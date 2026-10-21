@@ -16,6 +16,7 @@ default-members = [".", "core"]
 
 [dependencies]
 wtf-core = { path = "core" }
+libc = "0.2"
 clap = { version = "4.6.7", features = ["derive"] }
 crossterm = "0.29"
 nucleo-matcher = "0.3"

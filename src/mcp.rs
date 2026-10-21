@@ -167,7 +167,11 @@ impl Wtf {
             let st = lock(&self.state);
             (st.workspaces.iter().map(|w| w.id.clone()).collect::<Vec<_>>(), st.workspaces.get(st.current).map(|w| w.id.clone()))
         };
-        let lines: Vec<String> = live::sessions()
+        let all = match live::sessions() {
+            Ok(all) => all,
+            Err(e) => return e,
+        };
+        let lines: Vec<String> = all
             .iter()
             .map(|s| {
                 let mark = match (ours.contains(&s.id), cur.as_ref() == Some(&s.id)) {

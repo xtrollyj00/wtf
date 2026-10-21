@@ -99,16 +99,16 @@ reuse wtf's own pieces:
   in something to look at.
 - **User's view**: `user_view` reads the open window's rows, cursors, selected signal and
   visible range, so the agent can start from what the user is looking at.
-- **Link**: each wtf window listens on a local socket in `$XDG_RUNTIME_DIR` (or the temp
-  directory); `wtf --mcp` looks for one with the same trace path. Two requests travel over it,
+- **Link**: each wtf window listens on a local socket (see Registry); `wtf --mcp` looks for one with the same trace path. Two requests travel over it,
   both as session TOML (section 11): "send your session" and "take this session". Several
   windows on one trace: the most recently started one.
 - The agent's changes never save the user's session file by themselves; the user `:w`s if they
   want to keep them.
 - `wtf --mcp` takes no trace. The agent lists what is open with `sessions`, opens traces with
   `open` (several at once, switching with `use`), and works on the current workspace.
-- **Registry**: every session listens on a socket `wtf-<id>.sock` in `$XDG_RUNTIME_DIR` (or the
-  temp directory): a window's id is its process id, a workspace's is the server's process id and
+- **Registry**: every session listens on a socket `wtf-<id>.sock` in `$XDG_RUNTIME_DIR`, or
+  without it in `wtf-<uid>` in the temp directory, made so only the user can enter it and refused
+  (with an error saying so) if someone else owns it or can enter it: a window's id is its process id, a workspace's is the server's process id and
   a number (`4123-1`). A third request, "who are you", answers the kind (window or agent) and
   the trace's full path without waiting for the window's main loop, so listing is instant.
   Listing removes sockets nobody listens on (left by killed processes).

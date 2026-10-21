@@ -22,12 +22,37 @@ pub struct Incoming {
     pub reply: mpsc::Sender<Result<String, String>>,
 }
 
-fn dir() -> PathBuf {
-    std::env::var_os("XDG_RUNTIME_DIR").map_or_else(std::env::temp_dir, PathBuf::from)
+/// Where the sockets are: `$XDG_RUNTIME_DIR`, which is the user's own, or else a directory of the
+/// user's in the temp directory, which all users share (spec §15 "Registry").
+fn dir() -> std::io::Result<PathBuf> {
+    match std::env::var_os("XDG_RUNTIME_DIR") {
+        Some(d) => Ok(d.into()),
+        None => private_dir(&std::env::temp_dir()),
+    }
 }
 
-fn sock(id: &str) -> PathBuf {
-    dir().join(format!("wtf-{id}.sock"))
+/// `<base>/wtf-<uid>`, made if missing so that only the user can enter it; refused if it is not a
+/// directory (a link), belongs to someone else or others can enter it, as someone may have made it
+/// first to read the sockets.
+fn private_dir(base: &Path) -> std::io::Result<PathBuf> {
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+    // SAFETY: getuid has no preconditions and can't fail
+    let uid = unsafe { libc::getuid() };
+    let d = base.join(format!("wtf-{uid}"));
+    match std::fs::DirBuilder::new().mode(0o700).create(&d) {
+        Err(e) if e.kind() != std::io::ErrorKind::AlreadyExists => return Err(e),
+        _ => {}
+    }
+    let m = std::fs::symlink_metadata(&d)?;
+    if !m.is_dir() || m.uid() != uid || m.mode() & 0o077 != 0 {
+        let why = format!("{}: not a directory only you can enter; remove it, or set XDG_RUNTIME_DIR", d.display());
+        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, why));
+    }
+    Ok(d)
+}
+
+fn sock(id: &str) -> std::io::Result<PathBuf> {
+    Ok(dir()?.join(format!("wtf-{id}.sock")))
 }
 
 /// A session's socket. Removed when dropped.
@@ -44,7 +69,7 @@ impl Drop for Listener {
 /// Listen as session `id` of `kind` (`window` or `agent`) on `trace`; `handle` answers `GET` and
 /// `PUT`, on the listener's threads.
 pub fn listen(id: &str, kind: &str, trace: &Path, handle: impl Fn(Request) -> Result<String, String> + Send + Sync + 'static) -> std::io::Result<Listener> {
-    let path = sock(id);
+    let path = sock(id)?;
     let _ = std::fs::remove_file(&path);
     let listener = UnixListener::bind(&path)?;
     let trace = std::fs::canonicalize(trace).unwrap_or_else(|_| trace.to_path_buf());
@@ -114,9 +139,10 @@ pub struct Session {
     pub trace: PathBuf,
 }
 
-/// The sessions that answer, most recently started first.
-pub fn sessions() -> Vec<Session> {
-    let Ok(entries) = std::fs::read_dir(dir()) else { return Vec::new() };
+/// The sessions that answer, most recently started first; an error if the sockets' directory
+/// can't be used.
+pub fn sessions() -> Result<Vec<Session>, String> {
+    let entries = dir().and_then(std::fs::read_dir).map_err(|e| format!("can't list sessions: {e}"))?;
     let mut socks: Vec<(std::time::SystemTime, String)> = entries
         .flatten()
         .filter_map(|e| {
@@ -125,7 +151,7 @@ pub fn sessions() -> Vec<Session> {
         })
         .collect();
     socks.sort();
-    socks
+    Ok(socks
         .into_iter()
         .rev()
         .filter_map(|(_, id)| {
@@ -133,13 +159,13 @@ pub fn sessions() -> Vec<Session> {
             let (kind, trace) = info.split_once('\n')?;
             Some(Session { kind: kind.into(), trace: trace.into(), id })
         })
-        .collect()
+        .collect())
 }
 
 /// The most recently started window on this trace.
 pub fn window_on(trace: &Path) -> Option<String> {
     let trace = std::fs::canonicalize(trace).ok()?;
-    sessions().into_iter().find(|s| s.kind == "window" && s.trace == trace).map(|s| s.id)
+    sessions().ok()?.into_iter().find(|s| s.kind == "window" && s.trace == trace).map(|s| s.id)
 }
 
 /// Send a request to session `id` and wait for its answer.
@@ -151,7 +177,7 @@ pub fn request(id: &str, req: Request) -> Result<String, String> {
 }
 
 fn call(id: &str, req: String) -> Result<String, String> {
-    let path = sock(id);
+    let path = sock(id).map_err(|e| e.to_string())?;
     let mut s = match UnixStream::connect(&path) {
         Ok(s) => s,
         // left behind by a process that was killed: nothing listens there any more
@@ -176,6 +202,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn private_dir_is_only_yours() {
+        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+        let base = std::env::temp_dir().join(format!("wtf-private-{}", std::process::id()));
+        std::fs::create_dir_all(&base).unwrap();
+        let d = private_dir(&base).unwrap();
+        assert_eq!(std::fs::metadata(&d).unwrap().permissions().mode() & 0o777, 0o700);
+        assert_eq!(private_dir(&base).unwrap(), d); // found again
+        // opened to others (or made so by someone else): refused
+        std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(private_dir(&base).unwrap_err().to_string().contains("not a directory only you can enter"));
+        // a link in its place: refused, even to a directory of the user's
+        std::fs::remove_dir(&d).unwrap();
+        let other = base.join("other");
+        std::fs::DirBuilder::new().mode(0o700).create(&other).unwrap();
+        std::os::unix::fs::symlink(&other, &d).unwrap();
+        assert!(private_dir(&base).is_err());
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
     fn round_trip() {
         let trace = Path::new("tests/data/simple.vcd");
         let id = format!("test-live-{}", std::process::id());
@@ -191,7 +237,7 @@ mod tests {
                 inc.reply.send(a).unwrap();
             }
         });
-        let s = sessions().into_iter().find(|s| s.id == id).expect("listed");
+        let s = sessions().unwrap().into_iter().find(|s| s.id == id).expect("listed");
         assert_eq!((s.kind.as_str(), s.trace), ("window", std::fs::canonicalize(trace).unwrap()));
         assert_eq!(window_on(trace), Some(id.clone()));
         assert_eq!(request(&id, Request::Get), Ok("version = 1\n".into()));

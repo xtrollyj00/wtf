@@ -54,12 +54,12 @@ fn run(args: Args) -> Result<(), String> {
     }
     let (path, shared) = match args.attach {
         Some(None) => {
-            let list: Vec<String> = live::sessions().iter().map(|s| format!("{}  {}  {}", s.id, s.kind, s.trace.display())).collect();
+            let list: Vec<String> = live::sessions()?.iter().map(|s| format!("{}  {}  {}", s.id, s.kind, s.trace.display())).collect();
             println!("{}", if list.is_empty() { "no sessions are open".into() } else { list.join("\n") });
             return Ok(());
         }
         Some(Some(id)) => {
-            let s = live::sessions().into_iter().find(|s| s.id == id).ok_or(format!("no session {id}; `wtf --attach` lists them"))?;
+            let s = live::sessions()?.into_iter().find(|s| s.id == id).ok_or(format!("no session {id}; `wtf --attach` lists them"))?;
             let answer = live::request(&id, live::Request::Get)?;
             let text = answer.split_once("\n---\n").map_or(String::new(), |(_, t)| t.to_string());
             (s.trace, Some(text))
@@ -102,8 +102,14 @@ fn snapshot(app: &mut App, w: u16, h: Option<u16>) -> String {
 }
 
 fn tui(app: &mut App) -> Result<(), String> {
-    // the agent's way in (`wtf --mcp`); without it the window works as before
-    let live = live::window(&std::process::id().to_string(), &app.ws.trace_path).ok();
+    // the agent's way in (`wtf --mcp`); without it the window works as before, and says why
+    let live = match live::window(&std::process::id().to_string(), &app.ws.trace_path) {
+        Ok(l) => Some(l),
+        Err(e) => {
+            app.msg = Some((format!("no link for agents: {e}"), true));
+            None
+        }
+    };
     let mut term = ratatui::init();
     let res = (|| -> std::io::Result<()> {
         while !app.quit {

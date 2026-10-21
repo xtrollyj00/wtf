@@ -2510,6 +2510,7 @@ dependencies = [
  "clap",
  "crossterm",
  "insta",
+ "libc",
  "nucleo-matcher",
  "ratatui",
  "rmcp",
