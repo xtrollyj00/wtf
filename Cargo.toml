@@ -1,0 +1,24 @@
+[package]
+name = "wtf"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+members = ["core"]
+# so `cargo test`, `cargo clippy` and `cargo build` cover the core too
+default-members = [".", "core"]
+
+[dependencies]
+wtf-core = { path = "core" }
+clap = { version = "4.6.7", features = ["derive"] }
+crossterm = "0.29"
+nucleo-matcher = "0.3"
+ratatui = "0.30"
+rmcp = { version = "3.6.0", default-features = false, features = ["server", "transport-io", "macros"] }
+serde = { version = "1.0.229", features = ["derive"] }
+tokio = { version = "1.54.0", features = ["rt", "macros", "io-std"] }
+toml = "1.1.8"
+
+[dev-dependencies]
+insta = "1.49.0"
+serde_json = "1.0.154"

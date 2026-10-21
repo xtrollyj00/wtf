@@ -1,0 +1,23 @@
+# session
+version = 1
+
+[view]
+zoom = "1ns"
+time = "0ns"
+
+[cursors]
+1 = "12ns"
+
+[[rows]]
+signal = "top.clk"
+
+[[rows]]
+group = "cpu"
+rows = [
+  { signal = "top.cpu.state" },
+  { signal = "top.cpu.data" },
+  { signal = "top.cpu.busy" },
+]
+
+[[rows]]
+signal = "top.dma.state"

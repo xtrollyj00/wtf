@@ -1,0 +1,73 @@
+$timescale 1ns $end
+$scope module top $end
+$var wire 1 ! clk $end
+$var wire 1 " req_valid $end
+$var wire 2 # req_id [1:0] $end
+$var wire 1 $ resp_valid $end
+$var wire 2 % resp_id [1:0] $end
+$upscope $end
+$enddefinitions $end
+#0
+0!
+0"
+b0 #
+0$
+b0 %
+#5
+1!
+#10
+0!
+#15
+1!
+1"
+b1 #
+#20
+0!
+#25
+1!
+b10 #
+#30
+0!
+#35
+1!
+0"
+1$
+b10 %
+#40
+0!
+#45
+1!
+1"
+b11 #
+0$
+#50
+0!
+#55
+1!
+0"
+1$
+b1 %
+#60
+0!
+#65
+1!
+0$
+#70
+0!
+#75
+1!
+#80
+0!
+#85
+1!
+1$
+b0 %
+#90
+0!
+#95
+1!
+0$
+#100
+0!
+#105
+1!

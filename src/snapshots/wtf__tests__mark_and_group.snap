@@ -1,0 +1,17 @@
+---
+source: src/main.rs
+assertion_line: 312
+expression: "snapshot(&mut app, 80, Some(12))"
+---
+┌ signals ───────────────┐
+│ / to search            │
+│ ▾ top                  │                        simple
+│   ▾ cpu                │
+│     + state            │                /       search
+│     + data             │                Space   mark
+│       busy             │                Enter   add
+│   ▸ dma                │                Ctrl-g  add as a group
+│     clk                │                Esc     close
+│                        │
+└─ 2 marked ─────────────┘
+ EDIT                                                    0ns   2ns/col   simple

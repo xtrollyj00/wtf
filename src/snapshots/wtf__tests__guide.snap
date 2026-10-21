@@ -1,0 +1,12 @@
+---
+source: src/main.rs
+assertion_line: 184
+expression: "snapshot(&mut open(\"vcd\", None), 60, None)"
+---
+                           simple
+
+                    i       add signals
+                    :       commands
+                    ?       help
+                    q       quit
+ VIEW                                0ns   2ns/col   simple
