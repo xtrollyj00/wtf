@@ -1,8 +1,13 @@
 [package]
-name = "wtf"
+name = "wtf-wave"
 version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
+
+# the package is wtf-wave (wtf is taken on crates.io); the command is wtf
+[[bin]]
+name = "wtf"
+path = "src/main.rs"
 
 [workspace]
 members = ["core"]

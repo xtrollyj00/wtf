@@ -36,7 +36,7 @@ Two crates (spec §1 "Architecture"):
   decodes and streams; the decoding methods (`add_decode`, `bind`, `decode_*`) are in
   `workspace/decoding.rs`. `command::run` executes every `:` command; both interfaces go through it.
   `session.rs` reads / writes session TOML, which is also the wire format between processes.
-- **`src/` (`wtf`)** — interfaces: `tui/` (modes and keys in `app.rs`, signal panel, command
+- **`src/` (`wtf-wave`, the `wtf` command)** — interfaces: `tui/` (modes and keys in `app.rs`, signal panel, command
   completions in `commands.rs`), `mcp.rs` (rmcp tools: parse args, call the core, format dense
   bounded answers; their argument structs in `mcp/args.rs`, the `workspace` declaration in
   `mcp/declare.rs`), `draw.rs` (draws a workspace into a ratatui buffer, shared by the TUI, MCP
