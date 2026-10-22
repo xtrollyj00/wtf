@@ -1,0 +1,11 @@
+[package]
+name = "wtf-bench"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "Generates huge traces and measures wtf on them against the targets in spec §18"
+publish = false
+
+[dependencies]
+wtf-core = { path = "../core" }
+fst-writer = "0.3.1"

@@ -100,3 +100,42 @@ wtf must stay comfortable with traces up to **10 GB** and hierarchies of
 
 The targets are checked against generated reference traces (a 10 GB FST, a 10 GB VCD, a hierarchy
 with 500k signals), so results are comparable between versions and implementations.
+
+`bench/` (`wtf-bench`) writes them and times wtf on them. `gen --size 10G --format fst|vcd <dir>`
+writes `bench.fst` / `.vcd`: a 10 ns clock, a reset, `top.hot` (a 32-bit count of the cycles, a
+transition every cycle) and `--modules` (200) AXI4-Lite slaves `top.u<i>` with random
+transactions, run until the file has the size asked for; the same arguments write the same trace.
+`--modules 26316 --size 100M` is the 500k-signal hierarchy. `run <trace>` times, against the
+targets: opening in the core, adding `top.hot`, a value search for its last value, a clocked
+search over the whole trace, the first screen and the whole trace by `wtf --snapshot`, and peak
+memory (Linux only).
+
+#### First results
+
+wtf 0.1.0 on an AMD Ryzen 9 9950X3D (32 threads), 122 GB of memory, NVMe; 2026-10-22. The traces:
+`gen --size 10G`, 3803 signals (10 GiB: 24.4M cycles in VCD, 122.8M in FST), and
+`--modules 26300 --size 200M`, 499,703 signals (FST).
+
+| | 10 GiB VCD | 10 GiB FST | 500k signals | target |
+|---|---|---|---|---|
+| open, in the core | 2.6 s | 0.9 s | 0.1 s | |
+| first screen, `wtf --snapshot` | 3.8 s | 12.7 s | 8.9 s | 2 s VCD, 1 s FST |
+| whole trace on screen | 3.9 s | 12.6 s | | the first screen + 50 ms |
+| add `top.hot` | 0.6 s | 7.7 s | | 1 s |
+| value search to `top.hot`'s end | 5.4 s (24M) | 28.4 s (123M) | | 1 s for 10M |
+| clocked search, whole trace | 12.9 s | 71.5 s | | |
+| peak memory after open | 13.5 GB | 3.8 GB | 134 MB | proportional to the hierarchy |
+| peak memory after the searches | 13.5 GB | 8.9 GB | 147 MB | |
+
+What they say:
+
+- A VCD is read whole when it is opened (wellen), so its memory grows with the file: 13.5 GB for
+  10 GiB. This is the miss that background indexing (above) is for.
+- Drawing is not the cost: the whole trace on screen takes as long as the first screen.
+- An FST's first screen is slow because the signals on it are loaded whole, over the whole trace:
+  `top.hot` alone (123M changes) takes 7.7 s.
+- Value and clocked searches go at about 2.3 s per 10M changes and 0.55 s per million cycles in
+  both formats: the cost is in the search, not the file.
+- With 500k signals the core opens in 0.1 s but the window takes 8.9 s: building the signal panel's
+  tree looks each scope up among its siblings one by one, quadratic in a scope's children (26,300
+  modules under `top`).

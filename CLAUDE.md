@@ -16,7 +16,7 @@ server (`wtf --mcp`) so AI agents can debug traces and show their evidence in th
 ## Commands
 
 ```sh
-cargo build                          # both crates (default-members covers core)
+cargo build                          # both crates (default-members covers core, not bench)
 cargo test                           # all tests, wtf and wtf-core
 cargo test -p wtf-core               # core only
 cargo test -q --test mcp <name>      # one MCP integration test (tests/mcp.rs)
@@ -25,7 +25,12 @@ cargo test <name>                    # unit / TUI tests in src/main.rs by name
 cargo clippy -q --all-targets        # keep it clean
 INSTA_UPDATE=always cargo test <name>  # accept changed insta snapshots (check the diff)
 cargo run -- tests/data/simple.vcd --snapshot 100   # render one screen as text
+cargo run -p wtf-bench --release -- gen --size 1G --format fst /tmp/b   # a huge trace (spec §18)
+cargo build --release && cargo run -p wtf-bench --release -- run /tmp/b/bench.fst   # time wtf on it
 ```
+
+`bench/` (`wtf-bench`) is not a default member: `cargo test` and `cargo clippy` skip it unless
+given `-p wtf-bench`.
 
 ## Architecture
 

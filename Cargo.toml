@@ -10,7 +10,7 @@ name = "wtf"
 path = "src/main.rs"
 
 [workspace]
-members = ["core"]
+members = ["core", "bench"]
 # so `cargo test`, `cargo clippy` and `cargo build` cover the core too
 default-members = [".", "core"]
 

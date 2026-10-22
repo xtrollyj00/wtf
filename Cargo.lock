@@ -587,9 +587,20 @@ version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a9875223756618df05c8e7aae5e6a704fab17940337eb5b2fb962ed03853b4ce"
 dependencies = [
- "lz4_flex",
- "miniz_oxide",
+ "lz4_flex 0.13.1",
+ "miniz_oxide 0.9.1",
  "num_enum",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "fst-writer"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77be37fdc968866fa4f0cee73e42185e6d4699a761a51a54e6ebc9a3d73ed537"
+dependencies = [
+ "lz4_flex 0.11.6",
+ "miniz_oxide 0.8.9",
  "thiserror 2.0.21",
 ]
 
@@ -933,6 +944,15 @@ dependencies = [
 
 [[package]]
 name = "lz4_flex"
+version = "0.11.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "373f5eceeeab7925e0c1098212f2fbc4d416adec9d35051a6ab251e824c1854a"
+dependencies = [
+ "twox-hash",
+]
+
+[[package]]
+name = "lz4_flex"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7ef0d4ed8669f8f8826eb00dc878084aa8f253506c4fd5e8f58f5bce72ddb97e"
@@ -985,6 +1005,15 @@ name = "minimal-lexical"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
+
+[[package]]
+name = "miniz_oxide"
+version = "0.8.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1fa76a2c86f704bdb222d66965fb3d63269ce38518b83cb0575fca855ebb6316"
+dependencies = [
+ "adler2",
+]
 
 [[package]]
 name = "miniz_oxide"
@@ -2308,9 +2337,9 @@ dependencies = [
  "fst-reader",
  "indexmap",
  "leb128",
- "lz4_flex",
+ "lz4_flex 0.13.1",
  "memmap2",
- "miniz_oxide",
+ "miniz_oxide 0.9.1",
  "num_enum",
  "rayon",
  "rustc-hash",
@@ -2494,6 +2523,14 @@ name = "wit-bindgen"
 version = "0.57.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
+
+[[package]]
+name = "wtf-bench"
+version = "0.1.0"
+dependencies = [
+ "fst-writer",
+ "wtf-core",
+]
 
 [[package]]
 name = "wtf-core"
