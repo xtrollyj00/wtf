@@ -123,7 +123,7 @@ wtf 0.1.0 on an AMD Ryzen 9 9950X3D (32 threads), 122 GB of memory, NVMe; 2026-1
 | whole trace on screen | 3.9 s | 12.6 s | | the first screen + 50 ms |
 | add `top.hot` | 0.6 s | 7.7 s | | 1 s |
 | value search to `top.hot`'s end | 1.3 s (24M; was 5.4 s) | 6.5 s (123M; was 28.4 s) | | 1 s for 10M |
-| clocked search, whole trace | 2.6 s (was 12.9 s) | 17.3 s (was 71.5 s) | | |
+| clocked search, whole trace | 2.2 s (was 12.9 s) | 14.2 s (was 71.5 s) | | |
 | peak memory after open | 13.5 GB | 3.8 GB | 134 MB | proportional to the hierarchy |
 | peak memory after the searches | 13.5 GB | 8.9 GB | 147 MB | |
 
@@ -150,17 +150,20 @@ size of its answer. On the same machine and 10 GiB traces (2026-10-22):
 | call | VCD | FST | answer |
 |---|---|---|---|
 | `open` | 2.6 s | 0.7 s | 99 B |
-| `find @clk awvalid && awready`, `count_only` | 2.6 s | 17.2 s | 84 B |
-| the same, first 20 with `show` addr and data | 0.34 s | 3.8 s | 583 B |
+| `find @clk awvalid && awready`, `count_only` | 2.2 s (was 2.6 s) | 14.3 s (was 17.2 s) | 84 B |
+| the same, first 20 with `show` addr and data | 0.14 s (was 0.34 s) | 2.1 s (was 3.8 s) | 583 B |
 | `values` of `top.hot` and awaddr over 1 µs | 0.61 s | 7.2 s | 1.9 KB |
 | `render`, 4 signals over 200 ns | 0.2 ms | 0.2 ms | 2.2 KB |
-| `command decode bus axilite` on one port | 19.6 s | 108 s | 4 B |
+| `command decode bus axilite` on one port | 7.0 s (was 19.6 s) | 46.9 s (was 108 s) | 4 B |
 | `records` `where`, `group_by`, `count_only` | 19 ms at most | 89 ms at most | 0.1 - 0.9 KB |
-| server memory (peak) | 13.5 GB | 12.7 GB | |
+| server memory (peak) | 13.5 GB | 11.5 GB (was 12.7 GB) | |
 
 - Answers stay small; what costs an agent is time.
-- Decoding a protocol takes longest, long enough for a client to give up waiting. A profile
-  (1 GiB FST) puts it in the clocked sampling decoders share with the clocked search: an index of
-  values per signal and sample, a hash lookup per signal and row, and a `String` per value.
+- Decoding a protocol takes longest, long enough for a client to give up waiting. It was the
+  clocked sampling decoders share with the clocked search, which evaluated each query on every
+  cycle (an index of values per signal and sample, a hash lookup per signal and row, a `String`
+  per value). It is evaluated once per stretch of cycles in which its signals don't change now,
+  so it follows their changes, not the cycles. What is left grows with the cycles: walking the
+  clock's changes for its edges, and loading the signals (the 19 an AXI4-Lite port reads).
 - In an FST, the first call that reads a signal waits for all of it to load: `values` over 1 µs
   takes 7.2 s for `top.hot`'s 123M changes, as the first screen does.
