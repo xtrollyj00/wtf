@@ -36,6 +36,9 @@ pub struct Palette {
     pub grid: Color,
     /// The shades of the signal colours, in the order of `rows::COLORS`.
     pub hues: [Color; 8],
+    /// The screen's background and text; Reset keeps the terminal's.
+    pub background: Color,
+    pub text: Color,
     /// Without colour (`NO_COLOR`): the cursor column and the selected name are reversed, and
     /// marks are drawn with their glyph (spec §14 "Colours").
     pub mono: bool,
@@ -72,11 +75,13 @@ impl Palette {
             dim: c(0x5c6370, 241),
             grid: c(0x2c313c, 236),
             hues: [c(0xff6b6b, 203), c(0xd19a66, 173), c(0xe5c07b, 180), c(0x98c379, 114), c(0x56b6c2, 73), c(0x61afef, 75), c(0xc678dd, 176), c(0xabb2bf, 249)],
+            background: Color::Reset,
+            text: Color::Reset,
             mono: false,
         }
     }
 
-    /// For terminals with a light background: darker lines, pale highlights.
+    /// Light: its own background and text over the terminal's, darker lines, pale highlights.
     pub fn light(rgb: bool) -> Palette {
         let c = shade(rgb);
         Palette {
@@ -92,6 +97,8 @@ impl Palette {
             dim: c(0x7a808a, 244),
             grid: c(0xe4e8ee, 254),
             hues: [c(0xc62828, 160), c(0xc2581c, 166), c(0xa67c00, 136), c(0x2e7d32, 28), c(0x0e7490, 30), c(0x1d4ed8, 26), c(0xa21caf, 127), c(0x6b7280, 243)],
+            background: c(0xfafafa, 231),
+            text: c(0x383a42, 237),
             mono: false,
         }
     }
@@ -99,7 +106,7 @@ impl Palette {
     /// `NO_COLOR`: the terminal's own colours everywhere.
     pub fn mono() -> Palette {
         let r = Color::Reset;
-        Palette { line: r, fill: r, unknown: r, highz: r, cursor: r, cursor_text: r, cursor_dim: r, selected: r, hatch: r, dim: r, grid: r, hues: [r; 8], mono: true }
+        Palette { line: r, fill: r, unknown: r, highz: r, cursor: r, cursor_text: r, cursor_dim: r, selected: r, hatch: r, dim: r, grid: r, hues: [r; 8], background: r, text: r, mono: true }
     }
 
     /// Reversed where there is no colour: the cursor column, the selected name.
@@ -108,16 +115,36 @@ impl Palette {
     }
 }
 
-static PALETTE: std::sync::OnceLock<Palette> = std::sync::OnceLock::new();
+thread_local! {
+    // per thread, as the glyphs: the window draws on one thread, tests in several palettes
+    static PALETTE: std::cell::Cell<Option<&'static Palette>> = const { std::cell::Cell::new(None) };
+}
 
-/// Set once at start, before anything is drawn; later calls change nothing. Snapshots and the
-/// agents' `render` keep the default, as `text` tells the cursor columns by their colours.
+/// Set at start, before anything is drawn. Snapshots and the agents' `render` keep the default,
+/// as `text` tells the cursor columns by their colours.
 pub fn set_palette(p: Palette) {
-    let _ = PALETTE.set(p);
+    PALETTE.with(|c| c.set(Some(Box::leak(Box::new(p)))));
 }
 
 pub fn pal() -> &'static Palette {
-    PALETTE.get_or_init(|| Palette::dark(truecolor()))
+    static DARK: std::sync::OnceLock<Palette> = std::sync::OnceLock::new();
+    PALETTE.with(|c| c.get()).unwrap_or_else(|| DARK.get_or_init(|| Palette::dark(truecolor())))
+}
+
+/// The theme's background and text wherever the screen was left at the terminal's.
+pub fn fill_screen(buf: &mut Buffer) {
+    let p = pal();
+    if (p.background, p.text) == (Color::Reset, Color::Reset) {
+        return;
+    }
+    for cell in buf.content.iter_mut() {
+        if cell.bg == Color::Reset {
+            cell.bg = p.background;
+        }
+        if cell.fg == Color::Reset {
+            cell.fg = p.text;
+        }
+    }
 }
 
 /// The glyphs drawing uses (spec §14 "Glyphs"); one set per process, chosen at start.
@@ -363,6 +390,22 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
     ws.view.set_width(w.saturating_sub(wx) as u64);
     let ww = w.saturating_sub(wx);
 
+    // the time axis, and its grid lines first: the rows draw over them, except where they draw
+    // nothing (a label's gaps are drawn, so the grid stays out of them)
+    let dim = Style::new().fg(pal().dim);
+    let mut free = 0;
+    for (c, t) in axis(&ws.view, ws.trace.fs_per_tick) {
+        let x = wx + c;
+        // labels that would run into the previous one or off the edge are left out; their grid line stays
+        if c >= free && c + t.chars().count() <= ww {
+            put(buf, x, 0, &t, dim);
+            free = c + t.chars().count() + 2;
+        }
+        for y in 1..body {
+            put(buf, x, y, &gl().grid.to_string(), Style::new().fg(pal().grid));
+        }
+    }
+
     // bit lines of an expanded bus share one pass over the bus (row, [bit][column])
     let mut bit_changes: Option<(usize, Vec<Vec<Changes>>)> = None;
     let mut marker = None;
@@ -419,7 +462,7 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
             Row::Group { .. } => Vec::new(),
         };
         for (c, cells) in cells.into_iter().enumerate() {
-            for (dy, (ch, st)) in cells.into_iter().enumerate().filter(|(dy, _)| y + dy < body) {
+            for (dy, (ch, st)) in cells.into_iter().enumerate().filter(|(dy, (ch, st))| y + dy < body && (*ch, *st) != (' ', Style::new())) {
                 put(buf, wx + c, y + dy, ch.encode_utf8(&mut [0; 4]), st);
             }
         }
@@ -435,26 +478,9 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
             y += 1;
         }
     }
-    let dim = Style::new().fg(pal().dim);
     for y in (0..body).filter(|y| Some(*y) != marker) {
         put(buf, sep1, y, &gl().sep.to_string(), dim);
         put(buf, sep2, y, &gl().sep.to_string(), dim);
-    }
-    let mut free = 0;
-    for (c, t) in axis(&ws.view, ws.trace.fs_per_tick) {
-        let x = wx + c;
-        // labels that would run into the previous one or off the edge are left out; their grid line stays
-        if c >= free && c + t.chars().count() <= ww {
-            put(buf, x, 0, &t, dim);
-            free = c + t.chars().count() + 2;
-        }
-        for y in 1..body {
-            // only cells nothing was drawn in: label gaps are styled spaces
-            let cell = &buf[(x as u16, y as u16)];
-            if cell.symbol() == " " && cell.fg == Color::Reset {
-                put(buf, x, y, &gl().grid.to_string(), Style::new().fg(pal().grid));
-            }
-        }
     }
     if head > 1 {
         ruler(ws, buf, wx, ww, 1);

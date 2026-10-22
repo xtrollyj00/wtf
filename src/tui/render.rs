@@ -42,12 +42,14 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
     if let Some((title, lines)) = &app.examine {
         boxed(buf, w, body, title, lines, " Esc e close ");
     }
-    if matches!(app.mode, Mode::Command | Mode::Search) {
+    let at = if matches!(app.mode, Mode::Command | Mode::Search) {
         command_line(app, buf, w, h)
     } else {
         status(app, buf, w, h - 1);
         search
-    }
+    };
+    draw::fill_screen(buf);
+    at
 }
 
 /// The signal panel (spec §4 "Edit mode", §5). Returns the search cursor while typing a search.

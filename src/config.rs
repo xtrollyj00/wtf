@@ -98,6 +98,8 @@ fn slot<'a>(p: &'a mut Palette, key: &str) -> Option<&'a mut Color> {
         "hatch" => &mut p.hatch,
         "dim" => &mut p.dim,
         "grid" => &mut p.grid,
+        "background" => &mut p.background,
+        "text" => &mut p.text,
         _ => return rows::color_named(key).ok().map(|i| &mut p.hues[i]),
     })
 }
@@ -128,7 +130,7 @@ fn show(v: &toml::Value) -> String {
 }
 
 fn keys() -> String {
-    const FIELDS: [&str; 11] = ["line", "fill", "unknown", "highz", "cursor", "cursor_text", "cursor_dim", "selected", "hatch", "dim", "grid"];
+    const FIELDS: [&str; 13] = ["line", "fill", "unknown", "highz", "cursor", "cursor_text", "cursor_dim", "selected", "hatch", "dim", "grid", "background", "text"];
     FIELDS.iter().chain(COLORS.iter()).copied().collect::<Vec<_>>().join(", ")
 }
 
@@ -188,7 +190,7 @@ mod tests {
                 "config: unknown key foo (keys: glyphs, theme, colors)",
                 "config: glyphs = \"utf8\"? (unicode, box, ascii)",
                 "config: theme = 3? (dark, light)",
-                "config: unknown key colors.curser (keys: line, fill, unknown, highz, cursor, cursor_text, cursor_dim, selected, hatch, dim, grid, red, orange, yellow, green, cyan, blue, magenta, gray)",
+                "config: unknown key colors.curser (keys: line, fill, unknown, highz, cursor, cursor_text, cursor_dim, selected, hatch, dim, grid, background, text, red, orange, yellow, green, cyan, blue, magenta, gray)",
                 "config: colors.cursor = \"blue\"? (#rrggbb or 0-255)",
             ]
         );

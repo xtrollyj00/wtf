@@ -77,8 +77,9 @@ Each set keeps every distinction the others make, so a drawing reads the same in
 ### Colours
 
 - The palette (lines, busy fill, X, Z, cursor, marks, selection, grid, dimmed text) comes from a
-  theme: `dark` (the default) or `light`, for terminals with a light background. Single colours
-  can be changed in the config file (section 19).
+  theme: `dark` (the default) or `light`. `dark` keeps the terminal's background and text; `light`
+  paints its own over the whole screen, whatever the terminal's are. Single colours can be changed
+  in the config file (section 19), `background` and `text` too.
 - Colours are given as `#rrggbb` or a 256-colour index. On a terminal without truecolor (section
   4's detection), an `#rrggbb` colour is drawn as the nearest of the 256.
 - **A signal's colour**: a row can have its own colour, from a fixed set of names: `red`,

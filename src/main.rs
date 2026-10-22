@@ -729,6 +729,32 @@ mod tests {
     }
 
     #[test]
+    fn palettes() {
+        let t = trace::Trace::open("tests/data/axilite.vcd".as_ref()).unwrap();
+        let mut app = App::new(workspace::Workspace::new(t, "axilite".into()));
+        keys(&mut app, ":decode bus axilite clock=aclk prefix=s_axi_\n:add bus.wr bus.rd aclk s_axi_awaddr\n:fit\n");
+        assert!(app.msg.is_none(), "{:?}", app.msg);
+        let screen = |app: &mut App, w: u16| {
+            let area = Rect::new(0, 0, w, 14);
+            let mut buf = Buffer::empty(area);
+            render::draw(app, area, &mut buf);
+            buf
+        };
+        // the grid goes where the rows draw nothing, with colour or without: never into a label's gaps
+        let grid = |buf: &Buffer| buf.content.iter().enumerate().filter(|(_, c)| c.symbol() == "┊").map(|(i, _)| i).collect::<Vec<_>>();
+        let colour: Vec<_> = (60..130).map(|w| grid(&screen(&mut app, w))).collect();
+        draw::set_palette(draw::Palette::mono());
+        let mono: Vec<_> = (60..130).map(|w| grid(&screen(&mut app, w))).collect();
+        assert!(colour == mono);
+        // light paints the whole screen over the terminal's colours
+        draw::set_palette(draw::Palette::light(true));
+        keys(&mut app, ":");
+        let buf = screen(&mut app, 100);
+        assert!(buf.content.iter().all(|c| c.bg != Color::Reset && c.fg != Color::Reset));
+        draw::set_palette(draw::Palette::dark(true));
+    }
+
+    #[test]
     fn stream_rows() {
         let t = trace::Trace::open("tests/data/axis.vcd".as_ref()).unwrap();
         let mut app = App::new(workspace::Workspace::new(t, "axis".into()));
