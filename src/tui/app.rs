@@ -1,6 +1,7 @@
 //! App state and the keys of each mode (spec §2, §3, §4 "Command line", §5).
 
 use wtf_core::command;
+use crate::draw::gl;
 use crate::tui::panel::Panel;
 use wtf_core::rows::{self, Row};
 use wtf_core::time;
@@ -164,7 +165,7 @@ impl App {
         };
         if let Some((st, i)) = self.ws.record_at(s.var) {
             let r = &st.records[i];
-            let mut lines = vec![format!("{} – {} ({})", time::format(r.start, fpt), time::format(r.end, fpt), time::format(r.end - r.start, fpt)), String::new()];
+            let mut lines = vec![format!("{} {} {} ({})", time::format(r.start, fpt), gl().dash, time::format(r.end, fpt), time::format(r.end - r.start, fpt)), String::new()];
             let fields = st.fields_text(i, fpt);
             let nw = fields.iter().map(|f| f.0.chars().count()).max().unwrap_or(0);
             for (name, v) in fields {

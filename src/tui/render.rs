@@ -2,7 +2,7 @@
 //! the `?` box, the launch guide, the status line and the command line around them.
 
 use crate::tui::app::{App, Mode};
-use crate::draw::{self, pal, put, red, ROW_LINES};
+use crate::draw::{self, gl, pal, put, red, ROW_LINES};
 use wtf_core::rows::Row;
 use wtf_core::time;
 use wtf_core::view::View;
@@ -54,11 +54,11 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
 fn panel(app: &mut App, buf: &mut Buffer, pw: usize, body: usize) -> Option<(u16, u16)> {
     let dim = Style::new().fg(pal().dim);
     let inner = pw - 2;
-    put(buf, 0, 0, &format!("┌ signals {}┐", "─".repeat(pw.saturating_sub(11))), dim);
+    put(buf, 0, 0, &format!("{} signals {}{}", gl().border[0], gl().border[4].to_string().repeat(pw.saturating_sub(11)), gl().border[1]), dim);
     for y in 1..body.saturating_sub(1) {
-        put(buf, 0, y, &format!("│{}│", " ".repeat(inner)), dim);
+        put(buf, 0, y, &format!("{v}{}{v}", " ".repeat(inner), v = gl().border[5]), dim);
     }
-    put(buf, 0, body.saturating_sub(1), &format!("└{}┘", "─".repeat(inner)), dim);
+    put(buf, 0, body.saturating_sub(1), &format!("{}{}{}", gl().border[2], gl().border[4].to_string().repeat(inner), gl().border[3]), dim);
     if !app.panel.marked.is_empty() {
         put(buf, 2, body.saturating_sub(1), &format!(" {} marked ", app.panel.marked.len()), Style::new().fg(pal().cursor));
     }
@@ -89,16 +89,16 @@ fn panel(app: &mut App, buf: &mut Buffer, pw: usize, body: usize) -> Option<(u16
         let n = &app.panel.nodes[i];
         let y = 2 + k;
         let mark = match n.var {
-            None if n.open => "▾",
-            None => "▸",
-            Some(v) if app.ws.shown(v) => "●",
-            Some(v) if app.panel.marked.contains(&v) => "+",
-            Some(_) => " ",
+            None if n.open => gl().group_open,
+            None => gl().group_closed,
+            Some(v) if app.ws.shown(v) => gl().shown,
+            Some(v) if app.panel.marked.contains(&v) => '+',
+            Some(_) => ' ',
         };
         let text = format!("{}{mark} {}", " ".repeat(2 * n.depth), n.name);
         // too long: keep the end, where the leaf name is
         let len = text.chars().count();
-        let text = if len > inner - 1 { format!("…{}", text.chars().skip(len + 2 - inner).collect::<String>()) } else { text };
+        let text = if len > inner - 1 { format!("{}{}", gl().cut, text.chars().skip(len + 2 - inner).collect::<String>()) } else { text };
         let marked = n.var.is_some_and(|v| app.panel.marked.contains(&v));
         let st = match (Some(i) == cur, marked) {
             (true, _) => Style::new().bg(pal().selected).fg(pal().cursor).add_modifier(Modifier::BOLD),
@@ -188,7 +188,7 @@ fn help(app: &App, buf: &mut Buffer, w: usize, body: usize) {
         lines.push(String::new());
         lines.extend(notes.iter().map(|n| n.to_string()));
     }
-    boxed(buf, w, body, &format!("help · {title}"), &lines, " Esc ? close ");
+    boxed(buf, w, body, &format!("help {} {title}", gl().dot), &lines, " Esc ? close ");
 }
 
 /// A box over the middle of the screen: a title, lines, and how to close it. Lines it can't hold
@@ -200,7 +200,7 @@ fn boxed(buf: &mut Buffer, w: usize, body: usize, title: &str, lines: &[String],
         // shortcut: a box can't scroll; add scrolling when values longer than a screen matter
         let more = lines.len() - room + 1;
         lines.truncate(room - 1);
-        lines.push(format!("… {more} more lines"));
+        lines.push(format!("{} {more} more lines", gl().cut));
     }
     let top = format!(" {title} ");
     let widest = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0).max(top.chars().count()).max(close.chars().count());
@@ -214,14 +214,14 @@ fn boxed(buf: &mut Buffer, w: usize, body: usize, title: &str, lines: &[String],
     let st = Style::new().bg(Color::Reset).fg(Color::Reset);
     let dim = st.fg(pal().dim);
     let top: String = top.chars().take(bw - 2).collect();
-    put(buf, x0, y0, &format!("┌{top}{}┐", "─".repeat(bw - 2 - top.chars().count())), dim);
+    put(buf, x0, y0, &format!("{}{top}{}{}", gl().border[0], gl().border[4].to_string().repeat(bw - 2 - top.chars().count()), gl().border[1]), dim);
     for (i, l) in lines.iter().enumerate() {
         let l: String = l.chars().take(inner).collect();
-        put(buf, x0, y0 + 1 + i, "│ ", dim);
+        put(buf, x0, y0 + 1 + i, &format!("{} ", gl().border[5]), dim);
         put(buf, x0 + 2, y0 + 1 + i, &format!("{l:<inner$}"), st);
-        put(buf, x0 + bw - 2, y0 + 1 + i, " │", dim);
+        put(buf, x0 + bw - 2, y0 + 1 + i, &format!(" {}", gl().border[5]), dim);
     }
-    put(buf, x0, y0 + bh - 1, &format!("└{}{close}─┘", "─".repeat(bw - 3 - close.chars().count())), dim);
+    put(buf, x0, y0 + bh - 1, &format!("{}{}{close}{}{}", gl().border[2], gl().border[4].to_string().repeat(bw - 3 - close.chars().count()), gl().border[4], gl().border[3]), dim);
 }
 
 fn guide(app: &App, buf: &mut Buffer, w: usize, body: usize) {
@@ -264,10 +264,10 @@ fn status(app: &App, buf: &mut Buffer, w: usize, y: usize) {
                 let (s, i) = app.ws.record_at(r.var).unwrap();
                 let rec = &s.records[i];
                 let fields: Vec<String> = s.fields_text(i, fpt).into_iter().map(|(n, v)| format!("{n}={v}")).collect();
-                let times = format!("{}–{}", time::format(rec.start, fpt), time::format(rec.end, fpt));
+                let times = format!("{}{}{}", time::format(rec.start, fpt), gl().dash, time::format(rec.end, fpt));
                 let text = format!("{} #{i}  {times}  {}", s.name, fields.join(" "));
                 let room = w.saturating_sub(mode.len() + 1 + right.chars().count() + 2);
-                let text = if text.chars().count() > room { text.chars().take(room.saturating_sub(1)).chain(['…']).collect() } else { text };
+                let text = if text.chars().count() > room { text.chars().take(room.saturating_sub(1)).chain([gl().cut]).collect() } else { text };
                 (text, Style::new())
             }
             Some(Row::Signal(r)) => {
@@ -289,7 +289,7 @@ fn status(app: &App, buf: &mut Buffer, w: usize, y: usize) {
         return;
     }
     // a long path keeps its end, where the signal name is
-    let left = if len > room { format!("…{}", left.chars().skip(len + 1 - room).collect::<String>()) } else { left };
+    let left = if len > room { format!("{}{}", gl().cut, left.chars().skip(len + 1 - room).collect::<String>()) } else { left };
     put(buf, x, y, &left, st);
     put(buf, w.saturating_sub(right.chars().count()), y, &right, Style::new());
 }
@@ -302,7 +302,7 @@ fn command_line(app: &App, buf: &mut Buffer, w: usize, h: usize) -> Option<(u16,
     let items = if search { Vec::new() } else { crate::tui::commands::completions(&app.line) };
     let uw = items.iter().map(|c| c.usage.len()).max().unwrap_or(0);
     for (k, c) in items.iter().enumerate().take(y) {
-        let mark = if k == app.hl { " ▌ " } else { "   " };
+        let mark = if k == app.hl { format!(" {} ", gl().hl) } else { "   ".to_string() };
         let text = format!("{mark}{:<uw$}  {}", c.usage, c.desc);
         // opaque: the cursor column, selection and grid lines must not show through
         let st = Style::new().bg(Color::Reset).fg(Color::Reset);
@@ -311,7 +311,7 @@ fn command_line(app: &App, buf: &mut Buffer, w: usize, h: usize) -> Option<(u16,
     }
     // a rule between the list and the waveforms above it
     if let Some(ry) = y.checked_sub(items.len() + 1).filter(|_| !items.is_empty()) {
-        put(buf, 0, ry, &"─".repeat(w), Style::new().fg(pal().dim).bg(Color::Reset));
+        put(buf, 0, ry, &gl().border[4].to_string().repeat(w), Style::new().fg(pal().dim).bg(Color::Reset));
     }
     Some(((1 + app.cursor()).min(w.saturating_sub(1)) as u16, y as u16))
 }

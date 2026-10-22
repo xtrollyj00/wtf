@@ -63,6 +63,72 @@ pub fn pal() -> &'static Palette {
     })
 }
 
+/// The glyphs drawing uses (spec §14 "Glyphs"); one set per process, chosen at start.
+pub struct Glyphs {
+    /// 1-bit high / low lines and bus outlines.
+    pub line: char,
+    /// A 1-bit edge on the upper / lower line, by the lines before and after it:
+    /// [rise, fall, both (pulse), neither].
+    pub edge_up: [char; 4],
+    pub edge_down: [char; 4],
+    /// Upper and lower halves of a bus crossing, a segment's opening and its closing.
+    pub crossing: [char; 2],
+    pub open: [char; 2],
+    pub close: [char; 2],
+    /// Busy 1-bit columns and a collapsed group's activity, upper and lower.
+    pub fill: [char; 2],
+    pub busy_bus: char,
+    pub cut: char,
+    pub grid: char,
+    pub sep: char,
+    pub cursor: char,
+    pub mark: char,
+    /// A cursor off screen to the left / right.
+    pub left: char,
+    pub right: char,
+    pub group_open: char,
+    pub group_closed: char,
+    pub shown: char,
+    /// The highlighted completion, and the insertion point in Edit mode.
+    pub hl: char,
+    pub insert: char,
+    /// Borders: top-left, top-right, bottom-left, bottom-right, horizontal, vertical.
+    pub border: [char; 6],
+    /// Separators in text: `help · keys`, `65ns–85ns`.
+    pub dot: char,
+    pub dash: char,
+}
+
+pub const UNICODE: Glyphs = Glyphs {
+    line: '─',
+    edge_up: ['┌', '┐', '┬', '╷'],
+    edge_down: ['└', '┘', '┴', '╵'],
+    crossing: ['🮦', '🮧'],
+    open: ['🮣', '🮡'],
+    close: ['🮢', '🮠'],
+    fill: ['▄', '▀'],
+    busy_bus: '╳',
+    cut: '…',
+    grid: '┊',
+    sep: '│',
+    cursor: '┃',
+    mark: '╎',
+    left: '◂',
+    right: '▸',
+    group_open: '▾',
+    group_closed: '▸',
+    shown: '●',
+    hl: '▌',
+    insert: '▸',
+    border: ['┌', '┐', '└', '┘', '─', '│'],
+    dot: '·',
+    dash: '–',
+};
+
+pub fn gl() -> &'static Glyphs {
+    &UNICODE
+}
+
 pub fn red() -> Style {
     Style::new().fg(pal().unknown)
 }
@@ -86,14 +152,15 @@ pub fn height(ws: &Workspace) -> u16 {
 /// A drawing as plain text, one character per cell. Colours are dropped, so cursor columns show
 /// as ┃ (the cursor) and ╎ (marks) except over label text.
 pub fn text(buf: &Buffer) -> String {
+    let (cursor, mark) = (gl().cursor.to_string(), gl().mark.to_string());
     let mut out = String::new();
     for y in 0..buf.area.height {
         let line: String = (0..buf.area.width)
             .map(|x| {
                 let cell = &buf[(x, y)];
                 match cell.symbol() {
-                    s if cell.bg == pal().cursor && !s.chars().all(char::is_alphanumeric) => "┃",
-                    s if cell.bg == pal().cursor_dim && !s.chars().all(char::is_alphanumeric) => "╎",
+                    s if cell.bg == pal().cursor && !s.chars().all(char::is_alphanumeric) => cursor.as_str(),
+                    s if cell.bg == pal().cursor_dim && !s.chars().all(char::is_alphanumeric) => mark.as_str(),
                     s => s,
                 }
             })
@@ -252,17 +319,17 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
         let last = lines.get(l + 1).is_none_or(|n| n.0 != i);
         if adding && i == ws.sel && last && y < body {
             let indent = if rows::header_of(&ws.rows, i).is_some() { "  " } else { "" };
-            let text = format!("{indent}▸ new signals go here ");
+            let text = format!("{indent}{} new signals go here ", gl().insert);
             let fill = w.saturating_sub(text.chars().count());
-            put(buf, 0, y, &format!("{text}{}", "─".repeat(fill)), Style::new().fg(pal().cursor));
+            put(buf, 0, y, &format!("{text}{}", gl().line.to_string().repeat(fill)), Style::new().fg(pal().cursor));
             marker = Some(y);
             y += 1;
         }
     }
     let dim = Style::new().fg(pal().dim);
     for y in (0..body).filter(|y| Some(*y) != marker) {
-        put(buf, sep1, y, "│", dim);
-        put(buf, sep2, y, "│", dim);
+        put(buf, sep1, y, &gl().sep.to_string(), dim);
+        put(buf, sep2, y, &gl().sep.to_string(), dim);
     }
     let mut free = 0;
     for (c, t) in axis(&ws.view, ws.trace.fs_per_tick) {
@@ -276,7 +343,7 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
             // only cells nothing was drawn in: label gaps are styled spaces
             let cell = &buf[(x as u16, y as u16)];
             if cell.symbol() == " " && cell.fg == Color::Reset {
-                put(buf, x, y, "┊", Style::new().fg(pal().grid));
+                put(buf, x, y, &gl().grid.to_string(), Style::new().fg(pal().grid));
             }
         }
     }
@@ -311,7 +378,7 @@ fn ruler(ws: &Workspace, buf: &mut Buffer, wx: usize, ww: usize, y: usize) {
     for pair in list.windows(2) {
         let (a, b) = (col(pair[0].1), col(pair[1].1));
         let span = b.saturating_sub(a + 1);
-        put(buf, wx + a + 1, y, &"─".repeat(span), dim);
+        put(buf, wx + a + 1, y, &gl().line.to_string().repeat(span), dim);
         // like bus labels: only if it fits with a spare column on each side
         let label = format!(" {} ", time::format(pair[1].1 - pair[0].1, ws.trace.fs_per_tick));
         let len = label.chars().count();
@@ -328,8 +395,8 @@ fn ruler(ws: &Workspace, buf: &mut Buffer, wx: usize, ww: usize, y: usize) {
         };
         match v.col_of(t) {
             Some(c) => put(buf, wx + c as usize, y, &n.to_string(), st),
-            None if t < v.start => put(buf, wx, y, &format!("◂{n}"), st),
-            None => put(buf, wx + ww.saturating_sub(2), y, &format!("{n}▸"), st),
+            None if t < v.start => put(buf, wx, y, &format!("{}{n}", gl().left), st),
+            None => put(buf, wx + ww.saturating_sub(2), y, &format!("{n}{}", gl().right), st),
         }
     }
 }
@@ -353,6 +420,16 @@ fn nice(min: u64) -> u64 {
             return n;
         }
         p *= 10;
+    }
+}
+
+/// The index into `edge_up` / `edge_down` for an edge from `before` to `after` (high = true).
+fn edge(before: bool, after: bool) -> usize {
+    match (before, after) {
+        (false, true) => 0,
+        (true, false) => 1,
+        (true, true) => 2,
+        _ => 3,
     }
 }
 
@@ -415,7 +492,7 @@ pub fn wave(trace: &Trace, view: &View, row: &Sig, bit: Option<u32>, bits: Optio
         while c < ww && live(c) {
             if busy[c] {
                 // too many values to show: crossings
-                out[c] = [('╳', Style::new().fg(pal().hatch)); 2];
+                out[c] = [(gl().busy_bus, Style::new().fg(pal().hatch)); 2];
                 c += 1;
                 continue;
             }
@@ -430,10 +507,10 @@ pub fn wave(trace: &Trace, view: &View, row: &Sig, bit: Option<u32>, bits: Optio
                     true => red(),
                     false => Some(state_style(&v)).filter(|s| *s != Style::new()).unwrap_or_else(line),
                 };
-                out[c..e].iter_mut().for_each(|o| *o = [('─', st); 2]);
+                out[c..e].iter_mut().for_each(|o| *o = [(gl().line, st); 2]);
                 if opens {
                     let crossing = c > 0 && !busy[c - 1] && out[c - 1][0].0 != ' ';
-                    out[c] = if crossing { [('🮦', st), ('🮧', st)] } else { [('🮣', st), ('🮡', st)] };
+                    out[c] = if crossing { gl().crossing.map(|g| (g, st)) } else { gl().open.map(|g| (g, st)) };
                 }
                 // centred between the opening piece and the next crossing, with a gap on each side;
                 // cut with … if it doesn't fit, as long as three characters of it do (not just `0x`)
@@ -441,7 +518,7 @@ pub fn wave(trace: &Trace, view: &View, row: &Sig, bit: Option<u32>, bits: Optio
                 let room = (e - a).saturating_sub(2);
                 let text: String = match text.chars().count() {
                     n if n <= room => text,
-                    _ if room >= 4 => text.chars().take(room - 1).chain(['…']).collect(),
+                    _ if room >= 4 => text.chars().take(room - 1).chain([gl().cut]).collect(),
                     _ => String::new(),
                 };
                 let len = text.chars().count();
@@ -452,7 +529,7 @@ pub fn wave(trace: &Trace, view: &View, row: &Sig, bit: Option<u32>, bits: Optio
                     }
                     // a gap in the bottom edge around the label
                     for x in [start - 1, start + len] {
-                        if out[x][1].0 == '─' {
+                        if out[x][1].0 == gl().line {
                             out[x][1].0 = ' ';
                         }
                     }
@@ -460,7 +537,7 @@ pub fn wave(trace: &Trace, view: &View, row: &Sig, bit: Option<u32>, bits: Optio
             } else if opens && c > 0 && !busy[c - 1] && out[c - 1][0].0 != ' ' {
                 // a value ending in nothing (a stream between records): a closing piece
                 let st = out[c - 1][0].1;
-                out[c] = [('🮢', st), ('🮠', st)];
+                out[c] = gl().close.map(|g| (g, st));
             }
             c = e;
         }
@@ -471,7 +548,7 @@ pub fn wave(trace: &Trace, view: &View, row: &Sig, bit: Option<u32>, bits: Optio
         if busy[c] {
             // toggling faster than a column: fill between the high and low lines
             let st = Style::new().fg(pal().fill);
-            out[c] = [('▄', st), ('▀', st)];
+            out[c] = gl().fill.map(|g| (g, st));
             continue;
         }
         let (top, bot, st) = lines_of(&val(c));
@@ -479,21 +556,11 @@ pub fn wave(trace: &Trace, view: &View, row: &Sig, bit: Option<u32>, bits: Optio
             // an edge joins the lines on its left (before the change) to those on its right
             let before = range(c).0.checked_sub(1).and_then(|t| trace.value_of(var, bit, t));
             let (pt, pb, _) = lines_of(&before);
-            let t = match (pt, top) {
-                (false, true) => '┌',
-                (true, false) => '┐',
-                (true, true) => '┬',
-                _ => '╷',
-            };
-            let b = match (pb, bot) {
-                (false, true) => '└',
-                (true, false) => '┘',
-                (true, true) => '┴',
-                _ => '╵',
-            };
+            let t = gl().edge_up[edge(pt, top)];
+            let b = gl().edge_down[edge(pb, bot)];
             [(t, line()), (b, line())]
         } else {
-            [if top { ('─', st) } else { blank }, if bot { ('─', st) } else { blank }]
+            [if top { (gl().line, st) } else { blank }, if bot { (gl().line, st) } else { blank }]
         };
     }
     out
@@ -518,8 +585,8 @@ fn activity(trace: &Trace, view: &View, vars: &[usize], ww: usize) -> Vec<[(char
         .map(|c| (view.col_start(c), view.col_start(c + 1)))
         .take_while(|&(a, b)| a <= end || (a == b && a - 1 <= end))
         .map(|(a, b)| match vars.iter().any(|&v| trace.changes_in(v, a, b) != Changes::None) {
-            true => [('▄', line()), ('▀', line())],
-            false => [blank, ('─', Style::new().fg(pal().dim))],
+            true => gl().fill.map(|g| (g, line())),
+            false => [blank, (gl().line, Style::new().fg(pal().dim))],
         })
         .collect()
 }
