@@ -119,7 +119,7 @@ wtf 0.1.0 on an AMD Ryzen 9 9950X3D (32 threads), 122 GB of memory, NVMe; 2026-1
 | | 10 GiB VCD | 10 GiB FST | 500k signals | target |
 |---|---|---|---|---|
 | open, in the core | 2.6 s | 0.9 s | 0.1 s | |
-| first screen, `wtf --snapshot` | 3.8 s | 12.7 s | 8.9 s | 2 s VCD, 1 s FST |
+| first screen, `wtf --snapshot` | 3.8 s | 12.7 s | 0.2 s (was 8.9 s) | 2 s VCD, 1 s FST |
 | whole trace on screen | 3.9 s | 12.6 s | | the first screen + 50 ms |
 | add `top.hot` | 0.6 s | 7.7 s | | 1 s |
 | value search to `top.hot`'s end | 5.4 s (24M) | 28.4 s (123M) | | 1 s for 10M |
@@ -136,6 +136,6 @@ What they say:
   `top.hot` alone (123M changes) takes 7.7 s.
 - Value and clocked searches go at about 2.3 s per 10M changes and 0.55 s per million cycles in
   both formats: the cost is in the search, not the file.
-- With 500k signals the core opens in 0.1 s but the window takes 8.9 s: building the signal panel's
-  tree looks each scope up among its siblings one by one, quadratic in a scope's children (26,300
-  modules under `top`).
+- With 500k signals the window took 8.9 s while the core opened in 0.1 s: building the signal
+  panel's tree looked each scope up among its siblings one by one, quadratic in a scope's children
+  (26,300 modules under `top`). Looked up by name now, it takes 0.2 s.

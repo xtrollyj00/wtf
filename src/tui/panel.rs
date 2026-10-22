@@ -1,5 +1,6 @@
 //! The signal panel of Edit mode (spec §5): the file's scope tree, searched as in vim.
 
+use std::collections::HashMap;
 use wtf_core::trace::Trace;
 
 pub struct Node {
@@ -38,6 +39,8 @@ pub struct Panel {
 #[derive(Default)]
 struct Scope<'a> {
     scopes: Vec<(&'a str, Scope<'a>)>,
+    /// Where each subscope is in `scopes`: a scope can have tens of thousands.
+    index: HashMap<&'a str, usize>,
     vars: Vec<(&'a str, usize)>,
 }
 
@@ -51,13 +54,10 @@ impl Panel {
             let leaf = parts.pop().unwrap_or_default();
             let mut s = &mut root;
             for p in parts {
-                let k = match s.scopes.iter().position(|(n, _)| *n == p) {
-                    Some(k) => k,
-                    None => {
-                        s.scopes.push((p, Scope::default()));
-                        s.scopes.len() - 1
-                    }
-                };
+                let k = *s.index.entry(p).or_insert_with(|| {
+                    s.scopes.push((p, Scope::default()));
+                    s.scopes.len() - 1
+                });
                 s = &mut s.scopes[k].1;
             }
             s.vars.push((leaf, i));
