@@ -53,7 +53,8 @@ data  │ 0x3A  │─ 0x43 ─🮧 0x96 ─🮧 0xE1 🮧── 0x3A ─🮧 0x
 - **Cursor ruler**: a line above the waveforms, shown only when there is more than one cursor (section 9).
 - **Cursor and marks**: columns across all rows. The cursor is a highlighted column, so the data
   under it stays readable; the marks are drawn less strongly.
-- **Status line** (bottom): on the left the mode and the full path of the selected signal (or a
+- **Status line** (bottom): on the left the mode (`VIEW` reversed, `EDIT` in the accent colour, so
+  it shows when keys change the layout) and the full path of the selected signal (or a
   message); on the right the cursor's time, the zoom (time per column) and the file
   name with `[+]` if the session has unsaved changes. The visible time range is on the time axis.
 

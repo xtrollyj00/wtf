@@ -288,7 +288,8 @@ pub fn text(buf: &Buffer) -> String {
             .map(|x| {
                 let cell = &buf[(x, y)];
                 match cell.symbol() {
-                    s if cell.bg == pal().cursor && !s.chars().all(char::is_alphanumeric) => cursor.as_str(),
+                    // (the EDIT badge shares the cursor's colour, but is bold)
+                    s if cell.bg == pal().cursor && !cell.modifier.contains(Modifier::BOLD) && !s.chars().all(char::is_alphanumeric) => cursor.as_str(),
                     s if cell.bg == pal().cursor_dim && !s.chars().all(char::is_alphanumeric) => mark.as_str(),
                     s => s,
                 }

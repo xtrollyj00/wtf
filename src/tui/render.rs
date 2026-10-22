@@ -254,7 +254,12 @@ fn zoom_text(v: &View, fpt: Option<u128>) -> String {
 fn status(app: &App, buf: &mut Buffer, w: usize, y: usize) {
     let fpt = app.ws.trace.fs_per_tick;
     let mode = if app.mode == Mode::Edit { " EDIT " } else { " VIEW " };
-    put(buf, 0, y, mode, Style::new().add_modifier(Modifier::REVERSED));
+    // EDIT in the accent: the keys change the layout; VIEW stays quiet
+    let st = match app.mode == Mode::Edit && !pal().mono {
+        true => Style::new().bg(pal().cursor).fg(pal().cursor_text).add_modifier(Modifier::BOLD),
+        false => Style::new().add_modifier(Modifier::REVERSED),
+    };
+    put(buf, 0, y, mode, st);
     let plus = if app.ws.modified() { " [+]" } else { "" };
     let cursor = time::format(app.ws.view.cursor, fpt);
     let right = format!("{cursor}   {}   {}{plus} ", zoom_text(&app.ws.view, fpt), app.ws.file_name);
