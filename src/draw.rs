@@ -77,7 +77,6 @@ impl Palette {
     }
 
     /// For terminals with a light background: darker lines, pale highlights.
-    #[allow(dead_code)] // shortcut: unused until the config file picks the theme (spec §19), the next piece
     pub fn light(rgb: bool) -> Palette {
         let c = shade(rgb);
         Palette {

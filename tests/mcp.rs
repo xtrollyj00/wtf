@@ -67,6 +67,8 @@ impl Drop for Server {
 fn wtf(runtime: &Path) -> Command {
     let mut c = Command::new(env!("CARGO_BIN_EXE_wtf"));
     c.env("XDG_RUNTIME_DIR", runtime);
+    // the user's config must not change what the tests see (spec §19)
+    c.env("XDG_CONFIG_HOME", runtime);
     c
 }
 

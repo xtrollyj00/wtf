@@ -1,3 +1,4 @@
+mod config;
 mod draw;
 mod live;
 mod mcp;
@@ -55,9 +56,10 @@ fn run(args: Args) -> Result<(), String> {
     if args.mcp {
         return mcp::serve();
     }
-    if let Some(g) = args.glyphs {
-        draw::set_glyphs(g);
-    }
+    let config = config::load();
+    // --glyphs over the config file over unicode (spec §19 "Precedence")
+    draw::set_glyphs(args.glyphs.unwrap_or(config.glyphs));
+    let mut warnings = config.warnings;
     let (path, shared) = match args.attach {
         Some(None) => {
             let list: Vec<String> = live::sessions()?.iter().map(|s| format!("{}  {}  {}", s.id, s.kind, s.trace.display())).collect();
@@ -79,10 +81,10 @@ fn run(args: Args) -> Result<(), String> {
     app.ws.session_path = session.clone();
     if session.exists() {
         let text = std::fs::read_to_string(&session).map_err(|e| format!("{}: {e}", session.display()))?;
-        let warnings = session::apply(&mut app.ws, &text)?;
-        if !warnings.is_empty() {
-            app.msg = Some((warnings.join("; "), true));
-        }
+        warnings.extend(session::apply(&mut app.ws, &text)?);
+    }
+    if !warnings.is_empty() {
+        app.msg = Some((warnings.join("; "), true));
     }
     // a copy of the session on top of the usual one, as the agent's `present` does: u goes back
     if let Some(text) = shared {
@@ -96,9 +98,8 @@ fn run(args: Args) -> Result<(), String> {
         }
         None => {
             // as no-color.org says: set and not empty
-            if std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty()) {
-                draw::set_palette(draw::Palette::mono());
-            }
+            let no_color = std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty());
+            draw::set_palette(if no_color { draw::Palette::mono() } else { config.palette });
             tui(&mut app)
         }
     }

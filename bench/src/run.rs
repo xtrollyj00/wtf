@@ -84,7 +84,7 @@ fn snapshot(wtf: &Path, trace: &Path, session: &Path, view: &str) -> Result<Dura
         .map(|s| format!("[[rows]]\nsignal = \"{s}\"\n\n"))
         .collect();
     std::fs::write(session, format!("version = 1\n\n[view]\n{view}\n\n{rows}")).map_err(|e| e.to_string())?;
-    let (d, out) = time(|| std::process::Command::new(wtf).arg("--snapshot").arg("200x40").arg("-S").arg(session).arg(trace).output());
+    let (d, out) = time(|| std::process::Command::new(wtf).env("XDG_CONFIG_HOME", "/nonexistent").arg("--snapshot").arg("200x40").arg("-S").arg(session).arg(trace).output());
     let out = out.map_err(|e| format!("{}: {e}", wtf.display()))?;
     if !out.status.success() {
         return Err(format!("wtf --snapshot failed: {}", String::from_utf8_lossy(&out.stderr)));
