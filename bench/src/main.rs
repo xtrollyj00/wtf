@@ -2,19 +2,23 @@
 //!
 //!   cargo run -p wtf-bench --release -- gen --size 10G --format fst <dir>
 //!   cargo build --release && cargo run -p wtf-bench --release -- run <dir>/bench.fst
+//!   cargo run -p wtf-bench --release -- mcp <dir>/bench.fst
 
 mod generate;
+mod mcp;
 mod run;
 
 const USAGE: &str = "usage:
   wtf-bench gen [--size 1G] [--format vcd|fst] [--modules 200] <dir>
-  wtf-bench run [--wtf <path>] <trace>";
+  wtf-bench run [--wtf <path>] <trace>
+  wtf-bench mcp [--wtf <path>] <trace>";
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let r = match args.first().map(String::as_str) {
         Some("gen") => generate::main(&args[1..]),
         Some("run") => run::main(&args[1..]),
+        Some("mcp") => mcp::main(&args[1..]),
         _ => Err(USAGE.into()),
     };
     if let Err(e) = r {

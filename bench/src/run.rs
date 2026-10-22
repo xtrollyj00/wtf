@@ -8,13 +8,7 @@ use wtf_core::{command, query, workspace::Workspace};
 
 pub fn main(args: &[String]) -> Result<(), String> {
     let (opts, trace) = super::options(args, &["wtf"])?;
-    let wtf = match opts.into_iter().next() {
-        Some((_, p)) => PathBuf::from(p),
-        None => std::env::current_exe().map_err(|e| e.to_string())?.with_file_name("wtf"),
-    };
-    if !wtf.exists() {
-        return Err(format!("{}: no wtf binary; `cargo build --release` first, or give --wtf <path>", wtf.display()));
-    }
+    let wtf = wtf_binary(opts)?;
     let trace = PathBuf::from(trace);
     let fst = trace.extension().is_some_and(|e| e == "fst");
     let bytes = std::fs::metadata(&trace).map_err(|e| format!("{}: {e}", trace.display()))?.len();
@@ -59,6 +53,18 @@ pub fn main(args: &[String]) -> Result<(), String> {
     println!("{:<44}{:>10}    target: proportional to the hierarchy", "memory after open (peak)", mb(rss_open));
     println!("{:<44}{:>10}", "memory after the searches (peak)", mb(rss_loaded));
     Ok(())
+}
+
+/// `--wtf`, or the `wtf` built next to this binary.
+pub fn wtf_binary(opts: Vec<(String, String)>) -> Result<PathBuf, String> {
+    let wtf = match opts.into_iter().next() {
+        Some((_, p)) => PathBuf::from(p),
+        None => std::env::current_exe().map_err(|e| e.to_string())?.with_file_name("wtf"),
+    };
+    if !wtf.exists() {
+        return Err(format!("{}: no wtf binary; `cargo build --release` first, or give --wtf <path>", wtf.display()));
+    }
+    Ok(wtf)
 }
 
 fn time<T>(f: impl FnOnce() -> T) -> (Duration, T) {

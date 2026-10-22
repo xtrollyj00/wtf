@@ -141,3 +141,26 @@ What they say:
 - With 500k signals the window took 8.9 s while the core opened in 0.1 s: building the signal
   panel's tree looked each scope up among its siblings one by one, quadratic in a scope's children
   (26,300 modules under `top`). Looked up by name now, it takes 0.2 s.
+
+#### The MCP server
+
+`wtf-bench mcp <trace>` plays an agent's session over `wtf --mcp` and times each call, with the
+size of its answer. On the same machine and 10 GiB traces (2026-10-22):
+
+| call | VCD | FST | answer |
+|---|---|---|---|
+| `open` | 2.6 s | 0.7 s | 99 B |
+| `find @clk awvalid && awready`, `count_only` | 2.6 s | 17.2 s | 84 B |
+| the same, first 20 with `show` addr and data | 0.34 s | 3.8 s | 583 B |
+| `values` of `top.hot` and awaddr over 1 µs | 0.61 s | 7.2 s | 1.9 KB |
+| `render`, 4 signals over 200 ns | 0.2 ms | 0.2 ms | 2.2 KB |
+| `command decode bus axilite` on one port | 19.6 s | 108 s | 4 B |
+| `records` `where`, `group_by`, `count_only` | 19 ms at most | 89 ms at most | 0.1 - 0.9 KB |
+| server memory (peak) | 13.5 GB | 12.7 GB | |
+
+- Answers stay small; what costs an agent is time.
+- Decoding a protocol takes longest, long enough for a client to give up waiting. A profile
+  (1 GiB FST) puts it in the clocked sampling decoders share with the clocked search: an index of
+  values per signal and sample, a hash lookup per signal and row, and a `String` per value.
+- In an FST, the first call that reads a signal waits for all of it to load: `values` over 1 µs
+  takes 7.2 s for `top.hot`'s 123M changes, as the first screen does.
