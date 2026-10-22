@@ -35,6 +35,62 @@
   With a stream selected, the status line shows its record at the cursor (`rx.frame #2 65ns–85ns
   beats=0x2 len=0x8 data=c0 00 …`).
 - `X`, `U` and `x` are drawn red (red outline for buses), `Z` and `z` green.
+- The glyphs above are the `unicode` set; the others are below.
+
+### Glyphs
+
+Three glyph sets, chosen with `glyphs` in the config file (section 19) or `--glyphs` (section 12):
+
+- `unicode` (the default): everything above, including the Unicode 13 legacy computing glyphs
+  whose lines end mid-cell, so crossings join the outlines.
+- `box`: box drawing and block elements only, which nearly every font has. For terminals and fonts
+  that show the legacy computing glyphs as boxes or question marks.
+- `ascii`: 7-bit only, for plain terminals, logs and pasting a snapshot into a mail or an issue.
+  Every cell is one ASCII character.
+
+Each set keeps every distinction the others make, so a drawing reads the same in any of them.
+
+| Drawn | `unicode` | `box` | `ascii` |
+|---|---|---|---|
+| line (1-bit high / low, bus outline) | `─` | `─` | `-` |
+| 1-bit edge, upper / lower line | `┌┐┬╷` / `└┘┴╵` | as `unicode` | `+` / `+` |
+| bus crossing, upper / lower | `🮦` / `🮧` | `┬` / `┴` | `+` / `+` |
+| segment opens, upper / lower | `🮣` / `🮡` | `┌` / `└` | `+` / `+` |
+| segment closes, upper / lower | `🮢` / `🮠` | `┐` / `┘` | `+` / `+` |
+| busy 1-bit, a collapsed group's activity | `▄` over `▀` | as `unicode` | `#` over `#` |
+| busy bus | `╳` | `╳` | `#` |
+| label cut | `…` | `…` | `~` |
+| grid | `┊` | `┊` | `.` |
+| column separator | `│` | `│` | `\|` |
+| cursor, marks (where there is no colour) | `┃`, `╎` | as `unicode` | `\|`, `:` |
+| cursor off screen | `◂2`, `2▸` | as `unicode` | `<2`, `2>` |
+| group open / closed, signal shown (panel) | `▾`, `▸`, `●` | as `unicode` | `v`, `>`, `*` |
+| highlighted completion, insertion point | `▌`, `▸` | as `unicode` | `>`, `>` |
+| panel and help borders | `┌─┐│└┘` | as `unicode` | `+-+\|++` |
+| in text (`help · keys`, `65ns–85ns`) | `·`, `–` | as `unicode` | `-`, `-` |
+
+- In `ascii`, an edge and a bus crossing are both `+` on both lines: a 1-bit signal has one line
+  on each side of it, a bus two, so they don't mix up. `X` is never a glyph, only a value.
+- Busy columns (`####`) and a stream's labels (`#3 64B`) both use `#`; a label always has a
+  number after it.
+
+### Colours
+
+- The palette (lines, busy fill, X, Z, cursor, marks, selection, grid, dimmed text) comes from a
+  theme: `dark` (the default) or `light`, for terminals with a light background. Single colours
+  can be changed in the config file (section 19).
+- Colours are given as `#rrggbb` or a 256-colour index. On a terminal without truecolor (section
+  4's detection), an `#rrggbb` colour is drawn as the nearest of the 256.
+- **A signal's colour**: a row can have its own colour, from a fixed set of names: `red`,
+  `orange`, `yellow`, `green`, `cyan`, `blue`, `magenta`, `gray`. The theme gives each name its
+  shade, so a colour suits dark and light terminals alike. It colours the row's line or outline
+  and its labels; X, Z and violations keep their own colours, and the name column keeps its own.
+  Set with `:color` (section 7), saved in the session (section 11).
+- **Without colour** (`NO_COLOR` set to anything but empty, as no-color.org says): the cursor's
+  column is reversed, marks are drawn with their glyph where a cell is empty, the selected row's
+  name is reversed. Snapshots and the agents' `render` have no colours either.
+- Where there is no colour (`NO_COLOR`, snapshots, `render`), a 1-bit signal's X and Z stretches
+  are labelled like a bus value (`X`, `Z`) when they fit, as red and green can't tell them apart.
 
 ### Values
 

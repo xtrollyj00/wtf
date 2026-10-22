@@ -15,7 +15,8 @@ To be decided once prototypes exist:
 - Cursors: naming cursors, more than 9.
 - Attach as a live mirror: the window follows the agent's workspace as it changes, instead of
   copying it once (milestone 8).
-- User config file (TOML, e.g. `~/.config/wtf/config.toml`): colors, plain terminal output, default radix, key remapping?
+- More in the config file (section 19): default radix, key remapping; picking the theme from the
+  terminal's background (OSC 11).
 - Performance: targets and the rules that follow from them. Draft below; milestone 6 has a first
   measurement (clocked searches), the targets are not settled yet.
 

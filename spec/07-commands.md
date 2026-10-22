@@ -16,6 +16,7 @@
 | `:cursor <n> [time\|off]` | put cursor `n` at a time (`:cursor 1 <time>` moves the cursor, others place a mark), remove mark `n`, or without a time jump to mark `n` |
 | `:scope [path]` | names resolve under this scope first, wherever signals are named (search, `:add`, `:select`, the agent's tools): with `:scope top.cpu`, `state` is `top.cpu.state` though `top.dma.state` exists; saved in the session; without a path, no scope |
 | `:radix <name>` | set the radix of the selected row or group, e.g. `:radix dec` |
+| `:color <name\|off>` | set the colour of the selected rows or group (section 14): `red`, `orange`, `yellow`, `green`, `cyan`, `blue`, `magenta`, `gray`; `off` for the theme's |
 | `:undo` / `:redo` | undo / redo a change to the session layout |
 | `:fit` | zoom so the whole simulation fits on screen |
 | `:e` | reload the file, keeping signals, groups, cursor and zoom |
@@ -29,7 +30,7 @@ The command line shows the description column of this table next to each matchin
 
 Times accept `fs`, `ps`, `ns`, `us`, `ms`, `s`. A number without a unit means file ticks.
 
-- Layout commands (`:add`, `:rm`, `:group`, `:rename`, `:ungroup`, `:radix`) work from View and
+- Layout commands (`:add`, `:rm`, `:group`, `:rename`, `:ungroup`, `:radix`, `:color`) work from View and
   Edit mode and are undoable: each command that changes the rows is one undo step.
   "Selected rows" means the `V` selection in Edit mode, otherwise the selected row.
 - Patterns match full signal paths: `*` matches within one scope level, `**` across levels.

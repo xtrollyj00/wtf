@@ -44,6 +44,8 @@ reuse wtf's own pieces:
   field, ticks, shown in the answer's unit, and compared with a time (`where: "delay == 40ns"`); a
   value with a time unit is a time wherever a search takes values.
 - A signal's radix can be given with its name, `awaddr:dec`, wherever tools take signals.
+- Rows in `workspace` can also take a colour (section 14), after the radix or alone:
+  `awaddr:hex:red`, `wvalid:red`, to point the user at the guilty signal when presented.
 - `find` answers as a tab-separated table with a header. With a clock, consecutive matching
   cycles are one row: `from`, `last`, `cycles`. `show` adds a column per signal with its value on
   each match, as the clock edge samples it (one row per cycle), so `@clk awvalid && awready` with
@@ -89,7 +91,7 @@ reuse wtf's own pieces:
 
 - **Workspace**: `wtf --mcp` keeps its own rows, groups, radixes and cursors, invisible to the
   user. A `command(line)` tool runs wtf's `:` commands on it (`:add`, `:group`, `:rename`,
-  `:radix`, `:<time>`, `:zoom`, `:fit`, the cursor commands `:cursor <n> <time>` and
+  `:radix`, `:color`, `:<time>`, `:zoom`, `:fit`, the cursor commands `:cursor <n> <time>` and
   `:cursor <n> off`). `render` without signals draws the workspace, so the agent can check what it
   prepared; `view` describes it (rows, cursors with Δt, visible range).
 - **Present**: `present` shows the workspace in the user's wtf window for the same trace, if one

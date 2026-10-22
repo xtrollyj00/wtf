@@ -2,7 +2,7 @@
 
 A session is everything needed to reopen a trace exactly as you left it:
 
-- **layout**: rows and their order, groups and whether they are collapsed, radixes, expanded buses,
+- **layout**: rows and their order, groups and whether they are collapsed, radixes, colours, expanded buses,
 - **view**: the cursor and the marks, zoom, visible time.
 
 ### Saving and loading
@@ -57,7 +57,7 @@ signal = "top.cpu.clk"
 [[rows]]
 group = "cpu"
 rows = [
-  { signal = "top.cpu.state", radix = "dec", expanded = true },
+  { signal = "top.cpu.state", radix = "dec", color = "orange", expanded = true },
   { signal = "top.cpu.pc" },
 ]
 
@@ -88,8 +88,8 @@ rows = [
 - `[[signal]]` entries name computed signals (`:signal`), made before the rows, which can show
   them. Rows can also show unnamed slices and concatenations by their full form
   (`signal = "top.cpu.data[7:4]"`, `signal = "{top.a,top.b}"`).
-- `[[rows]]` entries are shown in file order. An entry is either a signal (`signal`, optional `radix`
-  and `expanded`, written only where they differ from the defaults)
+- `[[rows]]` entries are shown in file order. An entry is either a signal (`signal`, optional `radix`,
+  `color` and `expanded`, written only where they differ from the defaults)
   or a group (`group`, optional `collapsed`, and its own `rows`). The same shape inside groups
   leaves room for subgroups later.
 - Times are strings with units, as in commands. A plain number means file ticks. wtf writes times
@@ -104,8 +104,8 @@ As few options as possible. Everything that describes what to show (signals, gro
 cursors, zoom, time) lives in the session file (section 11), not on the command line.
 
 ```
-wtf [-S <session>] [--snapshot <width>[x<height>]] <trace>
-wtf --attach [<id>] [--snapshot <width>[x<height>]]
+wtf [-S <session>] [--glyphs <set>] [--snapshot <width>[x<height>]] <trace>
+wtf --attach [<id>] [--glyphs <set>] [--snapshot <width>[x<height>]]
 wtf --mcp
 wtf --help
 wtf --version
@@ -115,6 +115,7 @@ wtf --version
 |---|---|
 | `<trace>` | the VCD or FST file to open; required |
 | `-S <session>` | load this session instead of `<trace>.session.toml` |
+| `--glyphs <set>` | draw with this glyph set: `unicode`, `box` or `ascii` (section 14), over the config file's (section 19) |
 | `--snapshot <width>[x<height>]` | render one screen as plain text to stdout and exit, without the terminal UI; without a height, as tall as the content |
 | `--attach [<id>]` | without an id, list the open sessions (windows and agent workspaces); with one, open a window on that session's trace showing its rows and cursors (section 15) |
 | `--mcp` | serve AI agents over MCP on stdin / stdout instead of opening the screen (section 15) |
@@ -122,7 +123,8 @@ wtf --version
 - `--snapshot` is for CI logs, bug reports and wtf's own tests. Each screen cell becomes exactly
   one character, the same glyph the terminal UI draws, so columns stay aligned. What it shows comes
   from the session.
-- Snapshots have no colors; the cursor's column is drawn as `┃`. The terminal UI always uses colors.
+- Snapshots have no colours; the cursor's column is drawn as `┃` (`|` in `ascii`), marks as `╎`
+  (`:`). The terminal UI uses colours unless `NO_COLOR` is set (section 14).
 
 ## 13. Formats
 

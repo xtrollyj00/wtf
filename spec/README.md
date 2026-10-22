@@ -2,7 +2,7 @@
 
 **wtf** — **W**aveform **T**erminal **F**rontend. Also what you say when the bus goes `X`.
 
-Status: milestones 1–5 and 7–9 are built, 6 has a first measurement and 10 is planned (section 17).
+Status: milestones 1–5 and 7–9 are built, 6 has a first measurement, 10 and 11 are planned (section 17).
 Section 18 lists open topics, deferred until prototypes show what is needed.
 Implementation: Rust, a core crate and the interfaces (section 1).
 
@@ -24,6 +24,7 @@ One file per section; code cites them as `spec §N`. Read only the sections a ch
 | 16 | [16-decoders.md](16-decoders.md) | computed signals, streams, protocols, decoders, instances |
 | 17 | [17-milestones.md](17-milestones.md) | build order |
 | 18 | [18-deferred.md](18-deferred.md) | open topics, performance targets |
+| 19 | [19-config.md](19-config.md) | config file: glyphs, themes, colours |
 
 ## 1. Philosophy
 

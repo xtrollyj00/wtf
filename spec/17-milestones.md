@@ -47,3 +47,7 @@ Each milestone ends with something usable for day-to-day debugging.
       instructions and tool descriptions first; then a skill (a debugging workflow: find
       transfers, check handshakes, pair requests, declare the workspace, present); then a Claude
       Code plugin bundling the MCP server registration and the skill, so one install sets up both.
+11. **Looks** (planned). For people first: glyph sets for any terminal and font (`unicode`, `box`,
+    `ascii`, section 14), the config file (section 19), `dark` / `light` themes and `NO_COLOR`,
+    and a colour per signal (`:color`, in sessions and the agents' `workspace`). Which glyphs
+    agents' `render` should use is decided after, by counting tokens (milestone 10's way).
