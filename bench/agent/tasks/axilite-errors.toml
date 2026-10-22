@@ -1,0 +1,11 @@
+# The same port's protocol errors: a read answered SLVERR (0x20), an AW valid dropped before its
+# ready (210ns), a B response without a write (230ns). Every valid is X during reset, which
+# naive checks count as violations.
+trace = "tests/data/axilite.vcd"
+prompt = """
+The trace {trace} has an AXI-Lite slave port (s_axi_*, clocked by aclk). Check its handshakes:
+which reads got a non-OKAY response, on which channels a valid was dropped before its ready, and
+how many responses (B or R) came without a matching request?
+"""
+answer = '{"error_read_addrs": ["0x.."], "dropped_valid_channels": ["aw|w|b|ar|r"], "responses_without_request": 0}'
+expect = '{"error_read_addrs": ["0x20"], "dropped_valid_channels": ["aw"], "responses_without_request": 1}'

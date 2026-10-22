@@ -2530,6 +2530,7 @@ version = "0.1.0"
 dependencies = [
  "fst-writer",
  "serde_json",
+ "toml",
  "wtf-core",
 ]
 

@@ -1,0 +1,15 @@
+# AXI-Lite in tests/data/axilite.vcd: two writes (the second's W before its AW), eight reads (the
+# second SLVERR, six polls from 260ns). The table of transactions an engineer asks for first.
+trace = "tests/data/axilite.vcd"
+prompt = """
+The trace {trace} has an AXI-Lite slave port (s_axi_*, clocked by aclk). List every write
+transaction (address and data) and every read transaction (address, returned data and response).
+"""
+answer = '{"writes": [{"addr": "0x..", "data": "0x.."}], "reads": [{"addr": "0x..", "data": "0x..", "resp": 0}]}'
+expect = '''
+{"writes": [{"addr": "0x10", "data": "0x11111111"}, {"addr": "0x14", "data": "0x22222222"}],
+ "reads": [{"addr": "0x10", "data": "0x11111111", "resp": 0}, {"addr": "0x20", "data": "0xDEADBEEF", "resp": 2},
+           {"addr": "0x1C", "data": "0x3", "resp": 0}, {"addr": "0x1C", "data": "0x3", "resp": 0},
+           {"addr": "0x1C", "data": "0x3", "resp": 0}, {"addr": "0x1C", "data": "0x3", "resp": 0},
+           {"addr": "0x1C", "data": "0x7", "resp": 0}, {"addr": "0x18", "data": "0x0", "resp": 0}]}
+'''

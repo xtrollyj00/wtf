@@ -10,3 +10,4 @@ publish = false
 wtf-core = { path = "../core" }
 fst-writer = "0.3.1"
 serde_json = "1.0.154"
+toml = "1.1.8"

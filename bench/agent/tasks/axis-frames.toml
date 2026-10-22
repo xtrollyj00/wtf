@@ -1,0 +1,12 @@
+# AXI-Stream in tests/data/axis.vcd: frames of 10 (tkeep 0b0011 on its last beat), 4, 8 and 4
+# bytes; a beat dropped before its ready (0xD0, 105ns); a payload changed while stalled (0xE0 to
+# 0xE1, 125ns).
+trace = "tests/data/axis.vcd"
+prompt = """
+The trace {trace} has an AXI-Stream interface (tvalid, tready, tdata, tlast, tkeep, clocked by
+clk). How many bytes is each frame, in order? Count the protocol violations: beats whose tvalid
+dropped before tready, and beats whose payload changed while stalled.
+"""
+answer = '{"frame_bytes": [0], "dropped_beats": 0, "changed_while_stalled": 0}'
+expect = '{"frame_bytes": [10, 4, 8, 4], "dropped_beats": 1, "changed_while_stalled": 1}'
+ordered = ["frame_bytes"]

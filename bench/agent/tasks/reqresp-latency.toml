@@ -1,0 +1,12 @@
+# Requests and responses by ID in tests/data/reqresp.vcd: requests 1 (15ns), 2 (25ns), 3 (45ns);
+# responses 2 (35ns), 1 (55ns), 0 (85ns). So 1 waits 40ns, 2 waits 10ns, 3 is never answered and
+# 0 answers nothing.
+trace = "tests/data/reqresp.vcd"
+prompt = """
+The trace {trace} has a request channel (req_valid, req_id) and a response channel (resp_valid,
+resp_id), clocked by clk; responses come back by ID, possibly out of order. What is each answered
+request's latency in ns, which request IDs never got a response, and which response IDs had no
+request?
+"""
+answer = '{"latency_ns": {"<id>": 0}, "unanswered_ids": [0], "unrequested_ids": [0]}'
+expect = '{"latency_ns": {"1": 40, "2": 10}, "unanswered_ids": [3], "unrequested_ids": [0]}'

@@ -28,6 +28,9 @@ cargo run -- tests/data/simple.vcd --snapshot 100   # render one screen as text
 cargo run -p wtf-bench --release -- gen --size 1G --format fst /tmp/b   # a huge trace (spec §18)
 cargo build --release && cargo run -p wtf-bench --release -- run /tmp/b/bench.fst   # time wtf on it
 cargo run -p wtf-bench --release -- mcp /tmp/b/bench.fst   # time the MCP tools on it
+cargo build --release && cargo run -p wtf-bench --release -- agent run [--runs 3] [--review] [<task>...]
+                                     # agent benchmark: claude -p solves bench/agent/tasks (costs money)
+cargo run -p wtf-bench --release -- agent report           # results.jsonl per task, commit, model
 ```
 
 `bench/` (`wtf-bench`) is not a default member: `cargo test` and `cargo clippy` skip it unless

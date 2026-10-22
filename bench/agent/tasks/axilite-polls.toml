@@ -1,0 +1,10 @@
+# Counting accesses on a register block: six polling reads from 260ns, five of 0x1C (0x3 four
+# times, then 0x7), then one of 0x18.
+trace = "tests/data/axilite.vcd"
+prompt = """
+The trace {trace} has an AXI-Lite slave port (s_axi_*, clocked by aclk). Software polls a status
+register. How many times was register 0x1C read, which distinct values did it return, and which
+register was read right after the last poll of 0x1C?
+"""
+answer = '{"reads_of_0x1c": 0, "values_of_0x1c": ["0x.."], "read_after_polls": "0x.."}'
+expect = '{"reads_of_0x1c": 5, "values_of_0x1c": ["0x3", "0x7"], "read_after_polls": "0x18"}'

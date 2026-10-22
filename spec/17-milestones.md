@@ -30,8 +30,8 @@ Each milestone ends with something usable for day-to-day debugging.
      - run-length answers for repetitive values and "first 5, last 5" summaries;
      - `render` around an event (`420ns ± 10 cycles`) showing only the rows that change, and a
        clock too fast to draw labelled `clk (5ns)` instead of a solid block.
-10. **Agent benchmark and agent support** (planned). Changes for agents are judged by measurement,
-    not by how they look:
+10. **Agent benchmark and agent support** (benchmark built, `wtf-bench agent`; support planned).
+    Changes for agents are judged by measurement, not by how they look:
     - **Benchmark**: debugging tasks an agent solves with `wtf --mcp`, each a trace, a prompt and
       the expected answer. Real-world tasks (the AXI-Lite transaction table, handshake checks,
       write-to-command latency, counting reads on a register block) and synthetic traces with injected
@@ -43,6 +43,18 @@ Each milestone ends with something usable for day-to-day debugging.
       wall time. Results are kept, so a change to a tool shows up as a difference.
     - Agents' own reviews of a run (what was missing, what cost the most) are kept with it, as the
       source of the next changes.
+    - **As built** (`bench/src/agent.rs`): tasks are `bench/agent/tasks/<name>.toml` (a fixture, the
+      prompt, the JSON shape of the answer, the expected answer). The agent gets only wtf's tools,
+      in an empty directory without the user's settings, hooks or CLAUDE.md, under a time and money
+      cap; it ends its answer with a JSON block, graded key by key (hex and decimal, case, `ns`
+      and the order of unordered lists don't matter). Per run, appended to
+      `bench/agent/results.jsonl`: pass and score, turns, wtf calls in all and per tool, tool
+      errors, bytes of wtf's answers (all and the largest), tokens (input, output, cache read and
+      write), the peak context, cost, wall and API time, whether it presented, the answer, and
+      the wtf commit (dirty or not), model and Claude Code version. `report` averages them per
+      task, commit and model; `--runs N` repeats each task, as one run varies; `--review` asks the
+      agent afterwards what cost it the most. Transcripts and reviews go to `bench/agent/runs/`;
+      both are outside git, as answers quote local paths.
     - **Agent support**: how to tell agents to use wtf well, judged by the benchmark: the server's
       instructions and tool descriptions first; then a skill (a debugging workflow: find
       transfers, check handshakes, pair requests, declare the workspace, present); then a Claude
