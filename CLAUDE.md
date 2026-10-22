@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for coding agents working in this repository.
 
 wtf (Waveform Terminal Frontend) is a Vim-like terminal viewer for VCD / FST waveforms, with an MCP
 server (`wtf --mcp`) so AI agents can debug traces and show their evidence in the user's window.
