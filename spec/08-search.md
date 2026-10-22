@@ -42,5 +42,8 @@ clk      ▁▁▁▁▔▔▔▔▁▁▁▁▔▔▔▔
   the sample before (false at the first, which has none). So a protocol check is a search for its
   violations: `/@clk fell(valid) && !past(ready)` finds a valid dropped before its ready,
   `/@clk past(valid) && !past(ready) && !stable(data)` a payload changed while stalled.
+- A signal compares with a constant, never with another signal (`data != past(data)`, `a == b`):
+  such a rule is most often a protocol's, which a decoder checks already (section 16), and a
+  change is `!stable(x)`. The error says both.
 - On a bit line of an expanded bus, the search looks at that bit. String and real signals are
   searched by their text.

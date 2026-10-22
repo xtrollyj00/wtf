@@ -25,6 +25,8 @@ use declare::declared;
 
 /// Most lines one answer gives, so a busy clock can't flood the agent.
 const MAX_LINES: usize = 1000;
+/// Interfaces `info` lists; more are counted.
+const MAX_INTERFACES: usize = 10;
 /// Most bytes one answer gives: output can't be taken back out of the agent's context.
 const MAX_BYTES: usize = 24_000;
 
@@ -229,7 +231,19 @@ impl Wtf {
         let t = &app.trace;
         let tick = t.fs_per_tick.map_or("no timescale (plain ticks)".into(), |f| format!("1 tick = {}", time::format_exact(1, Some(f))));
         let u = unit(&app, &None, [t.start(), t.end()])?;
-        Ok(format!("{}\n{} - {}\n{tick}\n{} signals", app.file_name, show(&app, t.start(), u), show(&app, t.end(), u), t.vars.len()))
+        let mut out = format!("{}\n{} - {}\n{tick}\n{} signals", app.file_name, show(&app, t.start(), u), show(&app, t.end(), u), t.vars.len());
+        // the interfaces a decoder reads, so the agent decodes them instead of writing searches
+        let found = protocol::detect(t);
+        if !found.is_empty() {
+            out += "\ninterfaces a built-in protocol decodes (decode them: exact records, handshake checks built in):";
+            for f in found.iter().take(MAX_INTERFACES) {
+                out += &format!("\n  {}* {}: {}", f.prefix, f.protocol, f.decode_line());
+            }
+            if found.len() > MAX_INTERFACES {
+                out += &format!("\n  and {} more", found.len() - MAX_INTERFACES);
+            }
+        }
+        Ok(out)
     }
 
     #[tool(description = "List signals with their widths.")]
@@ -353,7 +367,7 @@ impl Wtf {
         Ok(budget(format!("at {}:\n{}", show(&app, t, unit(&app, &a.unit, [t])?), lines.join("\n"))))
     }
 
-    #[tool(description = "Find the times where a search expression matches, as wtf's / search does, as a tab-separated table with a header. With a clock, consecutive matching cycles are one row (`from`, `last`, `cycles`), unless `show` lists values per cycle.")]
+    #[tool(description = "Find the times where a search expression matches, as wtf's / search does, as a tab-separated table with a header. With a clock, consecutive matching cycles are one row (`from`, `last`, `cycles`), unless `show` lists values per cycle. For a bus or handshake, decode it instead (`open` / `info` list the interfaces, `protocols` the protocols): records are exact and their checks built in.")]
     fn find(&self, Parameters(a): Parameters<FindArgs>) -> Result<String, String> {
         let w = current(self)?;
         let mut app = lock(&w);
@@ -624,12 +638,19 @@ impl ServerHandler for Wtf {
             .with_instructions(
             "wtf reads VCD and FST waveforms from digital simulations. Times take units (120ns, 1.5us). \
              `sessions` lists the user's open wtf windows and their traces; `open` a trace (often one of \
-             theirs) to work on it in a workspace of your own. Then start with `info` and `signals`, read values with `values` / `value_at`, find events with \
-             `find`: `@clk valid && ready` with `show: [addr, data]` is a table of the transfers, \
-             `count_only` counts them. `protocols` lists what can be decoded; decode into records with `command`: `decode bus axilite \
-             clock=aclk prefix=s_axi_` makes `bus.wr` and `bus.rd` (transactions with their delay) and \
-             `bus.errors` (handshake violations); `records` lists them as a table, and streams and \
-             their fields are signals for `find` and the rest. Look at a stretch with `render`. To show the user evidence, \
+             theirs) to work on it in a workspace of your own. \
+             Decode first: `open` (and `info`) lists the interfaces a built-in protocol decodes, with the \
+             `command` line that decodes each (`decode bus axilite clock=aclk prefix=s_axi_`); its answer \
+             lists the streams made, with their records and violations. Decoded records are exact and \
+             the handshake checks are built in, so prefer them to searches of your own: `records` lists a \
+             stream as a table (`where`, `group_by`, `count_only`), e.g. `bus.wr` / `bus.rd`, the \
+             transactions with their delay, and `bus.errors` / `bus.wr.unmatched`, the violations. \
+             `protocols` lists what can be decoded, `protocols <name>` what each stream and field is. For \
+             an interface of the design's own, `protocol` samples it into a stream, `decode <name> pair` \
+             matches requests and responses, `decode <name> check` checks rules. \
+             `find` is for what no protocol covers: `@clk valid && ready` with `show: [addr, data]` is a \
+             table of the transfers, `count_only` counts them. Streams and their fields are signals for \
+             `find` and the rest; read values with `values` / `value_at`. To show the user evidence, \
              declare the workspace with `workspace` (rows, groups, radixes, cursors on the events, range), \
              check it with `view` / `render`, then `present` it; `command` edits it step by step. \
              `user_view` shows what the user is looking at. `reload` after the simulation was rerun.",

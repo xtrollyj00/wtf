@@ -95,6 +95,11 @@ fn generic_check() {
     let s = ws.check("chk", "clk", &rules).unwrap();
     assert_eq!(table(&s), [row(25, 35, &["stall"]), row(45, 55, &["short"]), row(95, 105, &["stall"]), row(115, 125, &["stall"]), row(125, 135, &["stall"])]);
     assert_eq!(ws.check("chk", "clk", &pairs(&[("bad", "nope")])).err().unwrap(), "bad: unknown signal: nope");
+    // a signal on the right points to the decoders' checks and to `stable`
+    let hint = ": a protocol's rule is likely a decoder's check already (`protocols`); a change is `!stable(tdata)`";
+    assert_eq!(ws.check("chk", "clk", &pairs(&[("bad", "tdata != past(tdata)")])).err().unwrap(), format!("bad: tdata: compares with a constant, not with past(...){hint}"));
+    assert_eq!(ws.check("chk", "clk", &pairs(&[("bad", "tdata == tkeep")])).err().unwrap(), format!("bad: tdata: compares with a constant, not with tkeep{hint}"));
+    assert_eq!(ws.check("chk", "clk", &pairs(&[("bad", "tdata == 0xZQ")])).err().unwrap(), "bad: tdata: not a value: 0xZQ");
     // as an instance, its params the rules
     let short = [("short", "tvalid && tlast && tkeep != 0xF")];
     ws.add_decode(decode("c", "check", "clk", &[], &short)).unwrap();
@@ -300,4 +305,19 @@ fn uart_bytes_and_errors() {
     assert_eq!(table(stream(&ws, "u.errors")).iter().map(|r| r.0).collect::<Vec<_>>(), [1000, 13000, 37000]);
     let err = ws.add_decode(decode("v", "uart", "", &[("line", "uart_tx")], &[])).unwrap_err();
     assert_eq!(err, "v: uart: needs baud=<a positive number of bits a second>");
+}
+
+/// The interfaces built-in protocols decode, by their signals' names, with a decode line each.
+#[test]
+fn detects_interfaces() {
+    let found = |f: &str| {
+        let t = wtf_core::trace::Trace::open(format!("{}/../tests/data/{f}", env!("CARGO_MANIFEST_DIR")).as_ref()).unwrap();
+        wtf_core::protocol::detect(&t).iter().map(|f| f.decode_line()).collect::<Vec<_>>()
+    };
+    assert_eq!(found("axilite.vcd"), ["decode s_axi axilite clock=top.aclk prefix=top.s_axi_"]);
+    assert_eq!(found("axis.vcd"), ["decode axis axis clock=top.clk prefix=top."]);
+    // AXI4 over AXI-Lite, whose roles it has too
+    assert_eq!(found("axi4.vcd").iter().filter(|l| l.contains(" axilite ")).count(), 0);
+    assert!(found("axi4.vcd").iter().any(|l| l.contains(" axi4 ")), "{:?}", found("axi4.vcd"));
+    assert!(found("simple.vcd").is_empty());
 }

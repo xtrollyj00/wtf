@@ -519,7 +519,11 @@ fn axis_frames_and_errors() {
 fn decode_with_command() {
     let dir = Dir::new("axilite");
     let mut s = Server::start(&dir.0);
-    s.ok("open", json!({"trace": std::fs::canonicalize("tests/data/axilite.vcd").unwrap()}));
+    // opening names the interfaces a protocol decodes, with the line that decodes each: it works as given
+    let opened = s.ok("open", json!({"trace": std::fs::canonicalize("tests/data/axilite.vcd").unwrap()}));
+    let line = "decode s_axi axilite clock=top.aclk prefix=top.s_axi_";
+    assert!(opened.ends_with(&format!("interfaces a built-in protocol decodes (decode them: exact records, handshake checks built in):\n  top.s_axi_* axilite: {line}")), "{opened}");
+    assert!(s.ok("command", json!({"line": line})).starts_with("s_axi: records s_axi.aw 2,"));
     s.ok("command", json!({"line": "add top.aclk"}));
     // decode says what it made and where the violations are, and where to read more
     assert_eq!(

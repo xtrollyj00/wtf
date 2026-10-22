@@ -411,3 +411,68 @@ fn streams_of(b: &Builtin) -> Vec<About<String>> {
     }
     schemas.into_iter().filter(|s| !hidden.contains(&s.0)).map(|(n, f, v, a)| (n, f.into_iter().map(|f| f.name).collect(), v, a)).collect()
 }
+
+/// An interface in a trace that a built-in protocol decodes: its signals' common prefix
+/// (`top.s_axi_`, playing each role as `<prefix><role>`), the protocol, and its clock if one
+/// stands out.
+#[derive(Debug, PartialEq)]
+pub struct Found {
+    pub prefix: String,
+    pub protocol: &'static str,
+    pub clock: Option<String>,
+}
+
+impl Found {
+    /// The `decode` line that puts the protocol on it, named after the prefix.
+    pub fn decode_line(&self) -> String {
+        let leaf = self.prefix.rsplit('.').next().unwrap_or("").trim_matches('_');
+        let name = if leaf.is_empty() { self.protocol } else { leaf };
+        let clock = match (&self.clock, builtin(self.protocol).is_some_and(|b| b.clocked)) {
+            (_, false) => String::new(),
+            (Some(c), true) => format!(" clock={c}"),
+            (None, true) => " clock=<clk>".into(),
+        };
+        format!("decode {name} {}{clock} prefix={}", self.protocol, self.prefix)
+    }
+}
+
+/// The interfaces of the file's signals that built-in protocols decode: wherever every required
+/// role is a signal `<prefix><role>`. A prefix goes to the protocol needing most roles (AXI4's
+/// wlast / rlast over AXI-Lite). Protocols whose roles are too generic to tell (UART's `line`) are
+/// left out.
+pub fn detect(trace: &crate::trace::Trace) -> Vec<Found> {
+    let mut protocols: Vec<(&'static str, Builtin)> = BUILTINS.iter().filter_map(|&n| Some((n, builtin(n)?))).filter(|(_, b)| b.required.len() > 1).collect();
+    protocols.sort_by_key(|(_, b)| std::cmp::Reverse(b.required.len()));
+    let file = |v: &usize| !trace.is_computed(*v);
+    let mut found: Vec<Found> = Vec::new();
+    for (name, b) in protocols {
+        let first = b.required[0];
+        let mut prefixes: Vec<&str> = trace.vars.iter().enumerate().filter(|(i, _)| file(i)).filter_map(|(_, v)| v.path.strip_suffix(first)).collect();
+        prefixes.sort();
+        for prefix in prefixes {
+            let all = b.required.iter().all(|r| trace.by_path.get(&format!("{prefix}{r}")).is_some_and(file));
+            if all && !found.iter().any(|f| f.prefix == prefix) {
+                found.push(Found { prefix: prefix.into(), protocol: name, clock: clock_of(trace, prefix) });
+            }
+        }
+    }
+    found.sort_by(|a, b| a.prefix.cmp(&b.prefix));
+    found
+}
+
+/// The clock an interface likely runs on: `<prefix>aclk` or `<prefix>clk`, else the one 1-bit
+/// signal in its scope named like a clock.
+fn clock_of(trace: &crate::trace::Trace, prefix: &str) -> Option<String> {
+    for own in ["aclk", "clk"] {
+        let p = format!("{prefix}{own}");
+        if trace.by_path.contains_key(&p) {
+            return Some(p);
+        }
+    }
+    let scope = prefix.rsplit_once('.').map_or("", |s| s.0);
+    let mut clocks = trace.vars.iter().filter(|v| v.width == Some(1)).filter(|v| v.path.rsplit_once('.').is_some_and(|(s, leaf)| s == scope && (leaf.contains("clk") || leaf.contains("clock"))));
+    match (clocks.next(), clocks.next()) {
+        (Some(c), None) => Some(c.path.clone()),
+        _ => None,
+    }
+}

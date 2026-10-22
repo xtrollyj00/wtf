@@ -9,7 +9,7 @@ reuse wtf's own pieces:
 | `sessions` | the open sessions: the user's windows and agents' workspaces, each with its id and trace |
 | `open(trace)` | open a trace in a new workspace of the agent's, which becomes the current one |
 | `use(session)` | make another of this server's workspaces the current one |
-| `info` | file, time range, timescale, number of signals |
+| `info` | file, time range, timescale, number of signals, and the interfaces a built-in protocol decodes, each with its `decode` line (`open` answers with it too) |
 | `signals(pattern)` | signals with their widths; `*` / `**` globs, or any path containing the text |
 | `values(signals, from, to, radix, unit)` | the value at `from`, then each change up to `to`, as `time value` lines |
 | `value_at(signals, time, radix, unit)` | values at one time |
@@ -89,6 +89,12 @@ reuse wtf's own pieces:
   awvalid && awready; addr = awaddr`), a check's rules with their expressions; a line written
   with the protocol says the rest (`writes: AW and W in either order, then B; delay from the later
   of AW and W to B`). An unknown protocol's error names them all.
+- Agents are pushed to decode: a decoder's records and checks are written and tested once, while
+  searches an agent writes differ from run to run and go wrong. So `info` names the interfaces
+  found by their signals (every required role of a built-in protocol a signal `<prefix><role>`;
+  AXI4 over AXI-Lite, whose roles it has too; the clock `<prefix>aclk`, or the one clock-like
+  signal in the scope), the server's instructions put decoding before `find`, and `find`'s
+  description and a comparison of two signals point to the decoders.
 - `command` decodes without touching the rows (`decode`, `protocol`, `signal`). `decode` answers
   with the streams it made and their records, violations apart (`bus: records bus.aw 2, ...;
   violations bus.errors 2, bus.wr.unmatched 1, ...`), then where to read more; the window shows

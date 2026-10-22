@@ -182,7 +182,21 @@ impl Parser<'_> {
         if crate::time::has_unit(&value) {
             value = (crate::time::parse(&value, self.fpt).map_err(|e| format!("{name}: {e}"))?.round() as u64).to_string();
         }
-        let target = parse(&value, width, names.as_ref()).map_err(|e| format!("{name}: {e}"))?;
+        // a signal on the right (`tdata != past(tdata)`, `a == b`): a rule of a protocol, which a
+        // decoder checks already, or a change, which `stable` is
+        let target = match parse(&value, width, names.as_ref()) {
+            Ok(t) => t,
+            Err(e) => {
+                let call = self.s.trim_start().starts_with('(');
+                return Err(match call || (self.resolve)(&value).is_ok() {
+                    true => format!(
+                        "{name}: compares with a constant, not with {value}{}: a protocol's rule is likely a decoder's check already (`protocols`); a change is `!stable({name})`",
+                        if call { "(...)" } else { "" }
+                    ),
+                    false => format!("{name}: {e}"),
+                });
+            }
+        };
         Ok(Expr::Cmp { sig, past, eq, target: Some(target) })
     }
 
