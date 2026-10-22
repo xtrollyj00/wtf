@@ -2,6 +2,7 @@ mod config;
 mod draw;
 mod live;
 mod mcp;
+mod theme;
 mod tui;
 
 use tui::app::App;
@@ -747,11 +748,11 @@ mod tests {
         let mono: Vec<_> = (60..130).map(|w| grid(&screen(&mut app, w))).collect();
         assert!(colour == mono);
         // light paints the whole screen over the terminal's colours
-        draw::set_palette(draw::Palette::light(true));
+        draw::set_palette(theme::builtin("light", true).unwrap());
         keys(&mut app, ":");
         let buf = screen(&mut app, 100);
         assert!(buf.content.iter().all(|c| c.bg != Color::Reset && c.fg != Color::Reset));
-        draw::set_palette(draw::Palette::dark(true));
+        draw::set_palette(theme::builtin("dark", true).unwrap());
     }
 
     #[test]

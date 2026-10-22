@@ -54,55 +54,7 @@ pub fn truecolor() -> bool {
         || ["ghostty", "kitty", "wezterm", "alacritty", "foot"].iter().any(|t| term.contains(t))
 }
 
-/// `#rrggbb` as it is, or its 256-colour shade where the terminal has no truecolor.
-fn shade(rgb: bool) -> impl Fn(u32, u8) -> Color {
-    move |hex, i| if rgb { Color::Rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8) } else { Color::Indexed(i) }
-}
-
 impl Palette {
-    pub fn dark(rgb: bool) -> Palette {
-        let c = shade(rgb);
-        Palette {
-            line: c(0x56b6c2, 73),
-            fill: c(0x2e6b73, 30),
-            unknown: c(0xe06c75, 168),
-            highz: c(0x98c379, 114),
-            cursor: c(0xe5c07b, 180),
-            cursor_text: c(0x1e1e1e, 234),
-            cursor_dim: c(0x4b422c, 58),
-            selected: c(0x2c313c, 236),
-            hatch: c(0x7f848e, 245),
-            dim: c(0x5c6370, 241),
-            grid: c(0x2c313c, 236),
-            hues: [c(0xff6b6b, 203), c(0xd19a66, 173), c(0xe5c07b, 180), c(0x98c379, 114), c(0x56b6c2, 73), c(0x61afef, 75), c(0xc678dd, 176), c(0xabb2bf, 249)],
-            background: Color::Reset,
-            text: Color::Reset,
-            mono: false,
-        }
-    }
-
-    /// Light: its own background and text over the terminal's, darker lines, pale highlights.
-    pub fn light(rgb: bool) -> Palette {
-        let c = shade(rgb);
-        Palette {
-            line: c(0x0e7490, 30),
-            fill: c(0x9fd3da, 152),
-            unknown: c(0xc62828, 160),
-            highz: c(0x2e7d32, 28),
-            cursor: c(0xf0c674, 221),
-            cursor_text: c(0x1e1e1e, 234),
-            cursor_dim: c(0xf3e6c4, 230),
-            selected: c(0xe4e8ee, 254),
-            hatch: c(0x8a8f98, 245),
-            dim: c(0x7a808a, 244),
-            grid: c(0xe4e8ee, 254),
-            hues: [c(0xc62828, 160), c(0xc2581c, 166), c(0xa67c00, 136), c(0x2e7d32, 28), c(0x0e7490, 30), c(0x1d4ed8, 26), c(0xa21caf, 127), c(0x6b7280, 243)],
-            background: c(0xfafafa, 231),
-            text: c(0x383a42, 237),
-            mono: false,
-        }
-    }
-
     /// `NO_COLOR`: the terminal's own colours everywhere.
     pub fn mono() -> Palette {
         let r = Color::Reset;
@@ -128,7 +80,7 @@ pub fn set_palette(p: Palette) {
 
 pub fn pal() -> &'static Palette {
     static DARK: std::sync::OnceLock<Palette> = std::sync::OnceLock::new();
-    PALETTE.with(|c| c.get()).unwrap_or_else(|| DARK.get_or_init(|| Palette::dark(truecolor())))
+    PALETTE.with(|c| c.get()).unwrap_or_else(|| DARK.get_or_init(|| crate::theme::builtin("dark", truecolor()).expect("dark is built in")))
 }
 
 /// The theme's background and text wherever the screen was left at the terminal's.

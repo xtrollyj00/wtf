@@ -46,7 +46,8 @@ Two crates (spec §1 "Architecture"):
   completions in `commands.rs`), `mcp.rs` (rmcp tools: parse args, call the core, format dense
   bounded answers; their argument structs in `mcp/args.rs`, the `workspace` declaration in
   `mcp/declare.rs`), `draw.rs` (draws a workspace into a ratatui buffer, shared by the TUI, MCP
-  `render` and `--snapshot`), `live.rs` (unix-socket link: windows and agent workspaces listen on
+  `render` and `--snapshot`; glyph sets and the palette), `config.rs` / `theme.rs` (the config
+  file and themes, spec §19; built-in themes are `themes/*.toml`, compiled in), `live.rs` (unix-socket link: windows and agent workspaces listen on
   `wtf-<id>.sock` in `$XDG_RUNTIME_DIR`; `GET` / `PUT` session TOML for `present`, `user_view`,
   `--attach`).
 

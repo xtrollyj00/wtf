@@ -1,0 +1,28 @@
+# Dark: the terminal's own background and text, One Dark's shades.
+# A colour is "#rrggbb", a 256-colour index, ["#rrggbb", index] (its shade on terminals
+# without truecolor; otherwise the nearest) or "default" (the terminal's own). Keys left out
+# are dark's. spec §19.
+
+line        = ["#56b6c2", 73]   # 1-bit lines and bus outlines
+fill        = ["#2e6b73", 30]   # 1-bit signals toggling faster than a column
+unknown     = ["#e06c75", 168]  # X
+highz       = ["#98c379", 114]  # Z
+cursor      = ["#e5c07b", 180]  # the cursor column, and the accent (selected name, EDIT)
+cursor_text = ["#1e1e1e", 234]  # text on the cursor column
+cursor_dim  = ["#4b422c", 58]   # the marks' columns
+selected    = ["#2c313c", 236]  # behind the selected row
+hatch       = ["#7f848e", 245]  # busy bus columns
+dim         = ["#5c6370", 241]  # scopes, separators, time labels
+grid        = ["#2c313c", 236]  # grid lines
+background  = "default"         # the screen; "default" keeps the terminal's
+text        = "default"         # text; "default" keeps the terminal's
+
+# the shades of the signal colours (:color)
+red         = ["#ff6b6b", 203]
+orange      = ["#d19a66", 173]
+yellow      = ["#e5c07b", 180]
+green       = ["#98c379", 114]
+cyan        = ["#56b6c2", 73]
+blue        = ["#61afef", 75]
+magenta     = ["#c678dd", 176]
+gray        = ["#abb2bf", 249]
