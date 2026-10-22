@@ -101,7 +101,7 @@ fn panel(app: &mut App, buf: &mut Buffer, pw: usize, body: usize) -> Option<(u16
         let text = if len > inner - 1 { format!("{}{}", gl().cut, text.chars().skip(len + 2 - inner).collect::<String>()) } else { text };
         let marked = n.var.is_some_and(|v| app.panel.marked.contains(&v));
         let st = match (Some(i) == cur, marked) {
-            (true, _) => Style::new().bg(pal().selected).fg(pal().cursor).add_modifier(Modifier::BOLD),
+            (true, _) => Style::new().bg(pal().selected).fg(pal().cursor).add_modifier(Modifier::BOLD | pal().accent()),
             (false, true) => Style::new().fg(pal().cursor),
             (false, false) => Style::new(),
         };

@@ -34,33 +34,91 @@ pub struct Palette {
     pub dim: Color,
     /// Grid lines under the time axis labels.
     pub grid: Color,
+    /// The shades of the signal colours, in the order of `rows::COLORS`.
+    pub hues: [Color; 8],
+    /// Without colour (`NO_COLOR`): the cursor column and the selected name are reversed, and
+    /// marks are drawn with their glyph (spec §14 "Colours").
+    pub mono: bool,
 }
 
 /// Truecolor when the terminal says it supports it, otherwise the nearest 256-colour shades.
 /// COLORTERM is often lost over ssh, so known truecolor terminals are also recognised by TERM.
-pub fn pal() -> &'static Palette {
-    static P: std::sync::OnceLock<Palette> = std::sync::OnceLock::new();
-    P.get_or_init(|| {
-        let env = |k| std::env::var(k).unwrap_or_default();
-        let term = env("TERM");
-        let rgb = matches!(env("COLORTERM").as_str(), "truecolor" | "24bit")
-            || term.ends_with("-direct")
-            || ["ghostty", "kitty", "wezterm", "alacritty", "foot"].iter().any(|t| term.contains(t));
-        let c = |r, g, b, fallback| if rgb { Color::Rgb(r, g, b) } else { Color::Indexed(fallback) };
+pub fn truecolor() -> bool {
+    let env = |k| std::env::var(k).unwrap_or_default();
+    let term = env("TERM");
+    matches!(env("COLORTERM").as_str(), "truecolor" | "24bit")
+        || term.ends_with("-direct")
+        || ["ghostty", "kitty", "wezterm", "alacritty", "foot"].iter().any(|t| term.contains(t))
+}
+
+/// `#rrggbb` as it is, or its 256-colour shade where the terminal has no truecolor.
+fn shade(rgb: bool) -> impl Fn(u32, u8) -> Color {
+    move |hex, i| if rgb { Color::Rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8) } else { Color::Indexed(i) }
+}
+
+impl Palette {
+    pub fn dark(rgb: bool) -> Palette {
+        let c = shade(rgb);
         Palette {
-            line: c(0x56, 0xb6, 0xc2, 73),
-            fill: c(0x2e, 0x6b, 0x73, 30),
-            unknown: c(0xe0, 0x6c, 0x75, 168),
-            highz: c(0x98, 0xc3, 0x79, 114),
-            cursor: c(0xe5, 0xc0, 0x7b, 180),
-            cursor_text: c(0x1e, 0x1e, 0x1e, 234),
-            cursor_dim: c(0x4b, 0x42, 0x2c, 58),
-            selected: c(0x2c, 0x31, 0x3c, 236),
-            hatch: c(0x7f, 0x84, 0x8e, 245),
-            dim: c(0x5c, 0x63, 0x70, 241),
-            grid: c(0x2c, 0x31, 0x3c, 236),
+            line: c(0x56b6c2, 73),
+            fill: c(0x2e6b73, 30),
+            unknown: c(0xe06c75, 168),
+            highz: c(0x98c379, 114),
+            cursor: c(0xe5c07b, 180),
+            cursor_text: c(0x1e1e1e, 234),
+            cursor_dim: c(0x4b422c, 58),
+            selected: c(0x2c313c, 236),
+            hatch: c(0x7f848e, 245),
+            dim: c(0x5c6370, 241),
+            grid: c(0x2c313c, 236),
+            hues: [c(0xff6b6b, 203), c(0xd19a66, 173), c(0xe5c07b, 180), c(0x98c379, 114), c(0x56b6c2, 73), c(0x61afef, 75), c(0xc678dd, 176), c(0xabb2bf, 249)],
+            mono: false,
         }
-    })
+    }
+
+    /// For terminals with a light background: darker lines, pale highlights.
+    #[allow(dead_code)] // shortcut: unused until the config file picks the theme (spec §19), the next piece
+    pub fn light(rgb: bool) -> Palette {
+        let c = shade(rgb);
+        Palette {
+            line: c(0x0e7490, 30),
+            fill: c(0x9fd3da, 152),
+            unknown: c(0xc62828, 160),
+            highz: c(0x2e7d32, 28),
+            cursor: c(0xf0c674, 221),
+            cursor_text: c(0x1e1e1e, 234),
+            cursor_dim: c(0xf3e6c4, 230),
+            selected: c(0xe4e8ee, 254),
+            hatch: c(0x8a8f98, 245),
+            dim: c(0x7a808a, 244),
+            grid: c(0xe4e8ee, 254),
+            hues: [c(0xc62828, 160), c(0xc2581c, 166), c(0xa67c00, 136), c(0x2e7d32, 28), c(0x0e7490, 30), c(0x1d4ed8, 26), c(0xa21caf, 127), c(0x6b7280, 243)],
+            mono: false,
+        }
+    }
+
+    /// `NO_COLOR`: the terminal's own colours everywhere.
+    pub fn mono() -> Palette {
+        let r = Color::Reset;
+        Palette { line: r, fill: r, unknown: r, highz: r, cursor: r, cursor_text: r, cursor_dim: r, selected: r, hatch: r, dim: r, grid: r, hues: [r; 8], mono: true }
+    }
+
+    /// Reversed where there is no colour: the cursor column, the selected name.
+    pub fn accent(&self) -> Modifier {
+        if self.mono { Modifier::REVERSED } else { Modifier::empty() }
+    }
+}
+
+static PALETTE: std::sync::OnceLock<Palette> = std::sync::OnceLock::new();
+
+/// Set once at start, before anything is drawn; later calls change nothing. Snapshots and the
+/// agents' `render` keep the default, as `text` tells the cursor columns by their colours.
+pub fn set_palette(p: Palette) {
+    let _ = PALETTE.set(p);
+}
+
+pub fn pal() -> &'static Palette {
+    PALETTE.get_or_init(|| Palette::dark(truecolor()))
 }
 
 /// The glyphs drawing uses (spec §14 "Glyphs"); one set per process, chosen at start.
@@ -325,7 +383,7 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
             // the accent shows where the keys go: not here while the panel has them
             match adding {
                 true => Style::new().add_modifier(Modifier::BOLD),
-                false => Style::new().fg(pal().cursor).add_modifier(Modifier::BOLD),
+                false => Style::new().fg(pal().cursor).add_modifier(Modifier::BOLD | pal().accent()),
             }
         } else {
             Style::new()
@@ -407,10 +465,17 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
         if let Some(c) = ws.view.col_of(t) {
             let area = Rect::new((wx + c as usize) as u16, 0, 1, body as u16);
             let st = match i == 0 {
-                true => Style::new().bg(pal().cursor).fg(pal().cursor_text),
+                true => Style::new().bg(pal().cursor).fg(pal().cursor_text).add_modifier(pal().accent()),
                 false => Style::new().bg(pal().cursor_dim),
             };
             buf.set_style(area, st);
+            if pal().mono && i != 0 {
+                for y in area.top()..area.bottom() {
+                    if buf[(area.x, y)].symbol() == " " {
+                        buf[(area.x, y)].set_char(gl().mark);
+                    }
+                }
+            }
         }
     }
 }
@@ -486,10 +551,10 @@ fn edge(before: bool, after: bool) -> usize {
 }
 
 /// Which of a signal's two lines a value draws: low, high, or both (buses, X, Z).
-fn lines_of(v: &Option<Val>) -> (bool, bool, Style) {
+fn lines_of(v: &Option<Val>, own: Style) -> (bool, bool, Style) {
     let Some(v) = v else { return (false, false, Style::new()) };
     let st = match state_style(v) {
-        s if s == Style::new() => line(),
+        s if s == Style::new() => own,
         s => s,
     };
     match v {
@@ -524,6 +589,8 @@ pub fn wave(trace: &Trace, view: &View, row: &Sig, bit: Option<u32>, bits: Optio
     let val = |c: usize| trace.value_of(var, bit, range(c).1 - 1);
     let blank = (' ', Style::new());
     let mut out = vec![[blank; 2]; ww];
+    // the row's own colour, or the theme's line
+    let own = row.color.map_or_else(line, |c| Style::new().fg(pal().hues[c]));
 
     // Busy: two or more changes in a column, or a run of segments narrower than two columns.
     // A run of k changed columns holds k-1 one-column segments; one alone is a short pulse.
@@ -557,7 +624,7 @@ pub fn wave(trace: &Trace, view: &View, row: &Sig, bit: Option<u32>, bits: Optio
                 let text = label(trace, stream, row, &v);
                 let st = match stream.is_some_and(|s| s.violations) {
                     true => red(),
-                    false => Some(state_style(&v)).filter(|s| *s != Style::new()).unwrap_or_else(line),
+                    false => Some(state_style(&v)).filter(|s| *s != Style::new()).unwrap_or(own),
                 };
                 out[c..e].iter_mut().for_each(|o| *o = [(gl().line, st); 2]);
                 if opens {
@@ -603,17 +670,43 @@ pub fn wave(trace: &Trace, view: &View, row: &Sig, bit: Option<u32>, bits: Optio
             out[c] = gl().fill.map(|g| (g, st));
             continue;
         }
-        let (top, bot, st) = lines_of(&val(c));
+        let (top, bot, st) = lines_of(&val(c), own);
         out[c] = if n[c] == Changes::One {
             // an edge joins the lines on its left (before the change) to those on its right
             let before = range(c).0.checked_sub(1).and_then(|t| trace.value_of(var, bit, t));
-            let (pt, pb, _) = lines_of(&before);
+            let (pt, pb, _) = lines_of(&before, own);
             let t = gl().edge_up[edge(pt, top)];
             let b = gl().edge_down[edge(pb, bot)];
-            [(t, line()), (b, line())]
+            [(t, own), (b, own)]
         } else {
             [if top { (gl().line, st) } else { blank }, if bot { (gl().line, st) } else { blank }]
         };
+    }
+    // X and Z draw both lines as a bus does, and get its label: colour isn't always there to
+    // tell them apart (NO_COLOR, snapshots, the agents' render)
+    let mut c = 0;
+    while c < ww && live(c) {
+        let mut e = c + 1;
+        while e < ww && live(e) && !busy[e] && n[e] == Changes::None {
+            e += 1;
+        }
+        if let Some(v) = val(c).filter(|v| !busy[c] && state_style(v) != Style::new()) {
+            let text = rows::label(&trace.vars[var], row, &v);
+            let a = c + (n[c] == Changes::One) as usize;
+            let len = text.chars().count();
+            if len + 2 <= e - a {
+                let start = a + (e - a - len) / 2;
+                for (k, ch) in text.chars().enumerate() {
+                    out[start + k][1].0 = ch;
+                }
+                for x in [start - 1, start + len] {
+                    if out[x][1].0 == gl().line {
+                        out[x][1].0 = ' ';
+                    }
+                }
+            }
+        }
+        c = e;
     }
     out
 }

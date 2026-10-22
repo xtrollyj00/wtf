@@ -138,7 +138,9 @@ pub struct WorkspaceArgs {
     /// tool, and `records` lists them.
     #[serde(default)]
     pub decode: Vec<DecodeSpec>,
-    /// The rows, top to bottom: a signal as `"name"` or `"name:radix"` (`"s_axi_awaddr:dec"`), or
+    /// The rows, top to bottom: a signal as `"name"` or `"name:radix"` (`"s_axi_awaddr:dec"`),
+    /// with a colour last to point the user at it (`"s_axi_wvalid:red"`, `"s_axi_awaddr:hex:red"`;
+    /// red orange yellow green cyan blue magenta gray), or
     /// a group `{"group": "write", "rows": ["s_axi_awaddr", "s_axi_awvalid"]}` (optionally
     /// `"collapsed": true`). Groups hold signals only.
     pub rows: Vec<RowSpec>,
@@ -248,8 +250,9 @@ pub struct CommandArgs {
     /// One of wtf's `:` commands, without the colon, run on the workspace: `add <path|pattern>...`
     /// (below the selected row, joining its group; after the group if its header is selected; a
     /// scope becomes a group), `rm <path|pattern>...` (`rm **` clears the workspace),
-    /// `select <row> [<last row>]` (the rows `group`, `rename`, `ungroup` and `radix` act on),
+    /// `select <row> [<last row>]` (the rows `group`, `rename`, `ungroup`, `radix` and `color` act on),
     /// `group <name>`, `rename <name>`, `ungroup`, `radix <hex|bin|dec|sdec|oct|ascii|float|q4.12|enum>`,
+    /// `color <red|orange|yellow|green|cyan|blue|magenta|gray|off>`,
     /// `cursor <1-9> [time|off]` (1 is the cursor, where values are read; 2 - 9 are marks, which stay
     /// where they are put; without a time the cursor jumps to that mark), `<time>` (moves the
     /// cursor), `zoom <time per column>`, `fit`, `undo`, `redo`, `unit <ns|ps|...|auto>` (the time

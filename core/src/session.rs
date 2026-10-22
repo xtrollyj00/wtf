@@ -153,6 +153,7 @@ fn rows_of(app: &mut Workspace, rows: Value, grouped: bool, out: &mut Vec<Row>, 
                 })
             });
             let expanded = row.remove("expanded").and_then(|e| e.as_bool()).unwrap_or(false);
+            let color = row.remove("color").and_then(|c| rows::color_named(c.as_str().unwrap_or("")).map_err(|e| warn.push(e)).ok());
             match app.var_named(&path) {
                 Some(var) if !out.iter().any(|r| r.sig().is_some_and(|s| s.var == var)) => {
                     let width = app.trace.vars[var].width.unwrap_or(0);
@@ -166,7 +167,7 @@ fn rows_of(app: &mut Workspace, rows: Value, grouped: bool, out: &mut Vec<Row>, 
                         None => (radix::default_for(named), 0),
                     };
                     let bits = if expanded { app.sub_lines(var) } else { 0 };
-                    out.push(Row::Signal(Sig { var, radix, frac, grouped, bits }));
+                    out.push(Row::Signal(Sig { var, radix, frac, grouped, bits, color }));
                 }
                 Some(_) => {}
                 None => missing.push(path),
@@ -203,6 +204,9 @@ fn signal_keys(app: &Workspace, s: &Sig) -> Vec<String> {
     let mut keys = vec![format!("signal = {}", quote(&var.path))];
     if var.width != Some(1) && s.radix != radix::default_for(var.names.is_some()) {
         keys.push(format!("radix = {}", quote(&radix::name(s.radix, s.frac, var.width.unwrap_or(0)))));
+    }
+    if let Some(c) = s.color {
+        keys.push(format!("color = {}", quote(rows::COLORS[c])));
     }
     if s.bits > 0 {
         keys.push("expanded = true".into());

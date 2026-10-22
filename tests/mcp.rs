@@ -267,6 +267,10 @@ fn workspace_in_one_call() {
     let view = s.ok("workspace", json!({"scope": "top", "rows": [{"group": "cpu", "rows": ["cpu.data", "cpu.busy"], "collapsed": true}, "clk"]}));
     // (the description lists a collapsed group's signals too, under its header)
     assert!(view.starts_with("rows (> selected):\n> ▸ cpu (2)  (collapsed)\n    data  top.cpu.data  hex\n    busy  top.cpu.busy\n  clk  top.clk\n"), "{view}");
+    // a colour last, after a radix or alone; a slice's `:` is no colour's
+    let view = s.ok("workspace", json!({"scope": "top", "rows": ["cpu.data:dec:red", "clk:green", "cpu.data[7:4]"]}));
+    assert!(view.starts_with("rows (> selected):\n> data  top.cpu.data  dec  red\n  clk  top.clk  green\n  data[7:4]  top.cpu.data[7:4]  hex\n"), "{view}");
+    assert_eq!(s.tool("command", json!({"line": "color off"})), Ok("done".into()));
     // named computed signals, declared with the rows that show them; bad ones reported with the rest
     let view = s.ok("workspace", json!({"signals": ["hi = cpu.data[7:4]", "pair = {busy, data[0]}"], "rows": ["hi:dec", "pair"]}));
     assert!(view.starts_with("rows (> selected):\n> hi  hi  dec\n  pair  pair  hex\n"), "{view}");

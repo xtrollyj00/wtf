@@ -77,6 +77,11 @@ fn declare(app: &mut Workspace, a: &WorkspaceArgs) -> Result<String, String> {
         }
     }
     let mut signal = |spec: &str| -> Option<Value> {
+        // a colour comes last (`awaddr:hex:red`, `wvalid:red`); its names are no radix's
+        let (spec, color) = match spec.rsplit_once(':') {
+            Some((n, c)) if rows::COLORS.contains(&c) => (n, Some(c)),
+            _ => (spec, None),
+        };
         let (name, radix) = with_radix(spec);
         let var = match app.resolve(name) {
             Ok((v, None)) => v,
@@ -96,6 +101,9 @@ fn declare(app: &mut Workspace, a: &WorkspaceArgs) -> Result<String, String> {
                 Ok((r, frac)) => _ = row.insert("radix".into(), Value::String(radix::name(r, frac, app.trace.vars[var].width.unwrap_or(0)))),
                 Err(e) => errors.push(e),
             }
+        }
+        if let Some(c) = color {
+            row.insert("color".into(), Value::String(c.into()));
         }
         Some(Value::Table(row))
     };

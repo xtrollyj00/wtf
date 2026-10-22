@@ -655,13 +655,29 @@ impl Workspace {
         Ok(())
     }
 
+    /// Set the colour of the selected signal, or of every signal in the selected group; None
+    /// gives them the theme's (spec §14 "Colours").
+    pub fn set_color(&mut self, color: Option<usize>) -> Result<(), String> {
+        let end = match self.rows.get(self.sel) {
+            None => return Err("no rows".into()),
+            Some(Row::Group { .. }) => rows::group_end(&self.rows, self.sel),
+            Some(Row::Signal(_)) => self.sel + 1,
+        };
+        for r in &mut self.rows[self.sel..end] {
+            if let Row::Signal(s) = r {
+                s.color = color;
+            }
+        }
+        Ok(())
+    }
+
     pub fn shown(&self, var: usize) -> bool {
         self.rows.iter().any(|r| r.sig().is_some_and(|s| s.var == var))
     }
 
     /// A row for a var in its default radix. Its values must be loaded (`Trace::load`).
     pub fn sig(&self, var: usize, grouped: bool) -> Row {
-        Row::Signal(Sig { var, radix: radix::default_for(self.trace.vars[var].names.is_some()), frac: 0, grouped, bits: 0 })
+        Row::Signal(Sig { var, radix: radix::default_for(self.trace.vars[var].names.is_some()), frac: 0, grouped, bits: 0, color: None })
     }
 
     /// New rows go below the selected row and join its group, if it is in one; with a group's

@@ -49,6 +49,9 @@ pub fn run(app: &mut Workspace, line: &str) -> Result<Option<Msg>, String> {
             let r = radix::parse_name(arg).ok_or_else(|| format!("unknown radix: {arg}"))?;
             app.set_radix(Some(r))
         }
+        "color" if arg.is_empty() => Err(format!("usage: :color <{}|off>", rows::COLORS.join("|"))),
+        "color" if arg == "off" => app.set_color(None),
+        "color" => app.set_color(Some(rows::color_named(arg)?)),
         "group" if arg.is_empty() => Err("usage: :group <name>".into()),
         "group" => app.group(arg),
         "signal" => {

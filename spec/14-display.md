@@ -19,7 +19,7 @@
 
 - Each signal takes two terminal lines, so its drawing can connect.
 - 1-bit signals are drawn as a high line on the upper line and a low line on the lower one,
-  joined at each edge by corners (`┌┐└┘`). `X` and `Z` draw both lines.
+  joined at each edge by corners (`┌┐└┘`). `X` and `Z` draw both lines, labelled where they fit (section "Colours").
 - Buses are drawn as hexagon outlines (`─` on both lines, as thin as 1-bit lines) with the value
   centred in the lower edge. Neighbouring values meet in a
   one-column crossing (`🮦` over `🮧`, Unicode 13 legacy computing glyphs that end mid-cell).
@@ -89,8 +89,8 @@ Each set keeps every distinction the others make, so a drawing reads the same in
 - **Without colour** (`NO_COLOR` set to anything but empty, as no-color.org says): the cursor's
   column is reversed, marks are drawn with their glyph where a cell is empty, the selected row's
   name is reversed. Snapshots and the agents' `render` have no colours either.
-- Where there is no colour (`NO_COLOR`, snapshots, `render`), a 1-bit signal's X and Z stretches
-  are labelled like a bus value (`X`, `Z`) when they fit, as red and green can't tell them apart.
+- A 1-bit signal's X and Z stretches are labelled like a bus value (`─── X ───`) where they fit:
+  without colour (`NO_COLOR`, snapshots, `render`) both draw the same two lines.
 
 ### Values
 

@@ -20,6 +20,16 @@ pub struct Sig {
     pub grouped: bool,
     /// A bus expanded into its bits shows this many bit lines under it (MSB first); 0 when folded.
     pub bits: u32,
+    /// Its own colour, an index into `COLORS`; the theme's when None (spec §14 "Colours").
+    pub color: Option<usize>,
+}
+
+/// The colours a row can have. The interfaces give each its shade.
+pub const COLORS: [&str; 8] = ["red", "orange", "yellow", "green", "cyan", "blue", "magenta", "gray"];
+
+/// A colour by name, or an error listing them.
+pub fn color_named(name: &str) -> Result<usize, String> {
+    COLORS.iter().position(|c| *c == name).ok_or_else(|| format!("unknown colour: {name} (colours: {})", COLORS.join(", ")))
 }
 
 impl Row {
@@ -260,7 +270,7 @@ mod tests {
     use super::*;
 
     fn sig(var: usize, grouped: bool) -> Row {
-        Row::Signal(Sig { var, radix: 0, frac: 0, grouped, bits: 0 })
+        Row::Signal(Sig { var, radix: 0, frac: 0, grouped, bits: 0, color: None })
     }
 
     #[test]

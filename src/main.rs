@@ -94,7 +94,13 @@ fn run(args: Args) -> Result<(), String> {
             print!("{}", snapshot(&mut app, w, h));
             Ok(())
         }
-        None => tui(&mut app),
+        None => {
+            // as no-color.org says: set and not empty
+            if std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty()) {
+                draw::set_palette(draw::Palette::mono());
+            }
+            tui(&mut app)
+        }
     }
 }
 
@@ -706,6 +712,19 @@ mod tests {
         }
         draw::set_glyphs(&draw::UNICODE);
         assert!(Args::try_parse_from(["wtf", "--glyphs", "utf8", "x.vcd"]).err().unwrap().to_string().contains("unknown glyphs: utf8 (unicode, box, ascii)"));
+    }
+
+    #[test]
+    fn signal_colour() {
+        let mut app = open("vcd", Some(SESSION));
+        keys(&mut app, ":select data\n:color blue\n");
+        assert!(app.msg.is_none(), "{:?}", app.msg);
+        let row = app.ws.rows[app.ws.sel].sig().unwrap().clone();
+        let cells = draw::wave(&app.ws.trace, &app.ws.view, &row, None, None, None, 60);
+        let fgs: Vec<_> = cells.iter().map(|c| c[0].1.fg).collect();
+        // its values in its colour; X and Z keep theirs
+        assert!(fgs.contains(&Some(draw::pal().hues[5])) && fgs.contains(&Some(draw::pal().unknown)) && fgs.contains(&Some(draw::pal().highz)), "{fgs:?}");
+        assert!(!fgs.contains(&Some(draw::pal().line)));
     }
 
     #[test]

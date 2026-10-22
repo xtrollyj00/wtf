@@ -8,7 +8,7 @@ use crate::live;
 use wtf_core::session;
 use wtf_core::protocol;
 use wtf_core::radix;
-use wtf_core::rows::{Row, Sig};
+use wtf_core::rows::{self, Row, Sig};
 use wtf_core::query;
 use wtf_core::search;
 use wtf_core::time::{self, Tick};
@@ -144,7 +144,7 @@ fn probes(app: &mut Workspace, names: &[String], radix_name: &Option<String>) ->
             None => (radix::default_for(named), 0),
             Some(r) => radix_for(r, width, named, n)?,
         };
-        out.push((n.to_string(), p, Sig { var: p.0, radix: r, frac, grouped: false, bits: 0 }));
+        out.push((n.to_string(), p, Sig { var: p.0, radix: r, frac, grouped: false, bits: 0, color: None }));
     }
     let vars: Vec<usize> = out.iter().map(|(_, p, _)| p.0).collect();
     app.trace.load(&vars);
@@ -586,8 +586,9 @@ pub fn describe(app: &Workspace, unit: Option<usize>) -> String {
                 let var = &app.trace.vars[s.var];
                 let w = var.width.unwrap_or(0);
                 let radix = if w > 1 { format!("  {}", radix::name(s.radix, s.frac, w)) } else { String::new() };
+                let color = s.color.map(|c| format!("  {}", rows::COLORS[c])).unwrap_or_default();
                 let bits = if s.bits > 0 { "  (expanded)" } else { "" };
-                format!("  {}{radix}{bits}", var.path)
+                format!("  {}{radix}{color}{bits}", var.path)
             }
             Row::Group { collapsed: true, .. } => "  (collapsed)".into(),
             Row::Group { .. } => String::new(),

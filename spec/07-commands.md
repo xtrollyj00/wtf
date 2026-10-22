@@ -16,7 +16,7 @@
 | `:cursor <n> [time\|off]` | put cursor `n` at a time (`:cursor 1 <time>` moves the cursor, others place a mark), remove mark `n`, or without a time jump to mark `n` |
 | `:scope [path]` | names resolve under this scope first, wherever signals are named (search, `:add`, `:select`, the agent's tools): with `:scope top.cpu`, `state` is `top.cpu.state` though `top.dma.state` exists; saved in the session; without a path, no scope |
 | `:radix <name>` | set the radix of the selected row or group, e.g. `:radix dec` |
-| `:color <name\|off>` | set the colour of the selected rows or group (section 14): `red`, `orange`, `yellow`, `green`, `cyan`, `blue`, `magenta`, `gray`; `off` for the theme's |
+| `:color <name\|off>` | set the colour of the selected row or group (section 14): `red`, `orange`, `yellow`, `green`, `cyan`, `blue`, `magenta`, `gray`; `off` for the theme's |
 | `:undo` / `:redo` | undo / redo a change to the session layout |
 | `:fit` | zoom so the whole simulation fits on screen |
 | `:e` | reload the file, keeping signals, groups, cursor and zoom |

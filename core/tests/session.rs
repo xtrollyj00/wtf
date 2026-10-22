@@ -7,14 +7,14 @@ use wtf_core::session;
 #[test]
 fn round_trip() {
     let mut ws = with(&["top.clk", "top.cpu"]);
-    for c in ["scope top.cpu", "select data", "radix dec", "select busy", "cursor 2 35ns", "cursor 3 50ns", "cursor 2", "zoom 2ns"] {
+    for c in ["scope top.cpu", "select data", "radix dec", "color red", "select busy", "cursor 2 35ns", "cursor 3 50ns", "cursor 2", "zoom 2ns"] {
         wtf_core::command::run(&mut ws, c).unwrap();
     }
     ws.sel = 2;
     ws.toggle_group(); // cpu.state expanded into its bits
     let text = session::to_toml(&ws);
     assert!(text.starts_with("# wtf session\nversion = 1\n"), "{text}");
-    assert!(text.contains("radix = \"dec\"") && text.contains("expanded = true") && text.contains("[cursors]\n1 = \"35ns\"\n2 = \"35ns\"\n3 = \"50ns\"\n"), "{text}");
+    assert!(text.contains("radix = \"dec\", color = \"red\"") && text.contains("expanded = true") && text.contains("[cursors]\n1 = \"35ns\"\n2 = \"35ns\"\n3 = \"50ns\"\n"), "{text}");
     let mut back = open();
     assert_eq!(session::apply(&mut back, &text), Ok(vec![]));
     assert_eq!(session::to_toml(&back), text);
@@ -45,6 +45,7 @@ fn warns_and_keeps_going() {
         [[rows]]
         signal = "top.clk"
         radix = "q4.4"
+        color = "pink"
         [[rows]]
         signal = "top.gone"
         [[rows]]
@@ -56,6 +57,7 @@ fn warns_and_keeps_going() {
     let warn = session::apply(&mut ws, text).unwrap();
     assert_eq!(warn, [
         "unknown radix: roman",
+        "unknown colour: pink (colours: red, orange, yellow, green, cyan, blue, magenta, gray)",
         "radix q4.4 doesn't fit top.clk",
         "nested group flattened: inner",
         "rows: entry without signal or group",
