@@ -122,8 +122,8 @@ wtf 0.1.0 on an AMD Ryzen 9 9950X3D (32 threads), 122 GB of memory, NVMe; 2026-1
 | first screen, `wtf --snapshot` | 3.8 s | 12.7 s | 0.2 s (was 8.9 s) | 2 s VCD, 1 s FST |
 | whole trace on screen | 3.9 s | 12.6 s | | the first screen + 50 ms |
 | add `top.hot` | 0.6 s | 7.7 s | | 1 s |
-| value search to `top.hot`'s end | 5.4 s (24M) | 28.4 s (123M) | | 1 s for 10M |
-| clocked search, whole trace | 12.9 s | 71.5 s | | |
+| value search to `top.hot`'s end | 1.3 s (24M; was 5.4 s) | 6.5 s (123M; was 28.4 s) | | 1 s for 10M |
+| clocked search, whole trace | 2.6 s (was 12.9 s) | 17.3 s (was 71.5 s) | | |
 | peak memory after open | 13.5 GB | 3.8 GB | 134 MB | proportional to the hierarchy |
 | peak memory after the searches | 13.5 GB | 8.9 GB | 147 MB | |
 
@@ -134,8 +134,10 @@ What they say:
 - Drawing is not the cost: the whole trace on screen takes as long as the first screen.
 - An FST's first screen is slow because the signals on it are loaded whole, over the whole trace:
   `top.hot` alone (123M changes) takes 7.7 s.
-- Value and clocked searches go at about 2.3 s per 10M changes and 0.55 s per million cycles in
-  both formats: the cost is in the search, not the file.
+- Value and clocked searches went at about 2.3 s per 10M changes and 0.55 s per million cycles in
+  both formats: each step to the next change searched the trace again (four binary searches) and
+  read the value twice. Walking a signal's changes in order, they take 0.55 s per 10M changes and
+  0.14 s per million cycles.
 - With 500k signals the window took 8.9 s while the core opened in 0.1 s: building the signal
   panel's tree looked each scope up among its siblings one by one, quadratic in a scope's children
   (26,300 modules under `top`). Looked up by name now, it takes 0.2 s.

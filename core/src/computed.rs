@@ -57,11 +57,8 @@ fn depth_ok(s: &str) -> bool {
 
 /// The times a var has a value from: its first, then each change.
 fn times(trace: &Trace, var: usize) -> Vec<Tick> {
-    let mut out: Vec<Tick> = trace.first_time(var).into_iter().collect();
-    while let Some(t) = out.last().and_then(|&t| trace.next_change(var, t)) {
-        out.push(t);
-    }
-    out
+    let Some(first) = trace.first_time(var) else { return vec![] };
+    std::iter::once(first).chain(trace.walk(var, None, first, true).map(|c| c.0)).collect()
 }
 
 /// A var's bits at `t`, as wide as it is; `x`s where it has no value (yet).

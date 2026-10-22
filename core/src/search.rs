@@ -272,6 +272,10 @@ pub fn find_query(trace: &Trace, q: &Query, from: Tick, forward: bool) -> Option
             start = edge(start, forward)?;
         }
     }
+    // a value of one signal (`/0x40`): one walk over its changes
+    if let Expr::Cmp { sig, past: 0, eq: true, target: Some(target) } = &q.expr {
+        return find(trace, sig.0, sig.1, target, from, forward);
+    }
     let mut sigs = Vec::new();
     probes(&q.expr, &mut sigs);
     loop {
@@ -306,16 +310,32 @@ fn matches(target: &Target, v: Option<&Val>) -> bool {
 
 /// The next (or previous) time after (before) `from` where the signal changes to the target, so
 /// a match is the start of a matching segment.
-// shortcut: walks the changes one by one; index values if searching huge traces is too slow (milestone 6).
 pub fn find(trace: &Trace, var: usize, bit: Option<u32>, target: &Target, from: Tick, forward: bool) -> Option<Tick> {
-    let mut t = from;
-    loop {
-        t = if forward { trace.next_change_of(var, bit, t)? } else { trace.prev_change_of(var, bit, t)? };
-        let before = t.checked_sub(1).is_some_and(|p| matches(target, trace.value_of(var, bit, p).as_ref()));
-        if !before && matches(target, trace.value_of(var, bit, t).as_ref()) {
-            return Some(t);
+    find_all(trace, var, bit, target, from, forward).next()
+}
+
+/// Every such time, nearest first, from one walk over the signal's changes.
+// shortcut: looks at every change; index values if searching huge traces is too slow (spec §18).
+pub fn find_all<'a>(trace: &'a Trace, var: usize, bit: Option<u32>, target: &'a Target, from: Tick, forward: bool) -> impl Iterator<Item = Tick> + 'a {
+    let mut changes = trace.walk(var, bit, from, forward).peekable();
+    // forward, whether the change before matched
+    let mut last = None;
+    std::iter::from_fn(move || {
+        while let Some((x, v)) = changes.next() {
+            // the value just before x: forward the last change's, backward the next one's
+            let before = match (forward, last) {
+                (true, Some(m)) => m,
+                (false, _) if let Some(c) = changes.peek() => matches(target, c.1.as_ref()),
+                _ => x.checked_sub(1).is_some_and(|p| matches(target, trace.value_of(var, bit, p).as_ref())),
+            };
+            let now = matches(target, v.as_ref());
+            last = Some(now);
+            if now && !before {
+                return Some(x);
+            }
         }
-    }
+        None
+    })
 }
 
 #[cfg(test)]

@@ -186,15 +186,15 @@ impl Workspace {
                     let made = self.resolve(&signal).map(|p| {
                         let width = if p.1.is_some() { Some(1) } else { self.trace.vars[p.0].width };
                         self.trace.load(&[p.0]);
-                        let mut t = self.trace.start();
-                        let mut times = vec![t];
-                        while let Some(x) = self.trace.next_change_of(p.0, p.1, t) {
-                            times.push(x);
-                            t = x;
-                        }
+                        let start = self.trace.start();
+                        let mut changes = vec![(start, self.trace.value_of(p.0, p.1, start))];
+                        changes.extend(self.trace.walk(p.0, p.1, start, true));
                         let end = self.trace.end();
-                        let records = (0..times.len())
-                            .map(|i| Record { start: times[i], end: times.get(i + 1).copied().unwrap_or(end.max(times[i] + 1)), fields: vec![self.trace.value_of(p.0, p.1, times[i])] })
+                        let ends: Vec<Tick> = changes.iter().skip(1).map(|c| c.0).collect();
+                        let records = changes
+                            .into_iter()
+                            .enumerate()
+                            .map(|(i, (t, v))| Record { start: t, end: ends.get(i).copied().unwrap_or(end.max(t + 1)), fields: vec![v] })
                             .collect();
                         Stream { name: name.into(), schema: vec![stream::Field { name: "value".into(), width, time: false }], records, violations: false }
                     });

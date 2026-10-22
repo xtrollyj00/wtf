@@ -145,11 +145,13 @@ impl Column {
     /// One walk over the signal's changes alongside the samples, in time order.
     fn new(trace: &Trace, p: Probe, samples: &[Tick]) -> Self {
         let (mut rows, mut vals) = (Vec::with_capacity(samples.len()), Vec::new());
-        let mut next = None;
+        let Some(&t0) = samples.first() else { return Column { rows, vals } };
+        vals.push(trace.value_of(p.0, p.1, t0));
+        let mut changes = trace.walk(p.0, p.1, t0, true).peekable();
         for &t in samples {
-            if vals.is_empty() || next.is_some_and(|c| c <= t) {
-                vals.push(trace.value_of(p.0, p.1, t));
-                next = trace.next_change_of(p.0, p.1, t);
+            // the value at t: the last change up to it, if there are new ones
+            if let Some(v) = std::iter::from_fn(|| changes.next_if(|c| c.0 <= t)).last() {
+                vals.push(v.1);
             }
             rows.push(vals.len() as u32 - 1);
         }
@@ -167,12 +169,7 @@ pub fn edges(trace: &Trace, clock: Probe) -> Arc<Vec<Tick>> {
         return e.clone();
     }
     let rise = Target::Bits("1".into());
-    let (mut out, mut t) = (Vec::new(), 0);
-    while let Some(e) = search::find(trace, clock.0, clock.1, &rise, t, true) {
-        out.push(e);
-        t = e;
-    }
-    let out = Arc::new(out);
+    let out: crate::trace::Edges = Arc::new(search::find_all(trace, clock.0, clock.1, &rise, 0, true).collect());
     trace.edges.borrow_mut().insert(clock, out.clone());
     out
 }
@@ -195,14 +192,12 @@ pub fn sampled(trace: &Trace, q: &Query, t: Tick) -> Tick {
 pub fn changes(trace: &mut Trace, p: Probe, from: Tick, to: Tick, budget: &mut usize) -> (Vec<Tick>, bool) {
     trace.load(&[p.0]);
     let mut out = Vec::new();
-    let mut t = from;
-    while let Some(x) = trace.next_change_of(p.0, p.1, t).filter(|&x| x <= to) {
+    for (x, _) in trace.walk(p.0, p.1, from, true).take_while(|c| c.0 <= to) {
         if *budget == 0 {
             return (out, true);
         }
         out.push(x);
         *budget -= 1;
-        t = x;
     }
     (out, false)
 }

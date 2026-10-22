@@ -193,15 +193,7 @@ impl Trace {
         let idx = self.tt_pos(t, true).checked_sub(1)?;
         let off = sig.get_offset(idx)?;
         // the last element at a time is the settled value after delta cycles
-        let v = sig.get_value_at(&off, off.elements - 1);
-        Some(match v.to_bit_string() {
-            Some(b) => Val::Bits(b),
-            None => match v {
-                SignalValueRef::String(s) => Val::Text(s.to_string()),
-                SignalValueRef::Real(r) => Val::Text(r.to_string()),
-                _ => Val::Text(String::new()),
-            },
-        })
+        Some(val(sig.get_value_at(&off, off.elements - 1)))
     }
 
     /// Changes in [t0, t1). Two binary searches, independent of the number of transitions.
@@ -249,6 +241,67 @@ impl Trace {
         let pos = ti.partition_point(|&x| x < i);
         (pos > first).then(|| self.wave.time_table()[ti[pos - 1] as usize])
     }
+
+    /// The var's changes after `t` (backward: before it), nearest first, each with its value: one
+    /// search to start, then a step per change, where `next_change` and `value_at` search each
+    /// time. For whatever walks a signal (searches, clock edges, decoders).
+    fn walk_var(&self, var: usize, t: Tick, forward: bool) -> Box<dyn Iterator<Item = (Tick, Val)> + '_> {
+        if let Some(list) = self.computed(var) {
+            let changes = list.get(1..).unwrap_or(&[]);
+            return if forward {
+                Box::new(changes[changes.partition_point(|x| x.0 <= t)..].iter().cloned())
+            } else {
+                Box::new(changes[..changes.partition_point(|x| x.0 < t)].iter().rev().cloned())
+            };
+        }
+        let (ti, first) = self.indices(var);
+        let Some(sig) = (match self.vars[var].source {
+            Source::File(s) => self.wave.get_signal(s),
+            Source::Computed(_) => None,
+        }) else {
+            return Box::new(std::iter::empty());
+        };
+        let (tt, data) = (self.wave.time_table(), sig.data());
+        // entries at one time are delta cycles: the last is the settled value
+        if forward {
+            let mut pos = ti.partition_point(|&x| x < self.tt_pos(t, true)).max(first);
+            Box::new(std::iter::from_fn(move || {
+                let g = *ti.get(pos)?;
+                pos += ti[pos..].iter().take_while(|&&x| x == g).count();
+                Some((tt[g as usize], val(data.get_value_at(pos - 1))))
+            }))
+        } else {
+            let mut pos = ti.partition_point(|&x| x < self.tt_pos(t, false));
+            Box::new(std::iter::from_fn(move || {
+                if pos <= first {
+                    return None;
+                }
+                let (g, v) = (ti[pos - 1], val(data.get_value_at(pos - 1)));
+                pos -= ti[first..pos].iter().rev().take_while(|&&x| x == g).count();
+                Some((tt[g as usize], v))
+            }))
+        }
+    }
+}
+
+fn val(v: SignalValueRef) -> Val {
+    match v.to_bit_string() {
+        Some(b) => Val::Bits(b),
+        None => match v {
+            SignalValueRef::String(s) => Val::Text(s.to_string()),
+            SignalValueRef::Real(r) => Val::Text(r.to_string()),
+            _ => Val::Text(String::new()),
+        },
+    }
+}
+
+/// Bit `bit` of a value (0 the LSB), or the value itself.
+fn bit_of(v: Val, bit: Option<u32>) -> Option<Val> {
+    match (bit, v) {
+        (None, v) => Some(v),
+        (Some(b), Val::Bits(s)) => s.chars().rev().nth(b as usize).map(|c| Val::Bits(c.to_string())),
+        (Some(_), Val::Text(_)) => None,
+    }
 }
 
 // One bit of a bus, for buses expanded into their bits; `bit` None is the whole variable.
@@ -256,17 +309,41 @@ impl Trace {
 // costs time proportional to the bus's changes in view; index bits if that is ever too slow.
 impl Trace {
     pub fn value_of(&self, var: usize, bit: Option<u32>, t: Tick) -> Option<Val> {
-        let v = self.value_at(var, t)?;
-        match (bit, v) {
-            (None, v) => Some(v),
-            (Some(b), Val::Bits(s)) => s.chars().rev().nth(b as usize).map(|c| Val::Bits(c.to_string())),
-            (Some(_), Val::Text(_)) => None,
-        }
+        bit_of(self.value_at(var, t)?, bit)
     }
 
-    /// Whether the bus change at `t` changed this bit.
-    fn bit_changed(&self, var: usize, bit: Option<u32>, t: Tick) -> bool {
-        bit.is_none() || t == 0 || self.value_of(var, bit, t) != self.value_of(var, bit, t - 1)
+    /// The changes of a var or one of its bits after `t` (backward: before it), nearest first,
+    /// each with the value it changes to; a bit's are the bus changes that change it.
+    pub fn walk(&self, var: usize, bit: Option<u32>, t: Tick, forward: bool) -> Box<dyn Iterator<Item = (Tick, Option<Val>)> + '_> {
+        let changes = self.walk_var(var, t, forward).map(move |(x, v)| (x, bit_of(v, bit)));
+        if bit.is_none() {
+            return Box::new(changes);
+        }
+        // a bus change changes the bit if the bit differs from just before: forward, the last
+        // change's; backward, the next one's; at the end of the walk, looked up
+        let before = move |x: Tick| x.checked_sub(1).and_then(|p| self.value_of(var, bit, p));
+        if forward {
+            let mut last = None;
+            Box::new(changes.filter(move |(x, v)| {
+                let changed = *v != last.take().unwrap_or_else(|| before(*x));
+                last = Some(v.clone());
+                changed
+            }))
+        } else {
+            let mut changes = changes.peekable();
+            Box::new(std::iter::from_fn(move || {
+                loop {
+                    let (x, v) = changes.next()?;
+                    let prev = match changes.peek() {
+                        Some(c) => c.1 != v,
+                        None => before(x) != v,
+                    };
+                    if prev {
+                        return Some((x, v));
+                    }
+                }
+            }))
+        }
     }
 
     /// Changes of every bit of a bus in each tick range, as `[bit][range]` with bit 0 the LSB.
@@ -307,22 +384,13 @@ impl Trace {
         out
     }
 
-    pub fn next_change_of(&self, var: usize, bit: Option<u32>, mut t: Tick) -> Option<Tick> {
-        loop {
-            t = self.next_change(var, t)?;
-            if self.bit_changed(var, bit, t) {
-                return Some(t);
-            }
-        }
+    // a whole var's change needs no value, which a walk makes
+    pub fn next_change_of(&self, var: usize, bit: Option<u32>, t: Tick) -> Option<Tick> {
+        if bit.is_none() { self.next_change(var, t) } else { self.walk(var, bit, t, true).next().map(|c| c.0) }
     }
 
-    pub fn prev_change_of(&self, var: usize, bit: Option<u32>, mut t: Tick) -> Option<Tick> {
-        loop {
-            t = self.prev_change(var, t)?;
-            if self.bit_changed(var, bit, t) {
-                return Some(t);
-            }
-        }
+    pub fn prev_change_of(&self, var: usize, bit: Option<u32>, t: Tick) -> Option<Tick> {
+        if bit.is_none() { self.prev_change(var, t) } else { self.walk(var, bit, t, false).next().map(|c| c.0) }
     }
 }
 
@@ -383,6 +451,31 @@ mod tests {
             for t in 0..=v.end() + 1 {
                 assert_eq!(bits(&v, p, t), bits(&f, p, t), "{p} @ {t}");
                 assert_eq!(v.next_change(v.by_path[p], t), f.next_change(f.by_path[p], t), "{p} @ {t}");
+            }
+        }
+    }
+
+    /// `walk` against the changes read tick by tick: every var and bit, both ways, from every tick.
+    #[test]
+    fn walks() {
+        for ext in ["vcd", "fst"] {
+            let mut t = open(ext);
+            let b = |s: &str| Val::Bits(s.into());
+            t.add_computed("calc.x", Some(2), vec![(0, b("00")), (10, b("01")), (30, b("11"))]).unwrap();
+            let end = t.end() + 2;
+            for var in 0..t.vars.len() {
+                let bits = (0..t.vars[var].width.filter(|&w| w > 1).unwrap_or(0)).map(Some);
+                for bit in std::iter::once(None).chain(bits) {
+                    let v = |x: Tick| t.value_of(var, bit, x);
+                    let changes: Vec<(Tick, Option<Val>)> = (1..end).filter(|&x| v(x) != v(x - 1)).map(|x| (x, v(x))).collect();
+                    for from in 0..end {
+                        let fwd: Vec<_> = changes.iter().filter(|c| c.0 > from).cloned().collect();
+                        let back: Vec<_> = changes.iter().rev().filter(|c| c.0 < from).cloned().collect();
+                        let at = format!("{ext} {} {bit:?} from {from}", t.vars[var].path);
+                        assert_eq!(t.walk(var, bit, from, true).collect::<Vec<_>>(), fwd, "{at}");
+                        assert_eq!(t.walk(var, bit, from, false).collect::<Vec<_>>(), back, "{at}");
+                    }
+                }
             }
         }
     }
