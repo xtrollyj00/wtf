@@ -79,7 +79,7 @@ a session file for you to open. `wtf --attach` lists what agents have open.
 
 The design is in [`spec/`](spec/README.md), one file per topic: the keys, commands, search,
 sessions, the MCP server and the decoders. [Known limits](spec/18-deferred.md#known-limits)
-lists the shortcuts taken so far.
+lists the shortcuts taken so far. [`ROADMAP.md`](ROADMAP.md) says what comes next.
 
 ## Contributing
 
