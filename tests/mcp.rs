@@ -521,7 +521,11 @@ fn decode_with_command() {
     let mut s = Server::start(&dir.0);
     s.ok("open", json!({"trace": std::fs::canonicalize("tests/data/axilite.vcd").unwrap()}));
     s.ok("command", json!({"line": "add top.aclk"}));
-    s.ok("command", json!({"line": "decode bus axilite clock=aclk prefix=s_axi_"}));
+    // decode says what it made and where the violations are, and where to read more
+    assert_eq!(
+        s.ok("command", json!({"line": "decode bus axilite clock=aclk prefix=s_axi_"})),
+        "bus: records bus.aw 2, bus.w 2, bus.b 3, bus.ar 8, bus.r 8, bus.wr 2, bus.rd 8; violations bus.errors 2, bus.wr.unmatched 1, bus.rd.unmatched 0\n`records <stream>` lists one; `protocols axilite` says what each stream and field is"
+    );
     assert!(s.ok("view", json!({})).contains("aclk"), "the rows stay");
     assert_eq!(s.ok("records", json!({"stream": "bus.wr"})), "2 of 2\nstart\tend\tdelay\taddr\tdata\tstrb\tresp\n30ns\t50ns\t10ns\t0x10\t0x11111111\t0xF\t0x0\n60ns\t120ns\t20ns\t0x14\t0x22222222\t0x3\t0x0");
     assert_eq!(s.ok("records", json!({"stream": "bus.errors"})), "2 of 2\nstart\tend\trule\n180ns\t190ns\tr_resp\n210ns\t220ns\taw_dropped");
@@ -564,7 +568,12 @@ fn protocols_describe_themselves() {
         "  <name>.wr: delay addr prot data strb resp\n",
         "  <name>.wr.unmatched: kind (violations: kind = no request | no response | no aw | no w)",
         "  <name>.rd.unmatched: kind (violations: kind = no request | no response)",
-        "| r_resp)",
+        // what each stream is: what it samples, its rules' expressions, a note for the rest
+        "  <name>.aw: addr prot\n      a record per cycle where awvalid && awready; addr = awaddr, prot = awprot\n",
+        "        aw_dropped: fell(awvalid) && !past(awready)\n",
+        "        r_resp: rvalid && rready && rresp != 0\n",
+        "      writes: AW and W in either order, then B; delay from the later of AW and W to B\n",
+        "      a B without a write (no request), a write never answered (no response)",
         "example: decode bus axilite clock=aclk prefix=s_axi_",
     ] {
         assert!(axil.contains(line), "{line}\n{axil}");

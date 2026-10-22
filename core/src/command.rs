@@ -16,6 +16,7 @@ pub fn run(app: &mut Workspace, line: &str) -> Result<Option<Msg>, String> {
     match cmd {
         "add" => return add(app, arg),
         "e" => return app.reload().map(Some),
+        "decode" => return decode(app, arg).map(|m| Some((m, false))),
         _ => {}
     }
     match cmd {
@@ -58,7 +59,6 @@ pub fn run(app: &mut Workspace, line: &str) -> Result<Option<Msg>, String> {
             let (name, expr) = arg.split_once('=').ok_or("usage: :signal <name> = <signal>")?;
             app.define(name, expr).map(drop)
         }
-        "decode" => decode(app, arg),
         "protocol" => protocol(app, arg),
         "rename" if arg.is_empty() => Err("usage: :rename <name>".into()),
         "rename" => {
@@ -94,7 +94,9 @@ pub fn run(app: &mut Workspace, line: &str) -> Result<Option<Msg>, String> {
 /// `:decode name protocol key=value...`: an instance (`[[decode]]`); `clock=` is its clock,
 /// `prefix=` a param, and for `frame`, `pair` and `check` the keys that aren't roles are params. A
 /// value runs to the next `key=`, so a rule can have spaces: `bad=valid && !ready`.
-fn decode(app: &mut Workspace, arg: &str) -> Result<(), String> {
+/// Answers with the streams the instance made and how many records each has, violations apart,
+/// so what there is to look at shows: `bus: records bus.aw 2, ...; violations bus.errors 2, ...`.
+fn decode(app: &mut Workspace, arg: &str) -> Result<String, String> {
     let usage = "usage: :decode <name> <protocol> <role>=<signal>...";
     let mut words = arg.split_whitespace();
     let (name, protocol) = (words.next().ok_or(usage)?, words.next().ok_or(usage)?);
@@ -107,7 +109,12 @@ fn decode(app: &mut Workspace, arg: &str) -> Result<(), String> {
         false => k != "prefix" && !crate::protocol::builtin(protocol).is_some_and(|b| b.params.contains(&k.as_str())),
     });
     let d = crate::stream::Decode { name: name.into(), protocol: protocol.into(), clock, signals, params };
-    app.add_decode(d).map(drop)
+    app.add_decode(d)?;
+    let inner = format!("{name}.");
+    let made: Vec<&crate::stream::Stream> = app.streams.iter().filter(|s| s.name == name || s.name.starts_with(&inner)).collect();
+    let list = |violations: bool| made.iter().filter(|s| s.violations == violations).map(|s| format!("{} {}", s.name, s.records.len())).collect::<Vec<_>>().join(", ");
+    let parts: Vec<String> = [("records", list(false)), ("violations", list(true))].into_iter().filter(|(_, l)| !l.is_empty()).map(|(w, l)| format!("{w} {l}")).collect();
+    Ok(format!("{name}: {}", parts.join("; ")))
 }
 
 /// `:protocol name when=expr field=signal...`: a stateless protocol (`[[protocol]]`); `clock=` is

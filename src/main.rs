@@ -760,7 +760,8 @@ mod tests {
         let t = trace::Trace::open("tests/data/axis.vcd".as_ref()).unwrap();
         let mut app = App::new(workspace::Workspace::new(t, "axis".into()));
         keys(&mut app, ":decode rx axis clock=clk tvalid=tvalid tready=tready tdata=tdata tlast=tlast tkeep=tkeep\n");
-        assert!(app.msg.is_none(), "{:?}", app.msg);
+        // what it made, violations apart
+        assert_eq!(app.msg, Some(("rx: records rx.beat 7, rx.frame 4; violations rx.errors 2".into(), false)));
         keys(&mut app, ":add rx.frame rx.errors\n:fit\n");
         insta::assert_snapshot!(snapshot(&mut app, 100, None));
         // Space shows a row per field under the stream, as a bus's bits
@@ -798,7 +799,7 @@ mod tests {
         assert!(matches!(&app.ws.rows[0], rows::Row::Signal(s) if s.bits == 0) && app.ws.bit.is_none());
         // a rule's value runs to the next key, spaces and all
         keys(&mut app, ":decode stall check clock=clk bad=tvalid && !tready\n");
-        assert!(app.msg.is_none(), "{:?}", app.msg);
+        assert_eq!(app.msg, Some(("stall: violations stall 4".into(), false)));
         assert_eq!(app.ws.decodes.last().unwrap().params, [("bad".to_string(), "tvalid && !tready".to_string())]);
         keys(&mut app, ":decode x axis tvalid=nope\n");
         assert!(app.msg.as_ref().is_some_and(|(m, err)| *err && m.contains("no signal for tready")), "{:?}", app.msg);

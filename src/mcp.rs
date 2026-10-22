@@ -480,6 +480,10 @@ impl Wtf {
             }
         }
         out.extend(msg.map(|m| m.0));
+        if cmd == "decode" {
+            let protocol = line.split_whitespace().nth(2).unwrap_or("<protocol>");
+            out.push(format!("`records <stream>` lists one; `protocols {protocol}` says what each stream and field is"));
+        }
         Ok(if out.is_empty() { "done".into() } else { out.join("\n") })
     }
 

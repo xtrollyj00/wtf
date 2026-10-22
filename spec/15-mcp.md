@@ -84,8 +84,15 @@ reuse wtf's own pieces:
 - `protocols` is the agent's documentation, generated from the registry so it can't drift: the
   list of protocols (built in, on streams, the workspace's own), and for one its roles, params, the
   streams it makes with their fields (worked out from its steps), the values of its violation
-  fields, and an example `command` line. An unknown protocol's error names them all.
-- `command` decodes without touching the rows (`decode`, `protocol`, `signal`).
+  fields, what each stream is, and an example `command` line. What a stream is comes from its
+  step where it can: a sampled stream's condition and field signals (`a record per cycle where
+  awvalid && awready; addr = awaddr`), a check's rules with their expressions; a line written
+  with the protocol says the rest (`writes: AW and W in either order, then B; delay from the later
+  of AW and W to B`). An unknown protocol's error names them all.
+- `command` decodes without touching the rows (`decode`, `protocol`, `signal`). `decode` answers
+  with the streams it made and their records, violations apart (`bus: records bus.aw 2, ...;
+  violations bus.errors 2, bus.wr.unmatched 1, ...`), then where to read more; the window shows
+  that line on its status line.
 
 ### Workspaces, present and the link
 

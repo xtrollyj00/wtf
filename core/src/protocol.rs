@@ -38,7 +38,37 @@ pub struct Builtin {
     pub clocked: bool,
     /// The steps, from the roles given with their widths, and the params.
     pub steps: fn(&Given, &Params) -> Vec<Step>,
+    /// What a stream is, for `protocols <name>`, where its steps don't say it: (stream, line).
+    /// Sampled streams and rules describe themselves.
+    pub notes: &'static [(&'static str, &'static str)],
 }
+
+const AXIS: &[(&str, &str)] = &[
+    ("frame", "beats up to tlast; len in bytes (tkeep's 1 bits, or all of tdata per beat), data those bytes, complete 0 if the trace ended first"),
+];
+const AXILITE: &[(&str, &str)] = &[
+    ("wr", "writes: AW and W in either order, then B; delay from the later of AW and W to B"),
+    ("wr.unmatched", "a B without a write (no request), a write never answered (no response), a W without an AW (no aw) or the reverse (no w)"),
+    ("rd", "reads: AR, then R; delay from AR to R"),
+    ("rd.unmatched", "an R without an AR (no request), an AR never answered (no response)"),
+];
+const AXI4: &[(&str, &str)] = &[
+    ("wburst", "the W beats of a burst up to wlast; data the bytes wstrb marks"),
+    ("rburst", "the R beats of a burst up to rlast, each ID's apart (bursts of different IDs interleave)"),
+    ("wr", "writes: AW and its W burst in order, then the B with its ID; delay from the later of AW and the burst's first beat to B"),
+    ("wr.unmatched", "a B without a write (no request), a write never answered (no response), a W burst without an AW (no aw) or the reverse (no wburst)"),
+    ("rd", "reads: AR, then the R burst with its ID; delay (latency) from AR to the first R beat"),
+    ("rd.unmatched", "an R burst without an AR (no request), an AR never answered (no response)"),
+];
+const SPI: &[(&str, &str)] = &[
+    ("bit", "a bit of mosi (and miso) at each sampling edge of sclk while cs is low (mode 0 and 3: rising, 1 and 2: falling)"),
+    ("word", "`bits` bits (8), msb or lsb first by `order`"),
+    ("transfer", "cs low to high, its words as hex text"),
+];
+const UART: &[(&str, &str)] = &[
+    ("byte", "each frame's data bits, sampled in the middle of each bit at `baud`"),
+    ("errors", "a stop bit that isn't 1 (framing), a wrong parity bit (parity)"),
+];
 
 /// The protocols written in Rust.
 pub const BUILTINS: &[&str] = &["axis", "axilite", "axi4", "spi", "uart"];
@@ -46,7 +76,7 @@ pub const BUILTINS: &[&str] = &["axis", "axilite", "axi4", "spi", "uart"];
 /// The protocols written in Rust, by name.
 pub fn builtin(name: &str) -> Option<Builtin> {
     match name {
-        "axis" => Some(Builtin { about: "AXI4-Stream: beats, frames by tlast with their bytes, handshake errors", example: "decode rx axis clock=aclk prefix=s_axis_", required: &["tvalid", "tready", "tdata"], optional: &["tlast", "tkeep"], params: &[], clocked: true, steps: axis }),
+        "axis" => Some(Builtin { about: "AXI4-Stream: beats, frames by tlast with their bytes, handshake errors", example: "decode rx axis clock=aclk prefix=s_axis_", required: &["tvalid", "tready", "tdata"], optional: &["tlast", "tkeep"], params: &[], clocked: true, steps: axis, notes: AXIS }),
         "axilite" => Some(Builtin {
             about: "AXI4-Lite: write and read transactions with their delay, handshake errors, error responses",
             example: "decode bus axilite clock=aclk prefix=s_axi_",
@@ -57,6 +87,7 @@ pub fn builtin(name: &str) -> Option<Builtin> {
             params: &[],
             clocked: true,
             steps: axilite,
+            notes: AXILITE,
         }),
         "axi4" => Some(Builtin {
             about: "AXI4: write and read bursts as transactions, paired by ID, with their latency; handshake errors, error responses",
@@ -68,6 +99,7 @@ pub fn builtin(name: &str) -> Option<Builtin> {
             params: &[],
             clocked: true,
             steps: axi4,
+            notes: AXI4,
         }),
         "spi" => Some(Builtin {
             about: "SPI: bits at sclk's sampling edge, words, transfers framed by cs (active low)",
@@ -77,6 +109,7 @@ pub fn builtin(name: &str) -> Option<Builtin> {
             params: &["mode", "bits", "order"],
             clocked: false,
             steps: spi,
+            notes: SPI,
         }),
         "uart" => Some(Builtin {
             about: "UART: bytes from an idle-high line at a baud rate, framing and parity errors",
@@ -86,6 +119,7 @@ pub fn builtin(name: &str) -> Option<Builtin> {
             params: &["baud", "bits", "parity", "stop"],
             clocked: false,
             steps: uart,
+            notes: UART,
         }),
         _ => None,
     }
@@ -241,7 +275,7 @@ example: decode f frame input=rx.beat last=tlast bytes=tkeep data=tdata",
         "each response with its request, by order or by an id field, with the delay",
         "roles: request, response (streams)
 params: id=<field> (the same in both), or req_id=<field> resp_id=<field>; none: by order
-fields: delay, req_<each request field>, resp_<each response field>
+fields: delay (from the request to its response), req_<each request field>, resp_<each response field>
 also <name>.unmatched (violations): kind = no request | no response
 example: decode p pair request=cmd response=rsp id=tag",
     ),
@@ -286,9 +320,10 @@ pub fn describe(name: &str, session: &[Sampler]) -> Result<String, String> {
             out.push(format!("  {}", b.params.join(" ")));
         }
         out.push("streams, <name> being the instance's (those of optional roles only when they are given):".into());
-        for (stream, fields, violations) in streams_of(&b) {
+        for (stream, fields, violations, about) in streams_of(&b) {
             let names: Vec<&str> = fields.iter().map(|f| f.as_str()).collect();
             out.push(format!("  <name>.{stream}: {}{}", names.join(" "), violations.map_or(String::new(), |v| format!(" (violations{v})"))));
+            out.extend(about.into_iter().map(|l| format!("      {l}")));
         }
         out.push(format!("example: {}", b.example));
         return Ok(out.join("\n"));
@@ -314,13 +349,18 @@ pub fn unknown(name: &str, session: &[Sampler]) -> String {
     format!("unknown protocol: {name} (protocols: {}; `protocols <name>` describes one)", names.join(", "))
 }
 
-/// A built-in's streams, worked out from its steps with every role given: (step, fields, for
-/// violations what they are: `: rule = a | b` for a check).
-fn streams_of(b: &Builtin) -> Vec<(String, Vec<String>, Option<String>)> {
+/// A stream of a built-in, for `protocols <name>`: its name, fields, for violations what they
+/// are, and lines on what it is.
+type About<F> = (String, Vec<F>, Option<String>, Vec<String>);
+
+/// A built-in's streams, worked out from its steps with every role given: (stream, fields, for
+/// violations what they are, what it is). A note says what a stream is; otherwise its step does:
+/// what a sampled stream samples, a check's rules with their expressions.
+fn streams_of(b: &Builtin) -> Vec<About<String>> {
     use crate::stream::Field;
     let given: Vec<(&str, Option<u32>)> = b.required.iter().chain(b.optional).map(|r| (*r, Some(32))).collect();
-    let mut schemas: Vec<(String, Vec<Field>, Option<String>)> = Vec::new();
-    let find = |schemas: &[(String, Vec<Field>, Option<String>)], n: &str| schemas.iter().find(|s| s.0 == n).map(|s| s.1.clone()).unwrap_or_default();
+    let mut schemas: Vec<About<Field>> = Vec::new();
+    let find = |schemas: &[About<Field>], n: &str| schemas.iter().find(|s| s.0 == n).map(|s| s.1.clone()).unwrap_or_default();
     // the example's params (`baud=115200`), so a decoder that needs one can tell its fields
     let params: Vec<(String, String)> = b
         .example
@@ -334,30 +374,40 @@ fn streams_of(b: &Builtin) -> Vec<(String, Vec<String>, Option<String>)> {
         match step {
             Step::Changes { name, .. } => {
                 hidden.push(name.to_string());
-                schemas.push((name.into(), vec![Field { name: "value".into(), width: Some(4), time: false }], None));
+                schemas.push((name.into(), vec![Field { name: "value".into(), width: Some(4), time: false }], None, vec![]));
             }
-            Step::Sample { name, fields, .. } => schemas.push((name.into(), fields.into_iter().map(|(f, _)| Field { name: f, width: None, time: false }).collect(), None)),
+            Step::Sample { name, when, fields } => {
+                let from: Vec<String> = fields.iter().filter(|(f, sig)| f != sig).map(|(f, sig)| format!("{f} = {sig}")).collect();
+                let about = format!("a record per cycle where {when}{}", if from.is_empty() { String::new() } else { format!("; {}", from.join(", ")) });
+                schemas.push((name.into(), fields.into_iter().map(|(f, _)| Field { name: f, width: None, time: false }).collect(), None, vec![about]));
+            }
             Step::Check { name, rules } => {
-                let rules = format!(": rule = {}", rules.iter().map(|r| r.0.as_str()).collect::<Vec<_>>().join(" | "));
-                schemas.push((name.into(), vec![Field { name: "rule".into(), width: None, time: false }], Some(rules)));
+                let mut about = vec!["a record per cycle where a rule holds, rule naming it:".to_string()];
+                about.extend(rules.iter().map(|(r, e)| format!("  {r}: {e}")));
+                schemas.push((name.into(), vec![Field { name: "rule".into(), width: None, time: false }], Some(String::new()), about));
             }
             Step::Decode { name, input, decoder, params } => {
                 // any timescale: only the fields are wanted
                 let d = crate::decode::make(decoder, &find(&schemas, input), &params, Some(1)).ok();
                 let violations = d.as_ref().is_some_and(|d| d.violations()).then(String::new);
-                schemas.push((name.into(), d.map(|d| d.schema()).unwrap_or_default(), violations));
+                schemas.push((name.into(), d.map(|d| d.schema()).unwrap_or_default(), violations, vec![]));
             }
             Step::Join { name, requests, response, .. } => {
                 let reqs: Vec<(&str, Vec<Field>)> = requests.iter().map(|&r| (r, find(&schemas, r))).collect();
                 let reqs: Vec<(&str, &[Field])> = reqs.iter().map(|(r, f)| (*r, &f[..])).collect();
                 let schema = crate::decode::join_schema(&reqs, &find(&schemas, response));
-                schemas.push((name.into(), schema, None));
+                schemas.push((name.into(), schema, None, vec![]));
                 // a part missing needs two parts
                 let parts: String = requests.iter().filter(|_| requests.len() > 1).map(|r| format!(" | no {r}")).collect();
                 let kinds = format!(": kind = no request | no response{parts}");
-                schemas.push((format!("{name}.unmatched"), vec![Field { name: "kind".into(), width: None, time: false }], Some(kinds)));
+                schemas.push((format!("{name}.unmatched"), vec![Field { name: "kind".into(), width: None, time: false }], Some(kinds), vec![]));
             }
         }
     }
-    schemas.into_iter().filter(|s| !hidden.contains(&s.0)).map(|(n, f, v)| (n, f.into_iter().map(|f| f.name).collect(), v)).collect()
+    for (stream, note) in b.notes {
+        if let Some(s) = schemas.iter_mut().find(|s| s.0 == *stream) {
+            s.3.insert(0, note.to_string());
+        }
+    }
+    schemas.into_iter().filter(|s| !hidden.contains(&s.0)).map(|(n, f, v, a)| (n, f.into_iter().map(|f| f.name).collect(), v, a)).collect()
 }
