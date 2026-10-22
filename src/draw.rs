@@ -125,8 +125,53 @@ pub const UNICODE: Glyphs = Glyphs {
     dash: '–',
 };
 
+/// Box drawing only: the legacy computing glyphs' pieces become corners.
+pub const BOX: Glyphs = Glyphs { crossing: ['┬', '┴'], open: ['┌', '└'], close: ['┐', '┘'], ..UNICODE };
+
+/// 7-bit only. An edge and a crossing are both `+`; a 1-bit signal has one line beside it, a bus two.
+pub const ASCII: Glyphs = Glyphs {
+    line: '-',
+    edge_up: ['+'; 4],
+    edge_down: ['+'; 4],
+    crossing: ['+'; 2],
+    open: ['+'; 2],
+    close: ['+'; 2],
+    fill: ['#'; 2],
+    busy_bus: '#',
+    cut: '~',
+    grid: '.',
+    sep: '|',
+    cursor: '|',
+    mark: ':',
+    left: '<',
+    right: '>',
+    group_open: 'v',
+    group_closed: '>',
+    shown: '*',
+    hl: '>',
+    insert: '>',
+    border: ['+', '+', '+', '+', '-', '|'],
+    dot: '-',
+    dash: '-',
+};
+
+pub const SETS: [(&str, &Glyphs); 3] = [("unicode", &UNICODE), ("box", &BOX), ("ascii", &ASCII)];
+
+pub fn glyphs_named(name: &str) -> Result<&'static Glyphs, String> {
+    SETS.iter().find(|(n, _)| *n == name).map(|(_, g)| *g).ok_or_else(|| format!("unknown glyphs: {name} (unicode, box, ascii)"))
+}
+
+thread_local! {
+    // per thread, so tests can draw in several sets at once; the window draws on one thread
+    static GLYPHS: std::cell::Cell<&'static Glyphs> = const { std::cell::Cell::new(&UNICODE) };
+}
+
+pub fn set_glyphs(g: &'static Glyphs) {
+    GLYPHS.with(|c| c.set(g));
+}
+
 pub fn gl() -> &'static Glyphs {
-    &UNICODE
+    GLYPHS.with(|c| c.get())
 }
 
 pub fn red() -> Style {
@@ -210,7 +255,14 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
     } else if p >= *top + fit {
         *top = p + 1 - fit;
     }
-    let row_names = rows::display_names(&ws.trace, &ws.rows);
+    let mut row_names = rows::display_names(&ws.trace, &ws.rows);
+    // the core marks group headers `▾` / `▸`; drawn in the glyph set's
+    for (n, r) in row_names.iter_mut().zip(&ws.rows) {
+        if let Row::Group { collapsed, .. } = r {
+            let g = if *collapsed { gl().group_closed } else { gl().group_open };
+            *n = format!("{g}{}", n.chars().skip(1).collect::<String>());
+        }
+    }
     // a bit line is named after its bus, indented under it: `data[3]`; a field after its stream:
     // `frame.len`
     let names: Vec<String> = lines

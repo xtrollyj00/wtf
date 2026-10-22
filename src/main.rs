@@ -27,8 +27,11 @@ struct Args {
     /// the open sessions
     #[arg(long, value_name = "id", conflicts_with = "trace")]
     attach: Option<Option<String>>,
+    /// Draw with this glyph set: unicode, box (no legacy computing glyphs) or ascii
+    #[arg(long, value_name = "set", value_parser = draw::glyphs_named)]
+    glyphs: Option<&'static draw::Glyphs>,
     /// Serve AI agents over MCP on stdin / stdout, e.g. `claude mcp add wtf -- wtf --mcp`
-    #[arg(long, conflicts_with_all = ["trace", "session", "snapshot", "attach"])]
+    #[arg(long, conflicts_with_all = ["trace", "session", "snapshot", "attach", "glyphs"])]
     mcp: bool,
 }
 
@@ -51,6 +54,9 @@ fn main() {
 fn run(args: Args) -> Result<(), String> {
     if args.mcp {
         return mcp::serve();
+    }
+    if let Some(g) = args.glyphs {
+        draw::set_glyphs(g);
     }
     let (path, shared) = match args.attach {
         Some(None) => {
@@ -679,6 +685,27 @@ mod tests {
         }
         keys(&mut app, "\x1b");
         assert!(app.mode == app::Mode::View);
+    }
+
+    #[test]
+    fn glyph_sets() {
+        // buses with crossings, X and Z, a busy column, a group, marks; the panel's borders and tree;
+        // a stream's segments opening and closing
+        let mut app = open("vcd", Some(SESSION));
+        keys(&mut app, "jjjmw3mwia");
+        let t = trace::Trace::open("tests/data/axis.vcd".as_ref()).unwrap();
+        let mut axis = App::new(workspace::Workspace::new(t, "axis".into()));
+        keys(&mut axis, ":decode rx axis clock=clk tvalid=tvalid tready=tready tdata=tdata tlast=tlast tkeep=tkeep\n:add rx.frame\n:fit\n");
+        for (name, g) in [("box", &draw::BOX), ("ascii", &draw::ASCII)] {
+            draw::set_glyphs(g);
+            let text = format!("{}{}", snapshot(&mut app, 80, Some(16)), snapshot(&mut axis, 100, None));
+            if name == "ascii" {
+                assert!(text.is_ascii(), "{text}");
+            }
+            insta::assert_snapshot!(name, text);
+        }
+        draw::set_glyphs(&draw::UNICODE);
+        assert!(Args::try_parse_from(["wtf", "--glyphs", "utf8", "x.vcd"]).err().unwrap().to_string().contains("unknown glyphs: utf8 (unicode, box, ascii)"));
     }
 
     #[test]
