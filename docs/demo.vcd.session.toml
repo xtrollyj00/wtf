@@ -1,0 +1,43 @@
+# wtf session: an AXI4-Lite bus, decoded
+version = 1
+scope = "top"
+
+[view]
+zoom = "2ns"
+time = "30ns"
+
+[cursors]
+1 = "85ns"
+2 = "45ns"
+3 = "65ns"
+
+[[decode]]
+name = "bus"
+protocol = "axilite"
+clock = "top.aclk"
+params = { prefix = "top.s_axi_" }
+
+[[rows]]
+signal = "top.aclk"
+
+[[rows]]
+signal = "bus.wr"
+
+[[rows]]
+group = "write"
+rows = [
+  { signal = "top.s_axi_awvalid" },
+  { signal = "top.s_axi_awready" },
+  { signal = "top.s_axi_awaddr" },
+  { signal = "top.s_axi_wvalid" },
+  { signal = "top.s_axi_wready" },
+  { signal = "top.s_axi_wdata" },
+  { signal = "top.s_axi_bvalid" },
+  { signal = "top.s_axi_bresp" },
+]
+
+[[rows]]
+signal = "bus.rd"
+
+[[rows]]
+signal = "bus.errors"
