@@ -1,0 +1,11 @@
+--- a/rtl/axis_head_trimmer.vhd
++++ b/rtl/axis_head_trimmer.vhd
+@@ -174,7 +174,7 @@
+ 
+     -- Detect if current/next position is within the trim region
+     trim_pos_ok      <= '1' when (byte_cnt_reg <= shreg_trim_len(0)) else '0';
+-    trim_pos_next_ok <= '1' when (byte_cnt_next <= shreg_trim_len(0)) else '0';
++    trim_pos_next_ok <= '1' when (byte_cnt_next < shreg_trim_len(0)) else '0';
+ 
+     -- trim_active: entire word is trimmed (skipped)
+     -- trim_last: word contains the trim boundary (partial trim)

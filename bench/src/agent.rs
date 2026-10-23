@@ -3,7 +3,10 @@
 //! the size of wtf's answers, tokens, peak context, money and time.
 //!
 //! A task is bench/agent/tasks/<name>.toml: `trace` (from the repository root), `prompt` (`{trace}`
-//! becomes its path), `answer` (the JSON shape asked for) and `expect` (the answer). Each run
+//! becomes its path), `answer` (the JSON shape asked for) and `expect` (the answer). A fix task is
+//! a directory, bench/agent/tasks/<name>/, with a task.toml (`upstream`, `commit`, `file`, `from`,
+//! `prompt`, `answer`, `expect`), a bug.patch, and the Makefile and testbench the agent debugs
+//! with (see `Fix`); it passes when the answer is right and the agent's fix passes. Each run
 //! appends a line to bench/agent/results.jsonl, its transcript (and review) go to
 //! bench/agent/runs/; git ignores both.
 
@@ -14,7 +17,8 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const USAGE: &str = "usage:
-  wtf-bench agent run [--wtf <path>] [--model <model>] [--runs 1] [--budget 1.0] [--timeout 600] [--review] [<task>...]
+  wtf-bench agent run [--wtf <path>] [--model <model>] [--runs 1] [--budget 1.0|none] [--timeout 600] [--review] [<task>...]
+  wtf-bench agent check [<task>...]    prove fix tasks without an agent
   wtf-bench agent report";
 
 /// Asked after a run with --review, in the same session.
@@ -25,6 +29,7 @@ pub fn main(args: &[String]) -> Result<(), String> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().ok_or("no repository root")?.to_path_buf();
     match args.first().map(String::as_str) {
         Some("run") => run(&root, &args[1..]),
+        Some("check") => check(&root, &args[1..]),
         Some("report") => report(&root),
         _ => Err(USAGE.into()),
     }
@@ -64,6 +69,19 @@ struct Task {
     prompt: String,
     expect: Value,
     ordered: Vec<String>,
+    fix: Option<Fix>,
+}
+
+/// A fix task: one file of an upstream design at a commit, broken by the task's bug.patch; the
+/// rest of the task directory (a Makefile, tb/) is copied next to it. `make sim` fails as
+/// shipped; fixed is `make sim` and `make hidden` (a regression the agent never runs) passing
+/// with the task's own Makefile and tb/ put back. UPSTREAM, given to make, is the checkout.
+struct Fix {
+    dir: PathBuf,
+    upstream: String,
+    commit: String,
+    file: String,
+    from: String,
 }
 
 fn tasks(root: &Path, names: &[String]) -> Result<Vec<Task>, String> {
@@ -82,21 +100,24 @@ fn tasks(root: &Path, names: &[String]) -> Result<Vec<Task>, String> {
 }
 
 fn task(dir: &Path, root: &Path, name: String) -> Result<Task, String> {
-    let path = dir.join(format!("{name}.toml"));
+    let fix_dir = dir.join(&name);
+    let path = if fix_dir.is_dir() { fix_dir.join("task.toml") } else { dir.join(format!("{name}.toml")) };
     let t: toml::Table = std::fs::read_to_string(&path).map_err(|e| e.to_string())?.parse().map_err(|e| format!("{}: {e}", path.display()))?;
     let s = |k: &str| t.get(k).and_then(|v| v.as_str()).map(String::from).ok_or(format!("{}: needs {k}", path.display()));
-    let trace = root.join(s("trace")?);
-    if !trace.exists() {
-        return Err(format!("{}: no trace {}", path.display(), trace.display()));
-    }
-    let prompt = format!(
-        "{}\nEnd your answer with a ```json block of exactly this shape, with the values you found:\n{}",
-        s("prompt")?.replace("{trace}", &trace.display().to_string()).trim(),
-        s("answer")?
-    );
+    let (prompt, fix) = if fix_dir.is_dir() {
+        let fix = Fix { dir: fix_dir, upstream: s("upstream")?, commit: s("commit")?, file: s("file")?, from: s("from")? };
+        (s("prompt")?, Some(fix))
+    } else {
+        let trace = root.join(s("trace")?);
+        if !trace.exists() {
+            return Err(format!("{}: no trace {}", path.display(), trace.display()));
+        }
+        (s("prompt")?.replace("{trace}", &trace.display().to_string()), None)
+    };
+    let prompt = format!("{}\nEnd your answer with a ```json block of exactly this shape, with the values you found:\n{}", prompt.trim(), s("answer")?);
     let expect = serde_json::from_str(&s("expect")?).map_err(|e| format!("{}: expect: {e}", path.display()))?;
     let ordered = t.get("ordered").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
-    Ok(Task { name, prompt, expect, ordered })
+    Ok(Task { name, prompt, expect, ordered, fix })
 }
 
 fn run(root: &Path, args: &[String]) -> Result<(), String> {
@@ -118,7 +139,8 @@ fn run(root: &Path, args: &[String]) -> Result<(), String> {
     println!("task\trun\tpass\tscore\tcalls\terrors\tanswers\ttokens\tpeak\tcost\twall");
     for t in &tasks {
         for i in 1..=o.runs {
-            let mut row = once(&o, &wtf, t, &runs.join(format!("{}-{i}", t.name)))?;
+            let upstream = t.fix.as_ref().map(|f| checkout(root, f)).transpose()?;
+            let mut row = once(&o, &wtf, t, &runs.join(format!("{}-{i}", t.name)), upstream.as_deref())?;
             let m = row.as_object_mut().expect("a row is an object");
             for (k, v) in [("stamp", json!(stamp)), ("task", json!(t.name)), ("run", json!(i)), ("wtf", json!(commit)), ("dirty", json!(dirty)), ("claude", json!(claude))] {
                 m.insert(k.into(), v);
@@ -139,7 +161,10 @@ fn run(root: &Path, args: &[String]) -> Result<(), String> {
 
 /// One run of a task: the agent in an empty directory, with only wtf's tools (no shell, no file
 /// reads, so it can't read the trace itself), none of the user's settings, hooks or CLAUDE.md.
-fn once(o: &Opts, wtf: &Path, t: &Task, out: &Path) -> Result<Value, String> {
+/// A fix task's agent works in the task's work directory instead, and may also read and edit
+/// files there (Claude Code's default: reads and, with acceptEdits, edits inside the working
+/// directory only) and run `make sim`; the upstream checkout is outside it, out of its reach.
+fn once(o: &Opts, wtf: &Path, t: &Task, out: &Path, upstream: Option<&Path>) -> Result<Value, String> {
     let tmp = std::env::temp_dir().join(format!("wtf-agent-{}-{}", std::process::id(), out.file_name().unwrap_or_default().to_string_lossy()));
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(tmp.join("run")).map_err(|e| e.to_string())?;
@@ -147,9 +172,24 @@ fn once(o: &Opts, wtf: &Path, t: &Task, out: &Path) -> Result<Value, String> {
     let mcp = json!({"mcpServers": {"wtf": {"type": "stdio", "command": wtf, "args": ["--mcp"], "env": {"XDG_RUNTIME_DIR": rt, "XDG_CONFIG_HOME": rt}}}});
     let config = tmp.join("mcp.json");
     std::fs::write(&config, mcp.to_string()).map_err(|e| e.to_string())?;
+    let work = tmp.join("work");
+    let fix = t.fix.as_ref().zip(upstream);
+    if let Some((f, up)) = fix {
+        prepare(f, up, &work, false)?;
+        if make(&work, up, "sim")? {
+            return Err(format!("{}: `make sim` passes with the bug; `wtf-bench agent check {}`", t.name, t.name));
+        }
+    }
     let claude = |prompt: &str, resume: Option<&str>| {
         let mut c = Command::new("claude");
-        c.current_dir(&tmp).args(["-p", prompt, "--output-format", "stream-json", "--verbose", "--strict-mcp-config", "--tools", "", "--allowedTools", "mcp__wtf", "--setting-sources", "", "--max-budget-usd", &o.budget]);
+        c.args(["-p", prompt, "--output-format", "stream-json", "--verbose", "--strict-mcp-config", "--setting-sources", ""]);
+        match fix {
+            Some((_, up)) => c.current_dir(&work).env("UPSTREAM", up).args(["--tools", "Read,Edit,Grep,Bash", "--permission-mode", "acceptEdits", "--allowedTools", "mcp__wtf", "Bash(make sim:*)"]),
+            None => c.current_dir(&tmp).args(["--tools", "", "--allowedTools", "mcp__wtf"]),
+        };
+        if o.budget != "none" {
+            c.args(["--max-budget-usd", &o.budget]);
+        }
         c.arg("--mcp-config").arg(&config);
         if let Some(m) = &o.model {
             c.args(["--model", m]);
@@ -172,7 +212,16 @@ fn once(o: &Opts, wtf: &Path, t: &Task, out: &Path) -> Result<Value, String> {
     let m = row.as_object_mut().expect("metrics are an object");
     m.insert("wall_s".into(), json!((wall * 10.0).round() / 10.0));
     let answer = m.get("answer").and_then(Value::as_str).unwrap_or("").to_string();
-    let (score, pass, keys) = grade(&answer, &t.expect, &t.ordered);
+    let (score, mut pass, keys) = grade(&answer, &t.expect, &t.ordered);
+    if let Some((f, up)) = fix {
+        // the agent's RTL with the task's own Makefile and testbench
+        copy_task(f, &work)?;
+        let fixed = make(&work, up, "sim")? && make(&work, up, "hidden")?;
+        let file = std::fs::read_to_string(work.join(&f.file)).unwrap_or_default();
+        let _ = std::fs::write(out.with_extension("rtl"), file);
+        m.insert("fixed".into(), json!(fixed));
+        pass &= fixed;
+    }
     m.insert("score".into(), json!(score));
     m.insert("pass".into(), json!(pass));
     m.insert("keys".into(), keys);
@@ -189,6 +238,96 @@ fn once(o: &Opts, wtf: &Path, t: &Task, out: &Path) -> Result<Value, String> {
     }
     let _ = std::fs::remove_dir_all(&tmp);
     Ok(row)
+}
+
+/// The upstream checkout at the task's commit, in target/upstream/ (fetched once).
+fn checkout(root: &Path, f: &Fix) -> Result<PathBuf, String> {
+    let dir = root.join("target/upstream").join(&f.commit);
+    if dir.join(f.from.as_str()).exists() {
+        return Ok(dir);
+    }
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    for args in [vec!["init", "-q"], vec!["fetch", "-q", "--depth", "1", &f.upstream, &f.commit], vec!["checkout", "-q", "FETCH_HEAD"]] {
+        let ok = Command::new("git").current_dir(&dir).args(&args).status().map_err(|e| format!("git: {e}"))?.success();
+        if !ok {
+            return Err(format!("git {} failed in {}", args.join(" "), dir.display()));
+        }
+    }
+    Ok(dir)
+}
+
+/// The task's files (all but task.toml and bug.patch) copied into `work`, over what is there.
+fn copy_task(f: &Fix, work: &Path) -> Result<(), String> {
+    for e in std::fs::read_dir(&f.dir).map_err(|e| e.to_string())?.flatten() {
+        if ["task.toml", "bug.patch"].contains(&e.file_name().to_str().unwrap_or("")) {
+            continue;
+        }
+        let to = work.join(e.file_name());
+        let _ = std::fs::remove_dir_all(&to).or_else(|_| std::fs::remove_file(&to));
+        let ok = Command::new("cp").arg("-r").arg(e.path()).arg(&to).status().map_err(|e| format!("cp: {e}"))?.success();
+        if !ok {
+            return Err(format!("copying {} failed", e.path().display()));
+        }
+    }
+    Ok(())
+}
+
+/// A fresh work directory: the task's files, the upstream file, with the bug unless `fixed`.
+fn prepare(f: &Fix, upstream: &Path, work: &Path, fixed: bool) -> Result<(), String> {
+    let _ = std::fs::remove_dir_all(work);
+    std::fs::create_dir_all(work).map_err(|e| e.to_string())?;
+    copy_task(f, work)?;
+    let file = work.join(&f.file);
+    std::fs::create_dir_all(file.parent().unwrap_or(work)).map_err(|e| e.to_string())?;
+    std::fs::copy(upstream.join(&f.from), &file).map_err(|e| format!("{}: {e}", f.from))?;
+    if !fixed {
+        let ok = Command::new("git").current_dir(work).arg("apply").arg(f.dir.join("bug.patch")).status().map_err(|e| format!("git: {e}"))?.success();
+        if !ok {
+            return Err(format!("{}: bug.patch doesn't apply", f.dir.display()));
+        }
+    }
+    Ok(())
+}
+
+/// `make <target>` in the work directory; whether it passed (its output is in the target's logs).
+fn make(work: &Path, upstream: &Path, target: &str) -> Result<bool, String> {
+    let status = Command::new("make")
+        .current_dir(work)
+        .arg(target)
+        .arg(format!("UPSTREAM={}", upstream.display()))
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map_err(|e| format!("make: {e}"))?;
+    Ok(status.success())
+}
+
+/// Prove a fix task without an agent: with the bug `make sim` and `make hidden` fail, with the
+/// upstream file they pass.
+fn check(root: &Path, names: &[String]) -> Result<(), String> {
+    let tasks: Vec<Task> = tasks(root, names)?.into_iter().filter(|t| t.fix.is_some()).collect();
+    if tasks.is_empty() {
+        return Err("no fix tasks to check".into());
+    }
+    for t in &tasks {
+        let f = t.fix.as_ref().expect("filtered");
+        let upstream = checkout(root, f)?;
+        let work = std::env::temp_dir().join(format!("wtf-check-{}-{}", std::process::id(), t.name));
+        for fixed in [false, true] {
+            prepare(f, &upstream, &work, fixed)?;
+            for target in ["sim", "hidden"] {
+                let start = Instant::now();
+                let passed = make(&work, &upstream, target)?;
+                let verdict = if passed == fixed { "ok" } else { "WRONG" };
+                println!("{}\t{}\t{target}\t{}\t{verdict}\t{:.0}s", t.name, if fixed { "upstream" } else { "bug" }, if passed { "passes" } else { "fails" }, start.elapsed().as_secs_f64());
+                if passed != fixed {
+                    return Err(format!("{}: {target} {} with {}; its logs are in {}", t.name, if passed { "passes" } else { "fails" }, if fixed { "the upstream file" } else { "the bug" }, work.display()));
+                }
+            }
+        }
+        let _ = std::fs::remove_dir_all(&work);
+    }
+    Ok(())
 }
 
 /// The command's stream-json lines; killed after the timeout, which is then the failure.
@@ -370,6 +509,15 @@ fn report(root: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn loads_every_task() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().expect("the repository");
+        let all = tasks(root, &[]).expect("tasks load");
+        let fix = all.iter().find(|t| t.name == "head-trimmer-boundary").and_then(|t| t.fix.as_ref()).expect("a fix task");
+        assert!(fix.dir.join("bug.patch").exists());
+        assert!(all.iter().any(|t| t.name == "axis-frames" && t.fix.is_none()));
+    }
 
     #[test]
     fn grades_by_key() {

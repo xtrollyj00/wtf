@@ -55,6 +55,20 @@ Each milestone ends with something usable for day-to-day debugging.
       task, commit and model; `--runs N` repeats each task, as one run varies; `--review` asks the
       agent afterwards what cost it the most. Transcripts and reviews go to `bench/agent/runs/`;
       both are outside git, as answers quote local paths.
+    - **Fix tasks**: a component whose verification fails, debugged and fixed, as an engineer
+      would. A task is a directory `bench/agent/tasks/<name>/`: one file of an open-source
+      design (`upstream` repository, `commit`, the file's path `from` and where it goes, `file`),
+      a `bug.patch` that breaks it, and a `Makefile` and testbench of the task's own (`make sim`:
+      the visible test, writing `sim.log` and `trace.fst`; `make hidden`: a regression the agent
+      never runs). The runner fetches the upstream at the commit into `target/upstream/`, builds
+      the work directory and checks `make sim` fails; the agent works there with wtf, file reads
+      and edits inside it, and `make sim`. Afterwards the task's Makefile and testbench are put
+      back, and the run is `fixed` when `make sim` and `make hidden` pass; it passes when fixed
+      and the answer (the faulty signal, when the failure showed) is right. `agent check` proves a
+      task without an agent: the bug fails both, the upstream file passes both. Upstreams are
+      permissively licensed, so patches can live in the repo. The first, `head-trimmer-boundary`,
+      is ndk-fpga's AXIS head trimmer (VHDL, cocotb on nvc; the cocotb packages in a Python venv
+      on `PATH`).
     - **Agent support**: how to tell agents to use wtf well, judged by the benchmark: the server's
       instructions and tool descriptions first; then a skill (a debugging workflow: find
       transfers, check handshakes, pair requests, declare the workspace, present); then a Claude
