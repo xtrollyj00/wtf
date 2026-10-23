@@ -84,7 +84,8 @@ Ideas that span files:
 
 - Fixtures in `tests/data/` (`simple.vcd` / `.fst` are the same trace; `axis`, `axilite`, `axi4`,
   `spi`, `uart`, `handshake`, `reqresp`, `skew` for decoders and timing; `enum.fst` with an FST
-  enum table, written by `enum.c`). The fixture's contents are documented
+  enum table, written by `enum.c`; `hdl.vcd` and `vhdl.fst`, dumped by nvc from `vhdl.vhd`, for
+  names in either HDL's form). The fixture's contents are documented
   where tests use them; changing one means updating every test that reads it.
 - TUI tests live in `src/main.rs` (`keys(&mut app, "jj'2")` drives keys, insta snapshots in
   `src/snapshots/`). MCP tests in `tests/mcp.rs` run the real binary over stdio, each with its
