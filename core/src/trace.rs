@@ -35,6 +35,44 @@ pub fn names_key(bits: &str) -> &str {
     }
 }
 
+/// A name with VHDL's indexing as Verilog's (spec §8): `(…)` as `[…]`, `downto` in them as `:`,
+/// without the spaces in them and the dots before them (nvc names an array element
+/// `axi_tdata.[6]`). Case is kept.
+pub fn brackets(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    let (mut depth, mut rest) = (0, name);
+    while let Some(c) = rest.chars().next() {
+        let lower = rest.get(..6).map(str::to_ascii_lowercase);
+        if depth > 0 && lower.as_deref() == Some("downto") {
+            out.push(':');
+            rest = &rest[6..];
+            continue;
+        }
+        rest = &rest[c.len_utf8()..];
+        match c {
+            '(' | '[' => {
+                while out.ends_with('.') {
+                    out.pop();
+                }
+                depth += 1;
+                out.push('[');
+            }
+            ')' | ']' => {
+                depth -= 1;
+                out.push(']');
+            }
+            c if depth > 0 && c.is_whitespace() => {}
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// A name as names are matched in either HDL's form (spec §8): `brackets`, in lowercase.
+pub fn canon(name: &str) -> String {
+    brackets(name).to_lowercase()
+}
+
 enum Source {
     File(SignalRef),
     /// Values in time order, each different from the one before; the first is the initial value,

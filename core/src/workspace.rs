@@ -222,7 +222,9 @@ impl Workspace {
 
     /// A signal named in a search: as in the name column, by full path, or by the unique end of a
     /// path (`s_axi_wvalid`). `name[3]` is one bit of a bus; a slice `name[7:4]` or a
-    /// concatenation `{a, b}` is a computed var, made the first time it is named.
+    /// concatenation `{a, b}` is a computed var, made the first time it is named. A name that
+    /// matches nothing as written is matched in either HDL's form (spec §8): `HEADERS_VLD`,
+    /// `gen(4).x` for `gen[4].x`, `data(7 downto 4)`.
     pub fn resolve(&mut self, name: &str) -> Result<search::Probe, String> {
         let name = name.trim();
         if let Some(sig) = self.roles.get(name).cloned() {
@@ -231,14 +233,6 @@ impl Workspace {
             let p = self.resolve(&sig);
             self.roles = roles;
             return p;
-        }
-        if let Some((base, rest)) = name.split_once('[')
-            && !base.starts_with('{')
-            && let Some(b) = rest.strip_suffix(']').and_then(|n| n.parse::<u32>().ok())
-        {
-            let (v, _) = self.resolve(base)?;
-            let w = self.trace.vars[v].width.unwrap_or(1);
-            return if b < w { Ok((v, Some(b))) } else { Err(format!("{base} has no bit {b}")) };
         }
         if let Some(&v) = self.scope.as_ref().and_then(|s| self.trace.by_path.get(&format!("{s}.{name}"))) {
             return Ok((v, None));
@@ -250,27 +244,56 @@ impl Workspace {
         if let Some(&v) = self.trace.by_path.get(name) {
             return Ok((v, None));
         }
+        let name = &crate::trace::brackets(name);
         if let Some(form) = computed::form(name) {
             return self.compute(form).map(|v| (v, None));
         }
+        // a bit of a bus; a base that is no signal may be an array (`axi_tdata[6]`), named below
+        if let Some((base, rest)) = name.rsplit_once('[')
+            && !base.is_empty()
+            && let Some(b) = rest.strip_suffix(']').and_then(|n| n.parse::<u32>().ok())
+            && let Ok((v, None)) = self.resolve(base)
+        {
+            let w = self.trace.vars[v].width.unwrap_or(1);
+            return if b < w { Ok((v, Some(b))) } else { Err(format!("{base} has no bit {b}")) };
+        }
+        self.by_end(name).map(|v| (v, None))
+    }
+
+    /// The signal a path ends with, as written or else in either HDL's form; of several, the one
+    /// in the rows, in the scope, or of the file.
+    fn by_end(&self, name: &str) -> Result<usize, String> {
+        let vars = 0..self.trace.vars.len();
         let end = format!(".{name}");
-        let found: Vec<usize> = (0..self.trace.vars.len()).filter(|&v| self.trace.vars[v].path.ends_with(&end)).collect();
+        let mut found: Vec<usize> = vars.clone().filter(|&v| self.trace.vars[v].path.ends_with(&end)).collect();
+        if found.is_empty() {
+            // shortcut: every path in canonical form on each such lookup, O(signals); keep the
+            // forms in the trace if names that match only this way get slow on huge traces
+            let canon: Vec<String> = self.trace.vars.iter().map(|v| crate::trace::canon(&v.path)).collect();
+            let key = crate::trace::canon(name);
+            let scoped = self.scope.as_ref().map(|s| crate::trace::canon(&format!("{s}.{name}")));
+            found = vars.clone().filter(|&v| canon[v] == key || scoped.as_ref() == Some(&canon[v])).collect();
+            if found.is_empty() {
+                let end = format!(".{key}");
+                found = vars.filter(|&v| canon[v].ends_with(&end)).collect();
+            }
+        }
         match found[..] {
-            [v] => Ok((v, None)),
+            [v] => Ok(v),
             [] => Err(format!("unknown signal: {name}")),
             _ => {
                 // the only one of them in the rows is the one meant; else the only one of the file
                 // (decoding `tdata` makes `rx.beat.tdata`, which mustn't make `tdata` ambiguous)
                 if let [v] = found.iter().copied().filter(|&v| self.shown(v)).collect::<Vec<_>>()[..] {
-                    return Ok((v, None));
+                    return Ok(v);
                 }
                 if let Some(s) = &self.scope
                     && let [v] = found.iter().copied().filter(|&v| self.trace.vars[v].path.starts_with(&format!("{s}."))).collect::<Vec<_>>()[..]
                 {
-                    return Ok((v, None));
+                    return Ok(v);
                 }
                 if let [v] = found.iter().copied().filter(|&v| !self.trace.is_computed(v)).collect::<Vec<_>>()[..] {
-                    return Ok((v, None));
+                    return Ok(v);
                 }
                 let paths: Vec<&str> = found.iter().take(8).map(|&v| self.trace.vars[v].path.as_str()).collect();
                 let more = if found.len() > 8 { format!(", and {} more", found.len() - 8) } else { String::new() };

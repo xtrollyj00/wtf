@@ -212,19 +212,26 @@ fn scoped(app: &Workspace, arg: &str) -> String {
     }
 }
 
+/// As written, else in either HDL's form (spec §8: any case, `gen(4)` for `gen[4]`).
 fn paths(app: &Workspace, arg: &str) -> Vec<usize> {
     if let Some(&v) = app.trace.by_path.get(arg) {
         return vec![v];
     }
-    let vars = app.trace.vars.iter().enumerate();
-    if arg.contains('*') {
-        vars.filter(|(_, v)| glob(arg, &v.path)).map(|(i, _)| i).collect()
-    } else {
-        let prefix = format!("{arg}.");
-        vars.filter(|(_, v)| v.path.strip_prefix(&prefix).is_some_and(|leaf| !leaf.contains('.')))
-            .map(|(i, _)| i)
-            .collect()
+    let found = matching(app, arg, &|p| p.to_string());
+    if !found.is_empty() {
+        return found;
     }
+    matching(app, &crate::trace::canon(arg), &crate::trace::canon)
+}
+
+/// The vars whose path, in `form`, is `arg`, matches it as a pattern, or is directly in it.
+fn matching(app: &Workspace, arg: &str, form: &dyn Fn(&str) -> String) -> Vec<usize> {
+    let prefix = format!("{arg}.");
+    let hit = |p: &str| match arg.contains('*') {
+        true => glob(arg, p),
+        false => p == arg || p.strip_prefix(&prefix).is_some_and(|leaf| !leaf.contains('.')),
+    };
+    app.trace.vars.iter().enumerate().filter(|(_, v)| hit(&form(&v.path))).map(|(i, _)| i).collect()
 }
 
 /// `:add a b ...`: each in turn, below the previous. Names that fail are reported (as an error
@@ -276,10 +283,14 @@ fn add_one(app: &mut Workspace, arg: &str) -> Result<(), String> {
         return Err(format!("already shown: {arg}"));
     }
     // a scope (neither a signal nor a pattern) becomes a group named after it
-    if app.trace.by_path.contains_key(arg) || arg.contains('*') {
+    let signal = matches!(new[..], [v] if crate::trace::canon(&app.trace.vars[v].path) == crate::trace::canon(arg));
+    if signal || arg.contains('*') {
         app.add_rows(&new);
     } else {
-        app.add_group(arg.rsplit('.').next().unwrap_or(arg), &new);
+        // named as in the trace, whichever form it was named in
+        let path = app.trace.vars[new[0]].path.clone();
+        let scope = path.rsplit_once('.').map_or(arg.as_str(), |(s, _)| s);
+        app.add_group(scope.rsplit('.').next().unwrap_or(scope), &new);
     }
     Ok(())
 }

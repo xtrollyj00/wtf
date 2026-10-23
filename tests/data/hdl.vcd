@@ -1,0 +1,41 @@
+$timescale 1ns $end
+$scope module dut $end
+$var wire 1 ! clk $end
+$var wire 1 " headers_vld $end
+$var wire 8 # data $end
+$scope module gen_stages(0) $end
+$var wire 1 $ x $end
+$upscope $end
+$scope module gen_stages(1) $end
+$var wire 1 % x $end
+$upscope $end
+$scope module blk[2] $end
+$var wire 1 ( y $end
+$upscope $end
+$upscope $end
+$enddefinitions $end
+#0
+0!
+0"
+b00000000 #
+0$
+0%
+0(
+#5
+1!
+#10
+0!
+1"
+b10100101 #
+1%
+1(
+#15
+1!
+#20
+0!
+0"
+1$
+#25
+1!
+#30
+0!

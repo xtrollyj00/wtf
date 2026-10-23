@@ -109,17 +109,26 @@ impl Parser<'_> {
     }
 
     /// A name or a value: everything up to a space, a parenthesis or an operator, except inside
-    /// braces (`{a, b}` is one name).
+    /// braces (`{a, b}` is one name) and VHDL's parentheses: one right after a name is part of it
+    /// (`gen(4).x`, `data(7 downto 4)`), unless the name is a function's (`rose(x)`).
     fn word(&mut self) -> String {
         self.s = self.s.trim_start();
-        let mut depth = 0;
-        let end = self
-            .s
-            .find(|c: char| {
-                depth += (c == '{') as i32 - (c == '}') as i32;
-                depth == 0 && (c.is_whitespace() || "()&|!=".contains(c))
-            })
-            .unwrap_or(self.s.len());
+        let (mut braces, mut parens) = (0, 0);
+        let mut end = self.s.len();
+        for (i, c) in self.s.char_indices() {
+            let name_before = i > 0 && !matches!(&self.s[..i], "rose" | "fell" | "stable" | "past");
+            match c {
+                '{' => braces += 1,
+                '}' => braces -= 1,
+                '(' if parens > 0 || name_before => parens += 1,
+                ')' if parens > 0 => parens -= 1,
+                c if braces == 0 && parens == 0 && (c.is_whitespace() || "()&|!=".contains(c)) => {
+                    end = i;
+                    break;
+                }
+                _ => {}
+            }
+        }
         let (w, rest) = self.s.split_at(end);
         self.s = rest;
         w.to_string()

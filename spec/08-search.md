@@ -29,7 +29,13 @@ clk      ▁▁▁▁▔▔▔▔▁▁▁▁▔▔▔▔
   Operators are `==`, `!=`, `&&`, `||`, `!` and parentheses; values are written as above. A bare
   signal is true when it is 1 (on a bus: nonzero, with no unknown bits). Signals are named as in the
   name column, by full path, or by the end of a path if only one signal ends that way
-  (`s_axi_wvalid`); `data[3]` is one bit. They don't have to be shown. A search is an expression
+  (`s_axi_wvalid`); `data[3]` is one bit. They don't have to be shown. A name is matched as
+  written first, then **in either HDL's form**, since VHDL ignores case and the two write
+  indices differently: case doesn't matter (`HEADERS_VLD` is the trace's `headers_vld`), and
+  parentheses are brackets, so `gen_stages(4).stage_i.x` and `gen_stages[4].stage_i.x` name the
+  same signal whichever the simulator wrote, `data(3)` is `data[3]`, `data(7 downto 4)` is
+  `data[7:4]`, and an array element is named as written in the HDL (`axi_tdata(6)` for nvc's
+  `axi_tdata.[6]`). A search is an expression
   when it contains a name or an operator; a bare value searches the selected signal as above.
 - A match of an expression is where it **becomes true**. With a clock, `/@aclk wvalid && wready`,
   a match is **every clock cycle** whose ending rising edge of `aclk` samples the expression true

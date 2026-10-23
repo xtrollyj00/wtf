@@ -33,7 +33,8 @@ pub struct ProtocolsArgs {
 #[derive(Deserialize, schemars::JsonSchema)]
 pub struct ValuesArgs {
     /// Signals by full path, or by the end of a path if only one signal ends that way
-    /// (`s_axi_wdata`); `data[3]` is one bit.
+    /// (`s_axi_wdata`); `data[3]` is one bit. VHDL or Verilog forms both: any case,
+    /// `gen(4).x` or `gen[4].x`, `data(7 downto 4)` or `data[7:4]`.
     pub signals: Vec<String>,
     /// Start time with a unit, e.g. `0ns`, `1.5us`; a plain number is file ticks.
     pub from: String,
