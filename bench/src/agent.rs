@@ -4,7 +4,7 @@
 //!
 //! A task is bench/agent/tasks/<name>.toml: `trace` (from the repository root), `prompt` (`{trace}`
 //! becomes its path), `answer` (the JSON shape asked for) and `expect` (the answer). A fix task is
-//! a directory, bench/agent/tasks/<name>/, with a task.toml (`upstream`, `commit`, `file`, `from`,
+//! a directory, bench/agent/tasks/<name>/, with a task.toml (`upstream`, `commit`, `[files]`,
 //! `prompt`, `answer`, `expect`), a bug.patch, and the Makefile and testbench the agent debugs
 //! with (see `Fix`); it passes when the answer is right and the agent's fix passes. Each run
 //! appends a line to bench/agent/results.jsonl, its transcript (and review) go to
@@ -72,16 +72,16 @@ struct Task {
     fix: Option<Fix>,
 }
 
-/// A fix task: one file of an upstream design at a commit, broken by the task's bug.patch; the
-/// rest of the task directory (a Makefile, tb/) is copied next to it. `make sim` fails as
+/// A fix task: files of an upstream design at a commit (`files`: where each goes in the work
+/// directory, and its path upstream, a file or a directory), broken by the task's bug.patch; the
+/// rest of the task directory (a Makefile, tb/) is copied next to them. `make sim` fails as
 /// shipped; fixed is `make sim` and `make hidden` (a regression the agent never runs) passing
 /// with the task's own Makefile and tb/ put back. UPSTREAM, given to make, is the checkout.
 struct Fix {
     dir: PathBuf,
     upstream: String,
     commit: String,
-    file: String,
-    from: String,
+    files: Vec<(String, String)>,
 }
 
 fn tasks(root: &Path, names: &[String]) -> Result<Vec<Task>, String> {
@@ -105,7 +105,15 @@ fn task(dir: &Path, root: &Path, name: String) -> Result<Task, String> {
     let t: toml::Table = std::fs::read_to_string(&path).map_err(|e| e.to_string())?.parse().map_err(|e| format!("{}: {e}", path.display()))?;
     let s = |k: &str| t.get(k).and_then(|v| v.as_str()).map(String::from).ok_or(format!("{}: needs {k}", path.display()));
     let (prompt, fix) = if fix_dir.is_dir() {
-        let fix = Fix { dir: fix_dir, upstream: s("upstream")?, commit: s("commit")?, file: s("file")?, from: s("from")? };
+        let files: Vec<(String, String)> = t
+            .get("files")
+            .and_then(|v| v.as_table())
+            .map(|f| f.iter().filter_map(|(to, from)| Some((to.clone(), from.as_str()?.to_string()))).collect())
+            .unwrap_or_default();
+        if files.is_empty() {
+            return Err(format!("{}: needs files, a table of work path = upstream path", path.display()));
+        }
+        let fix = Fix { dir: fix_dir, upstream: s("upstream")?, commit: s("commit")?, files };
         (s("prompt")?, Some(fix))
     } else {
         let trace = root.join(s("trace")?);
@@ -217,8 +225,7 @@ fn once(o: &Opts, wtf: &Path, t: &Task, out: &Path, upstream: Option<&Path>) -> 
         // the agent's RTL with the task's own Makefile and testbench
         copy_task(f, &work)?;
         let fixed = make(&work, up, "sim")? && make(&work, up, "hidden")?;
-        let file = std::fs::read_to_string(work.join(&f.file)).unwrap_or_default();
-        let _ = std::fs::write(out.with_extension("rtl"), file);
+        let _ = std::fs::write(out.with_extension("diff"), changes(f, up, &work));
         m.insert("fixed".into(), json!(fixed));
         pass &= fixed;
     }
@@ -243,7 +250,7 @@ fn once(o: &Opts, wtf: &Path, t: &Task, out: &Path, upstream: Option<&Path>) -> 
 /// The upstream checkout at the task's commit, in target/upstream/ (fetched once).
 fn checkout(root: &Path, f: &Fix) -> Result<PathBuf, String> {
     let dir = root.join("target/upstream").join(&f.commit);
-    if dir.join(f.from.as_str()).exists() {
+    if f.files.iter().all(|(_, from)| dir.join(from).exists()) {
         return Ok(dir);
     }
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -277,9 +284,14 @@ fn prepare(f: &Fix, upstream: &Path, work: &Path, fixed: bool) -> Result<(), Str
     let _ = std::fs::remove_dir_all(work);
     std::fs::create_dir_all(work).map_err(|e| e.to_string())?;
     copy_task(f, work)?;
-    let file = work.join(&f.file);
-    std::fs::create_dir_all(file.parent().unwrap_or(work)).map_err(|e| e.to_string())?;
-    std::fs::copy(upstream.join(&f.from), &file).map_err(|e| format!("{}: {e}", f.from))?;
+    for (to, from) in &f.files {
+        let to = work.join(to);
+        std::fs::create_dir_all(to.parent().unwrap_or(work)).map_err(|e| e.to_string())?;
+        let ok = Command::new("cp").arg("-r").arg(upstream.join(from)).arg(&to).status().map_err(|e| format!("cp: {e}"))?.success();
+        if !ok {
+            return Err(format!("copying {from} from the upstream checkout failed"));
+        }
+    }
     if !fixed {
         let ok = Command::new("git").current_dir(work).arg("apply").arg(f.dir.join("bug.patch")).status().map_err(|e| format!("git: {e}"))?.success();
         if !ok {
@@ -287,6 +299,15 @@ fn prepare(f: &Fix, upstream: &Path, work: &Path, fixed: bool) -> Result<(), Str
         }
     }
     Ok(())
+}
+
+/// What the agent changed in the upstream files, as a diff.
+fn changes(f: &Fix, upstream: &Path, work: &Path) -> String {
+    f.files
+        .iter()
+        .filter_map(|(to, from)| Command::new("git").args(["diff", "--no-index", "--"]).arg(upstream.join(from)).arg(work.join(to)).output().ok())
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .collect()
 }
 
 /// `make <target>` in the work directory; whether it passed (its output is in the target's logs).

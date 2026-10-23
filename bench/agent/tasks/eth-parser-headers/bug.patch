@@ -1,0 +1,11 @@
+--- a/rtl/comp/axis_tools/logic/eth_parser/axis_eth_parser_sniffer.vhd
++++ b/rtl/comp/axis_tools/logic/eth_parser/axis_eth_parser_sniffer.vhd
+@@ -205,7 +205,7 @@
+     -- Calculate number of bytes to extract in current cycle
+     process (all)
+     begin
+-        if ((extracting = '1') and (valid_word = '1')) then
++        if ((extracting = '1') and (RX_AXI_TVALID = '1')) then
+             if (bytes_extracted = 0) then
+                 -- First extraction word: extract from soff_bytes to end of AXI word
+                 if ((WORD_BYTES - to_integer(soff_bytes)) < to_integer(bytes_remaining)) then

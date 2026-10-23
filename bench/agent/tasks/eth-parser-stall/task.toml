@@ -6,8 +6,6 @@
 # empty, backpressure holds RX for good, and the test stops at 775/1500 packets.
 upstream = "https://github.com/CESNET/ndk-fpga.git"
 commit = "aac31e7771740a5ea6cc3ee2623a1318dd579fd0"
-file = "rtl/axis_eth_parser.vhd"
-from = "comp/axis_tools/logic/eth_parser/axis_eth_parser.vhd"
 prompt = """
 rtl/axis_eth_parser.vhd is the top of an AXI4-Stream Ethernet header parser: it passes frames
 through from RX to TX and outputs each frame's extracted headers on HEADERS. Its verification
@@ -18,3 +16,6 @@ testbench or the Makefile.
 """
 answer = '{"signal": "<the signal whose logic was wrong>", "miscounts": <how many times in the failing run it took a wrong value>, "stuck_from": "<when the parser stopped taking RX data for good, in ns>"}'
 expect = '{"signal": "packets_in_flight", "miscounts": 5, "stuck_from": "391270ns"}'
+
+[files]
+"rtl/axis_eth_parser.vhd" = "comp/axis_tools/logic/eth_parser/axis_eth_parser.vhd"
