@@ -1,0 +1,14 @@
+--- a/rtl/axis_eth_parser.vhd
++++ b/rtl/axis_eth_parser.vhd
+@@ -367,9 +367,9 @@
+         if rising_edge(CLK) then
+             if (RESET = '1') then
+                 packets_in_flight <= (others => '0');
+-            elsif (rx_axi_first = '1' and headers_accepted = '0') then
++            elsif (rx_axi_first = '1') then
+                 packets_in_flight <= packets_in_flight + 1;
+-            elsif (rx_axi_first = '0' and headers_accepted = '1') then
++            elsif (headers_accepted = '1') then
+                 packets_in_flight <= packets_in_flight - 1;
+             end if;
+         end if;
