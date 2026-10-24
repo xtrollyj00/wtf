@@ -523,6 +523,11 @@ fn decode_with_command() {
     let opened = s.ok("open", json!({"trace": std::fs::canonicalize("tests/data/axilite.vcd").unwrap()}));
     let line = "decode s_axi axilite clock=top.aclk prefix=top.s_axi_";
     assert!(opened.ends_with(&format!("interfaces a built-in protocol decodes (decode them: exact records, handshake checks built in):\n  top.s_axi_* axilite: {line}")), "{opened}");
+    // a stream of an interface not decoded yet: the error gives its line
+    let undecoded = format!("its interface isn't decoded yet; with `command`, `{line}` makes s_axi.wr");
+    assert_eq!(s.tool("records", json!({"stream": "top.s_axi.wr"})), Err(format!("unknown stream: top.s_axi.wr: {undecoded}")));
+    assert_eq!(s.tool("records", json!({"stream": "s_axi.wr"})), Err(format!("unknown stream: s_axi.wr: {undecoded}")));
+    assert_eq!(s.tool("records", json!({"stream": "s_axi"})), Err(format!("unknown stream: s_axi: its interface isn't decoded yet; with `command`, `{line}` makes its streams (`protocols axilite`)")));
     assert!(s.ok("command", json!({"line": line})).starts_with("s_axi: records s_axi.aw 2,"));
     s.ok("command", json!({"line": "add top.aclk"}));
     // decode says what it made and where the violations are, and where to read more

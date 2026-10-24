@@ -54,7 +54,9 @@ reuse wtf's own pieces:
   `count_only` gives the number of matches and runs, first and last.
 - `records` lists a stream's records (section 16) as a table, `start`, `end` and a
   column per field, headed with how many are shown of all in the range (`20 of 157`); `from` /
-  `to` pick records by start, `count_only` counts them. `where` keeps the records a search
+  `to` pick records by start, `count_only` counts them. A stream of an interface `open` listed
+  but not decoded yet (`top.s_axi.wr`, `s_axi.wr`) is an error that gives its `decode` line.
+  `where` keeps the records a search
   expression over the fields holds for, the fields named bare (`addr != 0x1C && resp != 0`,
   `rule == dropped`; `past(x)` is x of the record before), evaluated on each record, so never on
   the gaps between records where field signals are `z`; the header counts the matches too

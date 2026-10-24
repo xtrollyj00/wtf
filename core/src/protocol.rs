@@ -423,10 +423,15 @@ pub struct Found {
 }
 
 impl Found {
+    /// The name `decode_line` gives its streams: the prefix's last part (`s_axi` for `top.s_axi_`).
+    pub fn name(&self) -> &str {
+        let leaf = self.prefix.rsplit('.').next().unwrap_or("").trim_matches('_');
+        if leaf.is_empty() { self.protocol } else { leaf }
+    }
+
     /// The `decode` line that puts the protocol on it, named after the prefix.
     pub fn decode_line(&self) -> String {
-        let leaf = self.prefix.rsplit('.').next().unwrap_or("").trim_matches('_');
-        let name = if leaf.is_empty() { self.protocol } else { leaf };
+        let name = self.name();
         let clock = match (&self.clock, builtin(self.protocol).is_some_and(|b| b.clocked)) {
             (_, false) => String::new(),
             (Some(c), true) => format!(" clock={c}"),

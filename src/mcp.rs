@@ -301,6 +301,21 @@ impl Wtf {
         let w = current(self)?;
         let app = lock(&w);
         let Some(s) = app.streams.iter().find(|s| s.name == a.stream) else {
+            // an interface `open` listed, not decoded yet (`top.s_axi.wr`, `s_axi.wr`): its line
+            let (base, part) = a.stream.rsplit_once('.').unwrap_or((&a.stream, ""));
+            let named = |f: &protocol::Found| [a.stream.as_str(), base].iter().any(|&n| n == f.name() || n == f.prefix.trim_end_matches(['_', '.']));
+            let found: Vec<protocol::Found> = protocol::detect(&app.trace).into_iter().filter(named).collect();
+            if !found.is_empty() {
+                let how: Vec<String> = found
+                    .iter()
+                    .take(3)
+                    .map(|f| match part {
+                        "" => format!("`{}` makes its streams (`protocols {}`)", f.decode_line(), f.protocol),
+                        _ => format!("`{}` makes {}.{part}", f.decode_line(), f.name()),
+                    })
+                    .collect();
+                return Err(format!("unknown stream: {}: its interface isn't decoded yet; with `command`, {}", a.stream, how.join("; or ")));
+            }
             let names: Vec<&str> = app.streams.iter().map(|s| s.name.as_str()).collect();
             return Err(match names.len() {
                 0 => format!("unknown stream: {} (none yet; make one with `command`: `decode <name> <protocol> ...`)", a.stream),
