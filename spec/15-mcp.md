@@ -53,7 +53,10 @@ reuse wtf's own pieces:
   `show: [awaddr, wdata]` is a table of the writes. `to` ends the search, e.g. at a reset.
   `count_only` gives the number of matches and runs, first and last.
 - `records` lists a stream's records (section 16) as a table, `start`, `end` and a
-  column per field, headed with how many are shown of all in the range (`20 of 157`); `from` /
+  column per field, headed with how many are shown of all in the range (`20 of 157`). With more
+  than one record, long values are shortened, a frame's data to its first 8 bytes and its size
+  (`f7 88 0c 5c 25 8f 30 3a ... (580 bytes)`), other text to 40 characters, and the header says
+  so; one record shows them whole. `from` /
   `to` pick records by start, `count_only` counts them. A stream of an interface `open` listed
   but not decoded yet (`top.s_axi.wr`, `s_axi.wr`) is an error that gives its `decode` line.
   `where` keeps the records a search

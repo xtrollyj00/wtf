@@ -510,7 +510,10 @@ fn axis_frames_and_errors() {
         "rows": ["rx.frame", "rx.frame.len:dec", "rx.errors"],
     });
     assert!(s.ok("workspace", decl).starts_with("rows (> selected):\n> frame  rx.frame\n  len  rx.frame.len  dec\n  errors  rx.errors\n"));
-    assert_eq!(s.ok("records", json!({"stream": "rx.frame"})), "4 of 4\nstart\tend\tbeats\tlen\tdata\tcomplete\n15ns\t55ns\t0x3\t0xA\ta0 00 00 00 a1 00 00 00 a2 00\t1\n55ns\t65ns\t0x1\t0x4\tb0 00 00 00\t1\n65ns\t85ns\t0x2\t0x8\tc0 00 00 00 c1 00 00 00\t1\n135ns\t145ns\t0x1\t0x4\te1 00 00 00\t1");
+    // a frame's data past 8 bytes is its count in a table, whole in one record
+    let short = "(long values shortened; one record, `count: 1` with `from`, shows them whole)";
+    assert_eq!(s.ok("records", json!({"stream": "rx.frame"})), format!("4 of 4 {short}\nstart\tend\tbeats\tlen\tdata\tcomplete\n15ns\t55ns\t0x3\t0xA\ta0 00 00 00 a1 00 00 00 ... (10 bytes)\t1\n55ns\t65ns\t0x1\t0x4\tb0 00 00 00\t1\n65ns\t85ns\t0x2\t0x8\tc0 00 00 00 c1 00 00 00\t1\n135ns\t145ns\t0x1\t0x4\te1 00 00 00\t1"));
+    assert_eq!(s.ok("records", json!({"stream": "rx.frame", "count": 1})), "1 of 4\nstart\tend\tbeats\tlen\tdata\tcomplete\n15ns\t55ns\t0x3\t0xA\ta0 00 00 00 a1 00 00 00 a2 00\t1");
     assert_eq!(s.ok("records", json!({"stream": "rx.errors"})), "2 of 2\nstart\tend\trule\n105ns\t115ns\tdropped\n125ns\t135ns\tchanged");
     assert_eq!(s.ok("find", json!({"expr": "rx.errors.rule == changed"})), "time\n125ns");
     // the workspace draws each record with its label

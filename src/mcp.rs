@@ -167,6 +167,20 @@ fn blank_indices(path: &str) -> (String, Vec<u64>) {
     (key, idx)
 }
 
+/// A field's text for a table of records: a frame's bytes past the first 8 as their count
+/// (`f7 88 0c 5c 25 8f 30 3a ... (580 bytes)`), other text past 40 characters likewise. 140 frames'
+/// data filled an agent's answer that wanted their lengths.
+fn shorten(t: String) -> String {
+    let words: Vec<&str> = t.split(' ').collect();
+    if words.len() > 8 && words.iter().all(|w| w.len() == 2 && w.bytes().all(|b| b.is_ascii_hexdigit())) {
+        return format!("{} ... ({} bytes)", words[..8].join(" "), words.len());
+    }
+    match t.char_indices().nth(40) {
+        Some((at, _)) => format!("{} ... ({} chars)", &t[..at], t.chars().count()),
+        None => t,
+    }
+}
+
 /// Cut an answer at a line boundary once it is over `MAX_BYTES`.
 fn budget(s: String) -> String {
     if s.len() <= MAX_BYTES {
@@ -424,14 +438,14 @@ impl Wtf {
         }
         let page = &picked[..picked.len().min(count)];
         let u = unit(&app, &a.unit, page.iter().flat_map(|r| [r.start, r.end]))?;
-        let mut lines = vec![format!("{} of {}{matching}{of}", page.len(), picked.len())];
+        // several records: long values shortened, as the rest of the row is what's compared
+        let whole = page.len() == 1;
+        let texts: Vec<Vec<String>> = page.iter().map(|r| s.schema.iter().zip(&r.fields).map(|(f, v)| field_text(&app, f, v, u)).map(|t| if whole { t } else { shorten(t) }).collect()).collect();
+        let cut = texts.iter().flatten().any(|t| t.ends_with(" bytes)") || t.ends_with(" chars)"));
+        let mut lines = vec![format!("{} of {}{matching}{of}{}", page.len(), picked.len(), if cut { " (long values shortened; one record, `count: 1` with `from`, shows them whole)" } else { "" })];
         lines.push(["start", "end"].into_iter().chain(s.schema.iter().map(|f| f.name.as_str())).collect::<Vec<_>>().join("\t"));
-        for r in page {
-            let mut line = format!("{}\t{}", show(&app, r.start, u), show(&app, r.end, u));
-            for (f, v) in s.schema.iter().zip(&r.fields) {
-                line += &format!("\t{}", field_text(&app, f, v, u));
-            }
-            lines.push(line);
+        for (r, texts) in page.iter().zip(texts) {
+            lines.push(std::iter::once(format!("{}\t{}", show(&app, r.start, u), show(&app, r.end, u))).chain(texts).collect::<Vec<_>>().join("\t"));
         }
         Ok(budget(lines.join("\n")))
     }
