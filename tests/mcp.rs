@@ -148,6 +148,10 @@ fn reading_tools() {
     assert_eq!(s.ok("signals", json!({"pattern": "top.cpu.*"})), "top.cpu.state (3 bits)\ntop.cpu.data (8 bits)\ntop.cpu.busy (1 bit)");
     assert_eq!(s.ok("signals", json!({"pattern": "STATE"})), "top.cpu.state (3 bits)\ntop.dma.state (3 bits)");
     assert_eq!(s.ok("signals", json!({"pattern": "nope"})), "no match: nope");
+    // array elements and generate instances of one width are one line, the indices as ranges
+    s.ok("open", json!({"trace": std::fs::canonicalize("tests/data/vhdl.fst").unwrap()}));
+    assert_eq!(s.ok("signals", json!({"pattern": "vhdl"})), "vhdl.clk (1 bit)\nvhdl.arr.[0..1] (4 bits, 2 signals)\nvhdl.gen(0..1).x (1 bit, 2 signals)");
+    s.ok("open", json!({"trace": simple()}));
     assert_eq!(s.ok("signals", json!({"pattern": "**sta*"})), "no match: **sta* (a pattern matches the whole path: **.*sta* for sta anywhere)");
     assert_eq!(s.ok("signals", json!({"pattern": "**.*sta*"})), "top.cpu.state (3 bits)\ntop.dma.state (3 bits)");
     assert_eq!(s.ok("values", json!({"signals": ["cpu.data"], "from": "15ns", "to": "40ns", "radix": "dec"})), "cpu.data:\n  15ns 67\n  20ns 150\n  30ns 225\n  40ns 58\n");

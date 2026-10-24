@@ -104,6 +104,69 @@ fn field_text(app: &Workspace, f: &wtf_core::stream::Field, v: &Option<Val>, u: 
     wtf_core::stream::value_text(f, v, app.trace.fs_per_tick, Some(u.index), u.decimals)
 }
 
+/// Paths with their widths as `signals` lines: those differing only in indices (`[3]`, `(3)`) and
+/// of one width are one line, each index a range: `mux_in.[0..15].[0..15] (8 bits, 256 signals)`.
+/// A barrel shifter's 256 elements, one line each, were most of an agent's answer.
+fn collapse<'a>(vars: impl Iterator<Item = (&'a str, String)>) -> Vec<String> {
+    /// Paths alike but for their indices: each index's range, how many, the first.
+    struct Group<'a> {
+        key: String,
+        width: String,
+        ranges: Vec<(u64, u64)>,
+        n: usize,
+        first: &'a str,
+    }
+    let mut groups: Vec<Group> = Vec::new();
+    for (path, width) in vars {
+        let (key, idx) = blank_indices(path);
+        match groups.iter_mut().find(|g| g.key == key && g.width == width) {
+            Some(g) => {
+                for (r, i) in g.ranges.iter_mut().zip(&idx) {
+                    *r = (r.0.min(*i), r.1.max(*i));
+                }
+                g.n += 1;
+            }
+            None => groups.push(Group { key, width, ranges: idx.iter().map(|&i| (i, i)).collect(), n: 1, first: path }),
+        }
+    }
+    groups
+        .into_iter()
+        .map(|Group { key, width, ranges, n, first }| match n {
+            1 => format!("{first} ({width})"),
+            _ => {
+                let mut ranges = ranges.into_iter().map(|(a, b)| if a == b { a.to_string() } else { format!("{a}..{b}") });
+                let path: String = key.split('\0').enumerate().map(|(i, part)| if i == 0 { part.to_string() } else { format!("{}{part}", ranges.next().unwrap_or_default()) }).collect();
+                format!("{path} ({width}, {n} signals)")
+            }
+        })
+        .collect()
+}
+
+/// A path with each index (`[12]`, `(4)`) blanked to its brackets around a NUL, and the indices.
+fn blank_indices(path: &str) -> (String, Vec<u64>) {
+    let (mut key, mut idx, mut rest) = (String::new(), Vec::new(), path);
+    while let Some(open) = rest.find(['[', '(']) {
+        let close = if rest.as_bytes()[open] == b'[' { ']' } else { ')' };
+        let inner = rest[open + 1..].find(close).map(|c| &rest[open + 1..open + 1 + c]);
+        match inner.and_then(|n| n.parse::<u64>().ok().filter(|_| n.bytes().all(|b| b.is_ascii_digit()))) {
+            Some(n) => {
+                let len = inner.map_or(0, str::len);
+                key += &rest[..=open];
+                key.push('\0');
+                key.push(close);
+                idx.push(n);
+                rest = &rest[open + len + 2..];
+            }
+            None => {
+                key += &rest[..=open];
+                rest = &rest[open + 1..];
+            }
+        }
+    }
+    key += rest;
+    (key, idx)
+}
+
 /// Cut an answer at a line boundary once it is over `MAX_BYTES`.
 fn budget(s: String) -> String {
     if s.len() <= MAX_BYTES {
@@ -246,18 +309,18 @@ impl Wtf {
         Ok(out)
     }
 
-    #[tool(description = "List signals with their widths.")]
+    #[tool(description = "List signals with their widths. Array elements and generate instances of one width are one line, their indices as ranges: `mux_in.[0..15] (8 bits, 16 signals)`, `gen(0..4).x (1 bit, 5 signals)`; name one as written, `mux_in.[3]`.")]
     fn signals(&self, Parameters(a): Parameters<SignalsArgs>) -> Result<String, String> {
         let w = current(self)?;
         let app = lock(&w);
         let p = a.pattern.to_lowercase();
-        let found: Vec<String> = app
-            .trace
-            .vars
-            .iter()
-            .filter(|v| if p.contains('*') { wtf_core::command::glob(&a.pattern, &v.path) } else { v.path.to_lowercase().contains(&p) })
-            .map(|v| format!("{} ({})", v.path, v.width.map_or("real or string".into(), |w| format!("{w} bit{}", if w == 1 { "" } else { "s" }))))
-            .collect();
+        let found = collapse(
+            app.trace
+                .vars
+                .iter()
+                .filter(|v| if p.contains('*') { wtf_core::command::glob(&a.pattern, &v.path) } else { v.path.to_lowercase().contains(&p) })
+                .map(|v| (v.path.as_str(), v.width.map_or("real or string".into(), |w| format!("{w} bit{}", if w == 1 { "" } else { "s" })))),
+        );
         let more = found.len().saturating_sub(MAX_LINES);
         let mut out = found.into_iter().take(MAX_LINES).collect::<Vec<_>>().join("\n");
         if more > 0 {
