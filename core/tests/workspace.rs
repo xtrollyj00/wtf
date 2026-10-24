@@ -30,6 +30,23 @@ fn names_signals() {
 }
 
 #[test]
+fn names_the_shallowest_of_a_port_passed_down() {
+    let vcd = "$timescale 1ns $end\n$scope module top $end\n$var wire 1 ! clk $end\n\
+        $scope module u0 $end\n$var wire 1 \" clk $end\n$scope module core $end\n$var wire 1 # clk $end\n$upscope $end\n$upscope $end\n\
+        $scope module u1 $end\n$var wire 1 $ clk $end\n$var wire 1 % ready $end\n$upscope $end\n\
+        $scope module u2 $end\n$var wire 1 & ready $end\n$upscope $end\n$upscope $end\n\
+        $enddefinitions $end\n#0\n0!\n0\"\n0#\n0$\n0%\n0&\n#10\n1!\n";
+    let path = std::env::temp_dir().join(format!("wtf-depth-{}.vcd", std::process::id()));
+    std::fs::write(&path, vcd).unwrap();
+    let mut ws = Workspace::open(&path).unwrap();
+    std::fs::remove_file(&path).unwrap();
+    // clk is in top, u0, u0.core and u1: top's is the one meant
+    assert_eq!(ws.resolve("clk"), Ok((var(&ws, "top.clk"), None)));
+    // two at the same depth stay ambiguous
+    assert_eq!(ws.resolve("ready"), Err("ambiguous: ready (2 signals: top.u1.ready, top.u2.ready)".into()));
+}
+
+#[test]
 fn undo_steps() {
     let mut ws = open();
     assert_eq!(ws.undo(), Err("already at oldest change".into()));

@@ -261,7 +261,7 @@ impl Workspace {
     }
 
     /// The signal a path ends with, as written or else in either HDL's form; of several, the one
-    /// in the rows, in the scope, or of the file.
+    /// in the rows, in the scope, of the file, or the shallowest.
     fn by_end(&self, name: &str) -> Result<usize, String> {
         let vars = 0..self.trace.vars.len();
         let end = format!(".{name}");
@@ -292,7 +292,15 @@ impl Workspace {
                 {
                     return Ok(v);
                 }
-                if let [v] = found.iter().copied().filter(|&v| !self.trace.is_computed(v)).collect::<Vec<_>>()[..] {
+                let file: Vec<usize> = found.iter().copied().filter(|&v| !self.trace.is_computed(v)).collect();
+                if let [v] = file[..] {
+                    return Ok(v);
+                }
+                // a port passed down the hierarchy (`clk` in every instance): the top one
+                let depth = |v: usize| self.trace.vars[v].path.matches('.').count();
+                let pool = if file.is_empty() { &found } else { &file };
+                let top = pool.iter().map(|&v| depth(v)).min();
+                if let [v] = pool.iter().copied().filter(|&v| Some(depth(v)) == top).collect::<Vec<_>>()[..] {
                     return Ok(v);
                 }
                 let paths: Vec<&str> = found.iter().take(8).map(|&v| self.trace.vars[v].path.as_str()).collect();

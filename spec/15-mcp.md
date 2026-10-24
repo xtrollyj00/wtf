@@ -76,7 +76,8 @@ reuse wtf's own pieces:
   Each command is one undo step, as in the window.
 - A name ambiguous in the trace means the one directly in the workspace's scope (`command` `scope
   dut`, or `scope` in `workspace`, kept for every later call and in the session), then the
-  signal the workspace shows, if it shows just one of them, then the only one under the scope;
+  signal the workspace shows, if it shows just one of them, then the only one under the scope,
+  then the shallowest, if just one is (`clk`, passed down to every instance, is the top's);
   otherwise the error lists the candidates. A pattern that matches nothing hints that it
   matches the whole path (`**.*fifo*`).
 - Every other tool works on the current workspace; until `open`, they say to open a trace first.

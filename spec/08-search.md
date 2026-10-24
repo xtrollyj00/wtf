@@ -32,7 +32,9 @@ clk      ▁▁▁▁▔▔▔▔▁▁▁▁▔▔▔▔
   only with `==` and `!=`. A bare
   signal is true when it is 1 (on a bus: nonzero, with no unknown bits). Signals are named as in the
   name column, by full path, or by the end of a path if only one signal ends that way
-  (`s_axi_wvalid`); `data[3]` is one bit. They don't have to be shown. A name is matched as
+  (`s_axi_wvalid`); of several, the one shown, the one in the workspace's scope, or the
+  shallowest if only one is (a port passed down the hierarchy, `clk` in every instance, is the top
+  one); `data[3]` is one bit. They don't have to be shown. A name is matched as
   written first, then **in either HDL's form**, since VHDL ignores case and the two write
   indices differently: case doesn't matter (`HEADERS_VLD` is the trace's `headers_vld`), and
   parentheses are brackets, so `gen_stages(4).stage_i.x` and `gen_stages[4].stage_i.x` name the
