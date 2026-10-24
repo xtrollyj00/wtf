@@ -50,12 +50,26 @@ pub enum Expr {
     Or(Box<Expr>, Box<Expr>),
     And(Box<Expr>, Box<Expr>),
     Not(Box<Expr>),
-    /// `sig == value`, `sig != value`, or a bare `sig` (true when it is 1 / nonzero); its value
-    /// `past` samples earlier (`past(sig)`).
-    Cmp { sig: Probe, past: u32, eq: bool, target: Option<Target> },
+    /// `sig == value`, `sig < value` (the other operators too), or a bare `sig` (true when it is
+    /// 1 / nonzero, `op` Eq); its value `past` samples earlier (`past(sig)`).
+    Cmp { sig: Probe, past: u32, op: Op, target: Option<Target> },
     /// `stable(sig)`: the same value as one sample earlier.
     Stable { sig: Probe, past: u32 },
 }
+
+/// How `Expr::Cmp` compares: `<` and the like as unsigned numbers, an unknown bit never.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Op {
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+}
+
+/// The operators, longest first, as the parser tries them.
+const OPS: [(&str, Op); 6] = [("==", Op::Eq), ("!=", Op::Ne), ("<=", Op::Le), (">=", Op::Ge), ("<", Op::Lt), (">", Op::Gt)];
 
 pub struct Query {
     /// `@clk`: matches are rising edges of this signal where the expression holds.
@@ -65,7 +79,7 @@ pub struct Query {
 
 /// Looks like an expression rather than a bare value for the selected signal.
 pub fn is_expr(text: &str) -> bool {
-    text.contains(['=', '!', '&', '|', '(', '@'])
+    text.contains(['=', '!', '&', '|', '(', '@', '<', '>'])
 }
 
 /// A parsed operand: its name, probe, width, value names and how many samples back.
@@ -87,7 +101,7 @@ pub fn parse_query(text: &str, fpt: Option<u128>, resolve: &mut Resolve) -> Resu
     };
     let expr = p.or()?;
     if !p.s.trim().is_empty() {
-        return Err(format!("unexpected: {}", p.s.trim()));
+        return Err(format!("unexpected: {} (operators: == != < <= > >= && || ! and parentheses)", p.s.trim()));
     }
     Ok(Query { clock, expr })
 }
@@ -122,7 +136,7 @@ impl Parser<'_> {
                 '}' => braces -= 1,
                 '(' if parens > 0 || name_before => parens += 1,
                 ')' if parens > 0 => parens -= 1,
-                c if braces == 0 && parens == 0 && (c.is_whitespace() || "()&|!=".contains(c)) => {
+                c if braces == 0 && parens == 0 && (c.is_whitespace() || "()&|!=<>".contains(c)) => {
                     end = i;
                     break;
                 }
@@ -169,23 +183,19 @@ impl Parser<'_> {
             if !self.eat(")") {
                 return Err("missing )".into());
             }
-            let cmp = |past, eq, target| Expr::Cmp { sig, past, eq, target };
+            let cmp = |past, target| Expr::Cmp { sig, past, op: Op::Eq, target };
             // from a known value only: a valid going from U to 0 in reset didn't fall
             let zero = || width.map(|w| Some(Target::Bits("0".repeat(w as usize)))).ok_or(format!("{f}({name}): not a bit signal"));
             return Ok(match f.as_str() {
-                "rose" => Expr::And(Box::new(cmp(past, true, None)), Box::new(cmp(past + 1, true, zero()?))),
-                "fell" => Expr::And(Box::new(cmp(past, true, zero()?)), Box::new(cmp(past + 1, true, None))),
+                "rose" => Expr::And(Box::new(cmp(past, None)), Box::new(cmp(past + 1, zero()?))),
+                "fell" => Expr::And(Box::new(cmp(past, zero()?)), Box::new(cmp(past + 1, None))),
                 _ => Expr::Stable { sig, past },
             });
         }
         self.s = start;
         let (name, sig, width, names, past) = self.operand()?;
-        let eq = if self.eat("==") {
-            true
-        } else if self.eat("!=") {
-            false
-        } else {
-            return Ok(Expr::Cmp { sig, past, eq: true, target: None });
+        let Some(&(sym, op)) = OPS.iter().find(|(sym, _)| self.eat(sym)) else {
+            return Ok(Expr::Cmp { sig, past, op: Op::Eq, target: None });
         };
         let mut value = self.word();
         if crate::time::has_unit(&value) {
@@ -206,7 +216,10 @@ impl Parser<'_> {
                 });
             }
         };
-        Ok(Expr::Cmp { sig, past, eq, target: Some(target) })
+        if !matches!(op, Op::Eq | Op::Ne) && !matches!(target, Target::Bits(_)) {
+            return Err(format!("{name} {sym} {value}: {sym} compares numbers; x, z and text only with == or !="));
+        }
+        Ok(Expr::Cmp { sig, past, op, target: Some(target) })
     }
 
     /// A signal, or `past(...)` of one: its name, probe, width, value names and how many samples
@@ -249,15 +262,27 @@ pub fn holds<V: std::borrow::Borrow<Val>>(e: &Expr, value: &dyn Fn(Probe, u32) -
             (Some(a), Some(b)) => a.as_ref().map(|v| v.borrow()) == b.as_ref().map(|v| v.borrow()),
             _ => false,
         },
-        Expr::Cmp { sig, past, eq, target } => {
+        Expr::Cmp { sig, past, op, target } => {
             let v = value(*sig, *past).flatten();
             let v = v.as_ref().map(|v| v.borrow());
-            let hit = match target {
+            let hit = || match target {
                 Some(target) => matches(target, v),
                 // as in an `if`: some bit is 1 and none is unknown
                 None => matches!(&v, Some(Val::Bits(b)) if b.contains(['1', 'h']) && !b.contains(['x', 'u', 'w', '-', 'z'])),
             };
-            hit == *eq
+            let order = || match (target, v) {
+                (Some(Target::Bits(p)), Some(Val::Bits(b))) => unsigned(b).map(|b| b.cmp(&unsigned(p).unwrap_or_default())),
+                _ => None,
+            };
+            use std::cmp::Ordering::*;
+            match op {
+                Op::Eq => hit(),
+                Op::Ne => !hit(),
+                Op::Lt => order() == Some(Less),
+                Op::Le => matches!(order(), Some(Less | Equal)),
+                Op::Gt => order() == Some(Greater),
+                Op::Ge => matches!(order(), Some(Greater | Equal)),
+            }
         }
     }
 }
@@ -296,7 +321,7 @@ pub fn find_query(trace: &Trace, q: &Query, from: Tick, forward: bool) -> Option
         }
     }
     // a value of one signal (`/0x40`): one walk over its changes
-    if let Expr::Cmp { sig, past: 0, eq: true, target: Some(target) } = &q.expr {
+    if let Expr::Cmp { sig, past: 0, op: Op::Eq, target: Some(target) } = &q.expr {
         return find(trace, sig.0, sig.1, target, from, forward);
     }
     let mut sigs = Vec::new();
@@ -312,6 +337,19 @@ pub fn find_query(trace: &Trace, q: &Query, from: Tick, forward: bool) -> Option
             return Some(t);
         }
     }
+}
+
+/// Bits as an unsigned number that orders as one: no leading zeros, compared by length, then
+/// digits; None with an unknown or high-impedance bit.
+fn unsigned(bits: &str) -> Option<(usize, String)> {
+    let b: String = bits.chars().map(|c| match c {
+        'h' => Some('1'),
+        'l' => Some('0'),
+        '0' | '1' => Some(c),
+        _ => None,
+    }).collect::<Option<_>>()?;
+    let b = b.trim_start_matches('0').to_string();
+    Some((b.len(), b))
 }
 
 fn matches(target: &Target, v: Option<&Val>) -> bool {
@@ -411,6 +449,11 @@ mod tests {
         assert_eq!(find("cpu.data == 0x96 || cpu.data == 0xe1", 0, true), Some(20));
         assert_eq!(find("cpu.data == 0x96 || cpu.data == 0xe1", 20, true), None);
         assert_eq!(find("cpu.busy", 70, false), Some(20));
+        // unsigned order: 0x43 @10 is the first above 0x40, 0x3A @40 the first below; z never compares
+        assert_eq!(find("cpu.data > 0x40", 0, true), Some(10));
+        assert_eq!(find("cpu.data>=0x96&&cpu.data<=0x96", 0, true), Some(20));
+        assert_eq!(find("cpu.data < 0x40", 0, true), Some(40));
+        assert_eq!(find("cpu.data < 0x40", 41, true), None);
         // with a clock: the cycles whose ending edge samples busy (edges 25 and 35), by their start
         assert_eq!(find("@clk cpu.busy", 0, true), Some(15));
         assert_eq!(find("@clk cpu.busy", 15, true), Some(25));
@@ -421,7 +464,8 @@ mod tests {
         assert_eq!(err("nope && cpu.busy"), "unknown signal: nope");
         assert_eq!(err("cpu.busy && (cpu.data == 1"), "missing )");
         assert_eq!(err("!= 3"), "missing signal before !=");
-        assert_eq!(err("cpu.busy )"), "unexpected: )");
+        assert_eq!(err("cpu.busy )"), "unexpected: ) (operators: == != < <= > >= && || ! and parentheses)");
+        assert_eq!(err("cpu.data < z"), "cpu.data < z: < compares numbers; x, z and text only with == or !=");
         assert_eq!(err("cpu.state == 0x10"), "cpu.state: 0x10 doesn't fit in 3 bits");
     }
 }

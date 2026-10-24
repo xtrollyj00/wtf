@@ -26,7 +26,10 @@ clk      ▁▁▁▁▔▔▔▔▁▁▁▁▔▔▔▔
 - A value wider than the signal, or a selected group header, shows an error on the status line.
 - **Expressions** search several signals at once, written as in SystemVerilog:
   `/s_axi_wvalid && s_axi_wready && s_axi_wdata == 0x40`, `/state == 3 || state == 5`, `/valid && !last`.
-  Operators are `==`, `!=`, `&&`, `||`, `!` and parentheses; values are written as above. A bare
+  Operators are `==`, `!=`, `<`, `<=`, `>`, `>=`, `&&`, `||`, `!` and parentheses; values are
+  written as above. `<` and the like compare unsigned numbers (`count >= 6`, `delay > 40ns`), and
+  a value with an unknown or high-impedance bit is neither less nor more; `x`, `z` and text compare
+  only with `==` and `!=`. A bare
   signal is true when it is 1 (on a bus: nonzero, with no unknown bits). Signals are named as in the
   name column, by full path, or by the end of a path if only one signal ends that way
   (`s_axi_wvalid`); `data[3]` is one bit. They don't have to be shown. A name is matched as

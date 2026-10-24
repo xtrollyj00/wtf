@@ -65,7 +65,8 @@ pub struct ValueAtArgs {
 #[derive(Deserialize, schemars::JsonSchema)]
 pub struct FindArgs {
     /// A search expression: `valid && ready && data == 0x40`, `state == 3 || state == 5`, `!rst`,
-    /// with ==, !=, &&, ||, ! and parentheses; values as 0x40, 64, 0b1000000, -12, x (unknown),
+    /// with ==, !=, <, <=, >, >= (unsigned numbers), &&, ||, ! and parentheses; values as 0x40,
+    /// 64, 0b1000000, -12, x (unknown),
     /// z (high impedance). A bare signal is true when 1. A match is where the expression becomes
     /// true. Prefixed with `@clk ` (a clock signal), a match is each clock cycle whose ending
     /// rising edge samples it true, reported at the cycle's starting edge. Over time: `past(x)` is

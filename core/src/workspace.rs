@@ -159,7 +159,7 @@ impl Workspace {
             };
             let width = if bit.is_some() { Some(1) } else { self.trace.vars[var].width };
             let target = Some(search::parse(text, width, names.as_ref())?);
-            search::Query { clock: None, expr: search::Expr::Cmp { sig: (var, bit), past: 0, eq: true, target } }
+            search::Query { clock: None, expr: search::Expr::Cmp { sig: (var, bit), past: 0, op: search::Op::Eq, target } }
         } else {
             self.query(text)?
         };

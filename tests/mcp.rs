@@ -543,6 +543,9 @@ fn decode_with_command() {
     // a delay is a time: in the unit asked for, and compared with one
     let wr = json!({"stream": "bus.wr", "where": "delay == 20ns", "unit": "ps"});
     assert_eq!(s.ok("records", wr), "1 of 1 matching, of 2\nstart\tend\tdelay\taddr\tdata\tstrb\tresp\n60000ps\t120000ps\t20000ps\t0x14\t0x22222222\t0x3\t0x0");
+    // ordered, as unsigned numbers; a time with a time
+    assert_eq!(s.ok("records", json!({"stream": "bus.wr", "where": "delay > 10ns", "count_only": true})), "1 matching records, of 2, first 60ns, last 60ns");
+    assert_eq!(s.ok("records", rd("addr >= 0x1C && addr < 0x20", true)), "5 matching records, of 8, first 260ns, last 380ns");
     // `group_by`: the six polls after 260ns as one line per distinct poll
     let polls = |by: Value, count_only| json!({"stream": "bus.rd", "from": "260ns", "group_by": by, "count_only": count_only});
     assert_eq!(s.ok("records", polls(json!(["addr", "data"]), false)), "3 of 3 distinct, of 6 records\n4 × addr=0x1C data=0x3 (260ns .. 350ns)\n1 × addr=0x1C data=0x7 (380ns .. 380ns)\n1 × addr=0x18 data=0x0 (410ns .. 410ns)");
