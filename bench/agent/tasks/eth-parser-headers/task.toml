@@ -14,7 +14,7 @@ rtl/comp/axis_tools/logic/eth_parser/ is an AXI4-Stream Ethernet header parser (
 axis_eth_parser.vhd); rtl/comp/base/ is the library of components it is built from. The parser
 passes frames through from RX to TX and outputs each frame's extracted headers on HEADERS. Its
 verification fails: `make sim` runs the cocotb test (tb/test_parser.py, on nvc) and writes
-sim.log and trace.fst, the waveform of the run. The environment is set up: `make sim` runs as
+sim.log and trace.fst, the waveform of the run; both are there from the failing run. The environment is set up: `make sim` runs as
 it is, in about 20 s. Find the cause in the RTL and fix it, so that `make sim` passes. Don't
 change the testbench or the Makefile.
 """

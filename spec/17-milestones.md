@@ -63,11 +63,19 @@ Each milestone ends with something usable for day-to-day debugging.
       the visible test, writing `sim.log` and `trace.fst`; `make hidden`: a regression the agent
       never runs). The runner fetches the upstream at the commit into `target/upstream/`, builds
       the work directory and checks `make sim` fails; the agent works there with wtf, file reads
-      and edits inside it, and `make sim`. Afterwards the task's Makefile and testbench are put
+      and edits inside it, and `make sim`. Make's `UPSTREAM` is a copy of the checkout without
+      `.git` and the HDL sources under `[files]`, so the reference can't be read from it.
+      Afterwards the task's Makefile and testbench are put
       back, and the run is `fixed` when `make sim` and `make hidden` pass; it passes when fixed
       and the answer (the faulty signal, when the failure showed) is right. `agent check` proves a
       task without an agent: the bug fails both, the upstream files pass both. Each run keeps
-      the agent's change as a diff against the upstream. Upstreams are
+      the agent's change as a diff against the upstream. `--no-mcp` runs them without wtf, as
+      the baseline (the log, the testbench and `make sim` only). The agent's `make` is a shim
+      outside its reach that counts the `make sim` runs (`sims`); `--max-sims N` makes it refuse
+      after N (the prompt says so), so an A/B compares what gets fixed within a budget, not given unlimited reruns.
+      The report groups by task, wtf commit, model, mcp and budget: `fixed` (the hidden test
+      passed) apart from `evidence` (the answer's keys), sandbox `denials` apart from wtf's
+      errors, and medians of the costs. Upstreams are
       permissively licensed, so patches can live in the repo. The first, `head-trimmer-boundary`,
       is ndk-fpga's AXIS head trimmer (VHDL, cocotb on nvc; the cocotb packages in a Python venv
       on `PATH`).

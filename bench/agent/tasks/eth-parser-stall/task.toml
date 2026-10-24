@@ -10,7 +10,7 @@ prompt = """
 rtl/axis_eth_parser.vhd is the top of an AXI4-Stream Ethernet header parser: it passes frames
 through from RX to TX and outputs each frame's extracted headers on HEADERS. Its verification
 fails: `make sim` runs the cocotb test (tb/test_parser.py, on nvc) and writes sim.log and
-trace.fst, the waveform of the run. The environment is set up: `make sim` runs as it is, in
+trace.fst, the waveform of the run; both are there from the failing run. The environment is set up: `make sim` runs as it is, in
 about 20 s. Find the cause in the RTL and fix it, so that `make sim` passes. Don't change the
 testbench or the Makefile.
 """

@@ -170,3 +170,32 @@ size of its answer. On the same machine and 10 GiB traces (2026-10-22):
   clock's changes for its edges, and loading the signals (the 19 an AXI4-Lite port reads).
 - In an FST, the first call that reads a signal waits for all of it to load: `values` over 1 µs
   takes 7.2 s for `top.hot`'s 123M changes, as the first screen does.
+
+#### Agents with and without wtf
+
+`wtf-bench agent run --no-mcp` runs the fix tasks without wtf: the agent has the RTL, the
+testbench, `sim.log` and `make sim`, and debugs with prints and reruns. Haiku (claude-haiku-5-5),
+5 runs per arm, `--max-sims 3`, wtf d89ab69 (2026-10-25); `pass` is fixed and every answer key
+right, `evidence` the share of keys right, costs are medians:
+
+| task | wtf | pass | fixed | evidence | `make sim` | denials | tokens | cost | wall |
+|---|---|---|---|---|---|---|---|---|---|
+| eth-parser-headers | on | 5/5 | 5/5 | 1.00 | 1 | 1.6 | 0.84M | $0.029 | 116 s |
+| | off | 3/5 | 5/5 | 0.73 | 2 | 7.8 | 1.24M | $0.048 | 205 s |
+| eth-parser-stall | on | 3/5 | 5/5 | 0.87 | 1 | 0.6 | 0.38M | $0.014 | 77 s |
+| | off | 4/5 | 5/5 | 0.87 | 2 | 7.4 | 0.60M | $0.018 | 127 s |
+| head-trimmer-boundary | on | 4/5 | 5/5 | 0.90 | 1 | 1.0 | 0.37M | $0.014 | 80 s |
+| | off | 0/5 | 5/5 | 0.50 | 1 | 8.0 | 0.61M | $0.023 | 138 s |
+
+- Every run fixed its bug, with wtf or without: these bugs are found from the log and the code.
+  The tasks don't measure whether wtf helps fix; harder ones (the symptom far from the cause, a
+  bug that reads as correct code, slow reruns) are for that.
+- wtf gets the evidence: 12 of 15 runs had every key right with it, 7 of 15 without. Without it,
+  no run found when head-trimmer's first bad beat left TX.
+- With wtf an agent ran `make sim` once, to confirm its fix, against 2 - 3 runs of prints without;
+  it took 0.6 - 0.7 times the tokens, 0.6 - 0.8 times the cost and about 0.6 times the time, on
+  every task.
+- Without wtf the agents tried to read `trace.fst` some other way (`fst2vcd`, Python readers),
+  most of their sandbox denials.
+- A big answer costs on every later turn, as the context is read again: the two answers cut at
+  24 KB (`signals` of a scope, `records` of frames with their data) cost more than the calls.
