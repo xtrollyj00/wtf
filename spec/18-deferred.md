@@ -175,19 +175,19 @@ size of its answer. On the same machine and 10 GiB traces (2026-10-22):
 
 `wtf-bench agent run --no-mcp` runs the fix tasks without wtf: the agent has the RTL, the
 testbench, `sim.log` and `make sim`, and debugs with prints and reruns. Haiku (claude-haiku-5-5),
-5 runs per arm, `--max-sims 3`, `--jobs 5`, wtf ef0ae14 (2026-10-25); `pass` is fixed and every
+5 runs per arm, `--max-sims 3`, `--jobs 5`, wtf d0ebd30 (2026-10-25); `pass` is fixed and every
 answer key right, `evidence` the share of keys right, costs are medians:
 
 | task | wtf | pass | fixed | evidence | `make sim` | denials | tokens | cost | wall |
 |---|---|---|---|---|---|---|---|---|---|
-| eth-parser-headers | on | 3/5 | 5/5 | 0.87 | 1 | 1.8 | 0.94M | $0.032 | 137 s |
-| | off | 1/5 | 5/5 | 0.46 | 1 | 8.4 | 1.30M | $0.045 | 203 s |
-| eth-parser-stall | on | 5/5 | 5/5 | 1.00 | 1 | 1.0 | 0.43M | $0.012 | 77 s |
-| | off | 2/5 | 5/5 | 0.80 | 2 | 5.2 | 0.65M | $0.024 | 146 s |
-| head-trimmer-boundary | on | 5/5 | 5/5 | 1.00 | 1 | 1.6 | 0.41M | $0.013 | 99 s |
-| | off | 0/5 | 5/5 | 0.50 | 1 | 7.4 | 0.34M | $0.014 | 94 s |
-| axil2mi-stale-addr | on | 5/5 | 5/5 | 1.00 | 1 | 1.4 | 0.45M | $0.016 | 46 s |
-| | off | 1/5 | 5/5 | 0.46 | 2 | 5.4 | 0.48M | $0.017 | 86 s |
+| eth-parser-headers | on | 5/5 | 5/5 | 1.00 | 1 | 1.4 | 0.68M | $0.029 | 134 s |
+| | off | 2/5 | 5/5 | 0.60 | 1 | 8.6 | 1.73M | $0.058 | 270 s |
+| eth-parser-stall | on | 5/5 | 5/5 | 1.00 | 1 | 1.2 | 0.40M | $0.014 | 76 s |
+| | off | 5/5 | 5/5 | 1.00 | 2 | 5.8 | 0.76M | $0.024 | 136 s |
+| head-trimmer-boundary | on | 5/5 | 5/5 | 1.00 | 1 | 1.2 | 0.30M | $0.012 | 85 s |
+| | off | 3/5 | 5/5 | 0.80 | 3 | 8.0 | 0.63M | $0.024 | 203 s |
+| axil2mi-stale-addr | on | 2/5 | 5/5 | 0.80 | 1 | 0.6 | 0.37M | $0.015 | 62 s |
+| | off | 1/5 | 5/5 | 0.46 | 2 | 5.0 | 0.38M | $0.015 | 57 s |
 
 `axil2mi-stale-addr` is the hard one: an AXI4-Lite to MI converter whose write address is sampled
 outside its handshake, so a write queued behind another goes one word up; the test only reads the
@@ -196,14 +196,17 @@ registers back at the end, 3.5 - 12.8 us after the bad writes, and never says wh
 - Every run fixed its bug, with wtf or without: these bugs are found from the log and the code,
   even axil2mi's (260 lines of state machine give the cause away). The tasks measure what wtf
   adds beyond the fix, not whether the fix needs it; that needs harder tasks.
-- wtf gets the evidence: 18 of 20 runs had every key right with it, 4 of 20 without. Without it,
-  the times were mostly `unknown`, or a clock's edge where its cycle's start was asked
-  (eth-parser-stall), or a beat or two off (head-trimmer, axil2mi).
-- With wtf an agent ran `make sim` once, to confirm its fix. It took 0.5 - 0.7 times the time and
-  0.5 - 0.7 times the cost on eth-parser-headers, eth-parser-stall and axil2mi (axil2mi's cost
-  about even); on head-trimmer, where the agents without wtf gave the time up, about the same.
-- The two eth-parser-headers misses with wtf gave the stall as 2275ns, the edge that registers
-  the header, for 2270ns, the cycle it was made in: the question leaves room for both.
+- wtf gets the evidence: 17 of 20 runs had every key right with it, 11 of 20 without. Without it,
+  the times were mostly `unknown`: the agents could not read `trace.fst`.
+- With wtf an agent ran `make sim` once, to confirm its fix. It took 0.4 - 0.6 times the time and
+  0.5 - 0.6 times the cost on eth-parser-headers, eth-parser-stall and head-trimmer; on axil2mi
+  about the same.
+- The axil2mi misses with wtf named a later bad write (1064ns), the register 0x24 write for the
+  first, or 0x24's one clock early (9248ns). No run used `pair`, which with `records where
+  req_addr != resp_addr` lists the 19 bad writes in one call. A batch an hour earlier, with
+  nearly the same tool docs, gave 5/5 on axil2mi: batches of 5 vary by that much.
+- The questions now say which cycle they mean in signals (the edge that starts the cycle in which
+  valid and ready are high), which lifted the runs without wtf from 4 to 11 of 20 against ef0ae14.
 - Without wtf the agents tried to read `trace.fst` some other way (`fst2vcd`, Python readers),
   most of their sandbox denials.
 - Agents decoded AXI-Lite and AXIS (`decode`, `records ... where addr == 0x24`) but read the MI

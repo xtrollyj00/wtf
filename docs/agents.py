@@ -6,15 +6,15 @@ import sys
 # task: (runs with every answer right, of 5; median wall s; median cost $), with wtf / without
 RUNS = 5
 DATA = {
-    "eth-parser-headers": ((3, 137, 0.032), (1, 203, 0.045)),
-    "eth-parser-stall": ((5, 77, 0.012), (2, 146, 0.024)),
-    "head-trimmer-boundary": ((5, 99, 0.013), (0, 94, 0.014)),
-    "axil2mi-stale-addr": ((5, 46, 0.016), (1, 86, 0.017)),
+    "eth-parser-headers": ((5, 134, 0.029), (2, 270, 0.058)),
+    "eth-parser-stall": ((5, 76, 0.014), (5, 136, 0.024)),
+    "head-trimmer-boundary": ((5, 85, 0.012), (3, 203, 0.024)),
+    "axil2mi-stale-addr": ((2, 62, 0.015), (1, 57, 0.015)),
 }
 PANELS = [  # title, field, axis maximum, value label
     ("Every answer right (runs of 5)", 0, RUNS, lambda v: f"{v}"),
-    ("Time to the fix, median", 1, 210, lambda v: f"{v} s"),
-    ("Cost per run, median", 2, 0.05, lambda v: f"${v:.3f}"),
+    ("Time to the fix, median", 1, 280, lambda v: f"{v} s"),
+    ("Cost per run, median", 2, 0.06, lambda v: f"${v:.3f}"),
 ]
 THEMES = {  # the dataviz reference palette: series 1 blue, the rest gray
     "agents.svg": dict(surface="#fcfcfb", ink="#0b0b0b", ink2="#52514e", muted="#898781", axis="#c3c2b7", wtf="#2a78d6", bare="#898781"),
