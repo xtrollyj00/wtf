@@ -17,7 +17,7 @@ run; both are there from the failing run. The environment is set up: `make sim` 
 about 5 s. Find the cause in the RTL and fix it, so that `make sim` passes. Don't change the
 testbench or the Makefile.
 """
-answer = '{"signal": "<the signal whose logic was wrong>", "first_bad_time": "<the first MI write that went to a wrong address: the start of the clock cycle in which MI accepted it (MI_WR and MI_ARDY), in ns>", "reg24_time": "<the same, for the write meant for register 0x24 that went elsewhere, in ns>"}'
+answer = '{"signal": "<the signal whose logic was wrong>", "first_bad_time": "<the first MI write that went to a wrong address: the rising edge that starts the cycle in which MI_WR and MI_ARDY are high for it, one clock before the edge that samples them, in ns>", "reg24_time": "<the same, for the write meant for register 0x24 that went elsewhere, in ns>"}'
 expect = '{"signal": "reg_waddr_we", "first_bad_time": "84ns", "reg24_time": "9252ns"}'
 
 [files]

@@ -18,8 +18,8 @@ sim.log and trace.fst, the waveform of the run; both are there from the failing 
 it is, in about 20 s. Find the cause in the RTL and fix it, so that `make sim` passes. Don't
 change the testbench or the Makefile.
 """
-answer = '{"entity": "<the entity whose code was wrong>", "first_bad_time": "<when HEADERS_VLD rose for the first wrong header, in ns>", "stall_time": "<the clock cycle in which the wrong header was made: the rising edge that starts it, in ns>"}'
-expect = '{"entity": "AXIS_ETH_PARSER_SNIFFER", "first_bad_time": "2290ns", "stall_time": "2270ns"}'
+answer = '{"entity": "<the entity whose code was wrong>", "first_bad_time": "<when HEADERS_VLD rose for the first wrong header, in ns>", "latch_time": "<the clock cycle whose ending edge first latched the wrong header as valid in a register: the rising edge that starts it, in ns>"}'
+expect = '{"entity": "AXIS_ETH_PARSER_SNIFFER", "first_bad_time": "2290ns", "latch_time": "2270ns"}'
 
 [files]
 "rtl/comp/base" = "comp/base"

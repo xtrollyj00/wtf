@@ -15,7 +15,7 @@ trace.fst, the waveform of the run; both are there from the failing run. The env
 about 20 s. Find the cause in the RTL and fix it, so that `make sim` passes. Don't change the
 testbench or the Makefile.
 """
-answer = '{"signal": "<the signal whose logic was wrong>", "miscounts": <how many times in the failing run it took a wrong value>, "stuck_from": "<the last RX handshake before the parser stopped taking data for good: the start of its clock cycle, in ns>"}'
+answer = '{"signal": "<the signal whose logic was wrong>", "miscounts": <how many times in the failing run its logic went wrong (not how many cycles it held a wrong value)>, "stuck_from": "<the last RX handshake before the parser stopped taking data for good: the rising edge that starts the cycle in which RX TVALID and TREADY are high for it, one clock before the edge that samples them, in ns>"}'
 expect = '{"signal": "packets_in_flight", "miscounts": 5, "stuck_from": "391265ns"}'
 
 [files]

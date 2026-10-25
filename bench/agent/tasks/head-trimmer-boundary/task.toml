@@ -12,7 +12,7 @@ on nvc) and writes sim.log and trace.fst, the waveform of the run; both are ther
 `make sim` runs as it is, in about 10 s. Find the cause in the RTL and fix it, so that `make sim`
 passes. Don't change the testbench or the Makefile.
 """
-answer = '{"signal": "<the signal whose logic was wrong>", "first_bad_time": "<when the first wrong beat of the failing packet left TX, in ns>"}'
+answer = '{"signal": "<the signal whose logic was wrong>", "first_bad_time": "<the first wrong beat of the failing packet on TX: the rising edge that starts the cycle in which TVALID and TREADY are high for it, one clock before the edge that samples them, in ns>"}'
 expect = '{"signal": "trim_pos_next_ok", "first_bad_time": "17200ns"}'
 
 [files]
