@@ -199,3 +199,19 @@ right, `evidence` the share of keys right, costs are medians:
   most of their sandbox denials.
 - A big answer costs on every later turn, as the context is read again: the two answers cut at
   24 KB (`signals` of a scope, `records` of frames with their data) cost more than the calls.
+
+`axil2mi-stale-addr` is harder: an AXI4-Lite to MI converter whose write address is sampled
+outside its handshake, so a write queued behind another goes one word up; the test only reads the
+registers back at the end, 3.5 - 12.8 us after the bad writes, and never says when they were made.
+Same setup, wtf 41f64da (2026-10-25):
+
+| task | wtf | pass | fixed | evidence | `make sim` | denials | tokens | cost | wall |
+|---|---|---|---|---|---|---|---|---|---|
+| axil2mi-stale-addr | on | 4/5 | 5/5 | 0.93 | 1 | 1.2 | 0.33M | $0.013 | 44 s |
+| | off | 2/5 | 5/5 | 0.60 | 3 | 8.0 | 0.66M | $0.026 | 115 s |
+
+- Again every run fixed it: 260 lines of state machine give the cause away. The times took the
+  waveform: with wtf 9 of 10 right, without 4 of 10, after 2 - 3 runs of prints in most runs.
+- With wtf half the tokens and cost, 0.4 times the time: the widest gap of the four tasks.
+- Agents decoded the AXI side (`decode axilite`, `records ... where addr == 0x24`) but read the
+  MI side with `find` and `show`; none used `protocol` or `pair`.

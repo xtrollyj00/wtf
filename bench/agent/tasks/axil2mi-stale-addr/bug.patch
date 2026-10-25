@@ -1,0 +1,18 @@
+--- a/rtl/axi4lite2mi.vhd
++++ b/rtl/axi4lite2mi.vhd
+@@ -283,7 +283,6 @@
+                 else
+                     if (AXI_AWVALID = '1') then
+                         AXI_AWREADY   <= '1';
+-                        reg_waddr_we  <= '1';
+                     end if;
+                 end if;
+ 
+@@ -305,6 +304,7 @@
+ 
+             when ST_WRITE =>
+                 AXI_WREADY   <= '1';
++                reg_waddr_we <= AXI_WVALID;
+                 reg_wdata_we <= AXI_WVALID;
+                 reg_strb_we  <= AXI_WVALID;
+ 
