@@ -466,7 +466,7 @@ impl Wtf {
         Ok(budget(format!("at {}:\n{}", show(&app, t, unit(&app, &a.unit, [t])?), lines.join("\n"))))
     }
 
-    #[tool(description = "The times a search expression matches, as a table. With `@clk ` first, a match is a clock cycle whose ending edge samples it true, reported at the cycle's starting edge; without, where the expression becomes true, so back-to-back handshakes are one match. `show` adds values, `count_only` counts (`help expressions`). For a bus, decode it instead (`help decode`).")]
+    #[tool(description = "The times a search expression matches, as a table. With `@clk ` first, a match is a clock cycle whose ending edge samples it true, reported at the cycle's starting edge; without, where the expression becomes true, so back-to-back handshakes are one match. `show` adds values (and the `protocol` line making them records), `count_only` counts (`help expressions`). For a bus, decode it instead (`help decode`).")]
     fn find(&self, Parameters(a): Parameters<FindArgs>) -> Result<String, String> {
         let w = current(self)?;
         let mut app = lock(&w);
@@ -520,6 +520,21 @@ impl Wtf {
         }
         if more {
             lines.push("(more may follow; search on from the last time)".into());
+        }
+        // a table of events per clock cycle is what `protocol` makes, with records to decode on
+        if let (Some(_), Some((clock, when))) = (q.clock, a.expr.trim().strip_prefix('@').and_then(|e| e.split_once(char::is_whitespace)))
+            && !shown.is_empty()
+        {
+            // shortcut: a field is its signal's last name; two alike make the line fail, renamed by the agent then
+            let fields: Vec<String> = shown
+                .iter()
+                .map(|(n, _, _)| {
+                    let last = n.rsplit('.').next().unwrap_or(n);
+                    let field: String = last.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+                    format!("{field}={n}")
+                })
+                .collect();
+            lines.push(format!("as records (`help decode`): `protocol s clock={clock} when={} {}`", when.trim(), fields.join(" ")));
         }
         Ok(budget(lines.join("\n")))
     }
@@ -595,7 +610,8 @@ impl Wtf {
         out.extend(msg.map(|m| m.0));
         if cmd == "decode" {
             let protocol = line.split_whitespace().nth(2).unwrap_or("<protocol>");
-            out.push(format!("`records <stream>` lists one; `protocols {protocol}` says what each stream and field is"));
+            let pair = if protocol == "pair" { "" } else { "; `pair` matches a stream with another (`help decode`)" };
+            out.push(format!("`records <stream>` lists one; `protocols {protocol}` says what each stream and field is{pair}"));
         }
         Ok(if out.is_empty() { "done".into() } else { out.join("\n") })
     }

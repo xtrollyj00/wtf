@@ -67,6 +67,8 @@ Shortcuts taken so far, to fix when they get in the way.
 - UART takes only the first stop bit into account; a break (the line held low) is a framing error.
 - A slice or concatenation SPI reads its pins through (`{cs, sclk, mosi, miso}`) stays a var, as
   every computed signal named.
+- The `protocol` line a `find` answer offers names each field by its signal's last name, so two
+  signals with the same last name give a line that fails until the agent renames one.
 
 ### Performance (draft)
 

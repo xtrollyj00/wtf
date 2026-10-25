@@ -119,8 +119,11 @@ reuse wtf's own pieces:
   searches an agent writes differ from run to run and go wrong. So `info` names the interfaces
   found by their signals (every required role of a built-in protocol a signal `<prefix><role>`;
   AXI4 over AXI-Lite, whose roles it has too; the clock `<prefix>aclk`, or the one clock-like
-  signal in the scope), the server's instructions put decoding before `find`, and `find`'s
-  description, `help expressions` and a comparison of two signals point to the decoders.
+  signal in the scope), the server's instructions put decoding before `find`, `find`'s
+  description and `help expressions` point to the decoders, and `decode` answers that `pair`
+  matches a stream with another. A `find` with a clock and `show` is a table of events, which is
+  what `protocol` makes: its answer ends with the line that makes it (`as records (help decode):
+  protocol s clock=clk when=valid && ready addr=addr`), as `info` gives the `decode` lines.
 - `command` decodes without touching the rows (`decode`, `protocol`, `signal`). `decode` answers
   with the streams it made and their records, violations apart (`bus: records bus.aw 2, ...;
   violations bus.errors 2, bus.wr.unmatched 1, ...`), then where to read more; the window shows

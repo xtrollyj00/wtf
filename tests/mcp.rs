@@ -196,7 +196,7 @@ fn enum_names() {
         "state:\n  20ns WRITE\n  30ns DONE\n  40ns 0x5\n  50ns 0xX\nstate:\n  20ns 0x2\n  30ns 0x3\n  40ns 0x5\n  50ns 0xX\n"
     );
     // the cycle whose ending edge (25ns) samples WRITE
-    assert_eq!(s.ok("find", json!({"expr": "@clk state == write", "show": ["state", "count"]})), "time\tstate\tcount\n15ns\tWRITE\t0x2");
+    assert_eq!(s.ok("find", json!({"expr": "@clk state == write", "show": ["state", "count"]})), "time\tstate\tcount\n15ns\tWRITE\t0x2\nas records (`help decode`): `protocol s clock=clk when=state == write state=state count=count`");
     assert_eq!(s.tool("values", json!({"signals": ["count:enum"], "from": "0ns", "to": "10ns"})), Err("enum: the file names no values of count".into()));
 }
 
@@ -212,7 +212,7 @@ fn find_runs_values_and_counts() {
     assert_eq!(s.ok("find", json!({"expr": "@clk !busy", "count_only": true})), "5 matches in 2 runs of consecutive cycles, first 5ns, last 65ns");
     assert_eq!(s.ok("find", json!({"expr": "@clk busy", "count_only": true})), "2 matches in 1 run of consecutive cycles, first 15ns, last 25ns");
     // values as the ending edge samples them: data changes at 20ns and 30ns, just after the cycles start
-    assert_eq!(s.ok("find", json!({"expr": "@clk busy", "show": ["data", "cpu.state"]})), "time\tdata\tcpu.state\n15ns\t0x96\t0x2\n25ns\t0xE1\t0x2");
+    assert_eq!(s.ok("find", json!({"expr": "@clk busy", "show": ["data", "cpu.state"]})), "time\tdata\tcpu.state\n15ns\t0x96\t0x2\n25ns\t0xE1\t0x2\nas records (`help decode`): `protocol s clock=clk when=busy data=data state=cpu.state`");
     // without a clock, at the match
     assert_eq!(s.ok("find", json!({"expr": "data == 0x40", "show": ["data:dec", "busy"]})), "time\tdata\tbusy\n60ns\t64\t0");
     // a window of the trace, and a unit of the agent's
@@ -558,7 +558,7 @@ fn decode_with_command() {
     // decode says what it made and where the violations are, and where to read more
     assert_eq!(
         s.ok("command", json!({"line": "decode bus axilite clock=aclk prefix=s_axi_"})),
-        "bus: records bus.aw 2, bus.w 2, bus.b 3, bus.ar 8, bus.r 8, bus.wr 2, bus.rd 8; violations bus.errors 2, bus.wr.unmatched 1, bus.rd.unmatched 0\n`records <stream>` lists one; `protocols axilite` says what each stream and field is"
+        "bus: records bus.aw 2, bus.w 2, bus.b 3, bus.ar 8, bus.r 8, bus.wr 2, bus.rd 8; violations bus.errors 2, bus.wr.unmatched 1, bus.rd.unmatched 0\n`records <stream>` lists one; `protocols axilite` says what each stream and field is; `pair` matches a stream with another (`help decode`)"
     );
     assert!(s.ok("view", json!({})).contains("aclk"), "the rows stay");
     assert_eq!(s.ok("records", json!({"stream": "bus.wr"})), "2 of 2\nn\tstart\tend\tdelay\taddr\tdata\tstrb\tresp\n0\t30ns\t50ns\t10ns\t0x10\t0x11111111\t0xF\t0x0\n1\t60ns\t120ns\t20ns\t0x14\t0x22222222\t0x3\t0x0");
@@ -651,9 +651,12 @@ fn records_compare_fields_and_pick_by_number() {
     assert_eq!(s.ok("records", o("n == 0 || past(resp_id) == req_id")), "2 of 2 matching, of 3\nn\tstart\tend\tdelay\treq_id\tresp_id\n0\t15ns\t45ns\t20ns\t0x1\t0x2\n1\t25ns\t65ns\t30ns\t0x2\t0x1");
     // the number counts from the stream's start, not from `from`
     assert_eq!(s.ok("records", json!({"stream": "o", "from": "40ns", "where": "n == 2", "count_only": true})), "1 matching records, of 1, first 45ns, last 45ns");
-    // signals in `find` still compare with constants (spec §8)
-    // a signal compares with a signal
-    assert_eq!(s.ok("find", json!({"expr": "@clk req_valid && req_id != resp_id", "count_only": true})), "3 matches in 2 runs of consecutive cycles, first 15ns, last 45ns");
+    // a signal compares with a signal; a table of events offers its `protocol` line, which works
+    let table = s.ok("find", json!({"expr": "@clk req_valid && req_id != resp_id", "show": ["req_id", "resp_id"]}));
+    assert_eq!(table, "time\treq_id\tresp_id\n15ns\t0x1\t0x0\n25ns\t0x2\t0x0\n45ns\t0x3\t0x2\nas records (`help decode`): `protocol s clock=clk when=req_valid && req_id != resp_id req_id=req_id resp_id=resp_id`");
+    let line = table.lines().last().unwrap().split('`').nth(3).unwrap().to_string();
+    assert_eq!(s.ok("command", json!({"line": line})), "done");
+    assert_eq!(s.ok("records", json!({"stream": "s", "count_only": true})), "3 records, first 15ns, last 45ns");
     // `@rising(clk)` names the clock inside
     assert_eq!(s.tool("find", json!({"expr": "@rising(clk) req_valid"})), Err("@ takes the clock signal itself, as its rising edges: @clk".into()));
 }
@@ -665,7 +668,7 @@ fn times_in_the_clocks_unit() {
     s.ok("open", json!({"trace": std::fs::canonicalize("tests/data/skew.vcd").unwrap()}));
     let data = json!({"signals": ["data"], "from": "0ns", "to": "70ns"});
     assert_eq!(s.ok("values", data.clone()), "data:\n  0ns 0x0\n  20.000002ns 0x5\n  30.000002ns 0x6\n");
-    assert_eq!(s.ok("find", json!({"expr": "@clk valid && ready", "show": ["data"]})), "time\tdata\n20ns\t0x5\n30ns\t0x6");
+    assert_eq!(s.ok("find", json!({"expr": "@clk valid && ready", "show": ["data"]})), "time\tdata\n20ns\t0x5\n30ns\t0x6\nas records (`help decode`): `protocol s clock=clk when=valid && ready data=data`");
     assert_eq!(s.ok("values", data.clone()), "data:\n  0ns 0x0\n  20ns 0x5\n  30ns 0x6\n");
     s.ok("command", json!({"line": "protocol rx clock=clk when=valid && ready d=data"}));
     assert_eq!(s.ok("records", json!({"stream": "rx"})), "2 of 2\nn\tstart\tend\td\n0\t20ns\t30ns\t0x5\n1\t30ns\t40ns\t0x6");
