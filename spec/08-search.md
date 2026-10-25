@@ -55,6 +55,8 @@ clk      ▁▁▁▁▔▔▔▔▁▁▁▁▔▔▔▔
   `/@clk past(valid) && !past(ready) && !stable(data)` a payload changed while stalled.
 - A signal compares with a constant, never with another signal (`data != past(data)`, `a == b`):
   such a rule is most often a protocol's, which a decoder checks already (section 16), and a
-  change is `!stable(x)`. The error says both.
+  change is `!stable(x)`. The error says both. A `records` `where` (section 15) is the
+  exception: there a field compares with another field of the same record, as a `pair`'s two
+  sides are what a scoreboard compares.
 - On a bit line of an expanded bus, the search looks at that bit. String and real signals are
   searched by their text.

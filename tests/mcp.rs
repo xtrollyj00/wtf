@@ -476,10 +476,10 @@ fn records_of_a_declared_stream() {
         "rows": ["rx", "rx.tdata"],
     });
     assert!(s.ok("workspace", decl).starts_with("rows (> selected):\n> rx  rx\n  tdata  rx.tdata  hex\n"));
-    assert_eq!(s.ok("records", json!({"stream": "rx"})), "2 of 2\nstart\tend\ttdata\tlow\n35ns\t45ns\t0x11\t0x1\n105ns\t115ns\t0x33\t0x3");
+    assert_eq!(s.ok("records", json!({"stream": "rx"})), "2 of 2\nn\tstart\tend\ttdata\tlow\n0\t35ns\t45ns\t0x11\t0x1\n1\t105ns\t115ns\t0x33\t0x3");
     // pages, ranges and counts
-    assert_eq!(s.ok("records", json!({"stream": "v", "count": 2})), "2 of 6\nstart\tend\td\n15ns\t25ns\t0x11\n25ns\t35ns\t0x11");
-    assert_eq!(s.ok("records", json!({"stream": "v", "from": "60ns", "to": "80ns"})), "2 of 2\nstart\tend\td\n65ns\t75ns\t0x22\n75ns\t85ns\t0x23");
+    assert_eq!(s.ok("records", json!({"stream": "v", "count": 2})), "2 of 6\nn\tstart\tend\td\n0\t15ns\t25ns\t0x11\n1\t25ns\t35ns\t0x11");
+    assert_eq!(s.ok("records", json!({"stream": "v", "from": "60ns", "to": "80ns"})), "2 of 2\nn\tstart\tend\td\n3\t65ns\t75ns\t0x22\n4\t75ns\t85ns\t0x23");
     assert_eq!(s.ok("records", json!({"stream": "v", "count_only": true})), "6 records, first 15ns, last 105ns");
     assert_eq!(s.ok("records", json!({"stream": "v", "from": "120ns"})), "no records");
     assert_eq!(s.tool("records", json!({"stream": "w"})), Err("unknown stream: w (streams: rx, v)".into()));
@@ -492,7 +492,7 @@ fn records_of_a_declared_stream() {
         "rows": ["c0.op"],
     });
     assert!(s.ok("workspace", decl).starts_with("rows (> selected):\n> op  c0.op  hex\n"));
-    assert_eq!(s.ok("records", json!({"stream": "c0"})), "2 of 2\nstart\tend\top\n35ns\t45ns\t0x1\n105ns\t115ns\t0x3");
+    assert_eq!(s.ok("records", json!({"stream": "c0"})), "2 of 2\nn\tstart\tend\top\n0\t35ns\t45ns\t0x1\n1\t105ns\t115ns\t0x3");
     let bad = s.tool("workspace", json!({"decode": [{"name": "c1", "protocol": "cmd", "signals": ["valid = valid", "x"]}], "rows": []}));
     assert_eq!(bad, Err("decode c1: x: not `name = signal`\ndecode c1: no signal for ready, cmd; no clock (the protocol has none either)".into()));
     // mistakes come back with the rest, and nothing changes
@@ -512,9 +512,9 @@ fn axis_frames_and_errors() {
     assert!(s.ok("workspace", decl).starts_with("rows (> selected):\n> frame  rx.frame\n  len  rx.frame.len  dec\n  errors  rx.errors\n"));
     // a frame's data past 8 bytes is its count in a table, whole in one record
     let short = "(long values shortened; one record, `count: 1` with `from`, shows them whole)";
-    assert_eq!(s.ok("records", json!({"stream": "rx.frame"})), format!("4 of 4 {short}\nstart\tend\tbeats\tlen\tdata\tcomplete\n15ns\t55ns\t0x3\t0xA\ta0 00 00 00 a1 00 00 00 ... (10 bytes)\t1\n55ns\t65ns\t0x1\t0x4\tb0 00 00 00\t1\n65ns\t85ns\t0x2\t0x8\tc0 00 00 00 c1 00 00 00\t1\n135ns\t145ns\t0x1\t0x4\te1 00 00 00\t1"));
-    assert_eq!(s.ok("records", json!({"stream": "rx.frame", "count": 1})), "1 of 4\nstart\tend\tbeats\tlen\tdata\tcomplete\n15ns\t55ns\t0x3\t0xA\ta0 00 00 00 a1 00 00 00 a2 00\t1");
-    assert_eq!(s.ok("records", json!({"stream": "rx.errors"})), "2 of 2\nstart\tend\trule\n105ns\t115ns\tdropped\n125ns\t135ns\tchanged");
+    assert_eq!(s.ok("records", json!({"stream": "rx.frame"})), format!("4 of 4 {short}\nn\tstart\tend\tbeats\tlen\tdata\tcomplete\n0\t15ns\t55ns\t0x3\t0xA\ta0 00 00 00 a1 00 00 00 ... (10 bytes)\t1\n1\t55ns\t65ns\t0x1\t0x4\tb0 00 00 00\t1\n2\t65ns\t85ns\t0x2\t0x8\tc0 00 00 00 c1 00 00 00\t1\n3\t135ns\t145ns\t0x1\t0x4\te1 00 00 00\t1"));
+    assert_eq!(s.ok("records", json!({"stream": "rx.frame", "count": 1})), "1 of 4\nn\tstart\tend\tbeats\tlen\tdata\tcomplete\n0\t15ns\t55ns\t0x3\t0xA\ta0 00 00 00 a1 00 00 00 a2 00\t1");
+    assert_eq!(s.ok("records", json!({"stream": "rx.errors"})), "2 of 2\nn\tstart\tend\trule\n0\t105ns\t115ns\tdropped\n1\t125ns\t135ns\tchanged");
     assert_eq!(s.ok("find", json!({"expr": "rx.errors.rule == changed"})), "time\n125ns");
     // the workspace draws each record with its label
     assert!(s.ok("render", json!({"width": 100})).contains("#0 10B"));
@@ -543,18 +543,18 @@ fn decode_with_command() {
         "bus: records bus.aw 2, bus.w 2, bus.b 3, bus.ar 8, bus.r 8, bus.wr 2, bus.rd 8; violations bus.errors 2, bus.wr.unmatched 1, bus.rd.unmatched 0\n`records <stream>` lists one; `protocols axilite` says what each stream and field is"
     );
     assert!(s.ok("view", json!({})).contains("aclk"), "the rows stay");
-    assert_eq!(s.ok("records", json!({"stream": "bus.wr"})), "2 of 2\nstart\tend\tdelay\taddr\tdata\tstrb\tresp\n30ns\t50ns\t10ns\t0x10\t0x11111111\t0xF\t0x0\n60ns\t120ns\t20ns\t0x14\t0x22222222\t0x3\t0x0");
-    assert_eq!(s.ok("records", json!({"stream": "bus.errors"})), "2 of 2\nstart\tend\trule\n180ns\t190ns\tr_resp\n210ns\t220ns\taw_dropped");
+    assert_eq!(s.ok("records", json!({"stream": "bus.wr"})), "2 of 2\nn\tstart\tend\tdelay\taddr\tdata\tstrb\tresp\n0\t30ns\t50ns\t10ns\t0x10\t0x11111111\t0xF\t0x0\n1\t60ns\t120ns\t20ns\t0x14\t0x22222222\t0x3\t0x0");
+    assert_eq!(s.ok("records", json!({"stream": "bus.errors"})), "2 of 2\nn\tstart\tend\trule\n0\t180ns\t190ns\tr_resp\n1\t210ns\t220ns\taw_dropped");
     // `where` picks records by their fields, on each record only (never `z` between them)
     let rd = |w: &str, count_only| json!({"stream": "bus.rd", "where": w, "count_only": count_only});
-    assert_eq!(s.ok("records", rd("resp != 0", false)), "1 of 1 matching, of 8\nstart\tend\tdelay\taddr\tdata\tresp\n170ns\t190ns\t10ns\t0x20\t0xDEADBEEF\t0x2");
+    assert_eq!(s.ok("records", rd("resp != 0", false)), "1 of 1 matching, of 8\nn\tstart\tend\tdelay\taddr\tdata\tresp\n1\t170ns\t190ns\t10ns\t0x20\t0xDEADBEEF\t0x2");
     assert_eq!(s.ok("records", rd("resp != 0", true)), "1 matching records, of 8, first 170ns, last 170ns");
     assert_eq!(s.ok("records", rd("addr == 0x99", false)), "no matching records, of 8");
-    assert_eq!(s.ok("records", json!({"stream": "bus.errors", "where": "rule == aw_dropped && past(rule) == r_resp"})), "1 of 1 matching, of 2\nstart\tend\trule\n210ns\t220ns\taw_dropped");
-    assert_eq!(s.tool("records", rd("adr == 1", false)), Err("bus.rd: no field adr (fields: delay, addr, data, resp)".into()));
+    assert_eq!(s.ok("records", json!({"stream": "bus.errors", "where": "rule == aw_dropped && past(rule) == r_resp"})), "1 of 1 matching, of 2\nn\tstart\tend\trule\n1\t210ns\t220ns\taw_dropped");
+    assert_eq!(s.tool("records", rd("adr == 1", false)), Err("bus.rd: no field adr (fields: delay, addr, data, resp, and n, the record's number)".into()));
     // a delay is a time: in the unit asked for, and compared with one
     let wr = json!({"stream": "bus.wr", "where": "delay == 20ns", "unit": "ps"});
-    assert_eq!(s.ok("records", wr), "1 of 1 matching, of 2\nstart\tend\tdelay\taddr\tdata\tstrb\tresp\n60000ps\t120000ps\t20000ps\t0x14\t0x22222222\t0x3\t0x0");
+    assert_eq!(s.ok("records", wr), "1 of 1 matching, of 2\nn\tstart\tend\tdelay\taddr\tdata\tstrb\tresp\n1\t60000ps\t120000ps\t20000ps\t0x14\t0x22222222\t0x3\t0x0");
     // ordered, as unsigned numbers; a time with a time
     assert_eq!(s.ok("records", json!({"stream": "bus.wr", "where": "delay > 10ns", "count_only": true})), "1 matching records, of 2, first 60ns, last 60ns");
     assert_eq!(s.ok("records", rd("addr >= 0x1C && addr < 0x20", true)), "5 matching records, of 8, first 260ns, last 380ns");
@@ -616,6 +616,27 @@ fn protocols_describe_themselves() {
 
 /// A trace in fs whose clock and signals lag by a femtosecond or two, as a real capture's: once a clock
 /// is searched, answers are in its unit, whole numbers of it; a finer unit gives them exactly.
+/// `records` `where` on a `pair`: its two sides compared field with field, as a scoreboard does,
+/// and a record picked by its number. reqresp.vcd paired by order: (req_id, resp_id) (1, 2),
+/// (2, 1), (3, 0).
+#[test]
+fn records_compare_fields_and_pick_by_number() {
+    let dir = Dir::new("reqresp");
+    let mut s = Server::start(&dir.0);
+    s.ok("open", json!({"trace": std::fs::canonicalize("tests/data/reqresp.vcd").unwrap()}));
+    s.ok("command", json!({"line": "protocol req clock=clk when=req_valid id=req_id"}));
+    s.ok("command", json!({"line": "protocol resp clock=clk when=resp_valid id=resp_id"}));
+    s.ok("command", json!({"line": "decode o pair request=req response=resp"}));
+    let o = |w: &str| json!({"stream": "o", "where": w});
+    assert_eq!(s.ok("records", o("req_id > resp_id")), "2 of 2 matching, of 3\nn\tstart\tend\tdelay\treq_id\tresp_id\n1\t25ns\t65ns\t30ns\t0x2\t0x1\n2\t45ns\t95ns\t40ns\t0x3\t0x0");
+    assert_eq!(s.ok("records", o("req_id == resp_id")), "no matching records, of 3");
+    assert_eq!(s.ok("records", o("n == 0 || past(resp_id) == req_id")), "2 of 2 matching, of 3\nn\tstart\tend\tdelay\treq_id\tresp_id\n0\t15ns\t45ns\t20ns\t0x1\t0x2\n1\t25ns\t65ns\t30ns\t0x2\t0x1");
+    // the number counts from the stream's start, not from `from`
+    assert_eq!(s.ok("records", json!({"stream": "o", "from": "40ns", "where": "n == 2", "count_only": true})), "1 matching records, of 1, first 45ns, last 45ns");
+    // signals in `find` still compare with constants (spec §8)
+    assert!(s.tool("find", json!({"expr": "req_id != resp_id"})).unwrap_err().contains("compares with a constant"));
+}
+
 #[test]
 fn times_in_the_clocks_unit() {
     let dir = Dir::new("skew");
@@ -626,7 +647,7 @@ fn times_in_the_clocks_unit() {
     assert_eq!(s.ok("find", json!({"expr": "@clk valid && ready", "show": ["data"]})), "time\tdata\n20ns\t0x5\n30ns\t0x6");
     assert_eq!(s.ok("values", data.clone()), "data:\n  0ns 0x0\n  20ns 0x5\n  30ns 0x6\n");
     s.ok("command", json!({"line": "protocol rx clock=clk when=valid && ready d=data"}));
-    assert_eq!(s.ok("records", json!({"stream": "rx"})), "2 of 2\nstart\tend\td\n20ns\t30ns\t0x5\n30ns\t40ns\t0x6");
+    assert_eq!(s.ok("records", json!({"stream": "rx"})), "2 of 2\nn\tstart\tend\td\n0\t20ns\t30ns\t0x5\n1\t30ns\t40ns\t0x6");
     // exact in a finer unit, or with the unit set
     assert_eq!(s.ok("find", json!({"expr": "@clk valid", "unit": "fs"})), "from\tlast\tcycles\n20000001fs\t30000001fs\t2");
     s.ok("command", json!({"line": "unit ps"}));
@@ -682,11 +703,11 @@ fn spi_and_uart_with_command() {
     assert!(!uart.contains("levels"), "the line's changes are no stream of the instance's");
     s.ok("open", json!({"trace": std::fs::canonicalize("tests/data/spi.vcd").unwrap()}));
     s.ok("command", json!({"line": "decode flash spi sclk=spi_clk cs=spi_cs_n mosi=spi_mosi miso=spi_miso mode=0"}));
-    assert_eq!(s.ok("records", json!({"stream": "flash.transfer"})), "2 of 2\nstart\tend\twords\tmosi\tmiso\tcomplete\n100ns\t430ns\t0x2\ta5 3c\t5a c3\t1\n500ns\t750ns\t0x2\tf0 a\t0f 5\t1");
-    assert_eq!(s.ok("records", json!({"stream": "flash.word", "where": "complete == 0"})), "1 of 1 matching, of 4\nstart\tend\tmosi\tmiso\tcomplete\n670ns\t750ns\t0xA\t0x5\t0");
+    assert_eq!(s.ok("records", json!({"stream": "flash.transfer"})), "2 of 2\nn\tstart\tend\twords\tmosi\tmiso\tcomplete\n0\t100ns\t430ns\t0x2\ta5 3c\t5a c3\t1\n1\t500ns\t750ns\t0x2\tf0 a\t0f 5\t1");
+    assert_eq!(s.ok("records", json!({"stream": "flash.word", "where": "complete == 0"})), "1 of 1 matching, of 4\nn\tstart\tend\tmosi\tmiso\tcomplete\n3\t670ns\t750ns\t0xA\t0x5\t0");
     s.ok("open", json!({"trace": std::fs::canonicalize("tests/data/uart.vcd").unwrap()}));
     assert_eq!(s.tool("command", json!({"line": "decode console uart line=uart_tx"})), Err("console: uart: needs baud=<a positive number of bits a second>".into()));
     s.ok("command", json!({"line": "decode console uart line=uart_tx baud=1000000 parity=even"}));
-    assert_eq!(s.ok("records", json!({"stream": "console.byte"})), "4 of 4\nstart\tend\tdata\n1us\t12us\t0x55\n13us\t24us\t0xA3\n25us\t36us\t0xF\n37us\t48us\t0x81");
-    assert_eq!(s.ok("records", json!({"stream": "console.errors"})), "2 of 2\nstart\tend\trule\n25us\t36us\tparity\n37us\t48us\tframing");
+    assert_eq!(s.ok("records", json!({"stream": "console.byte"})), "4 of 4\nn\tstart\tend\tdata\n0\t1us\t12us\t0x55\n1\t13us\t24us\t0xA3\n2\t25us\t36us\t0xF\n3\t37us\t48us\t0x81");
+    assert_eq!(s.ok("records", json!({"stream": "console.errors"})), "2 of 2\nn\tstart\tend\trule\n0\t25us\t36us\tparity\n1\t37us\t48us\tframing");
 }

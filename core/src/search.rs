@@ -55,6 +55,9 @@ pub enum Expr {
     Cmp { sig: Probe, past: u32, op: Op, target: Option<Target> },
     /// `stable(sig)`: the same value as one sample earlier.
     Stable { sig: Probe, past: u32 },
+    /// `a != b`: two fields of a record, as unsigned numbers or text; only in a `records` `where`
+    /// (`parse_filter`), as signals compare with constants (spec §8).
+    Fields { a: Probe, a_past: u32, op: Op, b: Probe, b_past: u32 },
 }
 
 /// How `Expr::Cmp` compares: `<` and the like as unsigned numbers, an unknown bit never.
@@ -92,7 +95,16 @@ pub type Resolve<'a> = dyn FnMut(&str) -> Result<(Probe, Option<u32>, Option<Nam
 /// Parse `[@clk] expr`. A value with a time unit (`delay == 40ns`) is that many ticks, by the
 /// trace's femtoseconds per tick `fpt`.
 pub fn parse_query(text: &str, fpt: Option<u128>, resolve: &mut Resolve) -> Result<Query, String> {
-    let mut p = Parser { s: text.trim(), fpt, resolve };
+    parse_expr(text, fpt, resolve, false)
+}
+
+/// Parse a `records` `where`: as `parse_query`, and a field compares with another field too.
+pub fn parse_filter(text: &str, fpt: Option<u128>, resolve: &mut Resolve) -> Result<Query, String> {
+    parse_expr(text, fpt, resolve, true)
+}
+
+fn parse_expr(text: &str, fpt: Option<u128>, resolve: &mut Resolve, fields: bool) -> Result<Query, String> {
+    let mut p = Parser { s: text.trim(), fpt, resolve, fields };
     let clock = if p.eat("@") {
         let w = p.word();
         Some((p.resolve)(&w)?.0)
@@ -110,6 +122,8 @@ struct Parser<'a> {
     s: &'a str,
     fpt: Option<u128>,
     resolve: &'a mut Resolve<'a>,
+    /// Operands on the right too (`Expr::Fields`).
+    fields: bool,
 }
 
 impl Parser<'_> {
@@ -197,6 +211,7 @@ impl Parser<'_> {
         let Some(&(sym, op)) = OPS.iter().find(|(sym, _)| self.eat(sym)) else {
             return Ok(Expr::Cmp { sig, past, op: Op::Eq, target: None });
         };
+        let right = self.s;
         let mut value = self.word();
         if crate::time::has_unit(&value) {
             value = (crate::time::parse(&value, self.fpt).map_err(|e| format!("{name}: {e}"))?.round() as u64).to_string();
@@ -207,6 +222,11 @@ impl Parser<'_> {
             Ok(t) => t,
             Err(e) => {
                 let call = self.s.trim_start().starts_with('(');
+                if self.fields && (call || (self.resolve)(&value).is_ok()) {
+                    self.s = right;
+                    let (_, b, _, _, b_past) = self.operand()?;
+                    return Ok(Expr::Fields { a: sig, a_past: past, op, b, b_past });
+                }
                 return Err(match call || (self.resolve)(&value).is_ok() {
                     true => format!(
                         "{name}: compares with a constant, not with {value}{}: a protocol's rule is likely a decoder's check already (`protocols`); a change is `!stable({name})`",
@@ -262,6 +282,23 @@ pub fn holds<V: std::borrow::Borrow<Val>>(e: &Expr, value: &dyn Fn(Probe, u32) -
             (Some(a), Some(b)) => a.as_ref().map(|v| v.borrow()) == b.as_ref().map(|v| v.borrow()),
             _ => false,
         },
+        Expr::Fields { a, a_past, op, b, b_past } => {
+            let (x, y) = (value(*a, *a_past).flatten(), value(*b, *b_past).flatten());
+            let order = match (x.as_ref().map(|v| v.borrow()), y.as_ref().map(|v| v.borrow())) {
+                (Some(Val::Bits(x)), Some(Val::Bits(y))) => unsigned(x).zip(unsigned(y)).map(|(x, y)| x.cmp(&y)),
+                (Some(Val::Text(x)), Some(Val::Text(y))) => Some(x.cmp(y)),
+                _ => None,
+            };
+            use std::cmp::Ordering::*;
+            match op {
+                Op::Eq => order == Some(Equal),
+                Op::Ne => order != Some(Equal),
+                Op::Lt => order == Some(Less),
+                Op::Le => matches!(order, Some(Less | Equal)),
+                Op::Gt => order == Some(Greater),
+                Op::Ge => matches!(order, Some(Greater | Equal)),
+            }
+        }
         Expr::Cmp { sig, past, op, target } => {
             let v = value(*sig, *past).flatten();
             let v = v.as_ref().map(|v| v.borrow());
@@ -297,6 +334,7 @@ pub fn probes(e: &Expr, out: &mut Vec<(Probe, u32)>) {
         Expr::Not(a) => probes(a, out),
         Expr::Cmp { sig, past, .. } => out.push((*sig, *past)),
         Expr::Stable { sig, past } => out.extend([(*sig, *past), (*sig, past + 1)]),
+        Expr::Fields { a, a_past, b, b_past, .. } => out.extend([(*a, *a_past), (*b, *b_past)]),
     }
 }
 

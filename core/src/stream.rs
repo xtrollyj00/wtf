@@ -139,27 +139,39 @@ impl Stream {
         Page { records: &self.records[a..b.min(a.saturating_add(limit))], total: b - a }
     }
 
-    /// The records starting in [from, to] for which `filter` holds, and how many start there in
-    /// all. `filter` is a search expression over the fields, named bare (`addr != 0x1C && resp ==
-    /// 0`), evaluated on each record, so never on the gaps between them; `past(x)` is x of the
-    /// record before.
-    pub fn select(&self, from: Tick, to: Tick, filter: Option<&str>, fpt: Option<u128>) -> Result<(Vec<&Record>, usize), String> {
+    /// The numbers of the records starting in [from, to] for which `filter` holds, and how many
+    /// start there in all. `filter` is a search expression over the fields, named bare (`addr !=
+    /// 0x1C && resp == 0`), evaluated on each record, so never on the gaps between them; `past(x)`
+    /// is x of the record before, `n` the record's number unless a field has that name, and a
+    /// field compares with another field too (`req_addr != resp_addr`).
+    pub fn select(&self, from: Tick, to: Tick, filter: Option<&str>, fpt: Option<u128>) -> Result<(Vec<usize>, usize), String> {
         let all = self.records(from, to, usize::MAX);
-        let Some(text) = filter else { return Ok((all.records.iter().collect(), all.total)) };
-        let q = crate::search::parse_query(text, fpt, &mut |name| match self.schema.iter().position(|f| f.name == name) {
+        let first = self.records.partition_point(|r| r.start < from);
+        let numbers = first..first + all.records.len();
+        let Some(text) = filter else { return Ok((numbers.collect(), all.total)) };
+        // `n`, the record's number, is the probe after the fields
+        let n = self.schema.len();
+        let q = crate::search::parse_filter(text, fpt, &mut |name| match self.schema.iter().position(|f| f.name == name) {
             Some(k) => Ok(((k, None), self.schema[k].width, None)),
+            None if name == "n" => Ok(((n, None), Some(64), None)),
             None => {
                 let names: Vec<&str> = self.schema.iter().map(|f| f.name.as_str()).collect();
-                Err(format!("{}: no field {name} (fields: {})", self.name, names.join(", ")))
+                Err(format!("{}: no field {name} (fields: {}, and n, the record's number)", self.name, names.join(", ")))
             }
         })?;
         if q.clock.is_some() {
             return Err("a record filter has no clock: it is evaluated on each record".into());
         }
-        let first = self.records.partition_point(|r| r.start < from);
-        let picked = (first..first + all.records.len())
-            .filter(|&i| crate::search::holds(&q.expr, &|(k, _), n| i.checked_sub(n as usize).map(|i| self.records[i].fields[k].clone())))
-            .map(|i| &self.records[i])
+        let picked = numbers
+            .filter(|&i| {
+                crate::search::holds(&q.expr, &|(k, _), back| {
+                    let i = i.checked_sub(back as usize)?;
+                    Some(match k == n {
+                        true => Some(Val::Bits(format!("{i:064b}"))),
+                        false => self.records[i].fields[k].clone(),
+                    })
+                })
+            })
             .collect();
         Ok((picked, all.total))
     }

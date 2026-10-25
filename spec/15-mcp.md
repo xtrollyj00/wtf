@@ -52,8 +52,8 @@ reuse wtf's own pieces:
   each match, as the clock edge samples it (one row per cycle), so `@clk awvalid && awready` with
   `show: [awaddr, wdata]` is a table of the writes. `to` ends the search, e.g. at a reset.
   `count_only` gives the number of matches and runs, first and last.
-- `records` lists a stream's records (section 16) as a table, `start`, `end` and a
-  column per field, headed with how many are shown of all in the range (`20 of 157`). With more
+- `records` lists a stream's records (section 16) as a table, `n` (the record's number, as the
+  stream's value `#n` shows it), `start`, `end` and a column per field, headed with how many are shown of all in the range (`20 of 157`). With more
   than one record, long values are shortened, a frame's data to its first 8 bytes and its size
   (`f7 88 0c 5c 25 8f 30 3a ... (580 bytes)`), other text to 40 characters, and the header says
   so; one record shows them whole. `from` /
@@ -62,7 +62,10 @@ reuse wtf's own pieces:
   `where` keeps the records a search
   expression over the fields holds for, the fields named bare (`addr != 0x1C && resp != 0`,
   `rule == dropped`; `past(x)` is x of the record before), evaluated on each record, so never on
-  the gaps between records where field signals are `z`; the header counts the matches too
+  the gaps between records where field signals are `z`. `n` is the record's number unless a field
+  has that name (`n == 138`, a testbench's packet #138), and a field compares with another field
+  too, as unsigned numbers or text (`req_addr != resp_addr`: a `pair`'s two sides, as a
+  scoreboard checks them). The header counts the matches too
   (`3 of 3 matching, of 157`). `group_by` names fields and answers one line per distinct value of
   them, in order of first appearance, with how many records have it and the first and last start
   (`128 × addr=0x1C data=0x3 (2.975us .. 69.015us)`), so 128 identical polls are one line. Streams are declared in `workspace` with

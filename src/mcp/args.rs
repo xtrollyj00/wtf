@@ -212,7 +212,8 @@ pub struct RecordsArgs {
     pub to: Option<String>,
     /// Only the records for which this holds: a search expression over the stream's fields, named
     /// bare, evaluated on each record (`addr != 0x1C && resp != 0`, `rule == dropped`, `past(x)` is x
-    /// of the record before).
+    /// of the record before); `n` is the record's number (`n == 138`), and a field compares with
+    /// another (`req_addr != resp_addr`, a `pair`'s two sides).
     #[serde(rename = "where")]
     pub filter: Option<String>,
     /// Fields to group by: one line per distinct value of them, with how many records have it and

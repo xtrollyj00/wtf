@@ -373,7 +373,7 @@ impl Wtf {
         Ok(budget(out))
     }
 
-    #[tool(description = "A stream's records (made by `command` `decode` / `protocol`, or declared in `workspace`) as a table: start, end and each field, headed `20 of 157` (shown of all in the range); `where` picks records by their fields (`resp != 0`), headed `3 of 3 matching, of 157`; `group_by` answers one line per distinct value of the fields named. `count_only` only counts them.")]
+    #[tool(description = "A stream's records (made by `command` `decode` / `protocol`, or declared in `workspace`) as a table: its number n, start, end and each field, headed `20 of 157` (shown of all in the range); `where` picks records by their fields (`resp != 0`, `n == 138`, `req_addr != resp_addr`), headed `3 of 3 matching, of 157`; `group_by` answers one line per distinct value of the fields named. `count_only` only counts them.")]
     fn records(&self, Parameters(a): Parameters<RecordsArgs>) -> Result<String, String> {
         let w = current(self)?;
         let app = lock(&w);
@@ -401,7 +401,8 @@ impl Wtf {
         };
         let from = a.from.as_deref().map(|f| at(&app, f)).transpose()?.unwrap_or(0);
         let to = a.to.as_deref().map(|t| at(&app, t)).transpose()?.unwrap_or(app.trace.end());
-        let (picked, of) = s.select(from, to, a.filter.as_deref(), app.trace.fs_per_tick)?;
+        let (numbers, of) = s.select(from, to, a.filter.as_deref(), app.trace.fs_per_tick)?;
+        let picked: Vec<&wtf_core::stream::Record> = numbers.iter().map(|&i| &s.records[i]).collect();
         // with `where`: how many match, of how many there are
         let (matching, of) = match a.filter {
             Some(_) => (" matching", format!(", of {of}")),
@@ -443,9 +444,9 @@ impl Wtf {
         let texts: Vec<Vec<String>> = page.iter().map(|r| s.schema.iter().zip(&r.fields).map(|(f, v)| field_text(&app, f, v, u)).map(|t| if whole { t } else { shorten(t) }).collect()).collect();
         let cut = texts.iter().flatten().any(|t| t.ends_with(" bytes)") || t.ends_with(" chars)"));
         let mut lines = vec![format!("{} of {}{matching}{of}{}", page.len(), picked.len(), if cut { " (long values shortened; one record, `count: 1` with `from`, shows them whole)" } else { "" })];
-        lines.push(["start", "end"].into_iter().chain(s.schema.iter().map(|f| f.name.as_str())).collect::<Vec<_>>().join("\t"));
-        for (r, texts) in page.iter().zip(texts) {
-            lines.push(std::iter::once(format!("{}\t{}", show(&app, r.start, u), show(&app, r.end, u))).chain(texts).collect::<Vec<_>>().join("\t"));
+        lines.push(["n", "start", "end"].into_iter().chain(s.schema.iter().map(|f| f.name.as_str())).collect::<Vec<_>>().join("\t"));
+        for ((r, n), texts) in page.iter().zip(&numbers).zip(texts) {
+            lines.push(std::iter::once(format!("{n}\t{}\t{}", show(&app, r.start, u), show(&app, r.end, u))).chain(texts).collect::<Vec<_>>().join("\t"));
         }
         Ok(budget(lines.join("\n")))
     }
