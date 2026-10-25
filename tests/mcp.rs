@@ -652,7 +652,10 @@ fn records_compare_fields_and_pick_by_number() {
     // the number counts from the stream's start, not from `from`
     assert_eq!(s.ok("records", json!({"stream": "o", "from": "40ns", "where": "n == 2", "count_only": true})), "1 matching records, of 1, first 45ns, last 45ns");
     // signals in `find` still compare with constants (spec §8)
-    assert!(s.tool("find", json!({"expr": "req_id != resp_id"})).unwrap_err().contains("compares with a constant"));
+    // a signal compares with a signal
+    assert_eq!(s.ok("find", json!({"expr": "@clk req_valid && req_id != resp_id", "count_only": true})), "3 matches in 2 runs of consecutive cycles, first 15ns, last 45ns");
+    // `@rising(clk)` names the clock inside
+    assert_eq!(s.tool("find", json!({"expr": "@rising(clk) req_valid"})), Err("@ takes the clock signal itself, as its rising edges: @clk".into()));
 }
 
 #[test]

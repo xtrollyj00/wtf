@@ -52,9 +52,9 @@ otherwise hex; 1-bit signals always show 0 / 1 / X / Z.
 - Operators: == != < <= > >= (unsigned numbers), &&, ||, ! and parentheses. A bare signal is
   true when 1 (some bit 1, none unknown).
 - Values: 0x40, 64, 0b1000000, -12, x (unknown), z (high impedance), a name the file gives a
-  value, or a time (`40ns`). A signal compares with a value, not with another signal: such a rule
-  is usually a protocol's, which a decoder checks already (`help decode`), and a change is
-  `!stable(x)`. (`records` `where` compares two fields: `help records`.)
+  value, a time (`40ns`), or another signal (`mi_addr != reg_waddr`, `data != past(data)`). Two
+  events at different times (a request and its response) are compared as records instead: a
+  stream of each, matched with `pair` (`help decode`), their fields in `records` `where`.
 - Without a clock, a match is where the expression becomes true, so back-to-back handshakes
   are one match: use `@clk` to see each cycle.
 - `@clk ` first (a clock signal): a match is each clock cycle whose ending rising edge samples

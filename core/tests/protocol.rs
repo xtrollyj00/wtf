@@ -95,10 +95,12 @@ fn generic_check() {
     let s = ws.check("chk", "clk", &rules).unwrap();
     assert_eq!(table(&s), [row(25, 35, &["stall"]), row(45, 55, &["short"]), row(95, 105, &["stall"]), row(115, 125, &["stall"]), row(125, 135, &["stall"])]);
     assert_eq!(ws.check("chk", "clk", &pairs(&[("bad", "nope")])).err().unwrap(), "bad: unknown signal: nope");
-    // a signal on the right points to the decoders' checks and to `stable`
-    let hint = ": a protocol's rule is likely a decoder's check already (`protocols`); a change is `!stable(tdata)`";
-    assert_eq!(ws.check("chk", "clk", &pairs(&[("bad", "tdata != past(tdata)")])).err().unwrap(), format!("bad: tdata: compares with a constant, not with past(...){hint}"));
-    assert_eq!(ws.check("chk", "clk", &pairs(&[("bad", "tdata == tkeep")])).err().unwrap(), format!("bad: tdata: compares with a constant, not with tkeep{hint}"));
+    // a signal compares with a signal: `x != past(x)` is `!stable(x)`
+    let mut by = |rule: &str| table(&ws.check("chk", "clk", &pairs(&[("changed", rule)])).unwrap());
+    let stalled = "past(tvalid) && !past(tready)";
+    assert_eq!(by(&format!("{stalled} && tdata != past(tdata)")), by(&format!("{stalled} && !stable(tdata)")));
+    assert!(!by(&format!("{stalled} && tdata != past(tdata)")).is_empty());
+    assert!(by("tvalid && tdata == tdata").len() == by("tvalid").len());
     assert_eq!(ws.check("chk", "clk", &pairs(&[("bad", "tdata == 0xZQ")])).err().unwrap(), "bad: tdata: not a value: 0xZQ");
     // as an instance, its params the rules
     let short = [("short", "tvalid && tlast && tkeep != 0xF")];

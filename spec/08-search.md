@@ -53,10 +53,10 @@ clk      ▁▁▁▁▔▔▔▔▁▁▁▁▔▔▔▔
   the sample before (false at the first, which has none). So a protocol check is a search for its
   violations: `/@clk fell(valid) && !past(ready)` finds a valid dropped before its ready,
   `/@clk past(valid) && !past(ready) && !stable(data)` a payload changed while stalled.
-- A signal compares with a constant, never with another signal (`data != past(data)`, `a == b`):
-  such a rule is most often a protocol's, which a decoder checks already (section 16), and a
-  change is `!stable(x)`. The error says both. A `records` `where` (section 15) is the
-  exception: there a field compares with another field of the same record, as a `pair`'s two
-  sides are what a scoreboard compares.
+- A signal compares with a value or with another signal, as unsigned numbers or text:
+  `mi_addr != reg_waddr`, `data != past(data)` (which is `!stable(data)`). In a `records` `where`
+  (section 15) a field compares with another field of the same record, so a `pair`'s two sides
+  are compared as a scoreboard does. `@` takes the clock signal itself: `@rising(clk)` is an
+  error naming `@clk`.
 - On a bit line of an expanded bus, the search looks at that bit. String and real signals are
   searched by their text.

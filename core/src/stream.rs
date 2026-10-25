@@ -151,7 +151,7 @@ impl Stream {
         let Some(text) = filter else { return Ok((numbers.collect(), all.total)) };
         // `n`, the record's number, is the probe after the fields
         let n = self.schema.len();
-        let q = crate::search::parse_filter(text, fpt, &mut |name| match self.schema.iter().position(|f| f.name == name) {
+        let q = crate::search::parse_query(text, fpt, &mut |name| match self.schema.iter().position(|f| f.name == name) {
             Some(k) => Ok(((k, None), self.schema[k].width, None)),
             None if name == "n" => Ok(((n, None), Some(64), None)),
             None => {
