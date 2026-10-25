@@ -1,0 +1,12 @@
+diff --git a/rtl/ibex_id_stage.sv b/rtl/ibex_id_stage.sv
+--- a/rtl/ibex_id_stage.sv
++++ b/rtl/ibex_id_stage.sv
+@@ -987,7 +987,7 @@ module ibex_id_stage #(
+     // If instruction is reading register that load will be writing stall in
+     // ID until load is complete. No need to stall when reading zero register.
+     assign rf_rd_a_hz = rf_rd_a_wb_match & rf_ren_a;
+-    assign rf_rd_b_hz = rf_rd_b_wb_match & rf_ren_b;
++    assign rf_rd_b_hz = rf_rd_b_wb_match & rf_ren_b & ~lsu_we;
+ 
+     // If instruction is read register that writeback is writing forward writeback data to read
+     // data. Note this doesn't factor in load data as it arrives too late, such hazards are

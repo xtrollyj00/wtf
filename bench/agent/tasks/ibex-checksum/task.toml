@@ -1,0 +1,29 @@
+# A fix task on Ibex (lowRISC, Apache-2.0) in its maxperf configuration, 3 stages with writeback:
+# a load in writeback stalls an instruction in ID that reads the register it loads. The bug drops
+# that stall for a store's data register (rs2): the store still waits for the load's response
+# (data_req_allowed), but in the response cycle it may go, with the stale value forwarded from
+# writeback (the load's address) instead of the loaded data. Only an adjacent `lw rX; sw rX` (in
+# tb/prog.c, the struct copies in put and take) whose store is in ID by the response cycle and is
+# granted in that cycle writes a wrong word; with a wait state on the store it reads the register
+# file again, which is right by then. The visible run (seed 1) writes 6 wrong words, the first at
+# 9075ns (pc 0x1b4, address 0x504); the checksum mismatch shows at the end, at 107us. RVFI
+# reports the store data of the cycle the store first tries to go, so it shows 12 stores with the
+# stale value: only the bus (data_wdata_o at data_gnt_i) says which were written. Not
+# WritebackStage without BranchTargetALU (no standard config): upstream there mis-jumps a taken
+# branch whose first cycle waits on a store's response, which fails riscv-tests sb and sh.
+upstream = "https://github.com/lowRISC/ibex.git"
+commit = "3250d99482f1963891ef1cf19356eeaeeaa71d30"
+prompt = """
+rtl/ is the Ibex RISC-V core (RV32IMC, SystemVerilog), in its maxperf configuration.
+Its test fails: `make sim` builds it with Verilator, runs tb/prog.c on it (built by clang; the
+memory in tb/tb.sv answers after random wait states) and compares the checksum the program
+returns with the same program's result on the host. It writes sim.log and trace.fst, the
+waveform of the run (with the core's RVFI port); both are there from the failing run. The
+environment is set up: `make sim` runs as it is, in about 5 s. Find the cause in the RTL and fix
+it, so that `make sim` passes. Don't change the testbench or the Makefile.
+"""
+answer = '{"signal": "<the signal whose logic was wrong>", "pc": "<the pc of the first instruction that wrote a wrong value to memory, in hex>", "first_write": "<that write: the rising edge that starts the cycle in which data_req_o, data_we_o and data_gnt_i are high for it, one clock before the edge that samples them, in ns>", "writes": <how many memory writes in the failing run carried a wrong value>}'
+expect = '{"signal": "rf_rd_b_hz", "pc": "0x1b4", "first_write": "9075ns", "writes": 6}'
+
+[files]
+"rtl" = "rtl"
