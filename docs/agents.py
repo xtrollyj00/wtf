@@ -7,7 +7,7 @@ import sys
 RUNS = 5
 DATA = {
     "eth-parser-headers": ((5, 116, 0.029), (3, 205, 0.048)),
-    "eth-parser-stall": ((3, 77, 0.014), (4, 127, 0.018)),
+    "eth-parser-stall": ((5, 75, 0.015), (2, 153, 0.024)),
     "head-trimmer-boundary": ((4, 80, 0.014), (0, 138, 0.023)),
     "axil2mi-stale-addr": ((4, 44, 0.013), (2, 115, 0.026)),
 }
@@ -43,7 +43,7 @@ def svg(c):
            '<desc id="d">' + "; ".join(f"{t}: with wtf {a[0]} of {RUNS} right, {a[1]} s, ${a[2]}; without {b[0]} of {RUNS}, {b[1]} s, ${b[2]}" for t, (a, b) in DATA.items()) + '</desc>',
            f'<rect width="{W}" height="{H}" rx="8" fill="{c["surface"]}"/>',
            f'<text x="20" y="32" font-size="17" font-weight="600" fill="{c["ink"]}">An agent fixing failing RTL testbenches, with and without wtf</text>',
-           f'<text x="20" y="54" font-size="13" fill="{c["ink2"]}">Every run fixed its bug either way; with wtf, 16 of 20 had every answer right (9 without), sooner and cheaper.</text>']
+           f'<text x="20" y="54" font-size="13" fill="{c["ink2"]}">Every run fixed its bug either way; with wtf, 18 of 20 had every answer right (7 without), sooner and cheaper.</text>']
     # legend
     lx = 20
     for name, color in (("with wtf", c["wtf"]), ("without wtf (logs, prints, reruns)", c["bare"])):

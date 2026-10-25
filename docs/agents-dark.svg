@@ -1,9 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="820" height="334" viewBox="0 0 820 334" font-family="system-ui, -apple-system, Segoe UI, sans-serif" role="img" aria-labelledby="t d">
 <title id="t">Haiku fixing three failing RTL testbenches, with and without wtf</title>
-<desc id="d">eth-parser-headers: with wtf 5 of 5 right, 116 s, $0.029; without 3 of 5, 205 s, $0.048; eth-parser-stall: with wtf 3 of 5 right, 77 s, $0.014; without 4 of 5, 127 s, $0.018; head-trimmer-boundary: with wtf 4 of 5 right, 80 s, $0.014; without 0 of 5, 138 s, $0.023; axil2mi-stale-addr: with wtf 4 of 5 right, 44 s, $0.013; without 2 of 5, 115 s, $0.026</desc>
+<desc id="d">eth-parser-headers: with wtf 5 of 5 right, 116 s, $0.029; without 3 of 5, 205 s, $0.048; eth-parser-stall: with wtf 5 of 5 right, 75 s, $0.015; without 2 of 5, 153 s, $0.024; head-trimmer-boundary: with wtf 4 of 5 right, 80 s, $0.014; without 0 of 5, 138 s, $0.023; axil2mi-stale-addr: with wtf 4 of 5 right, 44 s, $0.013; without 2 of 5, 115 s, $0.026</desc>
 <rect width="820" height="334" rx="8" fill="#1a1a19"/>
 <text x="20" y="32" font-size="17" font-weight="600" fill="#f0efec">An agent fixing failing RTL testbenches, with and without wtf</text>
-<text x="20" y="54" font-size="13" fill="#c3c2b7">Every run fixed its bug either way; with wtf, 16 of 20 had every answer right (9 without), sooner and cheaper.</text>
+<text x="20" y="54" font-size="13" fill="#c3c2b7">Every run fixed its bug either way; with wtf, 18 of 20 had every answer right (7 without), sooner and cheaper.</text>
 <rect x="20" y="70" width="12" height="12" rx="3" fill="#3987e5"/>
 <text x="38" y="80.5" font-size="12.5" fill="#c3c2b7">with wtf</text>
 <rect x="119.6" y="70" width="12" height="12" rx="3" fill="#898781"/>
@@ -18,10 +18,10 @@
 <text x="313.0" y="128.0" font-size="11.5" fill="#c3c2b7">5</text>
 <path d="M170.0,132.0 h78.8 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-78.8 z" fill="#898781"/>
 <text x="257.8" y="142.0" font-size="11.5" fill="#c3c2b7">3</text>
-<path d="M170.0,162.0 h78.8 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-78.8 z" fill="#3987e5"/>
-<text x="257.8" y="172.0" font-size="11.5" fill="#c3c2b7">3</text>
-<path d="M170.0,176.0 h106.4 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-106.4 z" fill="#898781"/>
-<text x="285.4" y="186.0" font-size="11.5" fill="#c3c2b7">4</text>
+<path d="M170.0,162.0 h134.0 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-134.0 z" fill="#3987e5"/>
+<text x="313.0" y="172.0" font-size="11.5" fill="#c3c2b7">5</text>
+<path d="M170.0,176.0 h51.2 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-51.2 z" fill="#898781"/>
+<text x="230.2" y="186.0" font-size="11.5" fill="#c3c2b7">2</text>
 <path d="M170.0,206.0 h106.4 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-106.4 z" fill="#3987e5"/>
 <text x="285.4" y="216.0" font-size="11.5" fill="#c3c2b7">4</text>
 
@@ -36,10 +36,10 @@
 <text x="461.2" y="128.0" font-size="11.5" fill="#c3c2b7">116 s</text>
 <path d="M380.0,132.0 h130.7 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-130.7 z" fill="#898781"/>
 <text x="519.7" y="142.0" font-size="11.5" fill="#c3c2b7">205 s</text>
-<path d="M380.0,162.0 h46.6 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-46.6 z" fill="#3987e5"/>
-<text x="435.6" y="172.0" font-size="11.5" fill="#c3c2b7">77 s</text>
-<path d="M380.0,176.0 h79.5 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-79.5 z" fill="#898781"/>
-<text x="468.5" y="186.0" font-size="11.5" fill="#c3c2b7">127 s</text>
+<path d="M380.0,162.0 h45.3 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-45.3 z" fill="#3987e5"/>
+<text x="434.3" y="172.0" font-size="11.5" fill="#c3c2b7">75 s</text>
+<path d="M380.0,176.0 h96.5 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-96.5 z" fill="#898781"/>
+<text x="485.5" y="186.0" font-size="11.5" fill="#c3c2b7">153 s</text>
 <path d="M380.0,206.0 h48.6 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-48.6 z" fill="#3987e5"/>
 <text x="437.6" y="216.0" font-size="11.5" fill="#c3c2b7">80 s</text>
 <path d="M380.0,220.0 h86.7 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-86.7 z" fill="#898781"/>
@@ -54,10 +54,10 @@
 <text x="675.0" y="128.0" font-size="11.5" fill="#c3c2b7">$0.029</text>
 <path d="M590.0,132.0 h128.5 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-128.5 z" fill="#898781"/>
 <text x="727.5" y="142.0" font-size="11.5" fill="#c3c2b7">$0.048</text>
-<path d="M590.0,162.0 h34.6 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-34.6 z" fill="#3987e5"/>
-<text x="633.6" y="172.0" font-size="11.5" fill="#c3c2b7">$0.014</text>
-<path d="M590.0,176.0 h45.7 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-45.7 z" fill="#898781"/>
-<text x="644.7" y="186.0" font-size="11.5" fill="#c3c2b7">$0.018</text>
+<path d="M590.0,162.0 h37.4 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-37.4 z" fill="#3987e5"/>
+<text x="636.4" y="172.0" font-size="11.5" fill="#c3c2b7">$0.015</text>
+<path d="M590.0,176.0 h62.2 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-62.2 z" fill="#898781"/>
+<text x="661.2" y="186.0" font-size="11.5" fill="#c3c2b7">$0.024</text>
 <path d="M590.0,206.0 h34.6 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-34.6 z" fill="#3987e5"/>
 <text x="633.6" y="216.0" font-size="11.5" fill="#c3c2b7">$0.014</text>
 <path d="M590.0,220.0 h59.5 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-59.5 z" fill="#898781"/>

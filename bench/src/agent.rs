@@ -587,7 +587,8 @@ fn metrics(events: &[Value]) -> Value {
 
 /// The answer's last ```json block against the expected one, key by key: (share right, all
 /// right, each key's verdict). Hex and decimal numbers are the same number, case and a `ns`
-/// suffix don't matter, and lists are compared as sets unless the task orders them.
+/// suffix don't matter, a name is its last part (`dut.x` is `x`), and lists are compared as sets
+/// unless the task orders them.
 fn grade(answer: &str, expect: &Value, ordered: &[String]) -> (f64, bool, Value) {
     let block = answer.rsplit_once("```json").and_then(|(_, b)| b.split_once("```")).map(|(b, _)| b);
     let got: Option<Value> = block.and_then(|b| serde_json::from_str(b).ok());
@@ -614,7 +615,8 @@ fn canon(v: &Value, sort: bool) -> Value {
                 Some(h) => u64::from_str_radix(h, 16).ok(),
                 None => s.parse().ok(),
             };
-            n.map_or(Value::String(s.to_string()), Value::from)
+            // a signal named by its full path is still that signal
+            n.map_or(Value::String(s.rsplit('.').next().unwrap_or(s).to_string()), Value::from)
         }
         Value::Number(n) => n.as_u64().map_or(v.clone(), Value::from),
         Value::Array(a) => {
@@ -699,6 +701,10 @@ mod tests {
         let answer = "```json\n{}\n```\n```json\n{\"writes\": [{\"addr\": \"0x10\", \"data\": \"0x11111111\"}], \"frames\": [4, 10], \"n\": 1}\n```";
         assert_eq!(grade(answer, &expect, &ordered), (0.5, false, json!({"writes": true, "frames": false, "n": true, "lat": false})));
         assert_eq!(grade("no json here", &expect, &ordered).0, 0.0);
+        // a name by its full path
+        let sig = json!({"signal": "packets_in_flight"});
+        assert!(grade("```json\n{\"signal\": \"axis_eth_parser.PACKETS_IN_FLIGHT\"}\n```", &sig, &[]).1);
+        assert!(!grade("```json\n{\"signal\": \"headers_accepted\"}\n```", &sig, &[]).1);
     }
 
     #[test]

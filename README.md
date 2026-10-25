@@ -83,7 +83,7 @@ also say when and where things went wrong, in fewer simulation runs, sooner and 
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/agents-dark.svg">
-  <img alt="Claude Haiku fixing four failing RTL testbenches, 5 runs each with and without wtf. Every run fixed its bug. Every answer right, with wtf / without: eth-parser-headers 5 / 3, eth-parser-stall 3 / 4, head-trimmer-boundary 4 / 0, axil2mi-stale-addr 4 / 2. Median time: 116 / 205 s, 77 / 127 s, 80 / 138 s, 44 / 115 s. Median cost: $0.029 / $0.048, $0.014 / $0.018, $0.014 / $0.023, $0.013 / $0.026." src="docs/agents.svg">
+  <img alt="Claude Haiku fixing four failing RTL testbenches, 5 runs each with and without wtf. Every run fixed its bug. Every answer right, with wtf / without: eth-parser-headers 5 / 3, eth-parser-stall 5 / 2, head-trimmer-boundary 4 / 0, axil2mi-stale-addr 4 / 2. Median time: 116 / 205 s, 75 / 153 s, 80 / 138 s, 44 / 115 s. Median cost: $0.029 / $0.048, $0.015 / $0.024, $0.014 / $0.023, $0.013 / $0.026." src="docs/agents.svg">
 </picture>
 
 ## Documentation

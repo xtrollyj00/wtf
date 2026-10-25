@@ -182,16 +182,23 @@ right, `evidence` the share of keys right, costs are medians:
 |---|---|---|---|---|---|---|---|---|---|
 | eth-parser-headers | on | 5/5 | 5/5 | 1.00 | 1 | 1.6 | 0.84M | $0.029 | 116 s |
 | | off | 3/5 | 5/5 | 0.73 | 2 | 7.8 | 1.24M | $0.048 | 205 s |
-| eth-parser-stall | on | 3/5 | 5/5 | 0.87 | 1 | 0.6 | 0.38M | $0.014 | 77 s |
-| | off | 4/5 | 5/5 | 0.87 | 2 | 7.4 | 0.60M | $0.018 | 127 s |
+| eth-parser-stall * | on | 5/5 | 5/5 | 1.00 | 1 | 0.6 | 0.38M | $0.015 | 75 s |
+| | off | 2/5 | 5/5 | 0.80 | 2 | 4.0 | 0.66M | $0.024 | 153 s |
 | head-trimmer-boundary | on | 4/5 | 5/5 | 0.90 | 1 | 1.0 | 0.37M | $0.014 | 80 s |
 | | off | 0/5 | 5/5 | 0.50 | 1 | 8.0 | 0.61M | $0.023 | 138 s |
+
+\* Re-run at 7c0690d, `--jobs 5`: the first run asked "when the parser stopped taking RX data", which
+is a clock cycle's start or its ending edge 5 ns later; agents with wtf gave the start, as `find
+@clk` reports it, those without the edge, as cocotb prints it, so wtf scored 3/5 against 4/5 for
+the wording. It now asks for the start of the last RX handshake's cycle, and the grader takes a
+signal by its last name (`axis_eth_parser.packets_in_flight` had failed as a full path).
 
 - Every run fixed its bug, with wtf or without: these bugs are found from the log and the code.
   The tasks don't measure whether wtf helps fix; harder ones (the symptom far from the cause, a
   bug that reads as correct code, slow reruns) are for that.
-- wtf gets the evidence: 12 of 15 runs had every key right with it, 7 of 15 without. Without it,
-  no run found when head-trimmer's first bad beat left TX.
+- wtf gets the evidence: 14 of 15 runs had every key right with it, 5 of 15 without. Without it,
+  no run found when head-trimmer's first bad beat left TX, and printing at clock edges, 3 of 5
+  gave eth-parser-stall's edge where its cycle's start was asked.
 - With wtf an agent ran `make sim` once, to confirm its fix, against 2 - 3 runs of prints without;
   it took 0.6 - 0.7 times the tokens, 0.6 - 0.8 times the cost and about 0.6 times the time, on
   every task.
