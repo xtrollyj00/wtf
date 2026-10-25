@@ -587,8 +587,8 @@ fn metrics(events: &[Value]) -> Value {
 
 /// The answer's last ```json block against the expected one, key by key: (share right, all
 /// right, each key's verdict). Hex and decimal numbers are the same number, case and a `ns`
-/// suffix don't matter, a name is its last part (`dut.x` is `x`), and lists are compared as sets
-/// unless the task orders them.
+/// suffix don't matter, a name is its last part (`dut.x` is `x`), lists are compared as sets
+/// unless the task orders them, and an expected `a|b` takes either.
 fn grade(answer: &str, expect: &Value, ordered: &[String]) -> (f64, bool, Value) {
     let block = answer.rsplit_once("```json").and_then(|(_, b)| b.split_once("```")).map(|(b, _)| b);
     let got: Option<Value> = block.and_then(|b| serde_json::from_str(b).ok());
@@ -597,7 +597,11 @@ fn grade(answer: &str, expect: &Value, ordered: &[String]) -> (f64, bool, Value)
         .iter()
         .map(|(k, v)| {
             let sort = !ordered.contains(k);
-            let ok = got.as_ref().and_then(|g| g.get(k)).is_some_and(|g| canon(g, sort) == canon(v, sort));
+            let alternatives = match v {
+                Value::String(s) => s.split('|').map(|a| json!(a)).collect(),
+                _ => vec![v.clone()],
+            };
+            let ok = got.as_ref().and_then(|g| g.get(k)).is_some_and(|g| alternatives.iter().any(|v| canon(g, sort) == canon(v, sort)));
             (k.clone(), json!(ok))
         })
         .collect();
@@ -705,6 +709,10 @@ mod tests {
         let sig = json!({"signal": "packets_in_flight"});
         assert!(grade("```json\n{\"signal\": \"axis_eth_parser.PACKETS_IN_FLIGHT\"}\n```", &sig, &[]).1);
         assert!(!grade("```json\n{\"signal\": \"headers_accepted\"}\n```", &sig, &[]).1);
+        // either of the names a task takes
+        let either = json!({"signal": "rf_ren_b_o|rf_ren_b"});
+        assert!(grade("```json\n{\"signal\": \"decoder.rf_ren_b\"}\n```", &either, &[]).1);
+        assert!(!grade("```json\n{\"signal\": \"rf_ren\"}\n```", &either, &[]).1);
     }
 
     #[test]
