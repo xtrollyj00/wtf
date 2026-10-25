@@ -6,10 +6,10 @@ import sys
 # task: (runs with every answer right, of 5; median wall s; median cost $), with wtf / without
 RUNS = 5
 DATA = {
-    "eth-parser-headers": ((5, 116, 0.029), (3, 205, 0.048)),
-    "eth-parser-stall": ((5, 75, 0.015), (2, 153, 0.024)),
-    "head-trimmer-boundary": ((4, 80, 0.014), (0, 138, 0.023)),
-    "axil2mi-stale-addr": ((4, 44, 0.013), (2, 115, 0.026)),
+    "eth-parser-headers": ((3, 137, 0.032), (1, 203, 0.045)),
+    "eth-parser-stall": ((5, 77, 0.012), (2, 146, 0.024)),
+    "head-trimmer-boundary": ((5, 99, 0.013), (0, 94, 0.014)),
+    "axil2mi-stale-addr": ((5, 46, 0.016), (1, 86, 0.017)),
 }
 PANELS = [  # title, field, axis maximum, value label
     ("Every answer right (runs of 5)", 0, RUNS, lambda v: f"{v}"),
@@ -43,7 +43,7 @@ def svg(c):
            '<desc id="d">' + "; ".join(f"{t}: with wtf {a[0]} of {RUNS} right, {a[1]} s, ${a[2]}; without {b[0]} of {RUNS}, {b[1]} s, ${b[2]}" for t, (a, b) in DATA.items()) + '</desc>',
            f'<rect width="{W}" height="{H}" rx="8" fill="{c["surface"]}"/>',
            f'<text x="20" y="32" font-size="17" font-weight="600" fill="{c["ink"]}">An agent fixing failing RTL testbenches, with and without wtf</text>',
-           f'<text x="20" y="54" font-size="13" fill="{c["ink2"]}">Every run fixed its bug either way; with wtf, 18 of 20 had every answer right (7 without), sooner and cheaper.</text>']
+           f'<text x="20" y="54" font-size="13" fill="{c["ink2"]}">Every run fixed its bug either way; with wtf, 18 of 20 had every answer right (4 without), mostly sooner and cheaper.</text>']
     # legend
     lx = 20
     for name, color in (("with wtf", c["wtf"]), ("without wtf (logs, prints, reruns)", c["bare"])):
@@ -66,7 +66,7 @@ def svg(c):
                 w = span * v / top
                 out.append(bar(x0, yy, w, BAR, color))
                 out.append(f'<text x="{x0 + max(w, 0) + 5:.1f}" y="{yy + BAR - 2:.1f}" font-size="11.5" fill="{c["ink2"]}">{label(v)}</text>')
-    out.append(f'<text x="20" y="{H - 18}" font-size="11.5" fill="{c["muted"]}">claude-haiku-5-5, {RUNS} runs per task and arm, at most 3 simulations each; wtf-bench agent, spec §18 has the table (2026-10-25)</text>')
+    out.append(f'<text x="20" y="{H - 18}" font-size="11.5" fill="{c["muted"]}">claude-haiku-5-5, wtf ef0ae14, {RUNS} runs per task and arm, at most 3 simulations each; wtf-bench agent, spec §18 has the table (2026-10-25)</text>')
     out.append("</svg>")
     return "\n".join(out) + "\n"
 

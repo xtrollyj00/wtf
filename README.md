@@ -78,12 +78,12 @@ a session file for you to open. `wtf --attach` lists what agents have open.
 How much it helps is measured, not claimed: `wtf-bench agent` gives an agent failing RTL
 testbenches to debug and fix, with wtf and without it (logs, prints and reruns only). Without it
 the agent still fixed every bug, as these bugs show in the code; with it, it could more often
-also say when and where things went wrong, in fewer simulation runs, sooner and for less. The numbers and how they were taken are in
+also say when and where things went wrong, in fewer simulation runs, and mostly sooner and for less. The numbers and how they were taken are in
 [spec §18](spec/18-deferred.md).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/agents-dark.svg">
-  <img alt="Claude Haiku fixing four failing RTL testbenches, 5 runs each with and without wtf. Every run fixed its bug. Every answer right, with wtf / without: eth-parser-headers 5 / 3, eth-parser-stall 5 / 2, head-trimmer-boundary 4 / 0, axil2mi-stale-addr 4 / 2. Median time: 116 / 205 s, 75 / 153 s, 80 / 138 s, 44 / 115 s. Median cost: $0.029 / $0.048, $0.015 / $0.024, $0.014 / $0.023, $0.013 / $0.026." src="docs/agents.svg">
+  <img alt="Claude Haiku fixing four failing RTL testbenches, 5 runs each with and without wtf. Every run fixed its bug. Every answer right, with wtf / without: eth-parser-headers 3 / 1, eth-parser-stall 5 / 2, head-trimmer-boundary 5 / 0, axil2mi-stale-addr 5 / 1. Median time: 137 / 203 s, 77 / 146 s, 99 / 94 s, 46 / 86 s. Median cost: $0.032 / $0.045, $0.012 / $0.024, $0.013 / $0.014, $0.016 / $0.017." src="docs/agents.svg">
 </picture>
 
 ## Documentation
