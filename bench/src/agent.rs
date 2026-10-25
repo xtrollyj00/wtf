@@ -17,9 +17,10 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const USAGE: &str = "usage:
-  wtf-bench agent run [--wtf <path>] [--model <model>] [--runs 1] [--budget 1.0|none] [--timeout 600] [--review] [--no-mcp] [--max-sims N] [<task>...]
+  wtf-bench agent run [--wtf <path>] [--model <model>] [--runs 1] [--budget 1.0|none] [--timeout 600] [--review] [--no-mcp] [--max-sims N] [--jobs 1] [<task>...]
                                        --no-mcp: fix tasks without wtf, as a baseline
                                        --max-sims: fix tasks get N `make sim` runs, then make refuses
+                                       --jobs: runs at once (each in its own directory)
   wtf-bench agent check [<task>...]    prove fix tasks without an agent
   wtf-bench agent report";
 
@@ -46,11 +47,12 @@ struct Opts {
     review: bool,
     no_mcp: bool,
     max_sims: Option<u64>,
+    jobs: usize,
     tasks: Vec<String>,
 }
 
 fn opts(args: &[String]) -> Result<Opts, String> {
-    let mut o = Opts { wtf: None, model: None, runs: 1, budget: "1.0".into(), timeout: 600, review: false, no_mcp: false, max_sims: None, tasks: vec![] };
+    let mut o = Opts { wtf: None, model: None, runs: 1, budget: "1.0".into(), timeout: 600, review: false, no_mcp: false, max_sims: None, jobs: 1, tasks: vec![] };
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = || it.next().cloned().ok_or(format!("{a} needs a value\n{USAGE}"));
@@ -62,6 +64,7 @@ fn opts(args: &[String]) -> Result<Opts, String> {
             "--timeout" => o.timeout = val()?.parse().map_err(|_| format!("--timeout: seconds\n{USAGE}"))?,
             "--review" => o.review = true,
             "--no-mcp" => o.no_mcp = true,
+            "--jobs" => o.jobs = val()?.parse().ok().filter(|&n| n > 0).ok_or(format!("--jobs: a number above 0\n{USAGE}"))?,
             "--max-sims" => o.max_sims = Some(val()?.parse().map_err(|_| format!("--max-sims: a number\n{USAGE}"))?),
             s if s.starts_with("--") => return Err(format!("unknown option {s}\n{USAGE}")),
             s => o.tasks.push(s.to_string()),
@@ -154,16 +157,45 @@ fn run(root: &Path, args: &[String]) -> Result<(), String> {
     let dirty = !version(Command::new("git").current_dir(root).args(["status", "--porcelain", "--untracked-files=no"])).is_empty();
     let claude = version(Command::new("claude").arg("--version"));
     let mut results = std::fs::OpenOptions::new().create(true).append(true).open(root.join("bench/agent/results.jsonl")).map_err(|e| e.to_string())?;
+    // a fix task's checkout and the tree make sees, once per task: runs at once share them
+    let upstreams: Vec<Option<(PathBuf, PathBuf)>> =
+        tasks.iter().map(|t| t.fix.as_ref().map(|f| checkout(root, f).and_then(|full| Ok((deps(root, f, &t.name, &full)?, full)))).transpose()).collect::<Result<_, _>>()?;
+    let todo: Vec<(usize, usize)> = (0..tasks.len()).flat_map(|t| (1..=o.runs).map(move |i| (t, i))).collect();
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let (send, done) = std::sync::mpsc::channel();
     println!("task\trun\tpass\tscore\tcalls\terrors\tanswers\ttokens\tpeak\tcost\twall");
-    for t in &tasks {
-        for i in 1..=o.runs {
-            let upstream = t.fix.as_ref().map(|f| checkout(root, f).and_then(|full| Ok((deps(root, f, &t.name, &full)?, full)))).transpose()?;
-            let mut row = once(&o, &wtf, t, &runs.join(format!("{}-{i}", t.name)), upstream.as_ref().map(|(d, u)| (d.as_path(), u.as_path())))?;
+    let mut failed = None;
+    std::thread::scope(|scope| {
+        for _ in 0..o.jobs.min(todo.len()) {
+            let send = send.clone();
+            let (o, wtf, tasks, upstreams, todo, next, runs) = (&o, &wtf, &tasks, &upstreams, &todo, &next, &runs);
+            scope.spawn(move || {
+                while let Some(&(ti, i)) = todo.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed)) {
+                    let t = &tasks[ti];
+                    let up = upstreams[ti].as_ref().map(|(d, u)| (d.as_path(), u.as_path()));
+                    let _ = send.send((ti, i, once(o, wtf, t, &runs.join(format!("{}-{i}", t.name)), up)));
+                }
+            });
+        }
+        drop(send);
+        // rows are written here only, one at a time
+        for (ti, i, row) in done {
+            let mut row = match row {
+                Ok(row) => row,
+                Err(e) => {
+                    eprintln!("{} run {i}: {e}", tasks[ti].name);
+                    failed.get_or_insert(e);
+                    continue;
+                }
+            };
+            let t = &tasks[ti];
             let m = row.as_object_mut().expect("a row is an object");
-            for (k, v) in [("stamp", json!(stamp)), ("task", json!(t.name)), ("run", json!(i)), ("wtf", json!(commit)), ("dirty", json!(dirty)), ("claude", json!(claude))] {
+            for (k, v) in [("stamp", json!(stamp)), ("task", json!(t.name)), ("run", json!(i)), ("wtf", json!(commit)), ("dirty", json!(dirty)), ("claude", json!(claude)), ("jobs", json!(o.jobs))] {
                 m.insert(k.into(), v);
             }
-            writeln!(results, "{row}").map_err(|e| e.to_string())?;
+            if let Err(e) = writeln!(results, "{row}") {
+                failed.get_or_insert(e.to_string());
+            }
             let g = |k: &str| row.get(k).cloned().unwrap_or(Value::Null);
             println!(
                 "{}\t{i}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t${:.3}\t{:.0}s{}",
@@ -172,9 +204,9 @@ fn run(root: &Path, args: &[String]) -> Result<(), String> {
                 row.get("failure").map_or(String::new(), |f| format!("\t{f}"))
             );
         }
-    }
+    });
     println!("transcripts in {}", runs.display());
-    Ok(())
+    failed.map_or(Ok(()), Err)
 }
 
 /// One run of a task: the agent in an empty directory, with only wtf's tools (no shell, no file
@@ -195,6 +227,8 @@ fn once(o: &Opts, wtf: &Path, t: &Task, out: &Path, upstream: Option<(&Path, &Pa
     let fix = t.fix.as_ref().zip(upstream);
     if let Some((f, (deps, up))) = fix {
         prepare(f, up, &work, false)?;
+        // the buggy files as the agent got them, for the diff of what it changed
+        prepare(f, up, &tmp.join("bug"), false)?;
         if make(&work, deps, "sim")? {
             return Err(format!("{}: `make sim` passes with the bug; `wtf-bench agent check {}`", t.name, t.name));
         }
@@ -255,8 +289,10 @@ fn once(o: &Opts, wtf: &Path, t: &Task, out: &Path, upstream: Option<(&Path, &Pa
         // the agent's RTL with the task's own Makefile and testbench
         copy_task(f, &work)?;
         let fixed = make(&work, deps, "sim")? && make(&work, deps, "hidden")?;
-        let _ = std::fs::write(out.with_extension("diff"), changes(f, up, &work));
+        let (diff, as_upstream) = changes(f, &tmp.join("bug"), up, &work);
+        let _ = std::fs::write(out.with_extension("diff"), diff);
         m.insert("fixed".into(), json!(fixed));
+        m.insert("as_upstream".into(), json!(as_upstream));
         pass &= fixed;
     }
     m.insert("score".into(), json!(score));
@@ -385,13 +421,13 @@ fn prepare(f: &Fix, upstream: &Path, work: &Path, fixed: bool) -> Result<(), Str
     Ok(())
 }
 
-/// What the agent changed in the upstream files, as a diff.
-fn changes(f: &Fix, upstream: &Path, work: &Path) -> String {
-    f.files
-        .iter()
-        .filter_map(|(to, from)| Command::new("git").args(["diff", "--no-index", "--"]).arg(upstream.join(from)).arg(work.join(to)).output().ok())
-        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
-        .collect()
+/// What the agent changed, as a diff from the buggy files (`bug`, prepared as the agent got them),
+/// and whether its files are upstream's again (a fix that restores upstream exactly).
+fn changes(f: &Fix, bug: &Path, upstream: &Path, work: &Path) -> (String, bool) {
+    let diff = |a: &Path, b: &Path| Command::new("git").args(["diff", "--no-index", "--"]).arg(a).arg(b).output().ok();
+    let text = f.files.iter().filter_map(|(to, _)| diff(&bug.join(to), &work.join(to))).map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).collect();
+    let same = f.files.iter().all(|(to, from)| diff(&upstream.join(from), &work.join(to)).is_some_and(|o| o.status.success()));
+    (text, same)
 }
 
 /// `make <target>` in the work directory; whether it passed (its output is in the target's logs).

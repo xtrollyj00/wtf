@@ -69,7 +69,9 @@ Each milestone ends with something usable for day-to-day debugging.
       back, and the run is `fixed` when `make sim` and `make hidden` pass; it passes when fixed
       and the answer (the faulty signal, when the failure showed) is right. `agent check` proves a
       task without an agent: the bug fails both, the upstream files pass both. Each run keeps
-      the agent's change as a diff against the upstream. `--no-mcp` runs them without wtf, as
+      the agent's change as a diff from the buggy files, and `as_upstream` says whether its fix
+      is upstream's exactly. `--jobs N` runs N at once, each in its own directory; the deps tree
+      is built once per task, and only the main thread writes `results.jsonl`. `--no-mcp` runs them without wtf, as
       the baseline (the log, the testbench and `make sim` only). The agent's `make` is a shim
       outside its reach that counts the `make sim` runs (`sims`); `--max-sims N` makes it refuse
       after N (the prompt says so), so an A/B compares what gets fixed within a budget, not given unlimited reruns.
