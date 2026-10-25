@@ -23,6 +23,21 @@ reuse wtf's own pieces:
 | `view(unit)` | describe the workspace: rows, cursors with Δt, visible range |
 | `present` | show the workspace in the user's window, or write `<trace>.agent.session.toml` |
 | `user_view(adopt)` | what the user's window shows; `adopt` copies it into the workspace |
+| `help(topic)` | the reference, a topic per concept; without a topic, the topics |
+
+- **The docs have one home per concept.** The tool definitions ride along on every turn of an
+  agent (with them, an agent's first turn was 16.2K tokens, without 7.9K), so they are short: a
+  description says what the tool does in a line or two, an argument's in one, and each points to
+  a `help` topic for the rest. Agents rarely call `help` (4 of 20 runs), so a fact that decides
+  an answer stays in the description too: what a `find` match with and without `@clk` is, and
+  what a record's `start` and `end` are; with those only in `help`, fewer runs used `@clk` and
+  some read a record's start as its sampling edge. `help` answers the reference on request, as `protocols <name>`
+  does for a protocol: `names` (paths, bits, slices, VHDL forms, scope, streams as signals),
+  `times`, `radix` (and colours), `expressions` (`find`'s), `decode` (built-ins, `protocol`,
+  `frame`, `pair`, `check`), `records`, `workspace` (declaring, `view`, `render`, `present`) and
+  `commands` (`command`'s). Each concept is explained in one topic, which the others point to.
+  The server's instructions are the map: the usual path (open, decode, records, present) and the
+  topics. Topics are kept in step with this spec, as descriptions are.
 
 - Signals are named by full path or by the end of a path if only one signal ends that way; `data[3]`
   is one bit. Names may be written as in VHDL or Verilog (section 8): any case, `gen(4)` or
@@ -53,7 +68,8 @@ reuse wtf's own pieces:
   `show: [awaddr, wdata]` is a table of the writes. `to` ends the search, e.g. at a reset.
   `count_only` gives the number of matches and runs, first and last.
 - `records` lists a stream's records (section 16) as a table, `n` (the record's number, as the
-  stream's value `#n` shows it), `start`, `end` and a column per field, headed with how many are shown of all in the range (`20 of 157`). With more
+  stream's value `#n` shows it), `start` (the rising edge that starts the record's first clock
+  cycle, as `find @clk` reports a match), `end` (the edge that samples its last) and a column per field, headed with how many are shown of all in the range (`20 of 157`). With more
   than one record, long values are shortened, a frame's data to its first 8 bytes and its size
   (`f7 88 0c 5c 25 8f 30 3a ... (580 bytes)`), other text to 40 characters, and the header says
   so; one record shows them whole. `from` /
@@ -104,7 +120,7 @@ reuse wtf's own pieces:
   found by their signals (every required role of a built-in protocol a signal `<prefix><role>`;
   AXI4 over AXI-Lite, whose roles it has too; the clock `<prefix>aclk`, or the one clock-like
   signal in the scope), the server's instructions put decoding before `find`, and `find`'s
-  description and a comparison of two signals point to the decoders.
+  description, `help expressions` and a comparison of two signals point to the decoders.
 - `command` decodes without touching the rows (`decode`, `protocol`, `signal`). `decode` answers
   with the streams it made and their records, violations apart (`bus: records bus.aw 2, ...;
   violations bus.errors 2, bus.wr.unmatched 1, ...`), then where to read more; the window shows

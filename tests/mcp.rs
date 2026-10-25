@@ -131,11 +131,29 @@ fn tools_list() {
     let list = s.call("tools/list", json!({}));
     let mut names: Vec<&str> = list["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
     names.sort();
-    assert_eq!(names, ["command", "find", "info", "open", "present", "protocols", "records", "reload", "render", "sessions", "signals", "use", "user_view", "value_at", "values", "view", "workspace"]);
+    assert_eq!(names, ["command", "find", "help", "info", "open", "present", "protocols", "records", "reload", "render", "sessions", "signals", "use", "user_view", "value_at", "values", "view", "workspace"]);
     // clients reject tools whose input schema isn't an object
     for t in list["tools"].as_array().unwrap() {
         assert_eq!(t["inputSchema"]["type"], "object", "{t}");
         assert!(!t["description"].as_str().unwrap().is_empty(), "{t}");
+    }
+}
+
+/// `help` is the reference the descriptions point to: the topics, then each one, before a trace
+/// is open too; every topic a description names exists.
+#[test]
+fn help_topics() {
+    let dir = Dir::new("help");
+    let mut s = Server::start(&dir.0);
+    let list = s.ok("help", json!({}));
+    assert!(list.starts_with("help <topic>:\nnames: "), "{list}");
+    assert!(s.ok("help", json!({"topic": "Records"})).contains("`n == 138`"));
+    let err = s.tool("help", json!({"topic": "nope"})).unwrap_err();
+    assert!(err.starts_with("no help topic nope; topics:\nnames: "), "{err}");
+    let tools = s.call("tools/list", json!({})).to_string();
+    for t in tools.split("`help ").skip(1) {
+        let topic = t.split('`').next().unwrap();
+        assert!(s.tool("help", json!({"topic": topic})).is_ok(), "no topic {topic}");
     }
 }
 

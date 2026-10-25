@@ -20,6 +20,7 @@ use std::sync::{Arc, Mutex};
 
 mod args;
 mod declare;
+mod help;
 pub use args::*;
 use declare::declared;
 
@@ -240,7 +241,7 @@ fn value(app: &Workspace, p: search::Probe, s: &Sig, t: Tick) -> String {
 
 #[tool_router]
 impl Wtf {
-    #[tool(description = "The open sessions: the user's wtf windows and agents' workspaces, each with its id, kind and trace.")]
+    #[tool(description = "The open sessions: the user's wtf windows and agents' workspaces, with ids and traces.")]
     fn sessions(&self) -> String {
         let (ours, cur) = {
             let st = lock(&self.state);
@@ -264,7 +265,7 @@ impl Wtf {
         if lines.is_empty() { "no sessions: the user has no wtf window open; `open` a trace".into() } else { lines.join("\n") }
     }
 
-    #[tool(description = "Open a trace in a new workspace, which becomes the current one: the other tools work on it. The user can look at it with `wtf --attach <id>`.")]
+    #[tool(description = "Open a trace in a new workspace, the current one from then on. Answers with `info`, which lists the interfaces to decode.")]
     fn open(&self, Parameters(a): Parameters<OpenArgs>) -> Result<String, String> {
         let app = Arc::new(Mutex::new(Workspace::open(std::path::Path::new(&a.trace))?));
         let mut st = lock(&self.state);
@@ -291,7 +292,7 @@ impl Wtf {
         self.info()
     }
 
-    #[tool(description = "What can be decoded into records, and how: the built-in protocols (axis, axilite, axi4, spi, uart), the protocols on streams (frame, pair, check) and the workspace's own sampled protocols. With a name: its roles, params, the streams it makes with their fields, and an example `command` line.")]
+    #[tool(description = "What can be decoded; with a name, its roles, params, streams and fields (`help decode`).")]
     fn protocols(&self, Parameters(a): Parameters<ProtocolsArgs>) -> Result<String, String> {
         // works before a trace is open, without the session's own protocols
         let own = current(self).ok().map(|w| lock(&w).protocols.clone()).unwrap_or_default();
@@ -301,7 +302,12 @@ impl Wtf {
         }
     }
 
-    #[tool(description = "The trace: file, time range, timescale and number of signals.")]
+    #[tool(description = "The reference: a topic per concept (names, times, radix, expressions, decode, records, workspace, commands); none lists them.")]
+    fn help(&self, Parameters(a): Parameters<HelpArgs>) -> Result<String, String> {
+        help::answer(a.topic.as_deref())
+    }
+
+    #[tool(description = "The trace: file, time range, signals, and the interfaces a built-in protocol decodes, each with its `decode` line.")]
     fn info(&self) -> Result<String, String> {
         let a = current(self)?;
         let app = lock(&a);
@@ -323,7 +329,7 @@ impl Wtf {
         Ok(out)
     }
 
-    #[tool(description = "List signals with their widths. Array elements and generate instances of one width are one line, their indices as ranges: `mux_in.[0..15] (8 bits, 16 signals)`, `gen(0..4).x (1 bit, 5 signals)`; name one as written, `mux_in.[3]`.")]
+    #[tool(description = "List signals with their widths; arrays and generate instances fold to one line (`gen(0..4).x`).")]
     fn signals(&self, Parameters(a): Parameters<SignalsArgs>) -> Result<String, String> {
         let w = current(self)?;
         let app = lock(&w);
@@ -343,7 +349,7 @@ impl Wtf {
         Ok(if out.is_empty() { wtf_core::command::no_match(&a.pattern) } else { budget(out) })
     }
 
-    #[tool(description = "Values of signals over a time range: the value at `from`, then every change up to `to`, as `time value` lines per signal; at most 1000 changes in all.")]
+    #[tool(description = "Values of signals over a time range: the value at `from`, then each change, as `time value` lines.")]
     fn values(&self, Parameters(a): Parameters<ValuesArgs>) -> Result<String, String> {
         let w = current(self)?;
         let mut app = lock(&w);
@@ -373,7 +379,7 @@ impl Wtf {
         Ok(budget(out))
     }
 
-    #[tool(description = "A stream's records (made by `command` `decode` / `protocol`, or declared in `workspace`) as a table: its number n, start, end and each field, headed `20 of 157` (shown of all in the range); `where` picks records by their fields (`resp != 0`, `n == 138`, `req_addr != resp_addr`), headed `3 of 3 matching, of 157`; `group_by` answers one line per distinct value of the fields named. `count_only` only counts them.")]
+    #[tool(description = "A decoded stream's records as a table: n, start (the rising edge that starts the record's first clock cycle), end (the edge that samples its last) and the fields; `where`, `group_by`, `count_only` (`help records`).")]
     fn records(&self, Parameters(a): Parameters<RecordsArgs>) -> Result<String, String> {
         let w = current(self)?;
         let app = lock(&w);
@@ -460,7 +466,7 @@ impl Wtf {
         Ok(budget(format!("at {}:\n{}", show(&app, t, unit(&app, &a.unit, [t])?), lines.join("\n"))))
     }
 
-    #[tool(description = "Find the times where a search expression matches, as wtf's / search does, as a tab-separated table with a header. With a clock, consecutive matching cycles are one row (`from`, `last`, `cycles`), unless `show` lists values per cycle. For a bus or handshake, decode it instead (`open` / `info` list the interfaces, `protocols` the protocols): records are exact and their checks built in.")]
+    #[tool(description = "The times a search expression matches, as a table. With `@clk ` first, a match is a clock cycle whose ending edge samples it true, reported at the cycle's starting edge; without, where the expression becomes true, so back-to-back handshakes are one match. `show` adds values, `count_only` counts (`help expressions`). For a bus, decode it instead (`help decode`).")]
     fn find(&self, Parameters(a): Parameters<FindArgs>) -> Result<String, String> {
         let w = current(self)?;
         let mut app = lock(&w);
@@ -518,7 +524,7 @@ impl Wtf {
         Ok(budget(lines.join("\n")))
     }
 
-    #[tool(description = "Draw signals over a time range as text, the way wtf's screen shows them: 1-bit signals as lines with edges, buses as outlines with their values, the cursor as ┃ and marks as ╎ columns. Without signals it draws the workspace.")]
+    #[tool(description = "Draw signals over a time range as text, as wtf's screen does; without signals, the workspace.")]
     fn render(&self, Parameters(a): Parameters<RenderArgs>) -> Result<String, String> {
         let w = current(self)?;
         let mut app = lock(&w);
@@ -558,7 +564,7 @@ impl Wtf {
         Ok(budget(text?))
     }
 
-    #[tool(description = "Run one of wtf's `:` commands on the workspace: the rows, groups, radixes and cursors the agent prepares as evidence, to check with `view` / `render` and then show the user with `present`.")]
+    #[tool(description = "Run one of wtf's `:` commands on the workspace: `decode`, `protocol`, rows, cursors (`help commands`).")]
     fn command(&self, Parameters(a): Parameters<CommandArgs>) -> Result<String, String> {
         let w = current(self)?;
         let mut app = lock(&w);
@@ -594,7 +600,7 @@ impl Wtf {
         Ok(if out.is_empty() { "done".into() } else { out.join("\n") })
     }
 
-    #[tool(description = "Describe the workspace: its rows (groups, radixes, the selected row), cursors with the time between them, and the visible range.")]
+    #[tool(description = "Describe the workspace: rows, cursors with the time between them, visible range.")]
     fn view(&self, Parameters(a): Parameters<ViewArgs>) -> Result<String, String> {
         let w = current(self)?;
         let app = lock(&w);
@@ -602,7 +608,7 @@ impl Wtf {
         Ok(budget(describe(&app, u)))
     }
 
-    #[tool(description = "Set up the whole workspace in one call: its rows (signals with radixes, groups), cursors and visible range replace what it had, as one undo step. Answers as `view` does.")]
+    #[tool(description = "Set up the whole workspace in one call: rows, cursors, range, decodes (`help workspace`). Answers as `view` does.")]
     fn workspace(&self, Parameters(a): Parameters<WorkspaceArgs>) -> Result<String, String> {
         let w = current(self)?;
         let mut app = lock(&w);
@@ -612,7 +618,7 @@ impl Wtf {
         Ok(budget(format!("{}{warn}", describe(&app, None))))
     }
 
-    #[tool(description = "Show the workspace to the user: in their open wtf window on this trace, its rows and cursors replace the window's (the user can undo with u); without a window, it is written to a session file to open.")]
+    #[tool(description = "Show the workspace to the user, in their wtf window on this trace or as a session file.")]
     fn present(&self) -> Result<String, String> {
         let w = current(self)?;
         let app = lock(&w);
@@ -632,7 +638,7 @@ impl Wtf {
         }
     }
 
-    #[tool(description = "What the user is looking at in their wtf window on this trace: rows, selected row, cursors, visible range.")]
+    #[tool(description = "What the user is looking at in their wtf window on this trace; `adopt` copies it into the workspace.")]
     fn user_view(&self, Parameters(a): Parameters<UserViewArgs>) -> Result<String, String> {
         let w = current(self)?;
         let mut app = lock(&w);
@@ -651,7 +657,7 @@ impl Wtf {
         Ok(budget(described.to_string()))
     }
 
-    #[tool(description = "Reopen the trace file, e.g. after the simulation was run again.")]
+    #[tool(description = "Reopen the trace file, after the simulation was run again.")]
     fn reload(&self) -> Result<String, String> {
         let w = current(self)?;
         let mut app = lock(&w);
@@ -729,24 +735,14 @@ impl ServerHandler for Wtf {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("wtf", env!("CARGO_PKG_VERSION")))
             .with_instructions(
-            "wtf reads VCD and FST waveforms from digital simulations. Times take units (120ns, 1.5us). \
-             `sessions` lists the user's open wtf windows and their traces; `open` a trace (often one of \
-             theirs) to work on it in a workspace of your own. \
-             Decode first: `open` (and `info`) lists the interfaces a built-in protocol decodes, with the \
-             `command` line that decodes each (`decode bus axilite clock=aclk prefix=s_axi_`); its answer \
-             lists the streams made, with their records and violations. Decoded records are exact and \
-             the handshake checks are built in, so prefer them to searches of your own: `records` lists a \
-             stream as a table (`where`, `group_by`, `count_only`), e.g. `bus.wr` / `bus.rd`, the \
-             transactions with their delay, and `bus.errors` / `bus.wr.unmatched`, the violations. \
-             `protocols` lists what can be decoded, `protocols <name>` what each stream and field is. For \
-             an interface of the design's own, `protocol` samples it into a stream, `decode <name> pair` \
-             matches requests and responses, `decode <name> check` checks rules. \
-             `find` is for what no protocol covers: `@clk valid && ready` with `show: [addr, data]` is a \
-             table of the transfers, `count_only` counts them. Streams and their fields are signals for \
-             `find` and the rest; read values with `values` / `value_at`. To show the user evidence, \
-             declare the workspace with `workspace` (rows, groups, radixes, cursors on the events, range), \
-             check it with `view` / `render`, then `present` it; `command` edits it step by step. \
-             `user_view` shows what the user is looking at. `reload` after the simulation was rerun.",
+            "wtf reads VCD and FST waveforms from digital simulations. The usual path: `open` a trace \
+             (`sessions` lists the user's windows and their traces); it lists the interfaces a built-in \
+             protocol decodes, each with its line. Decode first, with `command` (`decode bus axilite \
+             clock=aclk prefix=s_axi_`): records are exact and the handshake checks built in. Read them \
+             with `records` (`where`, `group_by`, `count_only`); `find` for what no protocol covers, \
+             `values` / `value_at` for values. To show evidence, declare the `workspace`, check it with \
+             `view` / `render`, then `present` it. `help` has the reference: names, times, radix, \
+             expressions, decode, records, workspace, commands.",
         )
     }
 }
