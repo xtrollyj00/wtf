@@ -154,7 +154,14 @@ impl Term {
                     Bin::Add => Shape { bits: widest + 1, signed },
                     Bin::Sub => Shape { bits: a.sbits().max(b.sbits()) + 1, signed: true },
                     Bin::Mul => Shape { bits: a.bits + b.bits, signed },
-                    Bin::And | Bin::Or | Bin::Xor => Shape { bits: widest, signed },
+                    // `a & 31` is never wider than 31, and not negative if either side isn't
+                    Bin::And => match (a.signed, b.signed) {
+                        (false, false) => Shape { bits: a.bits.min(b.bits), signed: false },
+                        (true, false) => b,
+                        (false, true) => a,
+                        (true, true) => Shape { bits: widest, signed: true },
+                    },
+                    Bin::Or | Bin::Xor => Shape { bits: widest, signed },
                     Bin::Shl => Shape { bits: a.bits.saturating_add(shift_max(r)), signed: a.signed },
                     Bin::Shr => a,
                 }
@@ -459,11 +466,7 @@ impl Parser<'_> {
         self.s = start;
         let left = self.chain()?;
         let Some(&(sym, op)) = OPS.iter().find(|(sym, _)| self.eat(sym)) else {
-            return Ok(match left.atom {
-                Atom::Signal((_, sig, _, _, past, _)) => Expr::Cmp { sig, past, op: Op::Eq, target: None },
-                Atom::Term(Term::Bool(e)) => *e,
-                Atom::Term(t) => Expr::Truth(t),
-            });
+            return Ok(truth(left.atom));
         };
         let right = self.s;
         let value = self.value_word();
@@ -597,10 +600,15 @@ impl Parser<'_> {
         }
     }
 
-    /// An operand: `(...)` and its slice, `~x`, `signed(x)`, a number or a signal.
+    /// An operand: `(...)` and its slice, `~x`, `!x` (1 or 0), `signed(x)`, a number or a
+    /// signal, which may be a field's slice or bit (`b[4:0]`, `b[3]`).
     fn atom(&mut self) -> Result<Atom, String> {
         self.s = self.s.trim_start();
         let at = self.s;
+        if !self.s.starts_with("!=") && self.eat("!") {
+            let a = self.atom()?;
+            return Ok(Atom::Term(Term::Bool(Box::new(Expr::Not(Box::new(truth(a)))))));
+        }
         if self.eat("~") {
             let a = self.atom()?;
             let src = self.since(at);
@@ -657,7 +665,24 @@ impl Parser<'_> {
             return Ok(Atom::Term(Term::Signed(Box::new(t), w)));
         }
         self.s = start;
-        self.operand().map(Atom::Signal)
+        let err = match self.operand() {
+            Ok(op) => return Ok(Atom::Signal(op)),
+            Err(e) => e,
+        };
+        // a slice or bit of a name that has none of its own: a record's field (`b[4:0]`)
+        self.s = start;
+        let name = self.word();
+        let Some((base, range)) = name.strip_suffix(']').and_then(|n| n.rsplit_once('[')) else { return Err(err) };
+        let (hi, lo) = match range.split_once(':') {
+            Some((h, l)) => (h.trim().parse::<u32>(), l.trim().parse::<u32>()),
+            None => (range.trim().parse(), range.trim().parse()),
+        };
+        let (Ok(hi), Ok(lo), Ok((sig, width, names, signed))) = (hi, lo, (self.resolve)(base)) else { return Err(err) };
+        let t = self.term(Atom::Signal((base.to_string(), sig, width, names, 0, signed)), base)?;
+        if hi < lo || hi >= t.width().unwrap_or(0) {
+            return Err(format!("{name}: {base} has no bits {hi}:{lo} ({} bits)", t.width().unwrap_or(0)));
+        }
+        Ok(Atom::Term(Term::Slice(Box::new(t), hi, lo)))
     }
 
     /// A signal, or `past(...)` of one: its name, probe, width, value names, how many samples
@@ -676,6 +701,15 @@ impl Parser<'_> {
         let (sig, width, names, signed) = (self.resolve)(&name)?;
         self.names.push((at..at + name.len(), sig));
         Ok((name, sig, width, names, 0, signed))
+    }
+}
+
+/// An operand as a condition: a signal true when 1 / nonzero, a value when known and nonzero.
+fn truth(a: Atom) -> Expr {
+    match a {
+        Atom::Signal((_, sig, _, _, past, _)) => Expr::Cmp { sig, past, op: Op::Eq, target: None },
+        Atom::Term(Term::Bool(e)) => *e,
+        Atom::Term(t) => Expr::Truth(t),
     }
 }
 
@@ -1024,6 +1058,11 @@ mod tests {
         yes("m == 4");
         yes("m != b");
         yes("t == idle");
+        // & bounds a shift amount; ! is an operand too; slices and bits of a name without its own
+        yes("1 << (a & 3) == 8");
+        yes("(m == 4) != !b");
+        yes("!(m == 3) == 1");
+        yes("m[2] == 1 && m[3:2] == 1 && m[1:0] == 0");
     }
 
     #[test]
@@ -1052,6 +1091,8 @@ mod tests {
         assert_eq!(err("a * a * a * a == 0"), "a * a * a * a: the result could be 128 bits, more than 127; slice an operand to fewer bits");
         assert_eq!(err("a + 1 < x"), "a + 1 < x: < compares numbers; x only with == or !=");
         assert_eq!(err("a + 1 == z"), "a + 1 == z: an arithmetic result is a number or x");
+        assert_eq!(err("m[4:0] == 0"), "m[4:0]: m has no bits 4:0 (4 bits)");
+        assert_eq!(err("q[1:0] == 0"), "unknown signal: q[1:0]");
         assert_eq!(err("(a + b)[200:0] == 0"), "(a + b)[200:0]: a slice is [hi:lo], hi from lo to 126");
     }
 }

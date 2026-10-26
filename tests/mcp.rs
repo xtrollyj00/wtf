@@ -675,6 +675,8 @@ fn arithmetic_in_fields_and_where() {
     // a negative field stays signed, and compares exactly with an unsigned one
     assert_eq!(p("back < -1"), "1 of 1 matching, of 3\nn\tstart\tend\tid\tnext\tback\n1\t25ns\t35ns\t0x2\t0x3\t-2");
     assert_eq!(p("back < id && (id & 1) == 1 && id << 2 == 12"), "1 of 1 matching, of 3\nn\tstart\tend\tid\tnext\tback\n2\t45ns\t55ns\t0x3\t0x4\t-1");
+    // a field's bits, and ! as an operand
+    assert_eq!(s.ok("records", json!({"stream": "p", "where": "id[1] == 1 && id[0:0] == !1", "count_only": true})), "1 matching records, of 3, first 25ns, last 25ns");
     assert_eq!(s.tool("records", json!({"stream": "p", "where": "id & 1 == 1"})), Err("id & 1 == 1: & and == need parentheses: (id & 1) == 1 or id & (1 == 1)".into()));
     assert_eq!(s.tool("find", json!({"expr": "~(req_id + 1) == 0"})), Err("~(req_id + 1): ~ inverts bits at a width, so give one with a slice: ~(req_id + 1)[1:0]".into()));
 }

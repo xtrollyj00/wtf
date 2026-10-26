@@ -55,7 +55,8 @@ otherwise hex; 1-bit signals always show 0 / 1 / X / Z.
   are exact integers: nothing wraps unless sliced, so a 32-bit add is `(a + b)[31:0]`; `signed(x)`
   reads x as two's complement (`signed(imm[11:0]) < 0`). `&`, `|`, `^` need parentheses beside
   another operator, `<<` and `>>` beside arithmetic: `(x & 3) == 0`, `wmask != 1 << addr[1:0]`.
-  An unknown operand makes the result x. Operands up to 64 bits; an error shows each fix.
+  A comparison or `!x` is a value, 1 or 0. A field's bits are `b[4:0]`, as a signal's. An unknown
+  operand makes the result x. Operands up to 64 bits; an error shows each fix.
 - Values: 0x40, 64, 0b1000000, -12, x (unknown), z (high impedance), a name the file gives a
   value, a time (`40ns`), or another signal (`mi_addr != reg_waddr`, `data != past(data)`). Two
   events at different times (a request and its response) are compared as records instead: a
