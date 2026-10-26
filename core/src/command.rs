@@ -325,7 +325,7 @@ fn rm(app: &mut Workspace, arg: &str) -> Result<(), String> {
 fn words(arg: &str) -> Vec<&str> {
     let (mut out, mut depth, mut start) = (Vec::new(), 0, None);
     for (i, c) in arg.char_indices() {
-        depth += (c == '{') as i32 - (c == '}') as i32;
+        depth += matches!(c, '{' | '(') as i32 - matches!(c, '}' | ')') as i32;
         if !c.is_whitespace() || depth > 0 {
             start.get_or_insert(i);
         } else if let Some(s) = start.take() {

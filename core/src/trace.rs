@@ -13,6 +13,8 @@ pub struct Var {
     pub width: Option<u32>,
     /// The names the file gives values (an FST enum table): bits without leading zeros, name.
     pub names: Option<Names>,
+    /// Its values are two's complement: a computed signal that can be negative (`a - b`).
+    pub signed: bool,
     source: Source,
 }
 
@@ -122,6 +124,7 @@ impl Trace {
                 path: v.full_name(h),
                 width: v.signal_encoding(h).length(),
                 names: v.enum_type(h).map(|(_, m)| m.iter().map(|(b, n)| (names_key(b).to_string(), n.to_string())).collect()),
+                signed: false,
                 source: Source::File(v.signal_ref()),
             })
             .collect();
@@ -168,7 +171,7 @@ impl Trace {
                 list.pop();
             }
         }
-        let var = Var { path: path.to_string(), width, names: None, source: Source::Computed(list) };
+        let var = Var { path: path.to_string(), width, names: None, signed: false, source: Source::Computed(list) };
         match self.by_path.get(path) {
             Some(&i) if matches!(self.vars[i].source, Source::Computed(_)) => {
                 self.vars[i] = var;

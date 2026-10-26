@@ -661,6 +661,24 @@ fn records_compare_fields_and_pick_by_number() {
     assert_eq!(s.tool("find", json!({"expr": "@rising(clk) req_valid"})), Err("@ takes the clock signal itself, as its rising edges: @clk".into()));
 }
 
+/// Arithmetic in fields and `where` (spec §8, §16): exact, a negative field signed, and errors
+/// that show the fix.
+#[test]
+fn arithmetic_in_fields_and_where() {
+    let dir = Dir::new("arith");
+    let mut s = Server::start(&dir.0);
+    s.ok("open", json!({"trace": std::fs::canonicalize("tests/data/reqresp.vcd").unwrap()}));
+    s.ok("command", json!({"line": "protocol p clock=clk when=req_valid id=req_id next=req_id + 1 back=resp_id - req_id"}));
+    let mut p = |w: &str| s.ok("records", json!({"stream": "p", "where": w}));
+    let all = "n\tstart\tend\tid\tnext\tback\n0\t15ns\t25ns\t0x1\t0x2\t-1\n1\t25ns\t35ns\t0x2\t0x3\t-2\n2\t45ns\t55ns\t0x3\t0x4\t-1";
+    assert_eq!(p("next == id + 1"), format!("3 of 3 matching, of 3\n{all}"));
+    // a negative field stays signed, and compares exactly with an unsigned one
+    assert_eq!(p("back < -1"), "1 of 1 matching, of 3\nn\tstart\tend\tid\tnext\tback\n1\t25ns\t35ns\t0x2\t0x3\t-2");
+    assert_eq!(p("back < id && (id & 1) == 1 && id << 2 == 12"), "1 of 1 matching, of 3\nn\tstart\tend\tid\tnext\tback\n2\t45ns\t55ns\t0x3\t0x4\t-1");
+    assert_eq!(s.tool("records", json!({"stream": "p", "where": "id & 1 == 1"})), Err("id & 1 == 1: & and == need parentheses: (id & 1) == 1 or id & (1 == 1)".into()));
+    assert_eq!(s.tool("find", json!({"expr": "~(req_id + 1) == 0"})), Err("~(req_id + 1): ~ inverts bits at a width, so give one with a slice: ~(req_id + 1)[1:0]".into()));
+}
+
 #[test]
 fn times_in_the_clocks_unit() {
     let dir = Dir::new("skew");

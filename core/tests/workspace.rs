@@ -332,6 +332,50 @@ fn slices_and_concatenations() {
 }
 
 #[test]
+fn computed_expressions() {
+    use wtf_core::command::run;
+    use wtf_core::trace::Val;
+    let dir = Dir::new("arith");
+    let trace = dir.0.join("t.vcd");
+    std::fs::copy(fixture("vcd"), &trace).unwrap();
+    let mut ws = Workspace::open(&trace).unwrap();
+    // data: x @0, 0x43 @10, 0x96 @20; an expression's var is as wide as its value can need
+    run(&mut ws, "signal next = data + 1").unwrap();
+    let next = var(&ws, "next");
+    assert_eq!(ws.trace.vars[next].width, Some(9));
+    assert_eq!(ws.trace.value_at(next, 0), Some(Val::Bits("xxxxxxxxx".into())));
+    assert_eq!(ws.trace.value_at(next, 22), Some(Val::Bits("010010111".into())));
+    // one that can be negative is signed: two's complement, sdec, signed in searches
+    run(&mut ws, "signal d = data - 0x80").unwrap();
+    let d = var(&ws, "d");
+    assert_eq!((ws.trace.vars[d].width, ws.trace.vars[d].signed), (Some(10), true));
+    assert_eq!(ws.trace.value_at(d, 12), Some(Val::Bits(format!("{:010b}", -61i32 as u32 & 0x3FF))));
+    run(&mut ws, "add d").unwrap();
+    assert_eq!(ws.rows.last().and_then(|r| r.sig()).map(|s| s.radix), Some(wtf_core::radix::SDEC));
+    ws.search("d < 0", true, 1).unwrap();
+    assert_eq!(ws.view.cursor, 10);
+    ws.search("d > 0", true, 1).unwrap();
+    assert_eq!(ws.view.cursor, 20);
+    // named in a row as written, by full paths: naming it again finds the same var
+    run(&mut ws, "add (data + 1) top.cpu.busy").unwrap();
+    assert_eq!(names(&ws)[names(&ws).len() - 2], "(top.cpu.data+1)");
+    assert_eq!(ws.resolve("(top.cpu.data+1)"), ws.resolve("( data+ 1)"));
+    // a search computes without a var
+    ws.view.cursor = 0;
+    ws.search("(data + 1)[7:0] == 0x97", true, 1).unwrap();
+    assert_eq!(ws.view.cursor, 20);
+    assert_eq!(run(&mut ws, "signal p = data + past(data)"), Err("data + past(data): past, rose, fell and stable need a clock; use them in find with @clk".into()));
+    // a session keeps them; :e works them out again
+    let toml = wtf_core::session::to_toml(&ws);
+    assert!(toml.contains("expr = \"data - 0x80\""), "{toml}");
+    let mut other = Workspace::open(&trace).unwrap();
+    assert_eq!(wtf_core::session::apply(&mut other, &toml), Ok(vec![]));
+    assert_eq!((names(&other), wtf_core::session::to_toml(&other)), (names(&ws), toml));
+    ws.reload().unwrap();
+    assert!(ws.trace.vars[var(&ws, "d")].signed);
+}
+
+#[test]
 fn named_signals() {
     use wtf_core::command::run;
     use wtf_core::trace::Val;

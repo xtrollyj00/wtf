@@ -141,9 +141,13 @@ pub const DEFAULT: usize = 0;
 /// Names from the file.
 pub const ENUM: usize = 9;
 
-/// The radix new rows start in: `enum` if the file names the signal's values, otherwise hex.
-pub fn default_for(named: bool) -> usize {
-    if named { ENUM } else { DEFAULT }
+/// Two's complement decimal.
+pub const SDEC: usize = 3;
+
+/// The radix new rows start in: `enum` if the file names the signal's values, `sdec` if they are
+/// signed (spec §16), otherwise hex.
+pub fn default_for(named: bool, signed: bool) -> usize {
+    if named { ENUM } else if signed { SDEC } else { DEFAULT }
 }
 
 /// One output digit from a group of bits; unknown digits are X, U or Z.

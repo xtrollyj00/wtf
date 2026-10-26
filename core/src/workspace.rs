@@ -184,7 +184,7 @@ impl Workspace {
         let q = search::parse_query(text, self.trace.fs_per_tick, &mut |name| {
             let p = self.resolve(name)?;
             let var = &self.trace.vars[p.0];
-            Ok(if p.1.is_some() { (p, Some(1), None) } else { (p, var.width, var.names.clone()) })
+            Ok(if p.1.is_some() { (p, Some(1), None, false) } else { (p, var.width, var.names.clone(), var.signed) })
         })?;
         let mut sigs: Vec<usize> = q.clock.iter().map(|c| c.0).collect();
         let mut probes = Vec::new();
@@ -243,6 +243,10 @@ impl Workspace {
         }
         if let Some(&v) = self.trace.by_path.get(name) {
             return Ok((v, None));
+        }
+        // an expression before VHDL's parentheses become brackets: `(a + b)` is no index
+        if let Some(form @ Form::Expr(_)) = computed::form(name) {
+            return self.compute(form).map(|v| (v, None));
         }
         let name = &crate::trace::brackets(name);
         if let Some(form) = computed::form(name) {
@@ -330,6 +334,7 @@ impl Workspace {
         let v = self.whole(expr)?;
         let values = computed::values(&mut self.trace, v);
         let var = self.trace.add_computed(name, self.trace.vars[v].width, values)?;
+        self.trace.vars[var].signed = self.trace.vars[v].signed;
         match self.signals.iter_mut().find(|s| s.0 == name) {
             Some(s) => s.1 = expr.to_string(),
             None => self.signals.push((name.to_string(), expr.to_string())),
@@ -348,8 +353,12 @@ impl Workspace {
     /// The computed var of a slice or concatenation, named by the full paths of its parts
     /// (`top.x[7:4]`, `{top.a,top.b}`), so naming it again in any form finds the same var.
     fn compute(&mut self, form: Form) -> Result<usize, String> {
+        if let Form::Expr(text) = form {
+            return self.compute_expr(text);
+        }
         // a part as a whole var; a bit of a bus is a one-bit slice
         let (path, parts) = match &form {
+            Form::Expr(_) => unreachable!(),
             Form::Slice(base, hi, lo) => {
                 let v = self.whole(base)?;
                 (format!("{}[{hi}:{lo}]", self.trace.vars[v].path), vec![v])
@@ -366,8 +375,38 @@ impl Workspace {
         let (width, values) = match form {
             Form::Slice(_, hi, lo) => (hi - lo + 1, computed::slice(&mut self.trace, parts[0], hi, lo)?),
             Form::Concat(_) => computed::concat(&mut self.trace, &parts)?,
+            Form::Expr(_) => unreachable!(),
         };
         self.trace.add_computed(&path, Some(width), values)
+    }
+
+    /// The computed var of an expression (`pc + 4`), named by it with its signals' full paths and
+    /// no spaces (`top.pc+4`), so naming it again finds the same var. It is as wide as its value
+    /// can need, and signed if that can be negative (spec §16).
+    fn compute_expr(&mut self, text: &str) -> Result<usize, String> {
+        let (term, names) = search::parse_term(text, self.trace.fs_per_tick, &mut |name| {
+            let p = self.resolve(name)?;
+            let var = &self.trace.vars[p.0];
+            Ok(if p.1.is_some() { (p, Some(1), None, false) } else { (p, var.width, var.names.clone(), var.signed) })
+        })?;
+        let mut path = String::new();
+        let mut end = 0;
+        for (range, (v, bit)) in names {
+            path.push_str(&text[end..range.start]);
+            path.push_str(&self.trace.vars[v].path);
+            path.extend(bit.map(|b| format!("[{b}]")));
+            end = range.end;
+        }
+        path.push_str(&text[end..]);
+        let path: String = path.chars().filter(|c| !c.is_whitespace()).collect();
+        if let Some(&v) = self.trace.by_path.get(&path) {
+            return Ok(v);
+        }
+        let shape = term.shape();
+        let values = computed::term(&mut self.trace, &term);
+        let v = self.trace.add_computed(&path, Some(shape.bits), values)?;
+        self.trace.vars[v].signed = shape.signed;
+        Ok(v)
     }
 
     /// Show a session the agent prepared (`present`, spec §15): its rows and cursors
@@ -708,7 +747,7 @@ impl Workspace {
 
     /// A row for a var in its default radix. Its values must be loaded (`Trace::load`).
     pub fn sig(&self, var: usize, grouped: bool) -> Row {
-        Row::Signal(Sig { var, radix: radix::default_for(self.trace.vars[var].names.is_some()), frac: 0, grouped, bits: 0, color: None })
+        Row::Signal(Sig { var, radix: radix::default_for(self.trace.vars[var].names.is_some(), self.trace.vars[var].signed), frac: 0, grouped, bits: 0, color: None })
     }
 
     /// New rows go below the selected row and join its group, if it is in one; with a group's

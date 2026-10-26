@@ -374,17 +374,17 @@ fn streams_of(b: &Builtin) -> Vec<About<String>> {
         match step {
             Step::Changes { name, .. } => {
                 hidden.push(name.to_string());
-                schemas.push((name.into(), vec![Field { name: "value".into(), width: Some(4), time: false }], None, vec![]));
+                schemas.push((name.into(), vec![Field { name: "value".into(), width: Some(4), time: false, signed: false }], None, vec![]));
             }
             Step::Sample { name, when, fields } => {
                 let from: Vec<String> = fields.iter().filter(|(f, sig)| f != sig).map(|(f, sig)| format!("{f} = {sig}")).collect();
                 let about = format!("a record per cycle where {when}{}", if from.is_empty() { String::new() } else { format!("; {}", from.join(", ")) });
-                schemas.push((name.into(), fields.into_iter().map(|(f, _)| Field { name: f, width: None, time: false }).collect(), None, vec![about]));
+                schemas.push((name.into(), fields.into_iter().map(|(f, _)| Field { name: f, width: None, time: false, signed: false }).collect(), None, vec![about]));
             }
             Step::Check { name, rules } => {
                 let mut about = vec!["a record per cycle where a rule holds, rule naming it:".to_string()];
                 about.extend(rules.iter().map(|(r, e)| format!("  {r}: {e}")));
-                schemas.push((name.into(), vec![Field { name: "rule".into(), width: None, time: false }], Some(String::new()), about));
+                schemas.push((name.into(), vec![Field { name: "rule".into(), width: None, time: false, signed: false }], Some(String::new()), about));
             }
             Step::Decode { name, input, decoder, params } => {
                 // any timescale: only the fields are wanted
@@ -400,7 +400,7 @@ fn streams_of(b: &Builtin) -> Vec<About<String>> {
                 // a part missing needs two parts
                 let parts: String = requests.iter().filter(|_| requests.len() > 1).map(|r| format!(" | no {r}")).collect();
                 let kinds = format!(": kind = no request | no response{parts}");
-                schemas.push((format!("{name}.unmatched"), vec![Field { name: "kind".into(), width: None, time: false }], Some(kinds), vec![]));
+                schemas.push((format!("{name}.unmatched"), vec![Field { name: "kind".into(), width: None, time: false, signed: false }], Some(kinds), vec![]));
             }
         }
     }

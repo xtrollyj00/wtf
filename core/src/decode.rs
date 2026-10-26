@@ -105,8 +105,8 @@ impl Frame {
         for (k, v) in params {
             match k.as_str() {
                 "last" => f.last = field(v, &mut errors),
-                "select" => f.select = field(v, &mut errors).map(|i| (i, Field { name: v.clone(), width: input[i].width, time: input[i].time })),
-                "key" => f.key = field(v, &mut errors).map(|i| (i, Field { name: v.clone(), width: input[i].width, time: input[i].time })),
+                "select" => f.select = field(v, &mut errors).map(|i| (i, Field { name: v.clone(), width: input[i].width, time: input[i].time, signed: input[i].signed })),
+                "key" => f.key = field(v, &mut errors).map(|i| (i, Field { name: v.clone(), width: input[i].width, time: input[i].time, signed: input[i].signed })),
                 "gap" => match time::parse(v, fs_per_tick) {
                     Ok(t) => f.gap = Some(t.round() as Tick),
                     Err(e) => errors.push(format!("frame: gap: {e}")),
@@ -147,12 +147,12 @@ impl Frame {
 
 impl Decoder for Frame {
     fn schema(&self) -> Vec<Field> {
-        let mut out = vec![Field { name: "beats".into(), width: Some(32), time: false }];
+        let mut out = vec![Field { name: "beats".into(), width: Some(32), time: false, signed: false }];
         out.extend(self.select.as_ref().map(|s| s.1.clone()));
         out.extend(self.key.as_ref().map(|s| s.1.clone()));
-        out.extend(self.bytes.as_ref().map(|_| Field { name: "len".into(), width: Some(32), time: false }));
-        out.extend(self.data.map(|_| Field { name: "data".into(), width: None, time: false }));
-        out.push(Field { name: "complete".into(), width: Some(1), time: false });
+        out.extend(self.bytes.as_ref().map(|_| Field { name: "len".into(), width: Some(32), time: false, signed: false }));
+        out.extend(self.data.map(|_| Field { name: "data".into(), width: None, time: false, signed: false }));
+        out.push(Field { name: "complete".into(), width: Some(1), time: false, signed: false });
         out
     }
 
@@ -275,7 +275,7 @@ pub fn join(name: &str, requests: &[(&str, &Stream)], response: &Stream, id: Opt
     unmatched.sort_by_key(|r| r.start);
     let reqs: Vec<(&str, &[Field])> = requests.iter().map(|(l, s)| (*l, &s.schema[..])).collect();
     let schema = join_schema(&reqs, &response.schema);
-    let kinds = vec![Field { name: "kind".into(), width: None, time: false }];
+    let kinds = vec![Field { name: "kind".into(), width: None, time: false, signed: false }];
     let unmatched = Stream { name: format!("{name}.unmatched"), schema: kinds, records: unmatched, violations: true };
     Ok((Stream { name: name.into(), schema, records: done, violations: false }, unmatched))
 }
@@ -284,11 +284,11 @@ pub fn join(name: &str, requests: &[(&str, &Stream)], response: &Stream, id: Opt
 pub fn join_schema(requests: &[(&str, &[Field])], response: &[Field]) -> Vec<Field> {
     let inputs: Vec<(&str, &[Field])> = requests.iter().copied().chain([("resp", response)]).collect();
     let names: Vec<&str> = inputs.iter().flat_map(|(_, s)| s.iter().map(|f| f.name.as_str())).collect();
-    let mut schema = vec![Field { name: "delay".into(), width: Some(64), time: true }];
+    let mut schema = vec![Field { name: "delay".into(), width: Some(64), time: true, signed: false }];
     for (label, s) in &inputs {
         for f in *s {
             let twice = names.iter().filter(|&&x| x == f.name).count() > 1;
-            schema.push(Field { name: if twice { format!("{label}_{}", f.name) } else { f.name.clone() }, width: f.width, time: f.time });
+            schema.push(Field { name: if twice { format!("{label}_{}", f.name) } else { f.name.clone() }, width: f.width, time: f.time, signed: f.signed });
         }
     }
     schema
@@ -332,11 +332,11 @@ pub fn pair(name: &str, req: &Stream, resp: &Stream, id: Option<(&str, &str)>) -
     unmatched.extend(waiting.into_values().flatten().chain(reqs).map(|q| kind(q, "no response")));
     pairs.sort_by_key(|r| r.start);
     unmatched.sort_by_key(|r| r.start);
-    let prefixed = |p: &str, s: &Stream| s.schema.iter().map(|f| Field { name: format!("{p}{}", f.name), width: f.width, time: f.time }).collect::<Vec<_>>();
-    let mut schema = vec![Field { name: "delay".into(), width: Some(64), time: true }];
+    let prefixed = |p: &str, s: &Stream| s.schema.iter().map(|f| Field { name: format!("{p}{}", f.name), width: f.width, time: f.time, signed: f.signed }).collect::<Vec<_>>();
+    let mut schema = vec![Field { name: "delay".into(), width: Some(64), time: true, signed: false }];
     schema.extend(prefixed("req_", req));
     schema.extend(prefixed("resp_", resp));
-    let kind_schema = vec![Field { name: "kind".into(), width: None, time: false }];
+    let kind_schema = vec![Field { name: "kind".into(), width: None, time: false, signed: false }];
     let unmatched = Stream { name: format!("{name}.unmatched"), schema: kind_schema, records: unmatched, violations: true };
     Ok((Stream { name: name.into(), schema, records: pairs, violations: false }, unmatched))
 }
@@ -502,14 +502,14 @@ impl Decoder for Spi {
         };
         let mut out = Vec::new();
         if self.out == SpiOut::Transfer {
-            out.push(Field { name: "words".into(), width: Some(32), time: false });
+            out.push(Field { name: "words".into(), width: Some(32), time: false, signed: false });
         }
-        out.push(Field { name: "mosi".into(), width: w, time: false });
+        out.push(Field { name: "mosi".into(), width: w, time: false, signed: false });
         if self.miso {
-            out.push(Field { name: "miso".into(), width: w, time: false });
+            out.push(Field { name: "miso".into(), width: w, time: false, signed: false });
         }
         if self.out != SpiOut::Bit {
-            out.push(Field { name: "complete".into(), width: Some(1), time: false });
+            out.push(Field { name: "complete".into(), width: Some(1), time: false, signed: false });
         }
         out
     }
@@ -634,7 +634,7 @@ impl Uart {
 
 impl Decoder for Uart {
     fn schema(&self) -> Vec<Field> {
-        if self.errors { vec![Field { name: "rule".into(), width: None, time: false }] } else { vec![Field { name: "data".into(), width: Some(self.bits as u32), time: false }] }
+        if self.errors { vec![Field { name: "rule".into(), width: None, time: false, signed: false }] } else { vec![Field { name: "data".into(), width: Some(self.bits as u32), time: false, signed: false }] }
     }
 
     fn feed(&mut self, r: &Record) -> Vec<Record> {

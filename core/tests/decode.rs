@@ -68,7 +68,7 @@ fn join_in_order() {
     use wtf_core::trace::Val;
     let stream = |name: &str, starts: &[u64]| Stream {
         name: name.into(),
-        schema: vec![Field { name: name.into(), width: Some(8), time: false }],
+        schema: vec![Field { name: name.into(), width: Some(8), time: false, signed: false }],
         records: starts.iter().map(|&t| Record { start: t, end: t + 5, fields: vec![Some(Val::Bits(format!("{t:08b}")))] }).collect(),
         violations: false,
     };

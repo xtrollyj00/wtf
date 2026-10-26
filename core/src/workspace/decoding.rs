@@ -196,7 +196,7 @@ impl Workspace {
                             .enumerate()
                             .map(|(i, (t, v))| Record { start: t, end: ends.get(i).copied().unwrap_or(end.max(t + 1)), fields: vec![v] })
                             .collect();
-                        Stream { name: name.into(), schema: vec![stream::Field { name: "value".into(), width, time: false }], records, violations: false }
+                        Stream { name: name.into(), schema: vec![stream::Field { name: "value".into(), width, time: false, signed: false }], records, violations: false }
                     });
                     match made {
                         Ok(s) => {
@@ -316,7 +316,7 @@ impl Workspace {
             records.extend(s.records.into_iter().map(|r| stream::Record { fields: vec![Some(crate::trace::Val::Text(rule.clone()))], ..r }));
         }
         records.sort_by_key(|r| r.start);
-        Ok(Stream { name: name.into(), schema: vec![stream::Field { name: "rule".into(), width: None, time: false }], records, violations: true })
+        Ok(Stream { name: name.into(), schema: vec![stream::Field { name: "rule".into(), width: None, time: false, signed: false }], records, violations: true })
     }
 
     /// Sample a protocol into the stream `name` and add it as signals. Returns the stream's var.
@@ -337,6 +337,9 @@ impl Workspace {
         let mut vars = Vec::new();
         for (path, width, values) in signals {
             vars.push(self.trace.add_computed(&path, width, values)?);
+        }
+        for (f, &v) in s.schema.iter().zip(&vars[1..]) {
+            self.trace.vars[v].signed = f.signed;
         }
         match self.streams.iter_mut().find(|x| x.name == s.name) {
             Some(old) => *old = s,

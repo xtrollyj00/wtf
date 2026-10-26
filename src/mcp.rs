@@ -221,7 +221,7 @@ fn probes(app: &mut Workspace, names: &[String], radix_name: &Option<String>) ->
         let width = if p.1.is_some() { 1 } else { app.trace.vars[p.0].width.unwrap_or(0) };
         let named = p.1.is_none() && app.trace.vars[p.0].names.is_some();
         let (r, frac) = match own.or(radix_name.as_deref()) {
-            None => (radix::default_for(named), 0),
+            None => (radix::default_for(named, p.1.is_none() && app.trace.vars[p.0].signed), 0),
             Some(r) => radix_for(r, width, named, n)?,
         };
         out.push((n.to_string(), p, Sig { var: p.0, radix: r, frac, grouped: false, bits: 0, color: None }));

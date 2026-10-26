@@ -162,9 +162,9 @@ fn rows_of(app: &mut Workspace, rows: Value, grouped: bool, out: &mut Vec<Row>, 
                         Some((r, frac, need)) if radix::fits(r, width, named) && need.is_none_or(|n| n == width) => (r, frac),
                         Some((r, frac, need)) => {
                             warn.push(format!("radix {} doesn't fit {path}", radix::name(r, frac, need.unwrap_or(width))));
-                            (radix::default_for(named), 0)
+                            (radix::default_for(named, app.trace.vars[var].signed), 0)
                         }
-                        None => (radix::default_for(named), 0),
+                        None => (radix::default_for(named, app.trace.vars[var].signed), 0),
                     };
                     let bits = if expanded { app.sub_lines(var) } else { 0 };
                     out.push(Row::Signal(Sig { var, radix, frac, grouped, bits, color }));
@@ -202,7 +202,7 @@ fn quote(s: &str) -> String {
 fn signal_keys(app: &Workspace, s: &Sig) -> Vec<String> {
     let var = &app.trace.vars[s.var];
     let mut keys = vec![format!("signal = {}", quote(&var.path))];
-    if var.width != Some(1) && s.radix != radix::default_for(var.names.is_some()) {
+    if var.width != Some(1) && s.radix != radix::default_for(var.names.is_some(), var.signed) {
         keys.push(format!("radix = {}", quote(&radix::name(s.radix, s.frac, var.width.unwrap_or(0)))));
     }
     if let Some(c) = s.color {

@@ -27,7 +27,7 @@ fn samples_a_record_per_cycle() {
     // a beat: from the cycle's starting edge to the edge that samples it, fields sampled with it
     let beat = ws.sample("rx.beat", "clk", "valid && ready", &[("tdata", "data"), ("low", "data[3:0]"), ("rdy", "ready")]).unwrap();
     assert_eq!(beat.name, "rx.beat");
-    let field = |name: &str, width| Field { name: name.into(), width: Some(width), time: false };
+    let field = |name: &str, width| Field { name: name.into(), width: Some(width), time: false, signed: false };
     assert_eq!(beat.schema, [field("tdata", 8), field("low", 4), field("rdy", 1)]);
     assert_eq!(beat.records.iter().map(|r| (r.start, r.end)).collect::<Vec<_>>(), [(35, 45), (105, 115)]);
     assert_eq!(beat.records[0].fields, [bits("00010001"), bits("0001"), bits("1")]);

@@ -234,8 +234,9 @@ pub fn display_names(trace: &Trace, rows: &[Row]) -> Vec<String> {
 }
 
 fn unique_leaves(paths: &[&str]) -> Vec<String> {
-    // a concatenation `{top.a,top.b}` is shown whole
-    let parts: Vec<Vec<&str>> = paths.iter().map(|p| if p.starts_with('{') { vec![*p] } else { p.split('.').collect() }).collect();
+    // a concatenation `{top.a,top.b}` and an expression `top.a+1` are shown whole
+    let whole = |p: &str| p.starts_with('{') || matches!(crate::computed::form(p), Some(crate::computed::Form::Expr(_)));
+    let parts: Vec<Vec<&str>> = paths.iter().map(|p| if whole(p) { vec![*p] } else { p.split('.').collect() }).collect();
     let mut depth = vec![1; paths.len()];
     let name = |i: usize, d: usize| parts[i][parts[i].len().saturating_sub(d)..].join(".");
     loop {

@@ -1,8 +1,10 @@
 //! Signals computed from names (spec §16): bit slices `data[63:32]` and
 //! concatenations `{a, b}` (most significant first, as in Verilog). Their values are worked out
-//! once, from the changes of the signals they are made of, into a computed var (`Trace`).
+//! once, from the changes of the signals they are made of, into a computed var (`Trace`). Also
+//! expressions (`pc + 4`, `signed(insn[31:20])`, spec §16), evaluated at each change.
 
 use crate::time::Tick;
+use crate::search::Term;
 use crate::trace::{Trace, Val};
 
 /// What a name computes.
@@ -12,6 +14,8 @@ pub enum Form<'a> {
     Slice(&'a str, u32, u32),
     /// `{a, b, c}`
     Concat(Vec<&'a str>),
+    /// `pc + 4`: an expression of section 8
+    Expr(&'a str),
 }
 
 /// The form of a name, if it computes anything. `data[3]` is a bit, not a slice, and computes
@@ -37,9 +41,30 @@ pub fn form(name: &str) -> Option<Form<'_>> {
         parts.push(inner[start..].trim());
         return Some(Form::Concat(parts));
     }
+    if is_expr(name) {
+        return Some(Form::Expr(name));
+    }
     let (base, range) = name.strip_suffix(']')?.rsplit_once('[')?;
     let (hi, lo) = range.split_once(':')?;
     Some(Form::Slice(base.trim(), hi.trim().parse().ok()?, lo.trim().parse().ok()?))
+}
+
+/// An operator outside brackets and braces, or a leading `(`, `~` or `signed(`. A `*` at an end
+/// or next to `.` or `*` is a pattern's (`top.cpu.*`, `**.valid`), not a product.
+fn is_expr(name: &str) -> bool {
+    let mut depth = 0i32;
+    let b = name.as_bytes();
+    let glob = |i: usize| i == 0 || i + 1 == b.len() || b".*".contains(&b[i - 1]) || b".*".contains(&b[i + 1]);
+    name.starts_with(['(', '~'])
+        || name.starts_with("signed(")
+        || name.char_indices().any(|(i, c)| {
+            depth += match c {
+                '[' | '{' => 1,
+                ']' | '}' => -1,
+                _ => 0,
+            };
+            depth == 0 && ("+-&|^~<>=!".contains(c) || (c == '*' && !glob(i)))
+        })
 }
 
 /// Braces balance, so `{a}, {b}` isn't read as one concatenation.
@@ -101,6 +126,24 @@ pub fn concat(trace: &mut Trace, vars: &[usize]) -> Result<(u32, Vec<(Tick, Val)
     Ok((widths.iter().sum(), all.into_iter().map(|t| (t, value(t))).collect()))
 }
 
+/// The values of an expression, at each change of the signals it reads, as `shape` bits (two's
+/// complement); `x`s where it is unknown.
+pub fn term(trace: &mut Trace, t: &Term) -> Vec<(Tick, Val)> {
+    let mut probes = Vec::new();
+    t.probes(&mut probes);
+    let vars: Vec<usize> = probes.iter().map(|p| p.0.0).collect();
+    trace.load(&vars);
+    let mut all: Vec<Tick> = vars.iter().flat_map(|&v| times(trace, v)).collect();
+    all.sort();
+    all.dedup();
+    let w = t.shape().bits as usize;
+    let bits = |at| match t.value(&|p, _| Some(trace.value_of(p.0, p.1, at))) {
+        Some(n) => format!("{:0w$b}", (n as u128) & ((1u128 << w) - 1)),
+        None => "x".repeat(w),
+    };
+    all.into_iter().map(|at| (at, Val::Bits(bits(at)))).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -115,5 +158,12 @@ mod tests {
         assert_eq!(form("data[3]"), None);
         assert_eq!(form("data[x:1]"), None);
         assert_eq!(form("top.clk"), None);
+        assert_eq!(form("pc + 4"), Some(Form::Expr("pc + 4")));
+        assert_eq!(form("signed(insn[31:20])"), Some(Form::Expr("signed(insn[31:20])")));
+        assert_eq!(form("{a, b - 1}"), Some(Form::Concat(vec!["a", "b - 1"])));
+        assert_eq!(form("x[7:4]"), Some(Form::Slice("x", 7, 4)));
+        assert_eq!(form("pc * 4"), Some(Form::Expr("pc * 4")));
+        assert_eq!(form("top.cpu.*"), None);
+        assert_eq!(form("**.s_axi_*"), None);
     }
 }

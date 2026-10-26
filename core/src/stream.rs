@@ -15,6 +15,8 @@ pub struct Field {
     pub width: Option<u32>,
     /// Its values are durations in ticks (a pair's `delay`), shown as times in the unit asked for.
     pub time: bool,
+    /// Its values are two's complement (a computed signal that can be negative).
+    pub signed: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -152,8 +154,8 @@ impl Stream {
         // `n`, the record's number, is the probe after the fields
         let n = self.schema.len();
         let q = crate::search::parse_query(text, fpt, &mut |name| match self.schema.iter().position(|f| f.name == name) {
-            Some(k) => Ok(((k, None), self.schema[k].width, None)),
-            None if name == "n" => Ok(((n, None), Some(64), None)),
+            Some(k) => Ok(((k, None), self.schema[k].width, None, self.schema[k].signed)),
+            None if name == "n" => Ok(((n, None), Some(64), None, false)),
             None => {
                 let names: Vec<&str> = self.schema.iter().map(|f| f.name.as_str()).collect();
                 Err(format!("{}: no field {name} (fields: {}, and n, the record's number)", self.name, names.join(", ")))
@@ -201,13 +203,14 @@ impl Stream {
     }
 }
 
-/// A field's value as text: numbers in hex, 1-bit ones as the bit, `-` where there is none, and a
+/// A field's value as text: numbers in hex (signed ones in decimal), 1-bit ones as the bit, `-` where there is none, and a
 /// time field's ticks as a time in `unit` to `decimals`, as `time::format_as` takes them.
 pub fn value_text(f: &Field, v: &Option<Val>, fpt: Option<u128>, unit: Option<usize>, decimals: Option<u32>) -> String {
     match v {
         None => "-".into(),
         Some(Val::Bits(b)) if f.time => u64::from_str_radix(b, 2).map_or("x".into(), |t| crate::time::format_as(t, fpt, unit, decimals)),
         Some(Val::Bits(b)) if b.len() == 1 => b.to_uppercase(),
+        Some(Val::Bits(b)) if f.signed => (crate::radix::RADIXES[crate::radix::SDEC].format)(b, 0),
         Some(Val::Bits(b)) => (crate::radix::RADIXES[crate::radix::DEFAULT].format)(b, 0),
         Some(Val::Text(t)) => t.clone(),
     }
@@ -229,6 +232,6 @@ pub fn sample(trace: &Trace, name: &str, q: &Query, fields: &[(String, Probe, Op
             Record { start: r.first, end: at + 1, fields: fields.iter().map(|(_, p, _)| trace.value_of(p.0, p.1, at)).collect() }
         })
         .collect();
-    let schema = fields.iter().map(|(n, _, w)| Field { name: n.clone(), width: *w, time: false }).collect();
+    let schema = fields.iter().map(|(n, p, w)| Field { name: n.clone(), width: *w, time: false, signed: p.1.is_none() && trace.vars[p.0].signed }).collect();
     Ok(Stream { name: name.to_string(), schema, records, violations: false })
 }

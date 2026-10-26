@@ -46,11 +46,16 @@ otherwise hex; 1-bit signals always show 0 / 1 / X / Z.
     ),
     (
         "expressions",
-        "search expressions for `find`: operators, values, @clk, past / rose / fell / stable",
+        "search expressions for `find`: operators, arithmetic, values, @clk, past / rose / fell / stable",
         "\
 `valid && ready && data == 0x40`, `state == 3 || state == 5`, `!rst`.
 - Operators: == != < <= > >= (unsigned numbers), &&, ||, ! and parentheses. A bare signal is
   true when 1 (some bit 1, none unknown).
+- Arithmetic, written as in SystemVerilog but stricter: + - * & | ^ ~ << >> and signed(x). Values
+  are exact integers: nothing wraps unless sliced, so a 32-bit add is `(a + b)[31:0]`; `signed(x)`
+  reads x as two's complement (`signed(imm[11:0]) < 0`). `&`, `|`, `^` need parentheses beside
+  another operator, `<<` and `>>` beside arithmetic: `(x & 3) == 0`, `wmask != 1 << addr[1:0]`.
+  An unknown operand makes the result x. Operands up to 64 bits; an error shows each fix.
 - Values: 0x40, 64, 0b1000000, -12, x (unknown), z (high impedance), a name the file gives a
   value, a time (`40ns`), or another signal (`mi_addr != reg_waddr`, `data != past(data)`). Two
   events at different times (a request and its response) are compared as records instead: a
@@ -82,7 +87,8 @@ each one's roles, params, streams and fields.
   so it can have spaces.
 - An interface of the design's own: `protocol <name> clock=<clk> when=<expr> <field>=<signal>...`
   makes a record per clock cycle where `when` holds (`help expressions`), the fields sampled with
-  it. With `roles=a,b` it is a type for `decode` instead.
+  it. A field is any expression without past: `next=pc + 4`, `imm=signed(insn[31:20])` (a field
+  that can be negative is signed, shown in decimal). With `roles=a,b` it is a type for `decode`.
 - On streams: `decode f frame input=rx.beat last=tlast` groups records into frames;
   `decode m pair request=axi.wr response=mi` matches requests with responses (by order, or
   `id=` / `req_id=` and `resp_id=`), each record both sides with its `delay`;

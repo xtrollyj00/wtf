@@ -69,16 +69,19 @@ clk      ▁▁▁▁▔▔▔▔▁▁▁▁▔▔▔▔
   - A slice gives a result a width: `(a + b)[31:0]` is the sum's low 32 bits, as a 32-bit adder
     makes it, read unsigned (a negative value's bits are its two's complement). A slice is the
     only way to wrap, so an expression says where it wraps.
-  - `*` binds tighter than `+` and `-`, arithmetic tighter than comparisons, comparisons tighter
-    than `&&`, `&&` tighter than `||`. `&`, `|`, `^`, `<<` and `>>` don't mix with another binary
-    operator without parentheses: `x & 3 == 0` is an error, `x & 3 == 0: & and == need
-    parentheses: (x & 3) == 0 or x & (3 == 0)`; `a & b & c` is fine.
+  - `*` binds tighter than `+` and `-`, arithmetic (shifts too) tighter than comparisons,
+    comparisons tighter than `&&`, `&&` tighter than `||`. Where SV's order surprises, parentheses
+    are required: `&`, `|` and `^` beside any other operator (SV puts them below `==`), `<<` and
+    `>>` beside other arithmetic (`1 << n + 1`). `x & 3 == 0` is an error, `x & 3 == 0: & and ==
+    need parentheses: (x & 3) == 0 or x & (3 == 0)`; `a & b & c` and `wmask != 1 << addr[1:0]`
+    are fine.
   - `~x` inverts x's bits at x's width, so x is a signal or a slice: `~(a + b)` is an error
     naming `~(a + b)[31:0]`.
   - An unknown or high-impedance bit in an operand makes the result unknown, which compares as
     `x` does: equal to `x`, unequal to every number.
   - Sizes are checked before searching: an operand up to 64 bits, a result up to 127 (a shift by
-    a 32-bit amount could be 2^32 bits wide). Beyond that, an error names the part and the fix:
-    `a << b: b is 32 bits, so the result could be 2^32 bits; shift by a slice, a << b[4:0]`.
+    a 32-bit amount could be 2^32 bits wide). Beyond that, an error names the part and the fix;
+    with 32-bit a and b: `a << b: b is 32 bits, so the result could be 2^32 bits; shift by a
+    slice, a << b[5:0]`. A shift amount can't be negative (signed).
 - On a bit line of an expanded bus, the search looks at that bit. String and real signals are
   searched by their text.
