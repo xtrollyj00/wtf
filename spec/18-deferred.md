@@ -190,10 +190,22 @@ answer key right, `evidence` the share of keys right, costs are medians:
 | | off | 3/5 | 5/5 | 0.80 | 3 | 8.0 | 0.63M | $0.024 | 203 s |
 | axil2mi-stale-addr | on | 2/5 | 5/5 | 0.80 | 1 | 0.6 | 0.37M | $0.015 | 62 s |
 | | off | 1/5 | 5/5 | 0.46 | 2 | 5.0 | 0.38M | $0.015 | 57 s |
+| ibex-checksum (wtf 916c847, 2026-10-26) | on | 3/5 | 4/5 | 0.75 | 1 | 4.0 | 2.02M | $0.133 | 277 s |
+| | off | 1/5 | 5/5 | 0.40 | 2 | 7.8 | 3.46M | $0.139 | 242 s |
 
 `axil2mi-stale-addr` is the hard one: an AXI4-Lite to MI converter whose write address is sampled
 outside its handshake, so a write queued behind another goes one word up; the test only reads the
 registers back at the end, 3.5 - 12.8 us after the bad writes, and never says when they were made.
+
+`ibex-checksum` was meant to be harder: Ibex (maxperf, 3 stages), 10k lines of RTL, whose store
+decoding lacks `rf_ren_b_o`, so an adjacent `lw rX; sw rX` may store the load's address when the
+store is granted in the load's response cycle; the test only sees a wrong checksum 10 000 cycles
+later. It is still found by reading: without wtf all 5 runs fixed it, grepping `rf_ren_*` across
+the decoders (OP and BRANCH set it, STORE not), and a first version (`rf_rd_b_hz & ~lsu_we`,
+beside `rf_rd_a_hz`) was fixed by both arms in one run each. wtf again gets the evidence (0.75
+against 0.40: the first bad write and how many); its miss on the fix was a run that hit the
+600 s timeout. One run with wtf counted 12 writes, the 6 bad ones and their copies, from a diff
+against a passing run.
 
 - Every run fixed its bug, with wtf or without: these bugs are found from the log and the code,
   even axil2mi's (260 lines of state machine give the cause away). The tasks measure what wtf
