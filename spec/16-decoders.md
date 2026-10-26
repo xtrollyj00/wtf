@@ -17,7 +17,8 @@ checks that return only violations.
     is the largest its value can need (`pc + 4` on a 32-bit pc is 33 bits). One that can be
     negative (a `-`, a `signed`) holds two's complement, starts in `sdec`, is shown in decimal by
     `records` and reads as signed in expressions, so `imm = signed(insn[31:20])` stays -4 in
-    `where imm < 0`. Its var is named by the expression with full paths and no spaces
+    `where imm < 0`. A field names its value in the fields after it and in `when`, as an
+    instance's roles do: `f3=insn[14:12] ok=f3 == 0`. Its var is named by the expression with full paths and no spaces
     (`top.pc+4`), and a row shows that whole;
   - in search expressions too, `rose(x)`, `fell(x)`, `stable(x)` and `past(x)` (the value one
     clock cycle earlier, with `@clk`), so a protocol check is a search for its violations:

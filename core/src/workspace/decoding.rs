@@ -5,16 +5,27 @@ use super::*;
 
 impl Workspace {
     /// A stream sampled at `clock` where `when` holds, with fields (name, signal) named as in a
-    /// search (`tdata[63:32]`, `{a, b}`).
+    /// search (`tdata[63:32]`, `{a, b}`). A field names its value in the fields after it and in
+    /// `when` (`f3 = insn[14:12]`, then `ok = f3 == 0`), as an instance's roles do.
     pub fn sample(&mut self, name: &str, clock: &str, when: &str, fields: &[(&str, &str)]) -> Result<Stream, String> {
-        let q = self.query(&format!("@{clock} {when}"))?;
+        let roles = self.roles.clone();
+        let made = self.sample_fields(name, clock, when, fields);
+        self.roles = roles;
+        let (q, probes) = made?;
+        self.trace.load(&probes.iter().map(|p| p.1.0).collect::<Vec<_>>());
+        stream::sample(&self.trace, name, &q, &probes)
+    }
+
+    /// `sample`'s fields, each a role for the ones after it, then its condition.
+    #[allow(clippy::type_complexity)]
+    fn sample_fields(&mut self, name: &str, clock: &str, when: &str, fields: &[(&str, &str)]) -> Result<(search::Query, Vec<(String, search::Probe, Option<u32>)>), String> {
         let mut probes = Vec::new();
         for &(field, sig) in fields {
             let p = self.resolve(sig).map_err(|e| format!("{name}.{field}: {e}"))?;
             probes.push((field.to_string(), p, if p.1.is_some() { Some(1) } else { self.trace.vars[p.0].width }));
+            self.roles.insert(field.to_string(), self.path_of(p));
         }
-        self.trace.load(&probes.iter().map(|p| p.1.0).collect::<Vec<_>>());
-        stream::sample(&self.trace, name, &q, &probes)
+        Ok((self.query(&format!("@{clock} {when}"))?, probes))
     }
 
     /// Add a protocol, replacing one of that name. Without roles it is sampled into a stream of

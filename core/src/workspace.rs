@@ -148,7 +148,7 @@ impl Workspace {
         // a number, x, z or a name of the selected signal's values is a value for it; another name
         // or an operator, an expression
         let value = !search::is_expr(text)
-            && (text.starts_with(|c: char| c.is_ascii_digit() || c == '-')
+            && (text.starts_with(|c: char| c.is_ascii_digit() || c == '-' || c == '\'')
                 || matches!(text.to_lowercase().as_str(), "x" | "u" | "z")
                 || names.as_ref().is_some_and(|n| n.iter().any(|(_, name)| name.eq_ignore_ascii_case(text))));
         let query = if value {

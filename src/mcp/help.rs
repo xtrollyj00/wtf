@@ -57,7 +57,7 @@ otherwise hex; 1-bit signals always show 0 / 1 / X / Z.
   another operator, `<<` and `>>` beside arithmetic: `(x & 3) == 0`, `wmask != 1 << addr[1:0]`.
   A comparison or `!x` is a value, 1 or 0. A field's bits are `b[4:0]`, as a signal's. An unknown
   operand makes the result x. Operands up to 64 bits; an error shows each fix.
-- Values: 0x40, 64, 0b1000000, -12, x (unknown), z (high impedance), a name the file gives a
+- Values: 0x40, 64, 0b1000000, -12, SV numbers (8'h40, 'd64, 4'b10x0, '1), x (unknown), z (high impedance), a name the file gives a
   value, a time (`40ns`), or another signal (`mi_addr != reg_waddr`, `data != past(data)`). Two
   events at different times (a request and its response) are compared as records instead: a
   stream of each, matched with `pair` (`help decode`), their fields in `records` `where`.
@@ -89,7 +89,8 @@ each one's roles, params, streams and fields.
 - An interface of the design's own: `protocol <name> clock=<clk> when=<expr> <field>=<signal>...`
   makes a record per clock cycle where `when` holds (`help expressions`), the fields sampled with
   it. A field is any expression without past: `next=pc + 4`, `imm=signed(insn[31:20])` (a field
-  that can be negative is signed, shown in decimal). With `roles=a,b` it is a type for `decode`.
+  that can be negative is signed, shown in decimal); later fields and `when` can name it
+  (`f3=insn[14:12] ok=f3 == 0`). With `roles=a,b` it is a type for `decode`.
 - On streams: `decode f frame input=rx.beat last=tlast` groups records into frames;
   `decode m pair request=axi.wr response=mi` matches requests with responses (by order, or
   `id=` / `req_id=` and `resp_id=`), each record both sides with its `delay`;

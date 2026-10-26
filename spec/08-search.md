@@ -12,7 +12,10 @@ clk      ▁▁▁▁▔▔▔▔▁▁▁▁▔▔▔▔
 
 - **Matching is by number**, in any radix: `/0x40`, `/64` and `/0b1000000` find the same value,
   and leading zeros don't matter (`/0x0040`). A number without a prefix is decimal.
-  On 1-bit signals, `/1` and `/0` find the next rising / falling edge.
+  SystemVerilog numbers are values everywhere too, stricter as in arithmetic: `8'h40`, `'d64`,
+  `4'b10x0` (x and z bits match as written), `'1` (all ones at the signal's width); a value that
+  doesn't fit its size is an error (`4'hFF`), not cut. In arithmetic an SV number must be known
+  and sized if a fill (`32'hFFFFFFFF`, not `'1`), and `4'sb1111` is -1. On 1-bit signals, `/1` and `/0` find the next rising / falling edge.
 - **Names**: on a signal whose values the file names (`enum`, section 10), a name is a value
   too, in any case: `/READ`, `/state == read`. Another word is an expression, as below.
 - **Unknown values**: `/x` finds the next value with any unknown bit (`x` or `u`),

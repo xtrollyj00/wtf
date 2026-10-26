@@ -31,6 +31,18 @@ pub fn parse(text: &str, width: Option<u32>, names: Option<&Names>) -> Result<Ta
         _ => {}
     }
     let Some(w) = width else { return Ok(Target::Text(text.trim().into())) };
+    if let Some(sv) = sv_literal(text.trim()) {
+        let bits = match sv? {
+            Sv::Fill(c) => c.to_string().repeat(w as usize),
+            Sv::Bits { bits, .. } => bits,
+        };
+        let fill = if bits.starts_with(['x', 'z']) { &bits[..1] } else { "0" };
+        let bits = bits.trim_start_matches('0');
+        if bits.len() > w as usize {
+            return Err(format!("{} doesn't fit in {w} bits", text.trim()));
+        }
+        return Ok(Target::Bits(format!("{}{bits}", fill.repeat(w as usize - bits.len()))));
+    }
     if let Some((bits, _)) = names.and_then(|n| n.iter().find(|(_, name)| name.eq_ignore_ascii_case(text.trim()))) {
         return Ok(Target::Bits(format!("{bits:0>w$}", w = w as usize)));
     }
@@ -647,7 +659,7 @@ impl Parser<'_> {
             }
             return Ok(Atom::Term(Term::Slice(Box::new(t), hi, lo)));
         }
-        if self.s.starts_with(|c: char| c.is_ascii_digit()) || (self.s.starts_with('-') && self.s[1..].starts_with(|c: char| c.is_ascii_digit())) {
+        if self.s.starts_with(|c: char| c.is_ascii_digit() || c == '\'') || (self.s.starts_with('-') && self.s[1..].starts_with(|c: char| c.is_ascii_digit() || c == '\'')) {
             let w = self.value_word();
             return number_text(&w, self.fpt).map(|n| Atom::Term(Term::Num(n)));
         }
@@ -713,10 +725,89 @@ fn truth(a: Atom) -> Expr {
     }
 }
 
-/// A number in an expression: decimal, `0x`, `0b` or `0o`, maybe negative, or a time (ticks).
+/// An SV number (`8'hFF`, `'b1010`, `4'sb1100`), its bits MSB first as wide as its size, or
+/// without leading zeros if unsized; or `'0`, `'1`, `'x`, `'z`, as wide as what it meets.
+#[derive(Debug, PartialEq)]
+pub enum Sv {
+    Bits { bits: String, signed: bool, sized: bool },
+    Fill(char),
+}
+
+/// Reads `text` as an SV number, if it is one (it has a `'`). Stricter than SV: a value that
+/// doesn't fit its size is an error, not cut.
+pub fn sv_literal(text: &str) -> Option<Result<Sv, String>> {
+    let (size, rest) = text.split_once('\'')?;
+    let form = || format!("{text}: an SV number is <size>'<b|o|d|h><digits>, e.g. 8'hFF, 'd12, 4'b10x0");
+    let size = match size.replace('_', "") {
+        s if s.is_empty() => None,
+        s => match s.parse::<u32>() {
+            Ok(n) if n > 0 => Some(n),
+            _ => return Some(Err(form())),
+        },
+    };
+    let rest = rest.to_lowercase();
+    if size.is_none() && matches!(rest.as_str(), "0" | "1" | "x" | "z") {
+        return Some(Ok(Sv::Fill(rest.chars().next().unwrap())));
+    }
+    let (signed, rest) = rest.strip_prefix('s').map_or((false, rest.as_str()), |r| (true, r));
+    let Some(base) = rest.chars().next() else { return Some(Err(form())) };
+    let digits = rest[1..].replace('_', "").replace('?', "z");
+    if digits.is_empty() {
+        return Some(Err(form()));
+    }
+    let per = match base {
+        'b' => 1,
+        'o' => 3,
+        'h' => 4,
+        'd' if matches!(digits.as_str(), "x" | "z") => 0,
+        'd' => match digits.parse::<u128>() {
+            Ok(n) => return Some(sized(text, format!("{n:b}"), size, signed)),
+            Err(_) => return Some(Err(form())),
+        },
+        _ => return Some(Err(form())),
+    };
+    let mut bits = String::new();
+    for c in digits.chars() {
+        match (c, c.to_digit(1 << per.max(1))) {
+            ('x' | 'z', _) => bits.push_str(&c.to_string().repeat(per.max(1))),
+            (_, Some(d)) => bits.push_str(&format!("{d:0per$b}")),
+            _ => return Some(Err(form())),
+        }
+    }
+    Some(sized(text, bits, size, signed))
+}
+
+/// SV bits brought to their size: leading zeros dropped, then padded (with an x or z if that
+/// leads, as SV does), or an error if the value is wider.
+fn sized(text: &str, bits: String, size: Option<u32>, signed: bool) -> Result<Sv, String> {
+    let fill = if bits.starts_with(['x', 'z']) { &bits[..1] } else { "0" };
+    let bits = match bits.trim_start_matches('0') {
+        "" => "0",
+        b => b,
+    };
+    let Some(n) = size.map(|n| n as usize) else { return Ok(Sv::Bits { bits: bits.into(), signed, sized: false }) };
+    if bits.len() > n {
+        return Err(format!("{text}: the value doesn't fit in {n} bits"));
+    }
+    Ok(Sv::Bits { bits: format!("{}{bits}", fill.repeat(n - bits.len())), signed, sized: true })
+}
+
+/// A number in an expression: decimal, `0x`, `0b` or `0o`, an SV number (`8'hFF`), maybe
+/// negative, or a time (ticks).
 fn number_text(text: &str, fpt: Option<u128>) -> Result<i128, String> {
     if crate::time::has_unit(text) {
         return crate::time::parse(text, fpt).map(|t| t.round() as i128);
+    }
+    if let Some(sv) = sv_literal(text.trim_start_matches('-')) {
+        let n = match sv? {
+            Sv::Fill(c) => return Err(format!("{text}: '{c} has no width in arithmetic; write one, as 32'h{}", if c == '1' { "FFFFFFFF" } else { "0" })),
+            Sv::Bits { bits, .. } if bits.contains(['x', 'z']) => return Err(format!("{text}: arithmetic takes known numbers; compare with x instead (== x)")),
+            Sv::Bits { bits, signed, sized } => {
+                let n = number(&bits).ok_or(format!("{text}: more than {MAX_RESULT} bits"))?;
+                if signed && sized { to_signed(n, bits.len() as u32) } else { n }
+            }
+        };
+        return Ok(if text.starts_with('-') { -n } else { n });
     }
     let (neg, t) = text.strip_prefix('-').map_or((false, text), |t| (true, t));
     let t = t.replace('_', "").to_lowercase();
@@ -1074,6 +1165,37 @@ mod tests {
         assert_eq!(arith("u + 1 == 5"), Ok(false));
         assert_eq!(arith("u + 1 < 5"), Ok(false));
         assert_eq!(arith("u & 1"), Ok(false));
+    }
+
+    #[test]
+    fn sv_literals() {
+        let bits = |b: &str, signed, sized| Some(Ok(Sv::Bits { bits: b.into(), signed, sized }));
+        assert_eq!(sv_literal("8'hF"), bits("00001111", false, true));
+        assert_eq!(sv_literal("'hF_F"), bits("11111111", false, false));
+        assert_eq!(sv_literal("4'b10x0"), bits("10x0", false, true));
+        assert_eq!(sv_literal("8'hx"), bits("xxxxxxxx", false, true));
+        assert_eq!(sv_literal("12'd100"), bits("000001100100", false, true));
+        assert_eq!(sv_literal("4'sb1100"), bits("1100", true, true));
+        assert_eq!(sv_literal("3'o7"), bits("111", false, true));
+        assert_eq!(sv_literal("'1"), Some(Ok(Sv::Fill('1'))));
+        assert_eq!(sv_literal("12"), None);
+        assert_eq!(sv_literal("4'hFF"), Some(Err("4'hFF: the value doesn't fit in 4 bits".into())));
+        assert_eq!(sv_literal("8'q1"), Some(Err("8'q1: an SV number is <size>'<b|o|d|h><digits>, e.g. 8'hFF, 'd12, 4'b10x0".into())));
+        // as values of a signal, and in arithmetic
+        let bits = |s: &str| Ok(Target::Bits(s.into()));
+        assert_eq!(parse("8'h40", Some(8), None), bits("01000000"));
+        assert_eq!(parse("'1", Some(4), None), bits("1111"));
+        assert_eq!(parse("4'b1x01", Some(6), None), bits("001x01"));
+        assert_eq!(parse("'h1FF", Some(8), None), Err("'h1FF doesn't fit in 8 bits".into()));
+        let yes = |s: &str| assert_eq!(arith(s), Ok(true), "{s}");
+        yes("m == 4'b0100");
+        yes("m == 'h4 && m != 1'b0");
+        yes("a == '1");
+        yes("a + 1'b1 == 33'h1_0000_0000");
+        yes("4'sb1111 == -1");
+        yes("s == 8'sd252 && s == -8'd4");
+        assert_eq!(arith("a + '1 == 0"), Err("'1: '1 has no width in arithmetic; write one, as 32'hFFFFFFFF".into()));
+        assert_eq!(arith("a + 4'b1x00 == 0"), Err("4'b1x00: arithmetic takes known numbers; compare with x instead (== x)".into()));
     }
 
     #[test]

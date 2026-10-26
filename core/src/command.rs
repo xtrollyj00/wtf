@@ -128,7 +128,7 @@ fn protocol(app: &mut Workspace, arg: &str) -> Result<(), String> {
     let (clock, when, roles) = (take("clock").unwrap_or_default(), take("when").ok_or(usage)?, take("roles"));
     let roles = roles.map_or(Vec::new(), |r| r.split(',').map(|r| r.trim().to_string()).filter(|r| !r.is_empty()).collect());
     let p = crate::stream::Sampler { name: name.into(), clock, when, fields, roles };
-    app.add_protocol(p).map(drop).map_err(|e| format!("{name}: {e}"))
+    app.add_protocol(p).map(drop).map_err(|e| format!("protocol {name} not made: {e}"))
 }
 
 /// `key=value` words in order; a value runs to the next `key=`, so it can have spaces

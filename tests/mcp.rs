@@ -675,6 +675,10 @@ fn arithmetic_in_fields_and_where() {
     // a negative field stays signed, and compares exactly with an unsigned one
     assert_eq!(p("back < -1"), "1 of 1 matching, of 3\nn\tstart\tend\tid\tnext\tback\n1\t25ns\t35ns\t0x2\t0x3\t-2");
     assert_eq!(p("back < id && (id & 1) == 1 && id << 2 == 12"), "1 of 1 matching, of 3\nn\tstart\tend\tid\tnext\tback\n2\t45ns\t55ns\t0x3\t0x4\t-1");
+    // a field names its value for the fields after it and for `when`
+    s.ok("command", json!({"line": "protocol q clock=clk when=req_valid && odd == 1'b1 id=req_id odd=id[0:0] twice=id * 2"}));
+    assert_eq!(s.ok("records", json!({"stream": "q"})), "2 of 2\nn\tstart\tend\tid\todd\ttwice\n0\t15ns\t25ns\t0x1\t1\t0x2\n1\t45ns\t55ns\t0x3\t1\t0x6");
+    assert_eq!(s.tool("command", json!({"line": "protocol r clock=clk when=req_valid x=nope"})), Err("protocol r not made: r.x: unknown signal: nope".into()));
     // a field's bits, and ! as an operand
     assert_eq!(s.ok("records", json!({"stream": "p", "where": "id[1] == 1 && id[0:0] == !1", "count_only": true})), "1 matching records, of 3, first 25ns, last 25ns");
     assert_eq!(s.tool("records", json!({"stream": "p", "where": "id & 1 == 1"})), Err("id & 1 == 1: & and == need parentheses: (id & 1) == 1 or id & (1 == 1)".into()));
