@@ -1,18 +1,18 @@
-# A fix task on Ibex (lowRISC, Apache-2.0) in its maxperf configuration, 3 stages with writeback: a
-# load in writeback stalls an instruction in ID that reads the register it loads (rf_rd_b_hz, from
-# the decoder's rf_ren_b_o). The bug drops rf_ren_b_o for stores, so a store's data register (rs2)
-# is no hazard: the store still waits for the load's response (data_req_allowed), but in the
-# response cycle it may go, with the stale value forwarded from writeback (the load's address)
-# instead of the loaded data. Only an adjacent `lw rX; sw rX` (in tb/prog.c, the struct copies in
-# put and take) whose store is in ID by the response cycle and is granted in that cycle writes a
-# wrong word; with a wait state on the store it reads the register file again, which is right by
-# then. The visible run (seed 1) writes 6 wrong words, the first at 9075ns (pc 0x1b4, address
-# 0x504); the checksum mismatch shows at the end, at 107us. RVFI reports the store data of the cycle
-# the store first tries to go, so it shows 12 stores with the stale value: only the bus
-# (data_wdata_o at data_gnt_i) says which were written. A diff of the bus writes against a passing
-# run finds 12: the 6 and the 6 copies of their words into out[]. RVFI gives every store rs2 0.
-# The bug was first beside rf_rd_a_hz in ibex_id_stage.sv (rf_rd_b_hz & ~lsu_we): both Haiku runs,
-# with wtf and without, saw it there by reading.
+# A fix task on Ibex (lowRISC, Apache-2.0) in its maxperf configuration, 3 stages with writeback.
+# Ibex splits a misaligned access in two; for the second part the LSU asks ID/EX for the next
+# word's address (addr_incr_req_o) in each state that sends it. The bug drops that in WAIT_GNT,
+# the state that also waits for an ordinary grant: a misaligned access whose first response comes
+# before its second request is granted sends the second to the first word again, so a load gets
+# its upper bytes from the wrong word. tb/prog.c reads frame words at odd offsets (get32, a
+# `lw` at 0x258, 0x260, 0x268); whether one goes wrong depends on the wait states, so every seed
+# fails with another checksum. The visible run (seed 1): 6 second parts go to the same word
+# (granted at 22745, 43465, 64335, 104885, 106035, 146715ns), 5 loads get a wrong value (one gets
+# the same bytes by chance), the first retiring at 22785ns (pc 0x258, 0xA09B9790 for 0x9B9790);
+# the checksum mismatch shows at 186us. The bug doesn't change the timing: a passing run has the
+# same cycles. Later loads of the bad words (the checksum loop over got[]) are not counted.
+# Earlier versions were found by reading, by both arms, in every run: a load-use stall dropped for
+# store data, beside the right line for rs1 (rf_rd_b_hz & ~lsu_we), then the same as a missing
+# rf_ren_b_o in the decoder's store case (grep rf_ren_* shows OP and BRANCH set it).
 # Not WritebackStage without BranchTargetALU (no standard config): upstream there mis-jumps a taken
 # branch whose first cycle waits on a store's response, which fails riscv-tests sb and sh.
 upstream = "https://github.com/lowRISC/ibex.git"
@@ -26,8 +26,8 @@ waveform of the run (with the core's RVFI port); both are there from the failing
 environment is set up: `make sim` runs as it is, in about 5 s. Find the cause in the RTL and fix
 it, so that `make sim` passes. Don't change the testbench or the Makefile.
 """
-answer = '{"signal": "<the signal whose logic was wrong>", "pc": "<the pc of the first instruction that wrote a wrong value to memory, in hex>", "first_write": "<that write: the rising edge that starts the cycle in which data_req_o, data_we_o and data_gnt_i are high for it, one clock before the edge that samples them, in ns>", "writes": <how many memory writes in the failing run the bug made wrong itself (not copies of wrong data)>}'
-expect = '{"signal": "rf_ren_b_o|rf_ren_b|rf_ren_b_dec", "pc": "0x1b4", "first_write": "9075ns", "writes": 6}'
+answer = '{"signal": "<the signal whose logic was wrong>", "pc": "<the pc of the first instruction that loaded a wrong value, in hex>", "first_load": "<when that instruction retired: the rising edge that starts the cycle in which rvfi_valid is high for it, one clock before the edge that samples it, in ns>", "loads": <how many loads in the failing run the bug made return a wrong value (not loads of wrong data from memory)>}'
+expect = '{"signal": "addr_incr_req_o|lsu_addr_incr_req|lsu_addr_incr_req_i|addr_incr_req", "pc": "0x258", "first_load": "22785ns", "loads": 5}'
 
 [files]
 "rtl" = "rtl"

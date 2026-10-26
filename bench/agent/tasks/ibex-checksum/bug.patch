@@ -1,11 +1,12 @@
-diff --git a/rtl/ibex_decoder.sv b/rtl/ibex_decoder.sv
---- a/rtl/ibex_decoder.sv
-+++ b/rtl/ibex_decoder.sv
-@@ -297,7 +297,6 @@ module ibex_decoder #(
+diff --git a/rtl/ibex_load_store_unit.sv b/rtl/ibex_load_store_unit.sv
+--- a/rtl/ibex_load_store_unit.sv
++++ b/rtl/ibex_load_store_unit.sv
+@@ -447,8 +447,6 @@ module ibex_load_store_unit #(
+       end
  
-       OPCODE_STORE: begin
-         rf_ren_a_o         = 1'b1;
--        rf_ren_b_o         = 1'b1;
-         data_req_o         = 1'b1;
-         data_we_o          = 1'b1;
- 
+       WAIT_GNT: begin
+-        // tell ID/EX stage to update the address
+-        addr_incr_req_o = handle_misaligned_q;
+         data_req_o      = 1'b1;
+         if (data_gnt_i || pmp_err_q) begin
+           ctrl_update         = 1'b1;
