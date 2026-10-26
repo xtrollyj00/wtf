@@ -58,5 +58,27 @@ clk      ▁▁▁▁▔▔▔▔▁▁▁▁▔▔▔▔
   (section 15) a field compares with another field of the same record, so a `pair`'s two sides
   are compared as a scoreboard does. `@` takes the clock signal itself: `@rising(clk)` is an
   error naming `@clk`.
+- **Arithmetic**: `+`, `-`, `*`, `&`, `|`, `^`, `~`, `<<`, `>>`, and `signed(x)`: `wd != (rs1d +
+  rs2d)[31:0]`, `wmask != 1 << addr[1:0]`, `pc_next != pc + 4`. Written as in SystemVerilog, but stricter
+  where SV's rules are loose: values are exact integers, nothing wraps or is cut to a width unless
+  written, and anything that could be read two ways is an error that shows both. So an
+  expression either means what an SV reader expects or doesn't parse.
+  - A signal reads as an unsigned number; `signed(x)` reads x as two's complement at its width
+    (x a signal or a slice). A result is exact: `0xFFFFFFFF + 1` is `0x100000000`, `2 - 3` is
+    -1, and comparisons compare these numbers (`signed(a) < b` is true for a negative a).
+  - A slice gives a result a width: `(a + b)[31:0]` is the sum's low 32 bits, as a 32-bit adder
+    makes it, read unsigned (a negative value's bits are its two's complement). A slice is the
+    only way to wrap, so an expression says where it wraps.
+  - `*` binds tighter than `+` and `-`, arithmetic tighter than comparisons, comparisons tighter
+    than `&&`, `&&` tighter than `||`. `&`, `|`, `^`, `<<` and `>>` don't mix with another binary
+    operator without parentheses: `x & 3 == 0` is an error, `x & 3 == 0: & and == need
+    parentheses: (x & 3) == 0 or x & (3 == 0)`; `a & b & c` is fine.
+  - `~x` inverts x's bits at x's width, so x is a signal or a slice: `~(a + b)` is an error
+    naming `~(a + b)[31:0]`.
+  - An unknown or high-impedance bit in an operand makes the result unknown, which compares as
+    `x` does: equal to `x`, unequal to every number.
+  - Sizes are checked before searching: an operand up to 64 bits, a result up to 127 (a shift by
+    a 32-bit amount could be 2^32 bits wide). Beyond that, an error names the part and the fix:
+    `a << b: b is 32 bits, so the result could be 2^32 bits; shift by a slice, a << b[4:0]`.
 - On a bit line of an expanded bus, the search looks at that bit. String and real signals are
   searched by their text.
