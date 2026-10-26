@@ -56,7 +56,7 @@ module tb;
   always @(posedge clk_i) begin
     cycles <= cycles + 1;
     if (cycles == 4) rst_ni <= 1;
-    if (cycles > 200000) begin $display("timeout after %0d cycles: FAIL", cycles); $finish; end
+    if (cycles > 2000000) begin $display("timeout after %0d cycles: FAIL", cycles); $finish; end
     instr_rvalid <= 0;
     data_rvalid <= 0;
     if (iq.size() > 0 && $urandom % 2 == 0) begin

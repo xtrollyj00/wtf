@@ -1,79 +1,36 @@
-// A message router: a producer fills a queue with messages, a consumer takes them out in order
-// of priority and sends each down a link as a frame: a tag byte, then the message's words; after
-// each round the receiver parses the new frames back. The checksum of all it got is returned.
-#include <stdint.h>
+// CoreMark's list, matrix and state benchmarks (vendor/eembc_coremark in the Ibex checkout), one
+// iteration on the validation seeds, as core_main.c runs them; returns its list, matrix and state
+// CRCs as a checksum, crclist << 16 ^ crcmatrix << 8 ^ crcstate.
+#include "coremark.h"
 
-struct msg { uint32_t id, len, data; };
+volatile ee_s32 seed1_volatile = 0, seed2_volatile = 0, seed3_volatile = 0x66;
+volatile ee_s32 seed4_volatile = 1, seed5_volatile = 0;
+ee_u32 default_num_contexts = 1;
+int ee_printf(const char *fmt, ...) { (void)fmt; return 0; }
 
-#define QLEN 8
-#define FRAME 13
-static struct msg queue[QLEN];
-static int count;
-static uint8_t link[32 * FRAME];
-static int sent;
+ee_s32 get_seed_32(int i);
+#define get_seed(x) (ee_s16)get_seed_32(x)
 
-static uint32_t seed = 0x1234;
-static uint32_t rnd(void) { seed = seed * 1103515245u + 12345u; return seed >> 7; }
-
-static void put(const struct msg *m) { queue[count++] = *m; }
-
-static void take(struct msg *m) {
-  int best = 0;
-  for (int i = 1; i < count; i++)
-    if ((queue[i].id & 0xf) < (queue[best].id & 0xf)) best = i;
-  *m = queue[best];
-  queue[best] = queue[--count];
-}
-
-static void put32(uint8_t *p, uint32_t w) {
-  for (int i = 0; i < 4; i++) p[i] = w >> 8 * i;
-}
-
-// Ibex reads a word at any address
-static uint32_t get32(const uint8_t *p) { return *(const uint32_t *)p; }
-
-static void send(const struct msg *m) {
-  uint8_t *f = &link[sent++ * FRAME];
-  f[0] = 0xa0 | (m->id & 0xf);
-  put32(f + 1, m->id);
-  put32(f + 5, m->len);
-  put32(f + 9, m->data);
-}
-
-// the receiver: frames sent since the last call, parsed back into messages
-static struct msg got[32];
-static int received;
-static int receive(void) {
-  for (; received < sent; received++) {
-    const uint8_t *f = &link[received * FRAME];
-    if ((f[0] & 0xf0) != 0xa0) return 0;
-    got[received].id = get32(f + 1);
-    got[received].len = get32(f + 5);
-    got[received].data = get32(f + 9);
-  }
-  return 1;
-}
-
-static uint32_t mix(uint32_t c, uint32_t w) { c = (c ^ w) * 0x9e3779b1u; return c ^ c >> 15; }
+static ee_u8 memblk[TOTAL_DATA_SIZE];
 
 uint32_t main(void) {
-  uint32_t sum = 0;
-  for (int round = 0; round < 8; round++) {
-    while (count < QLEN) {
-      struct msg m = { rnd(), rnd() % 1500, rnd() };
-      put(&m);
-    }
-    for (int k = 0; k < 4; k++) {
-      struct msg m;
-      take(&m);
-      send(&m);
-    }
-    if (!receive()) return 0;
+  static core_results r;
+  r.seed1 = get_seed(1);
+  r.seed2 = get_seed(2);
+  r.seed3 = get_seed(3);
+  r.iterations = get_seed_32(4);
+  r.execs = ALL_ALGORITHMS_MASK;
+  r.memblock[0] = memblk;
+  r.size = TOTAL_DATA_SIZE / NUM_ALGORITHMS;
+  for (int i = 0; i < NUM_ALGORITHMS; i++)
+    r.memblock[i + 1] = (char *)r.memblock[0] + r.size * i;
+  r.list = core_list_init(r.size, r.memblock[1], r.seed1);
+  core_init_matrix(r.size, r.memblock[2], (ee_s32)r.seed1 | ((ee_s32)r.seed2 << 16), &r.mat);
+  core_init_state(r.size, r.seed1, r.memblock[3]);
+  for (ee_u32 i = 0; i < r.iterations; i++) {
+    r.crc = crcu16(core_bench_list(&r, 1), r.crc);
+    r.crc = crcu16(core_bench_list(&r, -1), r.crc);
+    if (i == 0) r.crclist = r.crc;
   }
-  for (int i = 0; i < received; i++) {
-    sum = mix(sum, got[i].id);
-    sum = mix(sum, got[i].len);
-    sum = mix(sum, got[i].data);
-  }
-  return sum;
+  return (ee_u32)r.crclist << 16 ^ (ee_u32)r.crcmatrix << 8 ^ r.crcstate;
 }

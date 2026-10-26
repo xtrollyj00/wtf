@@ -1,33 +1,37 @@
-# A fix task on Ibex (lowRISC, Apache-2.0) in its maxperf configuration, 3 stages with writeback.
-# Ibex splits a misaligned access in two; for the second part the LSU asks ID/EX for the next
-# word's address (addr_incr_req_o) in each state that sends it. The bug drops that in WAIT_GNT,
-# the state that also waits for an ordinary grant: a misaligned access whose first response comes
-# before its second request is granted sends the second to the first word again, so a load gets
-# its upper bytes from the wrong word. tb/prog.c reads frame words at odd offsets (get32, a
-# `lw` at 0x258, 0x260, 0x268); whether one goes wrong depends on the wait states, so every seed
-# fails with another checksum. The visible run (seed 1): 6 second parts go to the same word
-# (granted at 22745, 43465, 64335, 104885, 106035, 146715ns), 5 loads get a wrong value (one gets
-# the same bytes by chance), the first retiring at 22785ns (pc 0x258, 0xA09B9790 for 0x9B9790);
-# the checksum mismatch shows at 186us. The bug doesn't change the timing: a passing run has the
-# same cycles. Later loads of the bad words (the checksum loop over got[]) are not counted.
-# Earlier versions were found by reading, by both arms, in every run: a load-use stall dropped for
-# store data, beside the right line for rs1 (rf_rd_b_hz & ~lsu_we), then the same as a missing
-# rf_ren_b_o in the decoder's store case (grep rf_ren_* shows OP and BRANCH set it).
-# Not WritebackStage without BranchTargetALU (no standard config): upstream there mis-jumps a taken
-# branch whose first cycle waits on a store's response, which fails riscv-tests sb and sh.
+# A fix task on Ibex (lowRISC, Apache-2.0) in its maxperf configuration, 3 stages with writeback,
+# running CoreMark. Ibex splits a misaligned access in two; for the second part the LSU asks ID/EX
+# for the next word's address (addr_incr_req_o) in each state that sends it. The bug drops that in
+# WAIT_GNT, the state that also waits for an ordinary grant: a misaligned access whose first
+# response comes before its second request is granted sends the second to the first word again.
+# CoreMark's only misaligned accesses are its matrix results (MATRES, 32 bits): core_main splits
+# the 2000 bytes in three, the matrix part starts at 666, and the port's align_mem doesn't realign.
+# Which access goes wrong depends on the wait states, so every seed fails with another checksum.
+# The visible run (seed 1, 1.1M cycles, 11 ms): of about 770 misaligned accesses 242 go wrong,
+# loads and stores; the first is the `sw` at 0x9be (matrix_test, to 0x193e; its second part goes
+# to 0x193c at 1823905ns), retiring at 1823955ns. Whether a store's value comes out wrong depends
+# on the bytes it overwrites, so the count is of the bug's accesses, not of wrong values.
+# Earlier versions were found by reading in every run without wtf: a load-use stall dropped for
+# store data, beside the right line for rs1 (rf_rd_b_hz & ~lsu_we), then as a missing rf_ren_b_o
+# in the decoder's store case (grep rf_ren_* shows OP and BRANCH set it), then this bug under a
+# program of 13-byte frames read with `lw` at odd offsets, which pointed to misaligned loads.
+# A fetch FIFO bug (the unaligned instruction's upper half from the stored entry, not the bypass)
+# crashes CoreMark within a few hundred cycles. Not WritebackStage without BranchTargetALU (no
+# standard config): upstream there mis-jumps a taken branch whose first cycle waits on a store's
+# response, which fails riscv-tests sb and sh.
 upstream = "https://github.com/lowRISC/ibex.git"
 commit = "3250d99482f1963891ef1cf19356eeaeeaa71d30"
 prompt = """
 rtl/ is the Ibex RISC-V core (RV32IMC, SystemVerilog), in its maxperf configuration.
-Its test fails: `make sim` builds it with Verilator, runs tb/prog.c on it (built by clang; the
-memory in tb/tb.sv answers after random wait states) and compares the checksum the program
-returns with the same program's result on the host. It writes sim.log and trace.fst, the
-waveform of the run (with the core's RVFI port); both are there from the failing run. The
-environment is set up: `make sim` runs as it is, in about 5 s. Find the cause in the RTL and fix
-it, so that `make sim` passes. Don't change the testbench or the Makefile.
+Its test fails: `make sim` builds it with Verilator and runs CoreMark on it (tb/prog.c runs
+CoreMark's list, matrix and state benchmarks from the Ibex checkout, built by clang; the memory
+in tb/tb.sv answers after random wait states), then compares the CRCs it returns with CoreMark's
+known ones. It writes sim.log and trace.fst, the waveform of the run (with the core's RVFI
+port); both are there from the failing run. The environment is set up: `make sim` runs as it
+is, in about 10 s. Find the cause in the RTL and fix it, so that `make sim` passes. Don't change
+the testbench or the Makefile.
 """
-answer = '{"signal": "<the signal whose logic was wrong>", "pc": "<the pc of the first instruction that loaded a wrong value, in hex>", "first_load": "<when that instruction retired: the rising edge that starts the cycle in which rvfi_valid is high for it, one clock before the edge that samples it, in ns>", "loads": <how many loads in the failing run the bug made return a wrong value (not loads of wrong data from memory)>}'
-expect = '{"signal": "addr_incr_req_o|lsu_addr_incr_req|lsu_addr_incr_req_i|addr_incr_req", "pc": "0x258", "first_load": "22785ns", "loads": 5}'
+answer = '{"signal": "<the signal whose logic was wrong>", "pc": "<the pc of the first instruction the bug made go wrong, in hex>", "first": "<when that instruction retired: the rising edge that starts the cycle in which rvfi_valid is high for it, one clock before the edge that samples it, in ns>", "count": <how many instructions in the failing run the bug made go wrong, whether or not their values came out wrong>}'
+expect = '{"signal": "addr_incr_req_o|lsu_addr_incr_req|lsu_addr_incr_req_i|addr_incr_req", "pc": "0x9be", "first": "1823955ns", "count": 242}'
 
 [files]
 "rtl" = "rtl"
