@@ -199,13 +199,20 @@ fn reloads() {
     assert_eq!(names(&ws), ["clk", "state", "rst"]);
     // a reload isn't undone, and clears undo
     assert!(ws.undo().is_err());
+    wtf_core::command::run(&mut ws, "decode d check clock=clk busy=top.dma.state != 0").unwrap();
     // the simulation ran again: shorter, and without dma
     let text = std::fs::read_to_string(&trace).unwrap();
     let short: String = text.lines().filter(|l| !l.contains("dma") && !l.ends_with('&')).take_while(|l| *l != "#60").map(|l| format!("{l}\n")).collect();
     std::fs::write(&trace, short).unwrap();
-    assert_eq!(ws.reload(), Ok(("reloaded; not in trace: top.dma.state".into(), true)));
+    let (msg, _) = ws.reload().unwrap();
+    assert_eq!(msg, "reloaded; not in trace: d (d: busy: unknown signal: top.dma.state), top.dma.state");
     assert_eq!(names(&ws), ["clk", "rst"]);
     assert_eq!((ws.trace.end(), ws.marks[1]), (55, Some(55)));
+    // the instance that failed is kept, and made again once it can be
+    assert_eq!(ws.decodes.len(), 1);
+    std::fs::write(&trace, &text).unwrap();
+    assert_eq!(ws.reload(), Ok(("reloaded".into(), false)));
+    assert!(ws.streams.iter().any(|s| s.name == "d"));
     // a file that can't be read changes nothing
     std::fs::remove_file(&trace).unwrap();
     assert!(ws.reload().is_err());

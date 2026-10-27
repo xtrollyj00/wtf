@@ -519,16 +519,19 @@ impl Workspace {
         self.streams.clear();
         // taken first: a protocol added would make its instances again
         let decodes = std::mem::take(&mut self.decodes);
+        // one that fails is kept, to try again on the next `:e`
         for p in std::mem::take(&mut self.protocols) {
             let name = p.name.clone();
-            if let Err(e) = self.add_protocol(p) {
+            if let Err(e) = self.add_protocol(p.clone()) {
                 missing.push(format!("{name} ({e})"));
+                self.protocols.push(p);
             }
         }
         for d in decodes {
             let name = d.name.clone();
-            if let Err(e) = self.add_decode(d) {
+            if let Err(e) = self.add_decode(d.clone()) {
                 missing.push(format!("{name} ({e})"));
+                self.decodes.push(d);
             }
         }
         let mut rows: Vec<Row> = Vec::new();

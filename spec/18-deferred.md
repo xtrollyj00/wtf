@@ -31,8 +31,6 @@ Shortcuts taken so far, to fix when they get in the way.
   reopened, and is listed in the panel and by `signals`.
 - The signal panel is rebuilt when computed vars appear, losing its highlighted item and Space
   marks.
-- A stream that can't be sampled again on `:e` is reported and dropped, not kept to retry on the
-  next `:e` (named signals are kept).
 - Sampling a stream again with fewer fields leaves the old field vars, with their old values.
 - Arithmetic (section 8) takes operands up to 64 bits and results up to 127 (an `i128`); a
   wider one is an error suggesting a slice.
