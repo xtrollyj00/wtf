@@ -10,7 +10,8 @@ checks that return only violations.
   It is evaluated once into a list of changes (materialized), queried like a file signal, and
   evaluated again on `:e`. Defined by an expression, anywhere a signal is named and in the
   session:
-  - bit slices `tdata[63:32]` and concatenation `{a, b, c}`;
+  - bit slices `tdata[63:32]` and concatenation `{a, b, c}`; a part may be a sized SV number
+    (`{insn[31], 1'b0}`), and an unsized one (`0`, `'1`) is an error;
   - any expression of section 8 without `past`, `rose`, `fell` or `stable` (which need a clock):
     arithmetic `pc + 4`, `signed(insn[31:20])`, and a comparison, a 1-bit value. The same holds
     for a sampled protocol's fields, sampled at its clock: `next = rvfi_pc_rdata + 4`. Its width

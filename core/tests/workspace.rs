@@ -332,6 +332,22 @@ fn slices_and_concatenations() {
 }
 
 #[test]
+fn concatenation_of_sv_numbers() {
+    use wtf_core::trace::Val;
+    let mut ws = open();
+    let b = |s: &str| Val::Bits(s.into());
+    // data: x @0, 0x43 @10, 0x96 @20; busy high 20 - 40. A sized number is a constant part.
+    let (cat, _) = ws.resolve("{cpu.data, 1'b0}").unwrap();
+    assert_eq!((ws.trace.vars[cat].width, ws.trace.value_at(cat, 12), ws.trace.value_at(cat, 20)), (Some(9), Some(b("010000110")), Some(b("100101100"))));
+    let (cat, _) = ws.resolve("{1'b1, cpu.busy}").unwrap();
+    assert_eq!((ws.trace.value_at(cat, 25), ws.trace.value_at(cat, 45)), (Some(b("11")), Some(b("10"))));
+    // it is named again as the same var, and a number needs a width
+    assert_eq!(ws.resolve("{cpu.data,1'b0}").unwrap().0, ws.resolve("{cpu.data, 1'b0}").unwrap().0);
+    assert_eq!(ws.resolve("{cpu.data, 0}"), Err("0: a number in a concatenation needs a width, as 1'b0".into()));
+    assert_eq!(ws.resolve("{'1, cpu.busy}"), Err("'1: a number in a concatenation needs a width, as 1'b0".into()));
+}
+
+#[test]
 fn computed_expressions() {
     use wtf_core::command::run;
     use wtf_core::trace::Val;

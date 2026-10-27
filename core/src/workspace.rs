@@ -11,7 +11,7 @@ use crate::session;
 use crate::stream::{self, Decode, Record, Sampler, Stream};
 use std::collections::HashMap;
 use crate::time::{self, Tick};
-use crate::trace::Trace;
+use crate::trace::{Trace, Val};
 use crate::view::View;
 use std::path::PathBuf;
 
@@ -323,6 +323,20 @@ impl Workspace {
         }
     }
 
+    /// A part of a concatenation: a signal, or a sized SV number (`1'b0`) as a constant var.
+    fn part(&mut self, name: &str) -> Result<usize, String> {
+        match search::sv_literal(name) {
+            Some(Err(e)) => Err(e),
+            Some(Ok(search::Sv::Bits { bits, sized: true, .. })) => match self.trace.by_path.get(name) {
+                Some(&v) => Ok(v),
+                None => self.trace.add_computed(name, Some(bits.len() as u32), vec![(0, Val::Bits(bits))]),
+            },
+            Some(Ok(_)) => Err(format!("{name}: a number in a concatenation needs a width, as 1'b0")),
+            None if name.starts_with(|c: char| c.is_ascii_digit()) => Err(format!("{name}: a number in a concatenation needs a width, as 1'b0")),
+            None => self.whole(name),
+        }
+    }
+
     /// `:signal name = expr` (spec §16): a computed signal under a name of its own,
     /// with the values of any signal name (`cmd[7:0]`, `{a, b}`). Defining it again replaces it.
     pub fn define(&mut self, name: &str, expr: &str) -> Result<usize, String> {
@@ -364,7 +378,7 @@ impl Workspace {
                 (format!("{}[{hi}:{lo}]", self.trace.vars[v].path), vec![v])
             }
             Form::Concat(names) => {
-                let vs = names.iter().map(|n| self.whole(n)).collect::<Result<Vec<_>, _>>()?;
+                let vs = names.iter().map(|n| self.part(n)).collect::<Result<Vec<_>, _>>()?;
                 let paths: Vec<&str> = vs.iter().map(|&v| self.trace.vars[v].path.as_str()).collect();
                 (format!("{{{}}}", paths.join(",")), vs)
             }
