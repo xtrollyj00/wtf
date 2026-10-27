@@ -523,7 +523,9 @@ mod tests {
         keys(&mut app, "n");
         assert_eq!((app.ws.view.cursor, msg(&app)), (25, "not found after 25ns: @clk busy".into()));
         keys(&mut app, "N");
-        assert_eq!(app.ws.view.cursor, 15);
+        assert_eq!((app.ws.view.cursor, msg(&app)), (15, "match 1 of 2".into()));
+        keys(&mut app, "n");
+        assert_eq!(msg(&app), "match 2 of 2");
         keys(&mut app, ":0\n/data[7] && top.cpu.busy\n");
         assert_eq!(app.ws.view.cursor, 20);
         keys(&mut app, "/state == 1\n");

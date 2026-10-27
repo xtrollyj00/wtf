@@ -312,6 +312,7 @@ fn number(bits: &str) -> Option<i128> {
     i128::from_str_radix(&b, 2).ok()
 }
 
+#[derive(Debug)]
 pub struct Query {
     /// `@clk`: matches are rising edges of this signal where the expression holds.
     pub clock: Option<Probe>,

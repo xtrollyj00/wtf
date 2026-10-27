@@ -146,14 +146,14 @@ fn value_search() {
     ws.search("0x96", true, 1).unwrap();
     assert_eq!(ws.view.cursor, 20);
     // a match is where the signal changes to the value: X from the start isn't one
-    assert_eq!(ws.search("x", false, 1), Err("not found before 20ns: x".into()));
+    assert_eq!(ws.search("x", false, 1).map(|_| ()), Err("not found before 20ns: x".into()));
     ws.search("z", true, 1).unwrap();
     assert_eq!(ws.view.cursor, 50);
     ws.view.set_cursor(0);
     // an expression searches anything; `n` matches on
     ws.search("@clk busy", true, 2).unwrap();
     assert_eq!(ws.view.cursor, 25);
-    assert_eq!(ws.search("data == 0x99", true, 1), Err("not found after 25ns: data == 0x99".into()));
+    assert_eq!(ws.search("data == 0x99", true, 1).map(|_| ()), Err("not found after 25ns: data == 0x99".into()));
     assert_eq!(ws.view.cursor, 25);
     // fewer matches than asked for: the last one
     ws.search("busy", false, 9).unwrap();

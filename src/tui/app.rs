@@ -1,6 +1,6 @@
 //! App state and the keys of each mode (spec §2, §3, §4 "Command line", §5).
 
-use wtf_core::command;
+use wtf_core::{command, query};
 use crate::draw::gl;
 use crate::tui::panel::Panel;
 use wtf_core::rows::{self, Row};
@@ -40,6 +40,8 @@ pub struct App {
     hist_pos: Option<usize>,
     /// The search `n` / `N` repeat.
     last_search: Option<String>,
+    /// Its matches counted in the whole trace, for the query it was (as `Debug` shows it).
+    matches: Option<(String, u64, bool)>,
     /// Status line message; true for errors.
     pub msg: Option<Msg>,
     count: Option<u64>,
@@ -69,6 +71,7 @@ impl App {
             searches: Vec::new(),
             hist_pos: None,
             last_search: None,
+            matches: None,
             msg: None,
             count: None,
             pending: None,
@@ -121,6 +124,7 @@ impl App {
     /// `:e`, with the signal panel rebuilt for the new file.
     pub fn reload(&mut self) -> Result<(), String> {
         self.msg = Some(self.ws.reload()?);
+        self.matches = None;
         self.panel = Panel::new(&self.ws.trace);
         Ok(())
     }
@@ -187,6 +191,24 @@ impl App {
             None => vec!["no value here".into()],
         };
         self.examine = Some((format!("{name} @ {}", time::format(self.ws.view.cursor, fpt)), value));
+    }
+
+    /// A value search (spec §8) that says where the match is: `match 3 of 157`.
+    fn search(&mut self, text: &str, forward: bool, n: u64) -> Result<(), String> {
+        // shortcut: counting stops at MAX matches, so `n` stays quick on huge traces
+        const MAX: u64 = 100_000;
+        let q = self.ws.search(text, forward, n)?;
+        let count = |to| query::find(&self.ws.trace, &q, &query::Search { from: 0, to, forward: true, merge: false, runs: usize::MAX, matches: MAX });
+        let key = format!("{q:?}");
+        if self.matches.as_ref().is_none_or(|m| m.0 != key) {
+            let all = count(None);
+            self.matches = Some((key, all.total, all.more));
+        }
+        let at = count(Some(self.ws.view.cursor));
+        let (_, total, more) = self.matches.as_ref().unwrap();
+        let i = if at.more { format!("{MAX}+") } else { at.total.to_string() };
+        self.msg = Some((format!("match {i} of {total}{}", if *more { "+" } else { "" }), false));
+        Ok(())
     }
 
     /// Move the selection by `d` screen lines (bit lines of expanded buses included).
@@ -333,7 +355,7 @@ impl App {
             }
             'n' | 'N' => {
                 let r = match self.last_search.clone() {
-                    Some(text) => self.ws.search(&text, c == 'n', n).map(|_| ()),
+                    Some(text) => self.search(&text, c == 'n', n),
                     None => Err("no search yet".into()),
                 };
                 self.report(r);
@@ -629,7 +651,7 @@ impl App {
                 let r = match search {
                     true => {
                         self.last_search = Some(line.clone());
-                        self.ws.search(&line, true, 1).map(|_| ())
+                        self.search(&line, true, 1)
                     }
                     false => self.run(&line),
                 };

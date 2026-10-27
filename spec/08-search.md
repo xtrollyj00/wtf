@@ -24,6 +24,9 @@ clk      ▁▁▁▁▔▔▔▔▁▁▁▁▔▔▔▔
   the segment. If the cursor is already inside a matching segment, `n` goes to the next one.
 - `n` / `N` repeat the last search forward / backward on the **currently selected** signal, so you
   can search one signal, select another, and press `n` to find the same value there.
+- **Match count**: after a jump (`/` Enter, `n`, `N`) the status line says where the cursor is
+  among all the matches in the trace, e.g. `match 3 of 157`. Counting stops at 100 000 matches,
+  shown as `100000+`.
 - **No wrap-around**: when nothing matches, the cursor stays and the status line says so,
   e.g. `not found after 1.2us: 0x40`.
 - A value wider than the signal, or a selected group header, shows an error on the status line.

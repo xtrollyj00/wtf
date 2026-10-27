@@ -136,8 +136,8 @@ impl Workspace {
 
     /// Value search (spec §8): a bare value on the selected signal or bit, or an expression over
     /// signals (`valid && ready && data == 0x40`, `@clk ...`). Goes `n` matches forward (back);
-    /// the cursor stays where it is when nothing matches.
-    pub fn search(&mut self, text: &str, forward: bool, n: u64) -> Result<(), String> {
+    /// the cursor stays where it is when nothing matches. Returns the query, for counting matches.
+    pub fn search(&mut self, text: &str, forward: bool, n: u64) -> Result<search::Query, String> {
         let text = text.trim();
         let selected = match self.rows.get(self.sel) {
             Some(Row::Signal(s)) => Some(self.probe(s.var, self.bit)),
@@ -175,7 +175,7 @@ impl Workspace {
             }
         }
         self.jump(t, false);
-        Ok(())
+        Ok(query)
     }
 
     /// A search expression (`@clk valid && ready`), its signals named as `resolve` names them, with
