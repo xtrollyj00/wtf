@@ -173,7 +173,11 @@ reuse wtf's own pieces:
   Listing removes sockets nobody listens on (left by killed processes).
 - **Attach**: `wtf --attach <id>` opens a window on the session's trace with its usual session
   file, then shows the session's rows and cursors on top, as `present` does (`u` restores the
-  usual view). It is a copy: from then on it is an ordinary window, the agent updates it with
-  `present`, and `:w` saves to the trace's session file. `wtf --attach` alone lists the sessions.
+  usual view). It follows the session: every 500 ms it reads the agent's session, and when it has
+  changed it shows it as `present` does (one undo step, `u` restores), so the agent's updates
+  arrive as it makes them (`:follow off` stops, section 7). The user's moves stay until the agent's
+  next change, and the right of the status line starts with `following <id>`. If the session goes away, the window stays as it is and says
+  `not following <id>`. `:w` saves to the trace's session file. `wtf --attach` alone lists the
+  sessions.
 - Workspaces live as long as the server: when the agent's client exits they are gone (`present`
   first to keep one).

@@ -55,9 +55,28 @@ pub struct App {
     pub records: Option<Records>,
     /// Text `yy` / `yt` copied, for the terminal's clipboard (OSC 52).
     pub yank: Option<String>,
+    /// The agent's session this window follows (`wtf --attach`).
+    pub follow: Option<Follow>,
     /// The trace file as last loaded, and a change to it seen since, with when it was first seen.
     seen: Stamp,
     changed: Option<(Stamp, std::time::Instant)>,
+}
+
+/// A window opened with `wtf --attach <id>` follows that session: each change the agent makes
+/// is shown as `present` shows it (spec §15 "Attach").
+pub struct Follow {
+    pub id: String,
+    /// Following, not stopped with `:follow off`.
+    pub on: bool,
+    /// The session text last shown, and the newest the agent has.
+    shown: String,
+    latest: String,
+}
+
+impl Follow {
+    pub fn new(id: &str, text: &str) -> Self {
+        Follow { id: id.to_string(), on: true, shown: text.to_string(), latest: text.to_string() }
+    }
 }
 
 /// A file's modification time and size: a new simulation run changes them.
@@ -112,6 +131,7 @@ impl App {
             examine: None,
             records: None,
             yank: None,
+            follow: None,
             seen,
             changed: None,
         }
@@ -156,6 +176,7 @@ impl App {
                 None
             }
             "e" => return self.reload(),
+            "follow" => return self.set_follow(arg.trim()),
             "records" => return self.open_records(arg.trim()),
             // the window picks the unit that fits; `unit` is for agents' answers (spec §15)
             "unit" => return Err("unit sets the time unit of an agent's answers; the window picks what fits".into()),
@@ -176,6 +197,53 @@ impl App {
         Ok(())
     }
 
+
+    /// The agent's session as it is now, or why it can't be read (the session is gone). Shows a
+    /// change when following; returns true when there is something new to draw.
+    pub fn agent_changed(&mut self, now: Result<String, String>) -> bool {
+        let Some(f) = &mut self.follow else { return false };
+        match now {
+            Ok(text) => {
+                f.latest = text;
+                self.show_latest()
+            }
+            Err(e) => {
+                self.msg = Some((format!("not following {}: {e}", f.id), true));
+                self.follow = None;
+                true
+            }
+        }
+    }
+
+    fn show_latest(&mut self) -> bool {
+        let Some(f) = &mut self.follow else { return false };
+        if !f.on || f.latest == f.shown {
+            return false;
+        }
+        f.shown = f.latest.clone();
+        let text = f.shown.clone();
+        let r = self.present(&text).map(drop);
+        self.report(r);
+        true
+    }
+
+    /// `:follow` / `:follow off`.
+    fn set_follow(&mut self, arg: &str) -> Result<(), String> {
+        let Some(f) = &mut self.follow else { return Err("not attached to an agent's session: wtf --attach <id> follows one".into()) };
+        match arg {
+            "off" => {
+                f.on = false;
+                self.msg = Some((format!("not following {}", f.id), false));
+            }
+            "" => {
+                f.on = true;
+                self.msg = Some((format!("following {}", f.id), false));
+                self.show_latest();
+            }
+            _ => return Err("usage: :follow [off]".into()),
+        }
+        Ok(())
+    }
 
     /// Reload the trace when its file changed and then stayed the same for a second, so a
     /// simulator still writing it isn't read half way. Returns true when it reloaded.

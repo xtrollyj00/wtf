@@ -35,6 +35,7 @@ pub const COMMANDS: &[Command] = &[
     Command { name: "undo", usage: ":undo", desc: "Undo the last change to the rows", args: false },
     Command { name: "redo", usage: ":redo", desc: "Redo a change undone with :undo", args: false },
     Command { name: "fit", usage: ":fit [<from> <to>]", desc: "Zoom to the whole simulation, or between cursors or times, e.g. :fit '2 '3 or :fit 10ns 20ns", args: true },
+    Command { name: "follow", usage: ":follow [off]", desc: "In a window opened with wtf --attach: show the agent's changes as it makes them, or stop", args: true },
     Command { name: "e", usage: ":e", desc: "Reload the trace, keeping signals, groups, cursor and zoom", args: false },
     Command { name: "w", usage: ":w [file]", desc: "Save the session", args: true },
     Command { name: "wq", usage: ":wq", desc: "Save the session and quit", args: false },

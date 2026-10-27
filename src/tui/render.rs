@@ -291,7 +291,8 @@ fn status(app: &App, buf: &mut Buffer, w: usize, y: usize) {
     put(buf, 0, y, mode, st);
     let plus = if app.ws.modified() { " [+]" } else { "" };
     let cursor = time::format(app.ws.view.cursor, fpt);
-    let right = format!("{cursor}   {}   {}{plus} ", zoom_text(&app.ws.view, fpt), app.ws.file_name);
+    let follow = app.follow.as_ref().filter(|f| f.on).map_or(String::new(), |f| format!("following {}   ", f.id));
+    let right = format!("{follow}{cursor}   {}   {}{plus} ", zoom_text(&app.ws.view, fpt), app.ws.file_name);
     let (left, st) = match &app.msg {
         Some((m, err)) => (m.clone(), if *err { red() } else { Style::new() }),
         None => match app.ws.rows.get(app.ws.sel) {

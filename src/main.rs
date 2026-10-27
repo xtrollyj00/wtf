@@ -61,7 +61,7 @@ fn run(args: Args) -> Result<(), String> {
     // --glyphs over the config file over unicode (spec §19 "Precedence")
     draw::set_glyphs(args.glyphs.unwrap_or(config.glyphs));
     let mut warnings = config.warnings;
-    let (path, shared) = match args.attach {
+    let (path, shared, attached) = match args.attach {
         Some(None) => {
             let list: Vec<String> = live::sessions()?.iter().map(|s| format!("{}  {}  {}", s.id, s.kind, s.trace.display())).collect();
             println!("{}", if list.is_empty() { "no sessions are open".into() } else { list.join("\n") });
@@ -71,9 +71,9 @@ fn run(args: Args) -> Result<(), String> {
             let s = live::sessions()?.into_iter().find(|s| s.id == id).ok_or(format!("no session {id}; `wtf --attach` lists them"))?;
             let answer = live::request(&id, live::Request::Get)?;
             let text = answer.split_once("\n---\n").map_or(String::new(), |(_, t)| t.to_string());
-            (s.trace, Some(text))
+            (s.trace, Some(text), Some(id))
         }
-        None => (args.trace.expect("clap requires it"), None),
+        None => (args.trace.expect("clap requires it"), None, None),
     };
     let mut app = App::new(workspace::Workspace::open(&path)?);
 
@@ -90,6 +90,7 @@ fn run(args: Args) -> Result<(), String> {
     // a copy of the session on top of the usual one, as the agent's `present` does: u goes back
     if let Some(text) = shared {
         app.present(&text)?;
+        app.follow = attached.map(|id| tui::app::Follow::new(&id, &text));
     }
 
     match args.snapshot {
@@ -124,6 +125,29 @@ fn tui(app: &mut App) -> Result<(), String> {
             None
         }
     };
+    // the agent's session, read every half second while attached, each change sent on
+    let agent = app.follow.as_ref().map(|f| {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let id = f.id.clone();
+        std::thread::spawn(move || {
+            let mut last = String::new();
+            loop {
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                let now = live::request(&id, live::Request::Get).map(|a| a.split_once("\n---\n").map_or(String::new(), |(_, t)| t.to_string()));
+                let gone = now.is_err();
+                if now.as_ref().is_ok_and(|t| *t == last) {
+                    continue;
+                }
+                if let Ok(t) = &now {
+                    last = t.clone();
+                }
+                if tx.send(now).is_err() || gone {
+                    return;
+                }
+            }
+        });
+        rx
+    });
     let mut term = ratatui::init();
     let res = (|| -> std::io::Result<()> {
         while !app.quit {
@@ -143,6 +167,11 @@ fn tui(app: &mut App) -> Result<(), String> {
                     break;
                 }
                 if app.watch(tui::app::stamp(&app.ws.trace_path), std::time::Instant::now()) {
+                    break;
+                }
+                if let Some(now) = agent.as_ref().and_then(|rx| rx.try_recv().ok())
+                    && app.agent_changed(now)
+                {
                     break;
                 }
             }
@@ -446,6 +475,42 @@ mod tests {
         assert!(matches!(&app.ws.rows[3], rows::Row::Signal(s) if s.bits == 0) && app.ws.bit.is_none());
         keys(&mut app, "u");
         assert_eq!(app.msg.as_ref().unwrap().0, "already at oldest change");
+    }
+
+    #[test]
+    fn follow_the_agent() {
+        let mut app = open("vcd", None);
+        let msg = |app: &App| app.msg.as_ref().map_or(String::new(), |m| m.0.clone());
+        keys(&mut app, ":follow\n");
+        assert_eq!(msg(&app), "not attached to an agent's session: wtf --attach <id> follows one");
+        // what the agent shows: first its cpu group, then the dma signals too
+        let mut agent = open("vcd", None);
+        keys(&mut agent, ":add top.cpu\n:30ns\n");
+        let first = session::to_toml(&agent.ws);
+        app.present(&first).unwrap();
+        app.follow = Some(tui::app::Follow::new("4123-1", &first));
+        assert!(snapshot(&mut app, 100, None).contains("following 4123-1"));
+        assert!(!app.agent_changed(Ok(first.clone()))); // no change, nothing to do
+        keys(&mut app, "5l");
+        assert_eq!(app.ws.view.cursor, 35); // the user's moves stay until the agent's next change
+        keys(&mut agent, ":add top.dma.state\n");
+        let second = session::to_toml(&agent.ws);
+        assert!(app.agent_changed(Ok(second.clone())));
+        assert_eq!((app.ws.rows.len(), app.ws.view.cursor), (5, 30));
+        assert!(msg(&app).starts_with("agent: presented"));
+        // off: changes wait; on again shows the newest
+        keys(&mut app, ":follow off\n");
+        assert_eq!(msg(&app), "not following 4123-1");
+        app.msg = None;
+        assert!(!snapshot(&mut app, 100, None).contains("following"));
+        assert!(!app.agent_changed(Ok(first.clone())));
+        assert_eq!(app.ws.rows.len(), 5);
+        keys(&mut app, ":follow\n");
+        assert_eq!(app.ws.rows.len(), 4);
+        // the session gone: the window stays as it is
+        assert!(app.agent_changed(Err("no session 4123-1".into())));
+        assert_eq!((app.follow.is_none(), msg(&app)), (true, "not following 4123-1: no session 4123-1".into()));
+        assert_eq!(app.ws.rows.len(), 4);
     }
 
     #[test]

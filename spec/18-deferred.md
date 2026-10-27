@@ -13,8 +13,6 @@ To be decided once prototypes exist:
   points: a wire format for signal data, version checks between client and server, fetching huge
   signals by time window, and `:e` and errors over the link.
 - Cursors: naming cursors, more than 9.
-- Attach as a live mirror: the window follows the agent's workspace as it changes, instead of
-  copying it once (milestone 8).
 - More in the config file (section 19): default radix, key remapping; picking the theme from the
   terminal's background (OSC 11).
 - Performance: targets and the rules that follow from them. Draft below; milestone 6 has a first

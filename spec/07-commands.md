@@ -24,6 +24,7 @@
 | `:w [file]` | save the session (section 11) |
 | `:wq` | save the session and quit |
 | `:records <stream> [where <expr>]` | a box listing a stream's records (section 16), `#n start–end` and every field, as the `records` tool does; `where` takes the same expression. In the box `j` / `k` move, `Ctrl-f` / `Ctrl-b` a box of records, `g` / `G` go to the first / last, `Enter` jumps the cursor to the record's start (a jump, so `''` comes back) and selects the stream's row if shown, `Esc` or `q` closes it. No `group_by` or `count_only`: those are for agents |
+| `:follow [off]` | in a window attached to an agent's session (section 15), follow it: a changed session is shown as `present` shows it. `:follow off` stops following; `:follow` resumes, showing the session if it changed meanwhile. Elsewhere it is an error |
 | `:help [<topic>]` | show the keys of the current mode, like `?`; with a topic, a box with its text from the agents' `help` tool (section 15), e.g. `:help records`. In the box `j` / `k` scroll, `Ctrl-f` / `Ctrl-b` a box, `g` / `G` go to the top / end, `Esc` or `q` closes it |
 | `:q` | quit; refuses if the session has unsaved changes |
 | `:q!` | quit without saving |
