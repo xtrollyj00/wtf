@@ -706,6 +706,10 @@ fn times_in_the_clocks_unit() {
     assert_eq!(s.ok("values", data.clone()), "data:\n  0ns 0x0\n  20ns 0x5\n  30ns 0x6\n");
     s.ok("command", json!({"line": "protocol rx clock=clk when=valid && ready d=data"}));
     assert_eq!(s.ok("records", json!({"stream": "rx"})), "2 of 2\nn\tstart\tend\td\n0\t20ns\t30ns\t0x5\n1\t30ns\t40ns\t0x6");
+    // a rounded time stands for every tick that prints as it: read after them, a change among them said
+    assert_eq!(s.ok("value_at", json!({"signals": ["data", "ready"], "time": "20ns"})), "at 20ns:\ndata = 0x5 (0x0 earlier in 20ns)\nready = 1");
+    assert_eq!(s.ok("find", json!({"expr": "@clk valid && ready", "from": "20ns"})), "from\tlast\tcycles\n30ns\t30ns\t1");
+    assert_eq!(s.ok("records", json!({"stream": "rx", "from": "30ns", "to": "30ns", "count_only": true})), "1 records, first 30ns, last 30ns");
     // exact in a finer unit, or with the unit set
     assert_eq!(s.ok("find", json!({"expr": "@clk valid", "unit": "fs"})), "from\tlast\tcycles\n20000001fs\t30000001fs\t2");
     s.ok("command", json!({"line": "unit ps"}));

@@ -128,12 +128,13 @@ fn declare(app: &mut Workspace, a: &WorkspaceArgs) -> Result<String, String> {
     for (n, t) in &a.cursors {
         if !matches!(n.parse::<u8>(), Ok(1..=9)) {
             errors.push(format!("cursors: no cursor {n} (1-9)"));
-        } else if let Some(t) = time_of(t, &mut errors) {
-            cursors.insert(n.clone(), exact(t));
+        } else if let Some((lo, hi)) = time_of(t, &mut errors) {
+            // a cursor stays at the time written, not the end of its span (spec §15 "Times")
+            cursors.insert(n.clone(), exact((lo + hi).div_ceil(2)));
         }
     }
     let (from, to) = match &a.range {
-        Some([f, t]) => (time_of(f, &mut errors).unwrap_or(0), time_of(t, &mut errors).unwrap_or(0)),
+        Some([f, t]) => (time_of(f, &mut errors).map_or(0, |s| s.0), time_of(t, &mut errors).map_or(0, |s| s.1)),
         None => (app.trace.start(), app.trace.end().max(1)),
     };
     if a.range.is_some() && to <= from {

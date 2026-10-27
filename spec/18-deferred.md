@@ -59,9 +59,6 @@ Shortcuts taken so far, to fix when they get in the way.
   after it are still paired, one off.
 - An instance of `frame` / `pair` / `check` on a stream made by a later instance fails on `:e`, as
   instances are made in order.
-- A time rounded to a thousandth of the workspace's unit can be just before the edge it stands for (`2595ns` for an
-  edge at 2595.000001ns), so `value_at` there reads the value before the edge; `find` `show` and
-  `records` sample correctly. A per-call `unit: "fs"` gives the exact time.
 - The status line's `match 3 of 157` counts matches only up to 100 000 (`100000+`), so `n` stays
   quick on huge traces; past that the total isn't known.
 - The workspace's time unit isn't saved in the session, nor shown in the window.

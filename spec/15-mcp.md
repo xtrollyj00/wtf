@@ -55,6 +55,13 @@ reuse wtf's own pieces:
   `2595ns`, `39.895000001us` is `39895ns`, a half cycle stays `2.5ns`; `unit: "fs"` gives them
   exactly. Before there is a unit, all the times in one answer share one unit, the largest that
   keeps the smallest nonzero one at 1 or more, exactly (`80ns`, `2595.000001ns`).
+  A time given as text in an MCP call stands for a span: every tick that prints as it (`2595ns`
+  is 2594.9995ns to 2595.0005ns; a finer time, `2595.0004ns`, is narrower; `fs` or a plain tick
+  count is one tick). `value_at` reads the span's end, after everything that printed as the
+  time, and says when a signal changes inside the span (`0x5 (0x4 earlier in 2595ns)`). `from`
+  in `records`, `values` and `render` takes the span's start, `to` its end; `find` searches after
+  the span's end (before its start, backward), and `find` `to` takes the whole span. `workspace`
+  `range` takes spans, its cursors keep the time written. The TUI's times are points.
 - The core keeps times as ticks and never picks a unit: the interfaces pass the unit and the
   precision to its one formatter. So a duration a decoder works out (a pair's `delay`) is a time
   field, ticks, shown in the answer's unit, and compared with a time (`where: "delay == 40ns"`); a

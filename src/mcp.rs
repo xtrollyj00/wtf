@@ -69,9 +69,11 @@ fn current(w: &Wtf) -> Result<Arc<Mutex<Workspace>>, String> {
     Ok(ws.app.clone())
 }
 
-fn at(app: &Workspace, s: &str) -> Result<Tick, String> {
-    let t = time::parse(s, app.trace.fs_per_tick)?;
-    Ok((t.max(0.0).round() as Tick).min(app.trace.end()))
+/// The ticks a time given stands for, first and last: a rounded time (`2595ns`) is every tick that
+/// prints as it (spec §15 "Times").
+fn at(app: &Workspace, s: &str) -> Result<(Tick, Tick), String> {
+    let (lo, hi) = time::span(s, app.trace.fs_per_tick)?;
+    Ok((lo.min(app.trace.end()), hi.min(app.trace.end())))
 }
 
 /// The unit of an answer's times, and their precision.
@@ -353,7 +355,7 @@ impl Wtf {
     fn values(&self, Parameters(a): Parameters<ValuesArgs>) -> Result<String, String> {
         let w = current(self)?;
         let mut app = lock(&w);
-        let (from, to) = (at(&app, &a.from)?, at(&app, &a.to)?);
+        let (from, to) = (at(&app, &a.from)?.0, at(&app, &a.to)?.1);
         // the cap is for the whole answer: one busy signal mustn't hide behind a quiet one
         let (mut lists, mut budget_left, mut cut) = (Vec::new(), MAX_LINES, false);
         for (name, p, s) in probes(&mut app, &a.signals, &a.radix)? {
@@ -405,8 +407,8 @@ impl Wtf {
                 _ => format!("unknown stream: {} (streams: {})", a.stream, names.join(", ")),
             });
         };
-        let from = a.from.as_deref().map(|f| at(&app, f)).transpose()?.unwrap_or(0);
-        let to = a.to.as_deref().map(|t| at(&app, t)).transpose()?.unwrap_or(app.trace.end());
+        let from = a.from.as_deref().map(|f| at(&app, f)).transpose()?.map_or(0, |s| s.0);
+        let to = a.to.as_deref().map(|t| at(&app, t)).transpose()?.map_or(app.trace.end(), |s| s.1);
         let (numbers, of) = s.select(from, to, a.filter.as_deref(), app.trace.fs_per_tick)?;
         let picked: Vec<&wtf_core::stream::Record> = numbers.iter().map(|&i| &s.records[i]).collect();
         // with `where`: how many match, of how many there are
@@ -461,8 +463,15 @@ impl Wtf {
     fn value_at(&self, Parameters(a): Parameters<ValueAtArgs>) -> Result<String, String> {
         let w = current(self)?;
         let mut app = lock(&w);
-        let t = at(&app, &a.time)?;
-        let lines: Vec<String> = probes(&mut app, &a.signals, &a.radix)?.iter().map(|(n, p, s)| format!("{n} = {}", value(&app, *p, s, t))).collect();
+        // after everything that prints as the time, and a change among it said
+        let (lo, t) = at(&app, &a.time)?;
+        let lines: Vec<String> = probes(&mut app, &a.signals, &a.radix)?
+            .iter()
+            .map(|(n, p, s)| match (value(&app, *p, s, lo), value(&app, *p, s, t)) {
+                (early, v) if early != v => format!("{n} = {v} ({early} earlier in {})", a.time.trim()),
+                (_, v) => format!("{n} = {v}"),
+            })
+            .collect();
         Ok(budget(format!("at {}:\n{}", show(&app, t, unit(&app, &a.unit, [t])?), lines.join("\n"))))
     }
 
@@ -474,12 +483,13 @@ impl Wtf {
         let shown = probes(&mut app, &a.show, &None)?;
         let forward = !a.backward;
         let search = query::Search {
+            // after (before) every tick the time stands for, so searching on from a match goes past it
             from: match &a.from {
-                Some(f) => at(&app, f)?,
+                Some(f) => at(&app, f).map(|(lo, hi)| if forward { hi } else { lo })?,
                 None if a.backward => app.trace.end() + 1,
                 None => 0,
             },
-            to: a.to.as_deref().map(|s| at(&app, s)).transpose()?,
+            to: a.to.as_deref().map(|s| at(&app, s)).transpose()?.map(|(lo, hi)| if forward { hi } else { lo }),
             forward,
             merge: a.show.is_empty(),
             runs: if a.count_only { usize::MAX } else { a.count.unwrap_or(20).min(MAX_LINES) },
@@ -548,8 +558,8 @@ impl Wtf {
             match (&a.from, &a.to) {
                 (None, None) => Ok(None),
                 (f, t) => {
-                    let from = f.as_deref().map_or(Ok(app.trace.start()), |f| at(app, f))?;
-                    let to = t.as_deref().map_or(Ok(app.trace.end()), |t| at(app, t))?;
+                    let from = f.as_deref().map_or(Ok(app.trace.start()), |f| at(app, f).map(|s| s.0))?;
+                    let to = t.as_deref().map_or(Ok(app.trace.end()), |t| at(app, t).map(|s| s.1))?;
                     if to <= from { Err("`to` must be after `from`".into()) } else { Ok(Some((from, to))) }
                 }
             }

@@ -92,6 +92,30 @@ pub fn parse(s: &str, fpt: Option<u128>) -> Result<f64, String> {
     Ok(v * ufs as f64 / fpt as f64)
 }
 
+/// The ticks that print as `s`, first and last: those `format_as` rounds to it, to a thousandth of
+/// its unit or its last digit if finer (`2595ns` is 2594.9995ns up to 2595.0005ns). The inverse of
+/// the formatter, so a rounded time read back stands for every tick it was. A plain tick count, or
+/// a span holding no tick, is the nearest tick.
+pub fn span(s: &str, fpt: Option<u128>) -> Result<(Tick, Tick), String> {
+    let point = parse(s, fpt)?.max(0.0).round() as Tick;
+    let s = s.trim();
+    let (num, unit) = s.split_at(s.find(|c: char| !(c.is_ascii_digit() || c == '.')).unwrap_or(s.len()));
+    let (Some(fpt), Some(&(_, ufs))) = (fpt, UNITS.iter().find(|(n, _)| *n == unit)) else { return Ok((point, point)) };
+    let (int, frac) = num.split_once('.').unwrap_or((num, ""));
+    let span = || -> Option<(Tick, Tick)> {
+        // in halves of the last place (ufs / 10^p / 2), the span is [2n - 1, 2n + 1)
+        let p = frac.len().max(3) as u32;
+        let frac = if frac.is_empty() { 0 } else { frac.parse::<u128>().ok()? * 10u128.pow(p - frac.len() as u32) };
+        let n = int.parse::<u128>().ok()?.checked_mul(10u128.checked_pow(p)?)?.checked_add(frac)?;
+        let tick = fpt.checked_mul(2)?.checked_mul(10u128.pow(p))?;
+        let lo = (2 * n).saturating_sub(1).checked_mul(ufs)?.div_ceil(tick);
+        let hi = (2 * n + 1).checked_mul(ufs)?.div_ceil(tick).checked_sub(1)?;
+        let (lo, hi) = (Tick::try_from(lo).ok()?, Tick::try_from(hi).ok()?);
+        (lo <= hi).then_some((lo, hi))
+    };
+    Ok(span().unwrap_or((point, point)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -140,6 +164,27 @@ mod tests {
         for t in [2_595_000_001, 69_360_000_001, 3_600_000_000_000_000_001] {
             assert_eq!(parse(&format_exact(t, fs), fs), Ok(t as f64), "{t}");
         }
+    }
+
+    #[test]
+    fn spans() {
+        let (fs, ns) = (Some(1), Some(3));
+        // the ticks that print as the text, and no others
+        let (lo, hi) = span("2595ns", fs).unwrap();
+        assert_eq!((lo, hi), (2_594_999_500, 2_595_000_499));
+        assert_eq!(format_as(lo, fs, ns, Some(3)), "2595ns");
+        assert_eq!(format_as(hi, fs, ns, Some(3)), "2595ns");
+        assert_eq!(format_as(lo - 1, fs, ns, Some(3)), "2594.999ns");
+        assert_eq!(format_as(hi + 1, fs, ns, Some(3)), "2595.001ns");
+        // more digits, narrower; a femtosecond or a tick count is one tick
+        assert_eq!(span("2595.0004ns", fs).unwrap(), (2_595_000_350, 2_595_000_449));
+        assert_eq!(span("20000002fs", fs).unwrap(), (20_000_002, 20_000_002));
+        assert_eq!(span("42", fs).unwrap(), (42, 42));
+        assert_eq!(span("0ns", fs).unwrap(), (0, 499));
+        // coarser ticks than the span: the nearest
+        assert_eq!(span("12.5ns", NS).unwrap(), (13, 13));
+        assert_eq!(span("12ns", NS).unwrap(), (12, 12));
+        assert!(span("1furlong", fs).is_err());
     }
 
     #[test]
