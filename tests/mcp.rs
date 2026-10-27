@@ -518,6 +518,16 @@ fn records_of_a_declared_stream() {
     assert_eq!(bad, Err("protocol e: y: not `name = signal`\nprotocol e: e.x: unknown signal: nope\nunknown signal: nope2".into()));
 }
 
+/// A stream without roles needs its clock, named as the error says; with roles, an instance gives it.
+#[test]
+fn protocol_without_roles_needs_a_clock() {
+    let dir = Dir::new("protocol-clock");
+    let mut s = Server::start(&dir.0);
+    s.ok("open", json!({"trace": std::fs::canonicalize("tests/data/handshake.vcd").unwrap()}));
+    let bad = s.tool("workspace", json!({"protocols": [{"name": "ret", "when": "valid && ready", "fields": ["d = data"]}], "rows": []}));
+    assert_eq!(bad, Err("protocol ret: needs a clock (`clock`: the signal it samples at)".into()));
+}
+
 #[test]
 fn axis_frames_and_errors() {
     let dir = Dir::new("axis");

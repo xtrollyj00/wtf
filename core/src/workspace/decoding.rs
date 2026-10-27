@@ -19,6 +19,9 @@ impl Workspace {
     /// `sample`'s fields, each a role for the ones after it, then its condition.
     #[allow(clippy::type_complexity)]
     fn sample_fields(&mut self, name: &str, clock: &str, when: &str, fields: &[(&str, &str)]) -> Result<(search::Query, Vec<(String, search::Probe, Option<u32>)>), String> {
+        if clock.is_empty() {
+            return Err("needs a clock (`clock`: the signal it samples at)".into());
+        }
         let mut probes = Vec::new();
         for &(field, sig) in fields {
             let p = self.resolve(sig).map_err(|e| format!("{name}.{field}: {e}"))?;
