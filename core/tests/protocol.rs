@@ -382,6 +382,8 @@ fn inverted_cs_and_line() {
     let mut low = inverted("uart.vcd", '!');
     low.add_decode(decode("u", "uart", "", &line, &[("baud", "1000000"), ("idle", "low")])).unwrap();
     assert_eq!(table(stream(&low, "u.byte")), table(stream(&ws, "u.byte")));
+    let err = high.add_decode(decode("g", "spi", "", &pins, &[("cs_active", "up")])).unwrap_err();
+    assert_eq!(err, "g: spi: cs_active=up: not low or high");
     let err = low.add_decode(decode("v", "uart", "", &line, &[("baud", "1000000"), ("idle", "up")])).unwrap_err();
     assert_eq!(err, "v: uart: idle=up: not high or low");
 }
@@ -404,4 +406,34 @@ fn uart_break_and_stop_bits() {
     ws.add_decode(decode("u", "uart", "", &[("line", "uart_tx")], &[("baud", "1000000"), ("stop", "2")])).unwrap();
     assert_eq!(table(stream(&ws, "u.errors")), [row(1000, 12000, &["framing"]), row(20000, 31000, &["break"])]);
     assert_eq!(table(stream(&ws, "u.byte")).iter().map(|r| r.0).collect::<Vec<_>>(), [1000, 40000]);
+}
+
+/// A write-only or read-only AXI4 port, by its roles given; and a port with only part of a side
+/// isn't found.
+#[test]
+fn axi4_one_side() {
+    let roles = |rs: &[&str]| rs.iter().map(|r| (r.to_string(), format!("m_axi_{r}"))).collect::<Vec<_>>();
+    let write = roles(&["awvalid", "awready", "awaddr", "awid", "wvalid", "wready", "wdata", "wlast", "bvalid", "bready", "bid"]);
+    let read = roles(&["arvalid", "arready", "araddr", "arid", "rvalid", "rready", "rdata", "rlast", "rid"]);
+    let names = |ws: &Workspace| ws.streams.iter().map(|s| s.name.clone()).collect::<Vec<_>>();
+    let reads = ["m.ar", "m.r", "m.rburst", "m.rd", "m.rd.unmatched"];
+    let writes = ["m.aw", "m.w", "m.b", "m.wburst", "m.wr", "m.wr.unmatched"];
+    for (side, has, hasnt) in [(&write, "m.wr", &reads[..]), (&read, "m.rd", &writes[..])] {
+        let mut ws = open("axi4.vcd");
+        let given: Vec<(&str, &str)> = side.iter().map(|(r, s)| (r.as_str(), s.as_str())).collect();
+        ws.add_decode(decode("m", "axi4", "aclk", &given, &[])).unwrap();
+        assert_eq!(table(stream(&ws, has)).len(), 2, "{:?}", names(&ws));
+        assert!(!names(&ws).iter().any(|n| hasnt.contains(&n.as_str())), "{:?}", names(&ws));
+    }
+    // awvalid without the rest of its side: neither protocol finds the port
+    let dir = Dir::new("axi-half");
+    let vcd = dir.0.join("half.vcd");
+    let mut text = String::from("$timescale 1ns $end\n$scope module top $end\n$var wire 1 ! aclk $end\n");
+    for (id, (r, w)) in "\"#$%&'(".chars().zip([("awvalid", 1), ("arvalid", 1), ("arready", 1), ("araddr", 8), ("rvalid", 1), ("rready", 1), ("rdata", 8)]) {
+        text += &format!("$var wire {w} {id} m_axi_{r} $end\n");
+    }
+    text += "$upscope $end\n$enddefinitions $end\n#0\n0!\n#10\n1!\n";
+    std::fs::write(&vcd, text).unwrap();
+    let t = wtf_core::trace::Trace::open(&vcd).unwrap();
+    assert!(wtf_core::protocol::detect(&t).is_empty());
 }

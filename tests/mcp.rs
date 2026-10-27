@@ -602,6 +602,8 @@ fn decode_with_command() {
     let polls = |by: Value, count_only| json!({"stream": "bus.rd", "from": "260ns", "group_by": by, "count_only": count_only});
     assert_eq!(s.ok("records", polls(json!(["addr", "data"]), false)), "3 of 3 distinct, of 6 records\n4 × addr=0x1C data=0x3 (260ns .. 350ns)\n1 × addr=0x1C data=0x7 (380ns .. 380ns)\n1 × addr=0x18 data=0x0 (410ns .. 410ns)");
     assert_eq!(s.ok("records", polls(json!(["addr"]), true)), "2 distinct, of 6 records");
+    let polls_dec = json!({"stream": "bus.rd", "from": "260ns", "group_by": ["addr", "data"], "radix": "dec", "count": 1});
+    assert_eq!(s.ok("records", polls_dec), "1 of 3 distinct, of 6 records\n4 × addr=28 data=3 (260ns .. 350ns)");
     let polled = json!({"stream": "bus.rd", "group_by": ["addr"], "where": "addr == 0x1C"});
     assert_eq!(s.ok("records", polled), "1 of 1 distinct, of 5 matching records, of 8\n5 × addr=0x1C (260ns .. 380ns)");
     assert_eq!(s.ok("find", json!({"expr": "bus.rd.resp == 2", "show": ["bus.rd.addr"]})), "time\tbus.rd.addr\n170ns\t0x20");
@@ -721,6 +723,10 @@ fn times_in_the_clocks_unit() {
     // a rounded time stands for every tick that prints as it: read after them, a change among them said
     assert_eq!(s.ok("value_at", json!({"signals": ["data", "ready"], "time": "20ns"})), "at 20ns:\ndata = 0x5 (0x0 earlier in 20ns)\nready = 1");
     assert_eq!(s.ok("find", json!({"expr": "@clk valid && ready", "from": "20ns"})), "from\tlast\tcycles\n30ns\t30ns\t1");
+    // backward: before every tick the time stands for
+    let back = |from: &str| json!({"expr": "@clk valid && ready", "from": from, "backward": true});
+    assert_eq!(s.ok("find", back("20ns")), "no match");
+    assert_eq!(s.ok("find", back("30ns")), "from\tlast\tcycles\n20ns\t20ns\t1");
     assert_eq!(s.ok("records", json!({"stream": "rx", "from": "30ns", "to": "30ns", "count_only": true})), "1 records, first 30ns, last 30ns");
     // exact in a finer unit, or with the unit set
     assert_eq!(s.ok("find", json!({"expr": "@clk valid", "unit": "fs"})), "from\tlast\tcycles\n20000001fs\t30000001fs\t2");
