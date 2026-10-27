@@ -389,7 +389,7 @@ fn inverted_cs_and_line() {
 }
 
 /// UART at 1 Mbaud, 2 stop bits: 0x55 whose second stop bit is 0, then a break (the line low
-/// 1000ns - 15000ns), then 0x55 again.
+/// 20000ns - 35000ns), then 0x55 again, then 0x00.
 #[test]
 fn uart_break_and_stop_bits() {
     let dir = Dir::new("uart-break");
@@ -401,11 +401,14 @@ fn uart_break_and_stop_bits() {
     text += "#12000\n1!\n#20000\n0!\n#35000\n1!\n";
     text += &frame(40000, "01010101011");
     text += "#60000\n1!\n";
+    // 0x00 with its stop bits high: a byte, not a break
+    text += &frame(62000, "00000000011");
+    text += "#80000\n1!\n";
     std::fs::write(&vcd, text).unwrap();
     let mut ws = Workspace::open(&vcd).unwrap();
     ws.add_decode(decode("u", "uart", "", &[("line", "uart_tx")], &[("baud", "1000000"), ("stop", "2")])).unwrap();
     assert_eq!(table(stream(&ws, "u.errors")), [row(1000, 12000, &["framing"]), row(20000, 31000, &["break"])]);
-    assert_eq!(table(stream(&ws, "u.byte")).iter().map(|r| r.0).collect::<Vec<_>>(), [1000, 40000]);
+    assert_eq!(table(stream(&ws, "u.byte")).iter().map(|r| (r.0, r.2[0].as_str())).collect::<Vec<_>>(), [(1000, "85"), (40000, "85"), (62000, "0")]);
 }
 
 /// A write-only or read-only AXI4 port, by its roles given; and a port with only part of a side
@@ -437,3 +440,17 @@ fn axi4_one_side() {
     let t = wtf_core::trace::Trace::open(&vcd).unwrap();
     assert!(wtf_core::protocol::detect(&t).is_empty());
 }
+
+/// SPI's last bit: where sclk stays still after it, cs rising ends it.
+#[test]
+fn spi_last_bit_at_cs() {
+    let dir = Dir::new("spi-still");
+    let vcd = dir.0.join("s.vcd");
+    // cs falls at 10, sclk rises at 20 with mosi 1, cs rises at 50, sclk falls at 60
+    let text = "$timescale 1ns $end\n$scope module top $end\n$var wire 1 ! sclk $end\n$var wire 1 \" cs $end\n$var wire 1 # mosi $end\n$upscope $end\n$enddefinitions $end\n#0\n0!\n1\"\n1#\n#10\n0\"\n#20\n1!\n#50\n1\"\n#60\n0!\n#80\n";
+    std::fs::write(&vcd, text).unwrap();
+    let mut ws = Workspace::open(&vcd).unwrap();
+    ws.add_decode(decode("s", "spi", "", &[("sclk", "sclk"), ("cs", "cs"), ("mosi", "mosi")], &[("bits", "1")])).unwrap();
+    assert_eq!(table(stream(&ws, "s.bit")), [row(20, 50, &["1"])]);
+}
+

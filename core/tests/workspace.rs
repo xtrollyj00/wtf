@@ -485,3 +485,21 @@ fn reloads_in_any_order() {
     assert_eq!(ws.reload(), Ok(("reloaded".into(), false)));
     assert!(ws.streams.iter().any(|s| s.name == "f"));
 }
+
+/// `:e` reports only what still can't be made after its passes: a named signal over one the rerun
+/// dropped, and the one over it, but not one that uses a signal listed after it.
+#[test]
+fn reloads_and_reports_whats_left() {
+    let dir = Dir::new("reload-left");
+    let trace = dir.0.join("t.vcd");
+    let text = std::fs::read_to_string(fixture("vcd")).unwrap();
+    std::fs::write(&trace, &text).unwrap();
+    let mut ws = Workspace::open(&trace).unwrap();
+    for c in ["signal lo = top.cpu.data[3:0]", "signal hi = top.cpu.data[7:4]", "signal lo = hi[1:0]", "signal ds = top.dma.state[0]", "signal dd = ds[0]"] {
+        wtf_core::command::run(&mut ws, c).unwrap();
+    }
+    std::fs::write(&trace, text.lines().filter(|l| !l.contains("dma") && !l.ends_with('&')).map(|l| format!("{l}\n")).collect::<String>()).unwrap();
+    let (msg, _) = ws.reload().unwrap();
+    assert_eq!(msg, "reloaded; not in trace: ds (unknown signal: top.dma.state[0]), dd (unknown signal: ds[0])");
+    assert!(ws.trace.by_path.contains_key("lo"), "lo is made in a second pass");
+}
