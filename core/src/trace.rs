@@ -15,6 +15,8 @@ pub struct Var {
     pub names: Option<Names>,
     /// Its values are two's complement: a computed signal that can be negative (`a - b`).
     pub signed: bool,
+    /// A duration in ticks (a pair's `delay`), shown as a time: the femtoseconds per tick.
+    pub time: Option<u128>,
     source: Source,
 }
 
@@ -125,6 +127,7 @@ impl Trace {
                 width: v.signal_encoding(h).length(),
                 names: v.enum_type(h).map(|(_, m)| m.iter().map(|(b, n)| (names_key(b).to_string(), n.to_string())).collect()),
                 signed: false,
+                time: None,
                 source: Source::File(v.signal_ref()),
             })
             .collect();
@@ -171,7 +174,7 @@ impl Trace {
                 list.pop();
             }
         }
-        let var = Var { path: path.to_string(), width, names: None, signed: false, source: Source::Computed(list) };
+        let var = Var { path: path.to_string(), width, names: None, signed: false, time: None, source: Source::Computed(list) };
         match self.by_path.get(path) {
             Some(&i) if matches!(self.vars[i].source, Source::Computed(_)) => {
                 self.vars[i] = var;

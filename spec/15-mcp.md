@@ -66,7 +66,8 @@ reuse wtf's own pieces:
 - The core keeps times as ticks and never picks a unit: the interfaces pass the unit and the
   precision to its one formatter. So a duration a decoder works out (a pair's `delay`) is a time
   field, ticks, shown in the answer's unit, and compared with a time (`where: "delay == 40ns"`); a
-  value with a time unit is a time wherever a search takes values.
+  value with a time unit is a time wherever a search takes values. Its field signal
+  (`bus.wr.delay`) shows as a time too, in a row and in `values`, in the unit that fits it.
 - A signal's radix can be given with its name, `awaddr:dec`, wherever tools take signals.
 - Rows in `workspace` can also take a colour (section 14), after the radix or alone:
   `awaddr:hex:red`, `wvalid:red`, to point the user at the guilty signal when presented.

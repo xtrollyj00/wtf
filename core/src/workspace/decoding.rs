@@ -366,6 +366,7 @@ impl Workspace {
         }
         for (f, &v) in s.schema.iter().zip(&vars[1..]) {
             self.trace.vars[v].signed = f.signed;
+            self.trace.vars[v].time = self.trace.fs_per_tick.filter(|_| f.time);
         }
         match self.streams.iter_mut().find(|x| x.name == s.name) {
             Some(old) => *old = s,

@@ -40,8 +40,6 @@ Shortcuts taken so far, to fix when they get in the way.
   `||` would still know the answer (`0 && x` is 0 in SV).
 - Applying a session (also `present`) adds its signals, protocols and instances to the ones there;
   none are removed.
-- A pair's `delay` is a time (ticks, `delay == 40ns`), but there is no `>` to find slow ones; as a
-  row, its field signal shows the ticks in the row's radix, not as a time.
 - `check` rules are violations written directly (`valid && !ready`), one record per cycle; a rule
   over records (a frame too long) needs a decoder.
 - Streams are worked out over the whole trace at once (spec §16 "Known limit").

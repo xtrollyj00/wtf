@@ -258,9 +258,10 @@ fn unique_leaves(paths: &[&str]) -> Vec<String> {
 pub fn label(var: &Var, row: &Sig, v: &Val) -> String {
     match v {
         Val::Bits(b) if b.len() == 1 => b.to_uppercase(),
-        Val::Bits(b) => match var.name_of(b).filter(|_| row.radix == radix::ENUM) {
-            Some(name) => name.into(),
-            None => (RADIXES[row.radix].format)(b, row.frac),
+        Val::Bits(b) => match (var.time, u64::from_str_radix(b, 2), var.name_of(b).filter(|_| row.radix == radix::ENUM)) {
+            (Some(fpt), Ok(t), _) => crate::time::format(t, Some(fpt)),
+            (_, _, Some(name)) => name.into(),
+            _ => (RADIXES[row.radix].format)(b, row.frac),
         },
         Val::Text(t) => t.clone(),
     }
