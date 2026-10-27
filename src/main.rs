@@ -284,6 +284,12 @@ mod tests {
         assert_eq!((app.ws.view.start, app.ws.view.cursor), (2 * half, 0));
         keys(&mut app, "H");
         assert_eq!(app.ws.view.start, half);
+        // L stops with the end at the left edge
+        keys(&mut app, "99L");
+        assert_eq!((app.ws.view.start, app.ws.view.cursor), (app.ws.view.end, 0));
+        keys(&mut app, "99H");
+        assert_eq!(app.ws.view.start, 0);
+        keys(&mut app, "2L");
         keys(&mut app, "5lc");
         assert_eq!(app.ws.view.cursor, 5);
         assert_eq!(app.ws.view.start, 0);
@@ -569,6 +575,9 @@ mod tests {
         assert_eq!((app.ws.view.cursor, msg(&app)), (15, "match 1 of 2".into()));
         keys(&mut app, "n");
         assert_eq!(msg(&app), "match 2 of 2");
+        // another search counts its own matches
+        keys(&mut app, ":0\n/busy\n");
+        assert_eq!(msg(&app), "match 1 of 1"); // where busy becomes true, not each cycle
         keys(&mut app, ":0\n/data[7] && top.cpu.busy\n");
         assert_eq!(app.ws.view.cursor, 20);
         keys(&mut app, "/state == 1\n");
@@ -754,6 +763,10 @@ mod tests {
         keys(&mut app, "?\x1b:help Decode\n");
         let screen = snapshot(&mut app, 100, Some(12));
         assert!(screen.contains("help · decode") && screen.contains("Decode first: records are exact"), "{screen}");
+        // Enter on a text jumps nowhere
+        let cursor = app.ws.view.cursor;
+        keys(&mut app, "\n");
+        assert!(app.records.is_some() && app.ws.view.cursor == cursor);
         keys(&mut app, "G");
         let screen = snapshot(&mut app, 100, Some(12));
         assert!(!screen.contains("Decode first: records are exact") && screen.contains("j k scroll  Esc close"), "{screen}");
