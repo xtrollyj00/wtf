@@ -43,3 +43,8 @@ Times accept `fs`, `ps`, `ns`, `us`, `ms`, `s`. A number without a unit means fi
   missing signals are dropped and listed, cursors and the visible time past the new end move to the end.
   Dropping signals marks the session as modified. The undo history is cleared.
   If the file can't be read, the old data stays and the error is shown.
+- **Auto-reload.** The window watches its trace file (its modification time and size). When the file
+  changes and then stays the same for a second, so a simulator still writing it isn't read half
+  way, the window reloads it as `:e` does and the status line says `reloaded`; a file that can't be
+  read keeps the old trace and shows the error. A file that disappears is not a change. Agents'
+  workspaces don't auto-reload: `reload` (section 15) is their `:e`.

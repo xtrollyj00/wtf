@@ -53,6 +53,16 @@ pub struct App {
     pub examine: Option<(String, Vec<String>)>,
     /// The `:records` list, or a `:help <topic>` text.
     pub records: Option<Records>,
+    /// The trace file as last loaded, and a change to it seen since, with when it was first seen.
+    seen: Stamp,
+    changed: Option<(Stamp, std::time::Instant)>,
+}
+
+/// A file's modification time and size: a new simulation run changes them.
+pub type Stamp = Option<(std::time::SystemTime, u64)>;
+
+pub fn stamp(path: &std::path::Path) -> Stamp {
+    std::fs::metadata(path).ok().and_then(|m| Some((m.modified().ok()?, m.len())))
 }
 
 /// `:records`: a stream's records, one a line, to pick one and jump to it. `:help <topic>`
@@ -75,6 +85,7 @@ pub struct Records {
 impl App {
     pub fn new(ws: Workspace) -> Self {
         let panel = Panel::new(&ws.trace);
+        let seen = stamp(&ws.trace_path);
         App {
             ws,
             top: 0,
@@ -98,6 +109,8 @@ impl App {
             help: false,
             examine: None,
             records: None,
+            seen,
+            changed: None,
         }
     }
 
@@ -153,12 +166,35 @@ impl App {
 
     /// `:e`, with the signal panel rebuilt for the new file.
     pub fn reload(&mut self) -> Result<(), String> {
+        self.seen = stamp(&self.ws.trace_path);
         self.msg = Some(self.ws.reload()?);
         self.matches = None;
         self.panel = Panel::new(&self.ws.trace);
         Ok(())
     }
 
+
+    /// Reload the trace when its file changed and then stayed the same for a second, so a
+    /// simulator still writing it isn't read half way. Returns true when it reloaded.
+    pub fn watch(&mut self, now: Stamp, at: std::time::Instant) -> bool {
+        if now.is_none() || now == self.seen {
+            self.changed = None;
+            return false;
+        }
+        match self.changed {
+            Some((s, t)) if s == now && at.duration_since(t) >= std::time::Duration::from_secs(1) => {
+                self.changed = None;
+                let r = self.reload();
+                self.report(r);
+                true
+            }
+            Some((s, _)) if s == now => false,
+            _ => {
+                self.changed = Some((now, at));
+                false
+            }
+        }
+    }
 
     /// Every key that changes the rows records an undo step, except collapsing and expanding
     /// groups (a View-mode action) and undo / redo themselves.

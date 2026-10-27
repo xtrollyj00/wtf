@@ -142,6 +142,9 @@ fn tui(app: &mut App) -> Result<(), String> {
                     let _ = inc.reply.send(answer);
                     break;
                 }
+                if app.watch(tui::app::stamp(&app.ws.trace_path), std::time::Instant::now()) {
+                    break;
+                }
             }
             if !crossterm::event::poll(std::time::Duration::ZERO)? {
                 continue;
@@ -432,6 +435,27 @@ mod tests {
         assert!(matches!(&app.ws.rows[3], rows::Row::Signal(s) if s.bits == 0) && app.ws.bit.is_none());
         keys(&mut app, "u");
         assert_eq!(app.msg.as_ref().unwrap().0, "already at oldest change");
+    }
+
+    #[test]
+    fn reload_when_the_file_changes() {
+        let mut app = open("vcd", Some(SESSION));
+        app.ws.trace_path = "tests/data/simple.vcd".into();
+        let t0 = std::time::Instant::now();
+        let at = |s: u64| t0 + std::time::Duration::from_millis(s);
+        let seen = tui::app::stamp(&app.ws.trace_path);
+        let new = |n: u64| Some((std::time::SystemTime::UNIX_EPOCH, n));
+        assert!(!app.watch(seen, at(0)));
+        // changed, then still changing: wait for it to stay the same a second
+        assert!(!app.watch(new(1), at(0)));
+        assert!(!app.watch(new(2), at(900)));
+        assert!(!app.watch(new(2), at(1800)));
+        assert!(app.watch(new(2), at(1900)));
+        assert_eq!(app.msg.as_ref().unwrap().0, "reloaded");
+        // reloaded: the file as it is now is the one seen
+        assert!(!app.watch(tui::app::stamp(&app.ws.trace_path), at(5000)));
+        // gone (a run deleting it first) is not a change
+        assert!(!app.watch(None, at(6000)));
     }
 
     #[test]
