@@ -38,7 +38,6 @@ Shortcuts taken so far, to fix when they get in the way.
   wider one is an error suggesting a slice.
 - In `c ? a : b`, any unknown bit the condition reads makes the result x, even where SV's `&&` /
   `||` would still know the answer (`0 && x` is 0 in SV).
-- Defining a protocol type again doesn't sample its instances again until `:e`.
 - Applying a session (also `present`) adds its signals, protocols and instances to the ones there;
   none are removed.
 - A pair's `delay` is a time (ticks, `delay == 40ns`), but there is no `>` to find slow ones; as a

@@ -199,6 +199,14 @@ fn protocols_put_on_signals() {
     assert_eq!((names(&other), wtf_core::session::to_toml(&other)), (names(&ws), toml));
     assert_eq!(ws.reload(), Ok(("reloaded".into(), false)));
     assert_eq!((ws.streams.len(), starts(&ws.streams[1])), (3, vec![85]));
+    // a type defined again samples its instances again, at once
+    let mut wider = cmd();
+    wider.fields = vec![("all".into(), "cmd".into())];
+    assert_eq!(ws.add_protocol(wider), Ok(None));
+    assert_eq!(ws.streams[0].schema.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["all"]);
+    let mut bad = cmd();
+    bad.when = "nope".into();
+    assert!(ws.add_protocol(bad).unwrap_err().starts_with("cmd defined, but instances failed: c0: "));
 }
 
 #[test]

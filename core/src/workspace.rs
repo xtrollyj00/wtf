@@ -466,13 +466,15 @@ impl Workspace {
             }
         }
         self.streams.clear();
+        // taken first: a protocol added would make its instances again
+        let decodes = std::mem::take(&mut self.decodes);
         for p in std::mem::take(&mut self.protocols) {
             let name = p.name.clone();
             if let Err(e) = self.add_protocol(p) {
                 missing.push(format!("{name} ({e})"));
             }
         }
-        for d in std::mem::take(&mut self.decodes) {
+        for d in decodes {
             let name = d.name.clone();
             if let Err(e) = self.add_decode(d) {
                 missing.push(format!("{name} ({e})"));

@@ -57,9 +57,19 @@ impl Workspace {
             true => Some(self.make_stream(name, &p.clock, &p)?),
             false => None,
         };
+        // a type defined again: its instances sampled again, and those after them, which may stack on them
+        let first = self.decodes.iter().position(|d| d.protocol == p.name);
+        let name = name.clone();
         match self.protocols.iter_mut().find(|x| x.name == p.name) {
             Some(old) => *old = p,
             None => self.protocols.push(p),
+        }
+        if let Some(i) = first {
+            let again = self.decodes[i..].to_vec();
+            let failed: Vec<String> = again.into_iter().filter_map(|d| self.add_decode(d).err()).collect();
+            if !failed.is_empty() {
+                return Err(format!("{name} defined, but instances failed: {}", failed.join("; ")));
+            }
         }
         Ok(var)
     }

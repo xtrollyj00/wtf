@@ -64,7 +64,9 @@ checks that return only violations.
 - **Protocols come in three kinds:**
   - **Sampled protocols**, defined in the session without Rust (`[[protocol]]`, `:protocol`): a
     clock, a predicate and fields as expressions. With `roles` one is a type, put on signals by
-    instances; without, it is its own single stream.
+    instances; without, it is its own single stream. Defining a type again (`:protocol`) samples
+    its instances again at once, with the instances made after them (which may stack on their
+    streams), in order; if one fails, the type stays defined and the error says which failed.
     ```toml
     [[protocol]]
     name = "cmd"
