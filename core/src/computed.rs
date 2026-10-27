@@ -63,7 +63,7 @@ fn is_expr(name: &str) -> bool {
                 ']' | '}' => -1,
                 _ => 0,
             };
-            depth == 0 && ("+-&|^~<>=!".contains(c) || (c == '*' && !glob(i)))
+            depth == 0 && ("+-&|^~<>=!/%?".contains(c) || (c == '*' && !glob(i)))
         })
 }
 

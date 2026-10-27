@@ -36,7 +36,9 @@ Shortcuts taken so far, to fix when they get in the way.
 - Sampling a stream again with fewer fields leaves the old field vars, with their old values.
 - `records` shows every field in hex; no per-field radix (`tdata:dec`).
 - Arithmetic (section 8) takes operands up to 64 bits and results up to 127 (an `i128`); a
-  wider one is an error suggesting a slice. No `/` or `%` (RV32M's DIV, REM).
+  wider one is an error suggesting a slice.
+- In `c ? a : b`, any unknown bit the condition reads makes the result x, even where SV's `&&` /
+  `||` would still know the answer (`0 && x` is 0 in SV).
 - Defining a protocol type again doesn't sample its instances again until `:e`.
 - Applying a session (also `present`) adds its signals, protocols and instances to the ones there;
   none are removed.

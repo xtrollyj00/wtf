@@ -49,14 +49,19 @@ otherwise hex; 1-bit signals always show 0 / 1 / X / Z.
         "search expressions for `find`: operators, arithmetic, values, @clk, past / rose / fell / stable",
         "\
 `valid && ready && data == 0x40`, `state == 3 || state == 5`, `!rst`.
-- Operators: == != < <= > >= (unsigned numbers), &&, ||, ! and parentheses. A bare signal is
-  true when 1 (some bit 1, none unknown).
-- Arithmetic, written as in SystemVerilog but stricter: + - * & | ^ ~ << >> and signed(x). Values
+- Operators: == != < <= > >= (unsigned numbers), &&, ||, !, ?: and parentheses. A bare signal is
+  true when 1 (some bit 1, none unknown). `* / %` bind tighter than `+ -`; `?:` is lowest.
+- Arithmetic, written as in SystemVerilog but stricter: + - * / % & | ^ ~ << >> and signed(x). Values
   are exact integers: nothing wraps unless sliced, so a 32-bit add is `(a + b)[31:0]`; `signed(x)`
-  reads x as two's complement (`signed(imm[11:0]) < 0`). `&`, `|`, `^` need parentheses beside
-  another operator, `<<` and `>>` beside arithmetic: `(x & 3) == 0`, `wmask != 1 << addr[1:0]`.
-  A comparison or `!x` is a value, 1 or 0. A field's bits are `b[4:0]`, as a signal's. An unknown
-  operand makes the result x. Operands up to 64 bits; an error shows each fix.
+  reads x as two's complement (`signed(imm[11:0]) < 0`), and `signed(x)[31:0]` is its sign
+  extension to 32 bits. `/` truncates toward zero, `%` takes the dividend's sign; dividing by
+  zero is x.
+- Ternary `c ? a : b` is a value; a nested one needs parentheses: `rd != (a < b ? 1 : 0)`.
+  An unknown bit in `c` makes the result x.
+- `&`, `|`, `^` need parentheses beside another operator, `<<` and `>>` beside arithmetic:
+  `(x & 3) == 0`, `wmask != 1 << addr[1:0]`. A comparison or `!x` is a value, 1 or 0. A field's
+  bits are `b[4:0]`, as a signal's, on either side of a comparison. An unknown operand makes the
+  result x. Operands up to 64 bits; an error shows each fix.
 - Values: 0x40, 64, 0b1000000, -12, SV numbers (8'h40, 'd64, 4'b10x0, '1), x (unknown), z (high impedance), a name the file gives a
   value, a time (`40ns`), or another signal (`mi_addr != reg_waddr`, `data != past(data)`). Two
   events at different times (a request and its response) are compared as records instead: a

@@ -61,7 +61,8 @@ clk      ▁▁▁▁▔▔▔▔▁▁▁▁▔▔▔▔
   (section 15) a field compares with another field of the same record, so a `pair`'s two sides
   are compared as a scoreboard does. `@` takes the clock signal itself: `@rising(clk)` is an
   error naming `@clk`.
-- **Arithmetic**: `+`, `-`, `*`, `&`, `|`, `^`, `~`, `<<`, `>>`, and `signed(x)`: `wd != (rs1d +
+- **Arithmetic**: `+`, `-`, `*`, `/`, `%`, `&`, `|`, `^`, `~`, `<<`, `>>`, `signed(x)` and
+  `c ? a : b`: `wd != (rs1d +
   rs2d)[31:0]`, `wmask != 1 << addr[1:0]`, `pc_next != pc + 4`. Written as in SystemVerilog, but stricter
   where SV's rules are loose: values are exact integers, nothing wraps or is cut to a width unless
   written, and anything that could be read two ways is an error that shows both. So an
@@ -71,9 +72,17 @@ clk      ▁▁▁▁▔▔▔▔▁▁▁▁▔▔▔▔
     -1, and comparisons compare these numbers (`signed(a) < b` is true for a negative a).
   - A slice gives a result a width: `(a + b)[31:0]` is the sum's low 32 bits, as a 32-bit adder
     makes it, read unsigned (a negative value's bits are its two's complement). A slice is the
-    only way to wrap, so an expression says where it wraps.
-  - `*` binds tighter than `+` and `-`, arithmetic (shifts too) tighter than comparisons,
-    comparisons tighter than `&&`, `&&` tighter than `||`. Where SV's order surprises, parentheses
+    only way to wrap, so an expression says where it wraps. A bit of a parenthesised value is a
+    one-bit slice: `(x >> 8)[7]` is `(x >> 8)[7:7]`. A slice after `signed(...)` is the sign
+    extension: `signed(insn[31:20])[31:0]` is the 12-bit immediate as a 32-bit value.
+  - `/` and `%` bind like `*`. A quotient truncates toward zero (`-7 / 2` is -3), and a remainder
+    takes the dividend's sign (`-7 % 2` is -1). Dividing by zero is x, as in SV.
+  - `c ? a : b` is a value, with the lowest precedence (below `||`), as in SV: `rd != (a < b ? 1 : 0)`.
+    `c` is a condition: when it reads an unknown bit, the result is x. A nested `?` needs
+    parentheses: `c ? a : (d ? e : f)`.
+  - `*`, `/` and `%` bind tighter than `+` and `-`, arithmetic (shifts too) tighter than
+    comparisons, comparisons tighter than `&&`, `&&` tighter than `||`, and `?:` is lowest.
+    Where SV's order surprises, parentheses
     are required: `&`, `|` and `^` beside any other operator (SV puts them below `==`), `<<` and
     `>>` beside other arithmetic (`1 << n + 1`). `x & 3 == 0` is an error, `x & 3 == 0: & and ==
     need parentheses: (x & 3) == 0 or x & (3 == 0)`; `a & b & c` and `wmask != 1 << addr[1:0]`
@@ -88,6 +97,7 @@ clk      ▁▁▁▁▔▔▔▔▁▁▁▁▔▔▔▔
     slice, a << b[5:0]`. A shift amount can't be negative (signed).
     An unsigned `&` is as narrow as its narrower side, so `a << (b & 31)` is fine.
   - A comparison is a value, 1 or 0, and `!x` is one too: `(bd == 1) != !(a < b)`. In a
-    `records` `where`, a field's slice or bit is written as a signal's: `b[4:0]`, `b[3]`.
+    `records` `where`, a field's slice or bit is written as a signal's: `b[4:0]`, `b[3]`, on
+    either side of a comparison: `rd == insn[11:7]`.
 - On a bit line of an expanded bus, the search looks at that bit. String and real signals are
   searched by their text.
