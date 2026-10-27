@@ -36,6 +36,7 @@ reuse wtf's own pieces:
   `times`, `radix` (and colours), `expressions` (`find`'s), `decode` (built-ins, `protocol`,
   `frame`, `pair`, `check`), `records`, `workspace` (declaring, `view`, `render`, `present`) and
   `commands` (`command`'s). Each concept is explained in one topic, which the others point to.
+  The window shows the same texts: `:help <topic>` opens one in a box (section 7).
   The server's instructions are the map: the usual path (open, decode, records, present) and the
   topics. Topics are kept in step with this spec, as descriptions are.
 

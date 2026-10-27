@@ -707,6 +707,15 @@ mod tests {
         assert!(snapshot(&mut app, 100, Some(20)).contains("help · signal panel"));
         keys(&mut app, "?\x1b:help\n");
         assert!(app.help && app.mode == app::Mode::Edit && snapshot(&mut app, 100, Some(20)).contains("help · EDIT"));
+        // a topic: the agents' reference, scrolled by the line
+        keys(&mut app, "?\x1b:help Decode\n");
+        let screen = snapshot(&mut app, 100, Some(12));
+        assert!(screen.contains("help · decode") && screen.contains("Decode first: records are exact"), "{screen}");
+        keys(&mut app, "G");
+        let screen = snapshot(&mut app, 100, Some(12));
+        assert!(!screen.contains("Decode first: records are exact") && screen.contains("j k scroll  Esc close"), "{screen}");
+        keys(&mut app, "\x1b:help nope\n");
+        assert_eq!(app.msg.as_ref().unwrap().0, "no help topic nope; topics: names times radix expressions decode records workspace commands");
     }
 
     #[test]

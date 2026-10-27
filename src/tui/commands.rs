@@ -37,7 +37,7 @@ pub const COMMANDS: &[Command] = &[
     Command { name: "e", usage: ":e", desc: "Reload the trace, keeping signals, groups, cursor and zoom", args: false },
     Command { name: "w", usage: ":w [file]", desc: "Save the session", args: true },
     Command { name: "wq", usage: ":wq", desc: "Save the session and quit", args: false },
-    Command { name: "help", usage: ":help", desc: "Show the keys of the current mode (also ?)", args: false },
+    Command { name: "help", usage: ":help [topic]", desc: "Show the keys of the current mode (also ?), or a topic: names times radix expressions decode records workspace commands", args: true },
     Command { name: "q", usage: ":q", desc: "Quit; refuses if the session has unsaved changes", args: false },
     Command { name: "q!", usage: ":q!", desc: "Quit without saving", args: false },
 ];

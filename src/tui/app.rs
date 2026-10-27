@@ -51,17 +51,21 @@ pub struct App {
     pub help: bool,
     /// The `e` box: a title and the full value of the selected signal at the cursor.
     pub examine: Option<(String, Vec<String>)>,
-    /// The `:records` list.
+    /// The `:records` list, or a `:help <topic>` text.
     pub records: Option<Records>,
 }
 
-/// `:records`: a stream's records, one a line, to pick one and jump to it.
+/// `:records`: a stream's records, one a line, to pick one and jump to it. `:help <topic>`
+/// shows a topic's text in it, lines without times, to scroll.
 pub struct Records {
+    /// The box's title.
+    pub name: String,
+    /// The stream whose row `Enter` selects.
     pub stream: String,
-    /// The line above the list: how many records, of how many.
+    /// The line above the list: how many records, of how many; none for a text.
     pub title: String,
     /// Each record's start and its line.
-    pub items: Vec<(time::Tick, String)>,
+    pub items: Vec<(Option<time::Tick>, String)>,
     pub hl: usize,
     /// First item shown, and how many fit, as last drawn.
     pub top: usize,
@@ -111,8 +115,17 @@ impl App {
         let line = line.trim();
         let (cmd, arg) = line.split_once(char::is_whitespace).unwrap_or((line, ""));
         let msg = match cmd {
-            "help" => {
+            "help" if arg.trim().is_empty() => {
                 self.help = true;
+                None
+            }
+            // the agents' reference, one source for both (spec §15)
+            "help" => {
+                let topics = || crate::mcp::help::TOPICS.iter().map(|t| t.0).collect::<Vec<_>>().join(" ");
+                let text = crate::mcp::help::answer(Some(arg)).map_err(|_| format!("no help topic {}; topics: {}", arg.trim(), topics()))?;
+                let items = text.lines().map(|l| (None, l.to_string())).collect();
+                let name = format!("help {} {}", gl().dot, arg.trim().to_lowercase());
+                self.records = Some(Records { name, stream: String::new(), title: String::new(), items, hl: 0, top: 0, page: 1 });
                 None
             }
             "w" => Some(command::save(&mut self.ws, arg.trim())?),
@@ -207,14 +220,15 @@ impl App {
             .map(|&i| {
                 let r = &st.records[i];
                 let fields: Vec<String> = st.fields_text(i, fpt).into_iter().map(|(n, v)| format!("{n}={v}")).collect();
-                (r.start, format!("#{i}  {}{}{}  {}", time::format(r.start, fpt), gl().dash, time::format(r.end, fpt), fields.join(" ")))
+                (Some(r.start), format!("#{i}  {}{}{}  {}", time::format(r.start, fpt), gl().dash, time::format(r.end, fpt), fields.join(" ")))
             })
             .collect();
         let title = match filter {
             Some(_) => format!("{} matching records, of {of}", numbers.len()),
             None => format!("{} records", numbers.len()),
         };
-        self.records = Some(Records { stream: st.name.clone(), title, items, hl: 0, top: 0, page: 1 });
+        let name = format!("records {} {}", gl().dot, st.name);
+        self.records = Some(Records { name, stream: st.name.clone(), title, items, hl: 0, top: 0, page: 1 });
         Ok(())
     }
 
@@ -233,7 +247,7 @@ impl App {
             KeyCode::Char('G') => r.hl = last,
             KeyCode::Char('g') => r.hl = 0,
             KeyCode::Enter => {
-                let (t, name) = (r.items[r.hl].0, r.stream.clone());
+                let (Some(t), name) = (r.items[r.hl].0, r.stream.clone()) else { return };
                 self.records = None;
                 let row = self.ws.rows.iter().position(|row| matches!(row, Row::Signal(s) if self.ws.trace.vars[s.var].path == name));
                 if let Some(i) = row {

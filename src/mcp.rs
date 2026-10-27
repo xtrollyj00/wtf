@@ -20,7 +20,7 @@ use std::sync::{Arc, Mutex};
 
 mod args;
 mod declare;
-mod help;
+pub mod help;
 pub use args::*;
 use declare::declared;
 
