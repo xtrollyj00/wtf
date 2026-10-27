@@ -376,12 +376,13 @@ enum SpiOut {
 }
 
 /// `spi`: SPI from the changes of `{cs, sclk, mosi}` or `{cs, sclk, mosi, miso}` (the field
-/// `value`), cs active low (`cs_active=high`: high). A bit is sampled at each edge of sclk that `mode` (0 - 3, CPOL and CPHA)
-/// samples on, rising for modes 0 and 3, falling for 1 and 2, with cs low, from the values just
-/// before it; it lasts to the next one. `bits` of them (MSB first, or LSB with `order=lsb`) make a
-/// word; a transfer runs from cs falling to cs rising, with its words as hex text. `out` picks the
-/// stream: `bit` (mosi, miso), `word` (mosi, miso, complete: 0 if cs rose first) or `transfer`
-/// (words, mosi, miso, complete: 0 if the trace ended first).
+/// `value`), cs active low (`cs_active=high`: high). A bit is sampled at each edge of sclk that
+/// `mode` (0 - 3, CPOL and CPHA) samples on, rising for modes 0 and 3, falling for 1 and 2, with cs
+/// low, from the values just before it; it lasts to the next one, the last of a transfer to sclk's
+/// next edge. `bits` of them (MSB first, or LSB with `order=lsb`) make a word; a transfer runs
+/// from cs falling to cs rising, with its words as hex text. `out` picks the stream: `bit` (mosi,
+/// miso), `word` (mosi, miso, complete: 0 if cs rose first) or `transfer` (words, mosi, miso,
+/// complete: 0 if the trace ended first).
 pub struct Spi {
     out: SpiOut,
     rising: bool,
@@ -394,6 +395,8 @@ pub struct Spi {
     end: Tick,
     /// The bit sampled last, waiting for its end: its start, mosi, miso.
     bit: Option<(Tick, u8, u8)>,
+    /// sclk's first other edge after it, where the last bit of a transfer ends.
+    shift: Option<Tick>,
     /// The word being shifted in: its start, and its bits.
     word: Option<(Tick, Vec<(u8, u8)>)>,
     /// The transfer since cs fell: its start, and its words' mosi and miso.
@@ -437,6 +440,7 @@ impl Spi {
             prev: None,
             end: 0,
             bit: None,
+            shift: None,
             word: None,
             transfer: None,
         })
@@ -543,9 +547,13 @@ impl Decoder for Spi {
             if p[0] == b'0' && edge {
                 self.end_bit(t, &mut out);
                 self.bit = Some((t, p[2], p[3]));
+                self.shift = None;
+            } else if p[1] != v[1] && self.bit.is_some() {
+                self.shift = self.shift.or(Some(t));
             }
             if p[0] == b'0' && v[0] == b'1' {
-                self.end_bit(t, &mut out);
+                // the last bit ends where sclk shifts, not where cs rises however long after
+                self.end_bit(self.shift.unwrap_or(t), &mut out);
                 self.end_word(t, false, &mut out);
                 self.end_transfer(t, true, &mut out);
             }

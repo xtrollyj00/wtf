@@ -269,11 +269,11 @@ fn spi_words_and_transfers() {
     let mut ws = open("spi.vcd");
     ws.add_decode(decode("f", "spi", "", &pins, &[])).unwrap();
     let bits = table(stream(&ws, "f.bit"));
-    // sampled at sclk's rise, each to the next; none while cs is high
-    assert_eq!((bits.len(), &bits[0], &bits[15]), (28, &row(110, 130, &["1", "0"]), &row(410, 430, &["0", "1"])));
+    // sampled at sclk's rise, each to the next, the last to sclk's fall; none while cs is high
+    assert_eq!((bits.len(), &bits[0], &bits[15]), (28, &row(110, 130, &["1", "0"]), &row(410, 420, &["0", "1"])));
     assert_eq!(table(stream(&ws, "f.word")), [
         row(110, 270, &["165", "90", "1"]),
-        row(270, 430, &["60", "195", "1"]),
+        row(270, 420, &["60", "195", "1"]),
         row(510, 670, &["240", "15", "1"]),
         row(670, 750, &["10", "5", "0"]),
     ]);

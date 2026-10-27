@@ -60,7 +60,8 @@ checks that return only violations.
   take no `clock`. Their settings are params of the instance: SPI's `mode`, `bits`, `order`,
   `cs_active` (`low`, the default, or `high`); UART's `baud`, `bits`, `parity` (`none`, `even`,
   `odd`), `stop`, `idle` (`high`, the default, or `low`, which reads the line inverted as RS-232
-  levels do). UART checks every stop bit; the line low for a whole frame is a `break`, with no byte.
+  levels do). An SPI bit lasts to the next sampling edge, the last of a transfer to sclk's next
+  edge. UART checks every stop bit; the line low for a whole frame is a `break`, with no byte.
 - **Protocols come in three kinds:**
   - **Sampled protocols**, defined in the session without Rust (`[[protocol]]`, `:protocol`): a
     clock, a predicate and fields as expressions. With `roles` one is a type, put on signals by

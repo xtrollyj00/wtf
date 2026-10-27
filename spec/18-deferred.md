@@ -50,8 +50,6 @@ Shortcuts taken so far, to fix when they get in the way.
 - The workspace's time unit isn't shown in the window.
 - A name that matches only in the other HDL's form (`HEADERS_VLD`, `gen(4)` for `gen[4]`, section
   8) is looked up by putting every path in that form, each time: O(signals) per such name.
-- SPI's bit records last from one sampling edge to the next, so the last bit of a transfer ends at
-  cs rising, however long after.
 - A slice or concatenation SPI reads its pins through (`{cs, sclk, mosi, miso}`) stays a var, as
   every computed signal named.
 
