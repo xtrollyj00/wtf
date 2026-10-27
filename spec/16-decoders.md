@@ -50,7 +50,7 @@ checks that return only violations.
                                           with delay (latency to B / the first R beat); errors as AXI4-Lite
   SPI:   sclk cs mosi miso          -> bit (at sclk's sampling edge for mode 0 - 3, cs low)
                                        -> word (bits, msb or lsb first), transfer (cs low to high)
-  UART:  the line and a baud rate   -> byte (each bit sampled in its middle), errors (framing, parity)
+  UART:  the line and a baud rate   -> byte (each bit sampled in its middle), errors (framing, parity, break)
   ```
   An AXI-Lite or AXI4 port that only writes or only reads is decoded too: a side none of whose
   roles is given (explicitly or under the prefix) is left out, and the instance makes only the
@@ -60,7 +60,7 @@ checks that return only violations.
   take no `clock`. Their settings are params of the instance: SPI's `mode`, `bits`, `order`,
   `cs_active` (`low`, the default, or `high`); UART's `baud`, `bits`, `parity` (`none`, `even`,
   `odd`), `stop`, `idle` (`high`, the default, or `low`, which reads the line inverted as RS-232
-  levels do).
+  levels do). UART checks every stop bit; the line low for a whole frame is a `break`, with no byte.
 - **Protocols come in three kinds:**
   - **Sampled protocols**, defined in the session without Rust (`[[protocol]]`, `:protocol`): a
     clock, a predicate and fields as expressions. With `roles` one is a type, put on signals by

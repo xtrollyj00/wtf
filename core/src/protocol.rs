@@ -70,7 +70,7 @@ const SPI: &[(&str, &str)] = &[
 ];
 const UART: &[(&str, &str)] = &[
     ("byte", "each frame's data bits, sampled in the middle of each bit at `baud`"),
-    ("errors", "a stop bit that isn't 1 (framing), a wrong parity bit (parity)"),
+    ("errors", "a stop bit that isn't 1 (framing), a wrong parity bit (parity), the line low for a whole frame (break, no byte)"),
 ];
 
 /// The protocols written in Rust.
@@ -118,7 +118,7 @@ pub fn builtin(name: &str) -> Option<Builtin> {
             notes: SPI,
         }),
         "uart" => Some(Builtin {
-            about: "UART: bytes from an idle-high line (idle=low: inverted) at a baud rate, framing and parity errors",
+            about: "UART: bytes from an idle-high line (idle=low: inverted) at a baud rate, framing and parity errors, breaks",
             example: "decode console uart line=uart_tx baud=115200",
             required: &["line"],
             optional: &[],
@@ -252,7 +252,7 @@ fn spi(given: &Given, params: &Params) -> Vec<Step> {
 }
 
 /// UART: `byte`, each frame's data, sampled in the middle of its bits at `baud`; `errors`, a stop
-/// bit that isn't 1 (`framing`) or a wrong `parity` bit.
+/// bit that isn't 1 (`framing`), a wrong `parity` bit or a `break`.
 fn uart(_: &Given, params: &Params) -> Vec<Step> {
     let mut steps = vec![Step::Changes { name: "levels", signal: "line".into() }];
     for out in ["byte", "errors"] {

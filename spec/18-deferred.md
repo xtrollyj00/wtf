@@ -52,7 +52,6 @@ Shortcuts taken so far, to fix when they get in the way.
   8) is looked up by putting every path in that form, each time: O(signals) per such name.
 - SPI's bit records last from one sampling edge to the next, so the last bit of a transfer ends at
   cs rising, however long after.
-- UART takes only the first stop bit into account; a break (the line held low) is a framing error.
 - A slice or concatenation SPI reads its pins through (`{cs, sclk, mosi, miso}`) stays a var, as
   every computed signal named.
 

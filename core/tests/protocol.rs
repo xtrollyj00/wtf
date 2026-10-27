@@ -385,3 +385,23 @@ fn inverted_cs_and_line() {
     let err = low.add_decode(decode("v", "uart", "", &line, &[("baud", "1000000"), ("idle", "up")])).unwrap_err();
     assert_eq!(err, "v: uart: idle=up: not high or low");
 }
+
+/// UART at 1 Mbaud, 2 stop bits: 0x55 whose second stop bit is 0, then a break (the line low
+/// 1000ns - 15000ns), then 0x55 again.
+#[test]
+fn uart_break_and_stop_bits() {
+    let dir = Dir::new("uart-break");
+    let vcd = dir.0.join("b.vcd");
+    // 0x55 LSB first: start 0, 1 0 1 0 1 0 1 0, stop 1, stop 0
+    let frame = |at: u64, bits: &str| bits.chars().enumerate().map(|(i, b)| format!("#{}\n{b}!\n", at + i as u64 * 1000)).collect::<String>();
+    let mut text = String::from("$timescale 1ns $end\n$scope module top $end\n$var wire 1 ! uart_tx $end\n$upscope $end\n$enddefinitions $end\n#0\n1!\n");
+    text += &frame(1000, "01010101010");
+    text += "#12000\n1!\n#20000\n0!\n#35000\n1!\n";
+    text += &frame(40000, "01010101011");
+    text += "#60000\n1!\n";
+    std::fs::write(&vcd, text).unwrap();
+    let mut ws = Workspace::open(&vcd).unwrap();
+    ws.add_decode(decode("u", "uart", "", &[("line", "uart_tx")], &[("baud", "1000000"), ("stop", "2")])).unwrap();
+    assert_eq!(table(stream(&ws, "u.errors")), [row(1000, 12000, &["framing"]), row(20000, 31000, &["break"])]);
+    assert_eq!(table(stream(&ws, "u.byte")).iter().map(|r| r.0).collect::<Vec<_>>(), [1000, 40000]);
+}

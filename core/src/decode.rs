@@ -570,9 +570,9 @@ impl Decoder for Spi {
 /// one) at `baud` bits a second:
 /// a frame starts where the line falls, and each bit is sampled in its middle: the start bit (a
 /// frame whose start bit isn't 0 was a glitch, and is dropped), `bits` data bits (5 - 9, LSB first),
-/// a `parity` bit (`none`, `even` or `odd`) and `stop` stop bits (1 or 2; the first is checked).
+/// a `parity` bit (`none`, `even` or `odd`) and `stop` stop bits (1 or 2, each checked).
 /// `out` picks the stream: `byte` (data) or `errors` (violations, `rule`: `framing`, a stop bit
-/// that isn't 1, or `parity`).
+/// that isn't 1, `parity`, or `break`, the line low for a whole frame, which makes no byte).
 pub struct Uart {
     errors: bool,
     /// Ticks a bit lasts.
@@ -617,7 +617,7 @@ impl Uart {
     /// Sample the open frame's bits whose middles fall before `t`, at the line's level; the record
     /// of a frame sampled whole.
     fn sample_until(&mut self, t: f64, out: &mut Vec<Record>) {
-        let need = 1 + self.bits + self.parity.is_some() as usize + 1;
+        let need = 1 + self.bits + self.parity.is_some() as usize + self.stop;
         while let (Some((start, got)), Some(level)) = (&mut self.frame, self.level) {
             if *start as f64 + (got.len() as f64 + 0.5) * self.period >= t {
                 return;
@@ -636,12 +636,17 @@ impl Uart {
         let len = 1 + self.bits + self.parity.is_some() as usize + self.stop;
         let end = start + (len as f64 * self.period).round() as Tick;
         let data: String = got[1..=self.bits].iter().rev().map(|&b| b as char).collect();
+        // the line held low for the whole frame: a break, no byte
+        let brk = got.iter().all(|&b| b == b'0');
+        if brk {
+            return self.errors.then(|| Record { start, end, fields: vec![Some(Val::Text("break".into()))] });
+        }
         if !self.errors {
             return Some(Record { start, end, fields: vec![Some(Val::Bits(data))] });
         }
         let ones = got[1..=self.bits].iter().filter(|&&b| b == b'1').count();
         let parity_bad = self.parity.is_some_and(|odd| (ones + (got[self.bits + 1] == b'1') as usize) % 2 != odd as usize);
-        let rule = if got[got.len() - 1] != b'1' {
+        let rule = if got[got.len() - self.stop..].iter().any(|&b| b != b'1') {
             "framing"
         } else if parity_bad {
             "parity"
