@@ -33,7 +33,7 @@ pub const COMMANDS: &[Command] = &[
     Command { name: "cursor", usage: ":cursor <n> [time|off]", desc: "Put mark n at a time (1: the cursor), remove it, or jump to it, e.g. :cursor 2 120ns", args: true },
     Command { name: "undo", usage: ":undo", desc: "Undo the last change to the rows", args: false },
     Command { name: "redo", usage: ":redo", desc: "Redo a change undone with :undo", args: false },
-    Command { name: "fit", usage: ":fit", desc: "Zoom so the whole simulation fits on screen", args: false },
+    Command { name: "fit", usage: ":fit [<from> <to>]", desc: "Zoom to the whole simulation, or between cursors or times, e.g. :fit '2 '3 or :fit 10ns 20ns", args: true },
     Command { name: "e", usage: ":e", desc: "Reload the trace, keeping signals, groups, cursor and zoom", args: false },
     Command { name: "w", usage: ":w [file]", desc: "Save the session", args: true },
     Command { name: "wq", usage: ":wq", desc: "Save the session and quit", args: false },

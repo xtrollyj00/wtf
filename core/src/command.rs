@@ -34,10 +34,7 @@ pub fn run(app: &mut Workspace, line: &str) -> Result<Option<Msg>, String> {
             app.view.set_zoom(t);
             Ok(())
         }
-        "fit" => {
-            app.view.fit();
-            Ok(())
-        }
+        "fit" => fit(app, arg),
         "scope" => app.set_scope(arg),
         "unit" => {
             app.unit = match arg {
@@ -186,6 +183,33 @@ fn cursor(app: &mut Workspace, arg: &str) -> Result<(), String> {
             Ok(())
         }
     }
+}
+
+/// `:fit [from to]`: the whole simulation, or the range between two cursors (`'2 '3`, `'1` is
+/// the cursor) or times, in either order. The cursor stays.
+fn fit(app: &mut Workspace, arg: &str) -> Result<(), String> {
+    let at = |a: &str| -> Result<crate::time::Tick, String> {
+        match a.strip_prefix('\'') {
+            Some(n) => {
+                let i = n.parse::<usize>().ok().filter(|n| (1..=9).contains(n)).ok_or(format!("no cursor {n}: cursors are '1 to '9"))? - 1;
+                app.cursor_list().into_iter().find(|c| c.0 == i).map(|c| c.1).ok_or(format!("no cursor {n}"))
+            }
+            None => Ok((crate::time::parse(a, app.trace.fs_per_tick)?.max(0.0).round() as u64).min(app.trace.end())),
+        }
+    };
+    match arg.split_whitespace().collect::<Vec<_>>()[..] {
+        [] => app.view.fit(),
+        [a, b] => {
+            let (a, b) = (at(a)?, at(b)?);
+            if a == b {
+                return Err("nothing between them: the same time".into());
+            }
+            app.view.start = a.min(b);
+            app.view.show_until(a.max(b));
+        }
+        _ => return Err("usage: :fit, or :fit <from> <to> as cursors ('2 '3) or times".into()),
+    }
+    Ok(())
 }
 
 /// `:w [file]`: the file given becomes the session file in use.

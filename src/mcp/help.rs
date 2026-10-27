@@ -155,7 +155,8 @@ edits the workspace step by step instead (`help commands`).",
   commands act on), `group <name>`, `rename <name>`, `ungroup`, `radix <radix>`, `color
   <colour|off>` (`help radix`), `undo`, `redo`. The answer lists the rows added and removed.
 - Cursors and view: `cursor <1-9> [time|off]` (without a time, jump to that mark), `<time>`
-  (moves the cursor), `zoom <time per column>`, `fit`.
+  (moves the cursor), `zoom <time per column>`, `fit [<from> <to>]` (all, or between cursors
+  `'2 '3` or times).
 - Names and times: `scope <path>` (`help names`), `unit <ns|ps|...|auto>` (`help times`).
 - Decoding: `decode`, `protocol`, `signal` (`help decode`).",
     ),

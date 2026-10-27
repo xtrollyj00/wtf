@@ -18,7 +18,7 @@
 | `:radix <name>` | set the radix of the selected row or group, e.g. `:radix dec` |
 | `:color <name\|off>` | set the colour of the selected row or group (section 14): `red`, `orange`, `yellow`, `green`, `cyan`, `blue`, `magenta`, `gray`; `off` for the theme's |
 | `:undo` / `:redo` | undo / redo a change to the session layout |
-| `:fit` | zoom so the whole simulation fits on screen |
+| `:fit [<from> <to>]` | zoom so the whole simulation fits on screen; with two cursors or times (`:fit '2 '3`, `:fit 10ns 20ns`, either order), zoom so the range between them fits. A cursor is `'N` as in marks (`'1` is the cursor). Zoom goes in steps, so a little more than the range may show, never less |
 | `:e` | reload the file, keeping signals, groups, cursor and zoom |
 | `:w [file]` | save the session (section 11) |
 | `:wq` | save the session and quit |

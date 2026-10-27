@@ -37,6 +37,24 @@ fn view_and_cursors() {
 }
 
 #[test]
+fn fit_a_range() {
+    let mut ws = open();
+    ws.view.set_width(40);
+    run(&mut ws, "25ns").unwrap();
+    run(&mut ws, "cursor 3 65ns").unwrap();
+    // the cursor to mark 3, in either order; the cursor stays
+    run(&mut ws, "fit '3 '1").unwrap();
+    assert_eq!((ws.view.start, ws.view.ticks, ws.view.cols, ws.view.cursor), (25, 1, 1, 25));
+    assert!(ws.view.last_visible() + 1 >= 65);
+    run(&mut ws, "fit 10ns 20ns").unwrap();
+    assert_eq!((ws.view.start, ws.view.ticks, ws.view.cols), (10, 1, 4));
+    assert_eq!(run(&mut ws, "fit '1 '2"), Err("no cursor 2".into()));
+    assert_eq!(run(&mut ws, "fit '0 '1"), Err("no cursor 0: cursors are '1 to '9".into()));
+    assert_eq!(run(&mut ws, "fit '1 25ns"), Err("nothing between them: the same time".into()));
+    assert_eq!(run(&mut ws, "fit 10ns"), Err("usage: :fit, or :fit <from> <to> as cursors ('2 '3) or times".into()));
+}
+
+#[test]
 fn adding_and_removing() {
     let mut ws = open();
     assert_eq!(run(&mut ws, "add"), Err("usage: :add <path|pattern>...".into()));
