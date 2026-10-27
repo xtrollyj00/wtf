@@ -35,7 +35,7 @@
 | `n` / `N` | next / previous match |
 | `m` / `Nm` | put a mark at the cursor, numbered `N` or the lowest free (section 9) |
 | `Tab` / `Shift-Tab` | jump to the next / previous mark in time |
-| `'2`…`'9` | jump to that mark |
+| `'1`…`'9` | jump to that cursor: `'1` centers the screen on the cursor, `'2`…`'9` jump to that mark |
 | `''` | back to where the cursor was before the last jump |
 | `M` / `NM` | remove the mark under the cursor, or mark `N` |
 | `:` | command |

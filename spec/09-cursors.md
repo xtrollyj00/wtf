@@ -13,13 +13,13 @@ Cursors mark times on the waveform. They are numbered `1`–`9`, as in Vim's cur
 | `m` | put a mark at the cursor, with the lowest free number |
 | `Nm` | put mark `N` at the cursor (moving it there if it exists), e.g. `3m` |
 | `Tab` / `Shift-Tab` | jump to the next / previous mark in time, wrapping around |
-| `'2`…`'9` | jump to that mark |
+| `'1`…`'9` | jump to that cursor: `'1` centers the screen on cursor 1 (where it is), `'2`…`'9` jump to that mark |
 | `''` | back to where the cursor was before the last jump; again, forward to where it jumped |
 | `M` | remove the mark under the cursor |
 | `NM` | remove mark `N`, e.g. `3M` |
 
-- **Jumps center.** A jump to a mark (`'N`, `Tab`, `:cursor N`) centers the screen on it, also
-  when it is already on screen. A jump to a time (`:<time>`) or a search match (`/`, `n`, `N`)
+- **Jumps center.** A jump to a mark (`'N`, `Tab`, `:cursor N`), or to cursor 1 (`'1`, `:cursor 1`),
+  centers the screen on it, also when it is already on screen. A jump to a time (`:<time>`) or a search match (`/`, `n`, `N`)
   centers only when it lands off screen. Small moves (`h` / `l`, `w` / `b`) scroll just enough,
   and `gg` / `G` keep the start / end at the edge.
 - **Jumps can be undone.** Each jump keeps where the cursor was, and `''` goes back there, so

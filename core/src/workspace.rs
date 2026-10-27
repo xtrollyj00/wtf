@@ -681,11 +681,11 @@ impl Workspace {
         Ok(())
     }
 
-    /// `'N`: jump to mark `n` (an index); cursor 1 is where the cursor already is.
+    /// `'N`: jump to mark `n` (an index); `'1`, the cursor, centers the screen on it.
     pub fn goto_mark(&mut self, n: usize) -> Result<(), String> {
         match self.marks.get(n).copied().flatten() {
             Some(t) => self.jump(t, true),
-            None if n == 0 => {}
+            None if n == 0 => self.view.center(self.view.cursor),
             None => return Err(format!("no cursor {}", n + 1)),
         }
         Ok(())

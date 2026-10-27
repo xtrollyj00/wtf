@@ -108,7 +108,11 @@ fn marks_stay_where_they_are_put() {
     assert_eq!(ws.remove_mark(Some(0)), Err("cursor 1 can't be removed".into()));
     assert_eq!(ws.remove_mark(Some(3)), Err("no cursor 4".into()));
     assert_eq!(ws.goto_mark(6), Err("no cursor 7".into()));
+    // `'1` centers on the cursor, which stays
+    ws.view.start = 0;
     assert_eq!(ws.goto_mark(0), Ok(()));
+    assert_eq!(ws.view.cursor, 50);
+    assert_eq!(ws.view.start, 50 - ws.view.width / 2 * ws.view.ticks / ws.view.cols);
     assert_eq!(ws.set_mark(Some(9)), Err("no cursor 10: marks are 2-9".into()));
     for _ in 0..8 {
         ws.set_mark(None).unwrap();

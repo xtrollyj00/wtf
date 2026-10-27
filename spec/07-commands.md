@@ -13,7 +13,7 @@
 | `:rename <name>` | rename the group the selected row is in |
 | `:ungroup` | dissolve the group the selected row is in; its signals stay where they are |
 | `:select <row> [<last row>]` | select a signal (named as in `:add`) or group, or the rows from one to another, as `V` does |
-| `:cursor <n> [time\|off]` | put cursor `n` at a time (`:cursor 1 <time>` moves the cursor, others place a mark), remove mark `n`, or without a time jump to mark `n` |
+| `:cursor <n> [time\|off]` | put cursor `n` at a time (`:cursor 1 <time>` moves the cursor, others place a mark), remove mark `n`, or without a time jump to mark `n` (`:cursor 1` centers the screen on the cursor) |
 | `:scope [path]` | names resolve under this scope first, wherever signals are named (search, `:add`, `:select`, the agent's tools): with `:scope top.cpu`, `state` is `top.cpu.state` though `top.dma.state` exists; saved in the session; without a path, no scope |
 | `:radix <name>` | set the radix of the selected row or group, e.g. `:radix dec` |
 | `:color <name\|off>` | set the colour of the selected row or group (section 14): `red`, `orange`, `yellow`, `green`, `cyan`, `blue`, `magenta`, `gray`; `off` for the theme's |
