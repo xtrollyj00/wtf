@@ -95,3 +95,20 @@ fn named_by_the_user() {
     assert!(run(&mut ws, "names count ZERO").unwrap_err().starts_with("usage: :names"));
     assert!(run(&mut ws, "names count[0] 1=ON").unwrap_err().contains("not a bit"));
 }
+
+/// Names given to a signal a rerun no longer has: `:e` reports them.
+#[test]
+fn names_lost_on_reload() {
+    let dir = std::env::temp_dir().join(format!("wtf-core-names-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let trace = dir.join("t.vcd");
+    let text = std::fs::read_to_string(format!("{}/../tests/data/simple.vcd", env!("CARGO_MANIFEST_DIR"))).unwrap();
+    std::fs::write(&trace, &text).unwrap();
+    let mut ws = Workspace::open(&trace).unwrap();
+    run(&mut ws, "names top.dma.state 0=IDLE").unwrap();
+    // the simulation ran again, without dma
+    std::fs::write(&trace, text.lines().filter(|l| !l.contains("dma") && !l.ends_with('&')).map(|l| format!("{l}\n")).collect::<String>()).unwrap();
+    let (msg, _) = ws.reload().unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    assert_eq!(msg, "reloaded; not in trace: names of top.dma.state (unknown signal: top.dma.state)");
+}

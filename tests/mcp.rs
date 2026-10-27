@@ -591,7 +591,8 @@ fn decode_with_command() {
     assert_eq!(s.ok("records", json!({"stream": "bus.errors", "where": "rule == aw_dropped && past(rule) == r_resp"})), "1 of 1 matching, of 2\nn\tstart\tend\trule\n1\t210ns\t220ns\taw_dropped");
     assert_eq!(s.tool("records", rd("adr == 1", false)), Err("bus.rd: no field adr (fields: delay, addr, data, resp, and n, the record's number)".into()));
     // a delay is a time: in the unit asked for, and compared with one
-    assert_eq!(s.ok("value_at", json!({"signals": ["bus.wr.delay"], "time": "70ns"})), "at 70ns:\nbus.wr.delay = 20ns");
+    assert_eq!(s.ok("value_at", json!({"signals": ["bus.wr.delay", "bus.wr.addr"], "time": "70ns"})), "at 70ns:\nbus.wr.delay = 20ns\nbus.wr.addr = 0x14");
+    assert_eq!(s.ok("values", json!({"signals": ["bus.wr.delay"], "from": "30ns", "to": "70ns"})), "bus.wr.delay:\n  30ns 10ns\n  50ns 0xZZZZZZZZZZZZZZZZ\n  60ns 20ns\n");
     let wr = json!({"stream": "bus.wr", "where": "delay == 20ns", "unit": "ps"});
     assert_eq!(s.ok("records", wr), "1 of 1 matching, of 2\nn\tstart\tend\tdelay\taddr\tdata\tstrb\tresp\n1\t60000ps\t120000ps\t20000ps\t0x14\t0x22222222\t0x3\t0x0");
     // ordered, as unsigned numbers; a time with a time

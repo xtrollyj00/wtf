@@ -199,16 +199,23 @@ fn protocols_put_on_signals() {
     assert_eq!((names(&other), wtf_core::session::to_toml(&other)), (names(&ws), toml));
     assert_eq!(ws.reload(), Ok(("reloaded".into(), false)));
     assert_eq!((ws.streams.len(), starts(&ws.streams[1])), (3, vec![85]));
-    // a type defined again samples its instances again, at once
+    // a type defined again samples its instances again, at once, and those made after them
+    let pq = wtf_core::stream::Decode { name: "pq".into(), protocol: "pair".into(), clock: String::new(), signals: vec![("request".into(), "c0".into()), ("response".into(), "err".into())], params: vec![] };
+    ws.add_decode(pq).unwrap();
+    let schema = |ws: &Workspace, n: &str| ws.streams.iter().find(|s| s.name == n).unwrap().schema.iter().map(|f| f.name.clone()).collect::<Vec<_>>();
+    assert_eq!(schema(&ws, "pq"), ["delay", "req_op", "req_arg"]);
     let mut wider = cmd();
     wider.fields = vec![("all".into(), "cmd".into())];
     assert_eq!(ws.add_protocol(wider), Ok(None));
     assert_eq!(ws.streams[0].schema.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["all"]);
+    assert_eq!(schema(&ws, "pq"), ["delay", "req_all"]);
     // the fields it lost hold no records
     assert_eq!(ws.trace.value_at(var(&ws, "c0.op"), 105), Some(Val::Bits("zzzz".into())));
     let mut bad = cmd();
     bad.when = "nope".into();
     assert!(ws.add_protocol(bad).unwrap_err().starts_with("cmd defined, but instances failed: c0: "));
+    // the type is defined all the same
+    assert_eq!(ws.protocols.iter().find(|p| p.name == "cmd").map(|p| p.when.as_str()), Some("nope"));
 }
 
 #[test]

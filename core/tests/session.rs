@@ -33,6 +33,7 @@ fn warns_and_keeps_going() {
     let text = r#"
         version = 1
         colour = "pink"
+        unit = "furlong"
         [view]
         active_cursor = 2
         zoom = "fast"
@@ -58,6 +59,7 @@ fn warns_and_keeps_going() {
     "#;
     let warn = session::apply(&mut ws, text).unwrap();
     assert_eq!(warn, [
+        "bad time unit: furlong (s, ms, us, ns, ps, fs)",
         "unknown radix: roman",
         "unknown colour: pink (colours: red, orange, yellow, green, cyan, blue, magenta, gray)",
         "radix q4.4 doesn't fit top.clk",
