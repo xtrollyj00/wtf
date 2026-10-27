@@ -59,7 +59,7 @@ Shortcuts taken so far, to fix when they get in the way.
   instances are made in order.
 - The status line's `match 3 of 157` counts matches only up to 100 000 (`100000+`), so `n` stays
   quick on huge traces; past that the total isn't known.
-- The workspace's time unit isn't saved in the session, nor shown in the window.
+- The workspace's time unit isn't shown in the window.
 - A name that matches only in the other HDL's form (`HEADERS_VLD`, `gen(4)` for `gen[4]`, section
   8) is looked up by putting every path in that form, each time: O(signals) per such name.
 - SPI's bit records last from one sampling edge to the next, so the last bit of a transfer ends at

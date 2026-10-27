@@ -7,7 +7,7 @@ use wtf_core::session;
 #[test]
 fn round_trip() {
     let mut ws = with(&["top.clk", "top.cpu"]);
-    for c in ["scope top.cpu", "select data", "radix dec", "color red", "select busy", "cursor 2 35ns", "cursor 3 50ns", "cursor 2", "zoom 2ns"] {
+    for c in ["scope top.cpu", "select data", "radix dec", "color red", "select busy", "cursor 2 35ns", "cursor 3 50ns", "cursor 2", "zoom 2ns", "unit ps"] {
         wtf_core::command::run(&mut ws, c).unwrap();
     }
     ws.sel = 2;
@@ -20,6 +20,8 @@ fn round_trip() {
     assert_eq!(session::to_toml(&back), text);
     assert_eq!((&back.rows, back.marks, back.view.cursor), (&ws.rows, ws.marks, 35));
     assert_eq!(back.scope.as_deref(), Some("top.cpu"));
+    assert!(text.contains("unit = \"ps\"\n"), "{text}");
+    assert_eq!(back.unit, ws.unit);
     // what was loaded is what `modified` compares with
     assert!(!back.modified());
     assert_eq!(session::rows_toml(&back), back.saved);

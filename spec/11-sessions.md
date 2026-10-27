@@ -38,6 +38,7 @@ libraries parse it.
 # session
 version = 1
 scope = "top"           # optional: names resolve under it first (:scope)
+unit = "ns"             # optional: the time unit set with :unit; absent when it is automatic
 
 [view]
 zoom = "8ns"
@@ -70,6 +71,8 @@ rows = [
 ```
 
 - `scope` is the `:scope` names resolve under first, set before anything else is read.
+- `unit` is the time unit set with `:unit`, applied with the session; a name wtf doesn't know
+  is a warning. The unit the clocks give is not saved: it comes back as decodes run again.
 - `version` is the format version. A file with a newer version than wtf knows is refused
   with an error instead of being misread.
 - `[[protocol]]` entries (after `[[signal]]`, before the rows) sample streams: `name`, `clock`,

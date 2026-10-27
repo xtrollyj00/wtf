@@ -33,6 +33,14 @@ pub fn apply(app: &mut Workspace, text: &str) -> Result<Vec<String>, String> {
             None => warn.push("scope must be a string".into()),
         }
     }
+    // the agent's time unit (`:unit`)
+    if let Some(unit) = t.remove("unit") {
+        match unit.as_str().map(time::unit_named) {
+            Some(Ok(u)) => app.unit = Some(u),
+            Some(Err(e)) => warn.push(e),
+            None => warn.push("unit must be a string".into()),
+        }
+    }
     // named signals first: rows may show them
     if let Some(Value::Array(signals)) = t.remove("signal") {
         for s in signals {
@@ -281,8 +289,9 @@ pub fn to_toml(app: &Workspace) -> String {
     let cursors: String =
         app.cursor_list().iter().map(|&(i, t)| format!("{} = {}\n", i + 1, quote(&time::format_exact(t, fpt)))).collect();
     format!(
-        "# wtf session\nversion = {VERSION}\n{}\n[view]\nzoom = {}\ntime = {}\n\n[cursors]\n{cursors}{}",
+        "# wtf session\nversion = {VERSION}\n{}{}\n[view]\nzoom = {}\ntime = {}\n\n[cursors]\n{cursors}{}",
         app.scope.as_ref().map_or(String::new(), |s| format!("scope = {}\n", quote(s))),
+        app.unit.map_or(String::new(), |u| format!("unit = {}\n", quote(time::unit_name(u)))),
         quote(&zoom),
         quote(&time::format_exact(v.start, fpt)),
         rows_toml(app)

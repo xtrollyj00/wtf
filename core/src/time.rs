@@ -59,6 +59,11 @@ pub fn unit_for(ts: impl IntoIterator<Item = Tick>, fpt: Option<u128>) -> usize 
     UNITS.iter().position(|(_, u)| base >= *u).unwrap_or(UNITS.len() - 1)
 }
 
+/// A unit's name, by its index.
+pub fn unit_name(unit: usize) -> &'static str {
+    UNITS[unit].0
+}
+
 /// A unit by name, e.g. `ns`.
 pub fn unit_named(name: &str) -> Result<usize, String> {
     UNITS.iter().position(|(n, _)| *n == name).ok_or(format!("bad time unit: {name} (s, ms, us, ns, ps, fs)"))
