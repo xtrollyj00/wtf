@@ -525,6 +525,11 @@ mod tests {
         keys(&mut app, "kkyy");
         assert!(matches!(app.ws.rows[app.ws.sel], rows::Row::Group { .. }));
         assert_eq!((app.yank.take(), app.msg.as_ref().unwrap().0.as_str()), (None, "select a signal to copy its value"));
+        // on a stream's row, its record at the cursor
+        let t = trace::Trace::open("tests/data/axis.vcd".as_ref()).unwrap();
+        let mut app = App::new(workspace::Workspace::new(t, "axis".into()));
+        keys(&mut app, ":decode rx axis clock=clk tvalid=tvalid tready=tready tdata=tdata tlast=tlast tkeep=tkeep\n:add rx.frame\n:70ns\nyy");
+        assert_eq!(app.yank.take().as_deref(), Some("rx.frame #2 65ns–85ns beats=0x2 len=0x8 data=c0 00 00 00 c1 00 00 00 complete=1"));
     }
 
     #[test]
@@ -546,6 +551,14 @@ mod tests {
         assert!(!app.watch(tui::app::stamp(&app.ws.trace_path), at(5000)));
         // gone (a run deleting it first) is not a change
         assert!(!app.watch(None, at(6000)));
+        // a change that can't be read keeps the old trace and says why
+        let before = session::to_toml(&app.ws);
+        app.ws.trace_path = "tests/data/gone.vcd".into();
+        assert!(!app.watch(new(3), at(7000)));
+        assert!(app.watch(new(3), at(8000)));
+        assert!(app.msg.as_ref().unwrap().1, "{:?}", app.msg);
+        assert_eq!(session::to_toml(&app.ws), before);
+        assert_eq!(app.ws.trace.end(), 80);
     }
 
     #[test]
