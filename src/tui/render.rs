@@ -186,6 +186,7 @@ fn help_text(app: &App) -> (&'static str, &'static [(&'static str, &'static str)
         ("Ctrl-f/b", "a screen of rows down / up"),
         ("Space", "fold a group, bus or stream"),
         ("e", "examine: the whole value"),
+        ("yy yt", "copy the value / the time"),
         ("/", "search"),
         ("n N", "next / previous match"),
         ("m M", "put / remove a mark (3m: mark 3)"),

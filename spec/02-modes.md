@@ -31,6 +31,8 @@
 | `Ctrl-f` / `Ctrl-b` | select the signal a screen of rows down / up |
 | `z` / `x` | zoom in / out by a factor of 2 around the cursor |
 | `i` | enter Edit mode |
+| `yy` | copy the selected signal's value at the cursor, as the value column shows it in its radix; on a stream's row, its record there. Copied to the terminal's clipboard with OSC 52 (a terminal that doesn't support it ignores it; over ssh it reaches the local clipboard); the status line shows `copied: 0x96` |
+| `yt` | copy the cursor's time, e.g. `25ns` |
 | `/` | search for a value on the selected signal (section 8) |
 | `n` / `N` | next / previous match |
 | `m` / `Nm` | put a mark at the cursor, numbered `N` or the lowest free (section 9) |

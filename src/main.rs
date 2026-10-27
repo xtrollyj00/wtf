@@ -158,6 +158,11 @@ fn tui(app: &mut App) -> Result<(), String> {
                 {
                     app.key(k);
                 }
+                // to the terminal's clipboard; one that can't take it ignores the sequence
+                if let Some(text) = app.yank.take() {
+                    use crossterm::clipboard::{ClipboardSelection, ClipboardType, CopyToClipboard};
+                    crossterm::execute!(std::io::stdout(), CopyToClipboard { content: text, destination: ClipboardSelection(vec![ClipboardType::Clipboard]) })?;
+                }
                 if app.quit || !crossterm::event::poll(std::time::Duration::ZERO)? {
                     break;
                 }
@@ -435,6 +440,20 @@ mod tests {
         assert!(matches!(&app.ws.rows[3], rows::Row::Signal(s) if s.bits == 0) && app.ws.bit.is_none());
         keys(&mut app, "u");
         assert_eq!(app.msg.as_ref().unwrap().0, "already at oldest change");
+    }
+
+    #[test]
+    fn copy() {
+        let mut app = open("vcd", Some(SESSION));
+        // data: 0x96 @20
+        keys(&mut app, ":25ns\njjjyy");
+        assert_eq!(app.yank.take().as_deref(), Some("0x96"));
+        assert_eq!(app.msg.as_ref().unwrap().0, "copied: 0x96");
+        keys(&mut app, "yt");
+        assert_eq!(app.yank.take().as_deref(), Some("25ns"));
+        keys(&mut app, "kkyy");
+        assert!(matches!(app.ws.rows[app.ws.sel], rows::Row::Group { .. }));
+        assert_eq!((app.yank.take(), app.msg.as_ref().unwrap().0.as_str()), (None, "select a signal to copy its value"));
     }
 
     #[test]

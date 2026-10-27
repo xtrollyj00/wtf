@@ -4,7 +4,7 @@ expression: "snapshot(&mut app, 100, Some(20))"
 ---
             │      │0ns       10ns      20ns      30ns      40ns      50ns      60ns      70ns
    ┌ help · VIEW ──────────────────────────────────────────────────────────────────────────────┐────
-clk│ h l       cursor left / right                  e         examine: the whole value         │
+clk│ h l       cursor left / right                  yy yt     copy the value / the time        │
    │ w b       next / previous change               /         search                           │
 ▾ c│ gg G      start / end                          n N       next / previous match            │
    │ z x       zoom in / out                        m M       put / remove a mark (3m: mark 3) │────
@@ -14,11 +14,11 @@ clk│ h l       cursor left / right                  e         examine: the who
    │ j k       select a row                         i         edit rows                        │
   b│ Ctrl-f/b  a screen of rows down / up           :         command                          │────
    │ Space     fold a group, bus or stream          q         quit                             │────
-dma│                                                                                           │────
+dma│ e         examine: the whole value                                                        │────
+   │                                                                                           │
    │ A count repeats a key: 5l 3w 2z.                                                          │
    │ /0x40  /-12  /x  /z  /valid && ready && data == 0x40  /@clk valid && ready                │
    │ /@clk fell(valid) && !past(ready)  rose( ) stable( ) past( )  data[7:4]  {a, b}           │
    └───────────────────────────────────────────────────────────────────────────── Esc ? close ─┘
-            │      │┊         ┊ ┃       ┊         ┊         ┊         ┊         ┊         ┊
             │      │┊         ┊ ┃       ┊         ┊         ┊         ┊         ┊         ┊
  VIEW  top.clk                                                              12ns   1ns/col   simple

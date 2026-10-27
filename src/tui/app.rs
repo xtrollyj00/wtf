@@ -53,6 +53,8 @@ pub struct App {
     pub examine: Option<(String, Vec<String>)>,
     /// The `:records` list, or a `:help <topic>` text.
     pub records: Option<Records>,
+    /// Text `yy` / `yt` copied, for the terminal's clipboard (OSC 52).
+    pub yank: Option<String>,
     /// The trace file as last loaded, and a change to it seen since, with when it was first seen.
     seen: Stamp,
     changed: Option<(Stamp, std::time::Instant)>,
@@ -109,6 +111,7 @@ impl App {
             help: false,
             examine: None,
             records: None,
+            yank: None,
             seen,
             changed: None,
         }
@@ -295,6 +298,33 @@ impl App {
         }
     }
 
+    /// `yy`: copy the selected signal's value at the cursor (a stream's record there); `yt`: the
+    /// cursor's time.
+    fn copy(&mut self, what: char) -> Result<(), String> {
+        let fpt = self.ws.trace.fs_per_tick;
+        let text = match what {
+            't' => time::format(self.ws.view.cursor, fpt),
+            'y' => {
+                let Some(Row::Signal(s)) = self.ws.rows.get(self.ws.sel) else { return Err("select a signal to copy its value".into()) };
+                if let Some((st, i)) = self.ws.record_at(s.var) {
+                    let r = &st.records[i];
+                    let fields: Vec<String> = st.fields_text(i, fpt).into_iter().map(|(n, v)| format!("{n}={v}")).collect();
+                    format!("{} #{i} {}{}{} {}", st.name, time::format(r.start, fpt), gl().dash, time::format(r.end, fpt), fields.join(" "))
+                } else {
+                    let (var, bit) = self.ws.probe(s.var, self.ws.bit);
+                    match self.ws.trace.value_of(var, bit, self.ws.view.cursor) {
+                        Some(v) if self.ws.stream_of(var).is_none() => rows::label(&self.ws.trace.vars[s.var], s, &v),
+                        _ => return Err("no value here".into()),
+                    }
+                }
+            }
+            _ => return Ok(()),
+        };
+        self.msg = Some((format!("copied: {text}"), false));
+        self.yank = Some(text);
+        Ok(())
+    }
+
     /// `e`: open a box with the selected signal's whole value at the cursor, or on a stream its
     /// record's: the times and every field.
     fn examine(&mut self) {
@@ -423,6 +453,10 @@ impl App {
             if (p, c) == ('g', 'g') {
                 self.ws.view.set_cursor(self.ws.trace.start());
             }
+            if p == 'y' {
+                let r = self.copy(c);
+                self.report(r);
+            }
             if p == '\'' {
                 let r = match c.to_digit(10) {
                     _ if c == '\'' => self.ws.jump_back(),
@@ -477,6 +511,7 @@ impl App {
             'x' => (0..n).for_each(|_| v.zoom_out()),
             '/' => self.open_line(Mode::Search),
             '\'' => self.pending = Some('\''),
+            'y' => self.pending = Some('y'),
             'm' => {
                 let r = self.ws.set_mark(given);
                 self.report(r);
