@@ -498,6 +498,11 @@ mod tests {
         assert!(app.agent_changed(Ok(second.clone())));
         assert_eq!((app.ws.rows.len(), app.ws.view.cursor), (5, 30));
         assert!(msg(&app).starts_with("agent: presented"));
+        // each change is one undo step
+        app.ws.undo().unwrap();
+        assert_eq!(app.ws.rows.len(), 4);
+        app.ws.redo().unwrap();
+        assert_eq!(app.ws.rows.len(), 5);
         // off: changes wait; on again shows the newest
         keys(&mut app, ":follow off\n");
         assert_eq!(msg(&app), "not following 4123-1");
