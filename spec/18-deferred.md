@@ -31,7 +31,7 @@ Shortcuts taken so far, to fix when they get in the way.
   reopened, and is listed in the panel and by `signals`.
 - The signal panel is rebuilt when computed vars appear, losing its highlighted item and Space
   marks.
-- Sampling a stream again with fewer fields leaves the old field vars, with their old values.
+- Sampling a stream again with fewer fields leaves the old field vars, holding no records.
 - Arithmetic (section 8) takes operands up to 64 bits and results up to 127 (an `i128`); a
   wider one is an error suggesting a slice.
 - In `c ? a : b`, any unknown bit the condition reads makes the result x, even where SV's `&&` /

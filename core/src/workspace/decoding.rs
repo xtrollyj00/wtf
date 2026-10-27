@@ -360,6 +360,15 @@ impl Workspace {
         if let Some((path, ..)) = signals.iter().find(|(p, ..)| self.trace.by_path.get(p).is_some_and(|&v| !self.trace.is_computed(v))) {
             return Err(format!("{path} is a signal of the file"));
         }
+        // fields it had and hasn't now hold no records: their vars stay, as vars aren't removed
+        if let Some(old) = self.streams.iter().find(|x| x.name == s.name) {
+            let gone: Vec<(String, Option<u32>)> = old.schema.iter().filter(|f| !s.schema.iter().any(|n| n.name == f.name)).map(|f| (format!("{}.{}", s.name, f.name), f.width)).collect();
+            let start = self.trace.start();
+            for (path, w) in gone {
+                let gap = w.map_or(Val::Text(String::new()), |w| Val::Bits("z".repeat(w as usize)));
+                self.trace.add_computed(&path, w, vec![(start, gap)])?;
+            }
+        }
         let mut vars = Vec::new();
         for (path, width, values) in signals {
             vars.push(self.trace.add_computed(&path, width, values)?);

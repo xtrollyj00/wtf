@@ -204,6 +204,8 @@ fn protocols_put_on_signals() {
     wider.fields = vec![("all".into(), "cmd".into())];
     assert_eq!(ws.add_protocol(wider), Ok(None));
     assert_eq!(ws.streams[0].schema.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["all"]);
+    // the fields it lost hold no records
+    assert_eq!(ws.trace.value_at(var(&ws, "c0.op"), 105), Some(Val::Bits("zzzz".into())));
     let mut bad = cmd();
     bad.when = "nope".into();
     assert!(ws.add_protocol(bad).unwrap_err().starts_with("cmd defined, but instances failed: c0: "));
