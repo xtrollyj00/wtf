@@ -22,6 +22,8 @@ pub struct App {
     pub ws: Workspace,
     /// First row on screen, as a position among the visible rows.
     pub top: usize,
+    /// Lines of rows on screen, as last drawn: what `Ctrl-f` / `Ctrl-b` move.
+    pub page: usize,
     pub mode: Mode,
     /// The mode the command line returns to.
     ret: Mode,
@@ -55,6 +57,7 @@ impl App {
         App {
             ws,
             top: 0,
+            page: 1,
             mode: Mode::View,
             ret: Mode::View,
             panel,
@@ -258,6 +261,7 @@ impl App {
             return self.report(r);
         }
         let KeyCode::Char(c) = k.code else { return self.cancel() };
+        let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
         // `3m`: the count names the mark; `m` alone takes a free one
         let given = self.count.map(|n| n.saturating_sub(1) as usize);
         let Some((pending, n)) = self.counted(c) else { return };
@@ -276,7 +280,23 @@ impl App {
             return;
         }
         let v = &mut self.ws.view;
+        let half = (v.width / 2).max(1) as i64;
+        let n_i = n.min(u32::MAX as u64) as i64;
         match c {
+            // half a screen, the cursor along; at the start or end it moves on alone
+            'd' | 'u' if ctrl => {
+                let cols = if c == 'd' { half * n_i } else { -half * n_i };
+                v.scroll(cols);
+                let d = cols.unsigned_abs().saturating_mul(v.ticks) / v.cols;
+                v.set_cursor(if c == 'd' { v.cursor.saturating_add(d) } else { v.cursor.saturating_sub(d) });
+            }
+            'f' if ctrl => self.move_sel(n_i.saturating_mul(self.page as i64) as isize),
+            'b' if ctrl => self.move_sel(-(n_i.saturating_mul(self.page as i64) as isize)),
+            _ if ctrl => {}
+            // the screen alone; the cursor keeps its time
+            'H' => v.scroll(-half * n_i),
+            'L' => v.scroll(half * n_i),
+            'c' => v.center(v.cursor),
             'h' => v.set_cursor(v.cursor.saturating_sub(n.saturating_mul(v.step()))),
             'l' => v.set_cursor(v.cursor.saturating_add(n.saturating_mul(v.step()))),
             'w' | 'b' => {
@@ -313,7 +333,7 @@ impl App {
             }
             'n' | 'N' => {
                 let r = match self.last_search.clone() {
-                    Some(text) => self.ws.search(&text, c == 'n', n),
+                    Some(text) => self.ws.search(&text, c == 'n', n).map(|_| ()),
                     None => Err("no search yet".into()),
                 };
                 self.report(r);
@@ -609,7 +629,7 @@ impl App {
                 let r = match search {
                     true => {
                         self.last_search = Some(line.clone());
-                        self.ws.search(&line, true, 1)
+                        self.ws.search(&line, true, 1).map(|_| ())
                     }
                     false => self.run(&line),
                 };

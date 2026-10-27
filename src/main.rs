@@ -262,6 +262,36 @@ mod tests {
     }
 
     #[test]
+    fn paging() {
+        let mut app = open("vcd", None);
+        keys(&mut app, ":add top.cpu\n:add top.clk\n:zoom 1ns\n");
+        snapshot(&mut app, 40, None); // sets the width: 40 columns less the names, 1 tick each
+        let half = app.ws.view.width / 2;
+        keys(&mut app, "\x04");
+        assert_eq!((app.ws.view.start, app.ws.view.cursor), (half, half));
+        keys(&mut app, "\x15\x15");
+        assert_eq!((app.ws.view.start, app.ws.view.cursor), (0, 0));
+        // the screen alone: the cursor keeps its time, off screen too
+        keys(&mut app, "2L");
+        assert_eq!((app.ws.view.start, app.ws.view.cursor), (2 * half, 0));
+        keys(&mut app, "H");
+        assert_eq!(app.ws.view.start, half);
+        keys(&mut app, "5lc");
+        assert_eq!(app.ws.view.cursor, 5);
+        assert_eq!(app.ws.view.start, 0);
+        keys(&mut app, ":30ns\nc");
+        assert_eq!(app.ws.view.start, 30 - app.ws.view.width / 2);
+        // rows: a screen down, clamped at the last
+        keys(&mut app, "\x06");
+        assert_eq!(app.ws.sel, app.ws.rows.len() - 1);
+        keys(&mut app, "\x02");
+        assert!(app.ws.sel < app.ws.rows.len() - 1);
+        // other Ctrl keys do nothing, not their letter
+        keys(&mut app, "\x0c");
+        assert_eq!(app.ws.view.cursor, 30);
+    }
+
+    #[test]
     fn collapsed_group() {
         let mut app = open("vcd", Some(SESSION));
         keys(&mut app, "j ");

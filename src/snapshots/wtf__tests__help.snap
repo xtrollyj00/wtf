@@ -3,22 +3,22 @@ source: src/main.rs
 expression: "snapshot(&mut app, 100, Some(20))"
 ---
             │      │0ns       10ns      20ns      30ns      40ns      50ns      60ns      70ns
-            │      │┊    ┌────┐ ┃  ┌────┐    ┌────┐    ┌────┐    ┌────┐    ┌────┐    ┌────┐    ┌────
-clk   ┌ help · VIEW ─────────────────────────────────────────────────────────────────────────┐─┘
-      │ h l     cursor left / right                 n N     next / previous match            │
-▾ cpu │ w b     next / previous change              m M     put / remove a mark (3m: mark 3) │
-      │ gg G    start / end                         Tab     jump to the next mark            │──────
-  cpu.│ z x     zoom in / out                       '2..'9  jump to a mark                   │──────
-      │ j k     select a row                        ''      back to before the jump          │──────
-  data│ Space   fold a group, bus or stream         i       edit rows                        │──────
-      │ e       examine: the whole value            :       command                          │
-  busy│ /       search                              q       quit                             │──────
-      │                                                                                      │──────
-dma.st│ A count repeats a key: 5l 3w 2z.                                                     │──────
-      │ /0x40  /-12  /x  /z  /valid && ready && data == 0x40  /@clk valid && ready           │
-      │ /@clk fell(valid) && !past(ready)  rose( ) stable( ) past( )  data[7:4]  {a, b}      │
-      └──────────────────────────────────────────────────────────────────────── Esc ? close ─┘
-            │      │┊         ┊ ┃       ┊         ┊         ┊         ┊         ┊         ┊
+   ┌ help · VIEW ──────────────────────────────────────────────────────────────────────────────┐────
+clk│ h l       cursor left / right                  e         examine: the whole value         │
+   │ w b       next / previous change               /         search                           │
+▾ c│ gg G      start / end                          n N       next / previous match            │
+   │ z x       zoom in / out                        m M       put / remove a mark (3m: mark 3) │────
+  c│ Ctrl-d/u  half a screen right / left           Tab       jump to the next mark            │────
+   │ H L       screen left / right, cursor stays    '2..'9    jump to a mark                   │────
+  d│ c         center on the cursor                 ''        back to before the jump          │────
+   │ j k       select a row                         i         edit rows                        │
+  b│ Ctrl-f/b  a screen of rows down / up           :         command                          │────
+   │ Space     fold a group, bus or stream          q         quit                             │────
+dma│                                                                                           │────
+   │ A count repeats a key: 5l 3w 2z.                                                          │
+   │ /0x40  /-12  /x  /z  /valid && ready && data == 0x40  /@clk valid && ready                │
+   │ /@clk fell(valid) && !past(ready)  rose( ) stable( ) past( )  data[7:4]  {a, b}           │
+   └───────────────────────────────────────────────────────────────────────────── Esc ? close ─┘
             │      │┊         ┊ ┃       ┊         ┊         ┊         ┊         ┊         ┊
             │      │┊         ┊ ┃       ┊         ┊         ┊         ┊         ┊         ┊
  VIEW  top.clk                                                              12ns   1ns/col   simple

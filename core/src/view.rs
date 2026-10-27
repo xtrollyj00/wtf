@@ -78,6 +78,15 @@ impl View {
         }
     }
 
+    /// Move the screen `cols` columns right (negative: left), at most to show the end at the left
+    /// edge; the cursor stays, even off screen.
+    pub fn scroll(&mut self, cols: i64) {
+        self.pending_fit = false;
+        self.pending_to = None;
+        let d = cols.unsigned_abs().saturating_mul(self.ticks) / self.cols;
+        self.start = if cols < 0 { self.start.saturating_sub(d) } else { self.start.saturating_add(d).min(self.end.max(self.start)) };
+    }
+
     /// Keep the cursor on its time and on its screen column; near 0 it moves on screen instead.
     fn rezoom(&mut self, ticks: u64, cols: u64) {
         let col = self.col_of(self.cursor).unwrap_or(0);

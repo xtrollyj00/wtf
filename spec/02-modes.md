@@ -25,6 +25,10 @@
 | `Space` | collapse / expand the selected group (section 6), or expand a bus into its bits or a stream into its fields / fold them |
 | `e` | examine: a box with the selected signal's whole value at the cursor; on a stream, its record there (times and every field, a frame's `data` 16 bytes a line); `Esc`, `q` or `e` closes it |
 | `gg` / `G` | time cursor to the start / end of the simulation |
+| `Ctrl-d` / `Ctrl-u` | move the screen half its width right / left, the cursor the same distance (at the start or end of the simulation the cursor still moves) |
+| `H` / `L` | move the screen half its width left / right; the cursor keeps its time, even off screen, and the next cursor move scrolls back to it |
+| `c` | center the screen on the cursor |
+| `Ctrl-f` / `Ctrl-b` | select the signal a screen of rows down / up |
 | `z` / `x` | zoom in / out by a factor of 2 around the cursor |
 | `i` | enter Edit mode |
 | `/` | search for a value on the selected signal (section 8) |
@@ -39,8 +43,9 @@
 | `q` | quit, same as `:q` |
 
 A count before a key repeats it, as in Vim: `5l`, `3w`, `3x`. Counts apply to `h` `l` `w` `b`
-`j` `k` `z` `x` `n` `N`, and in Edit mode to `j` `k` `J` `K`. Other keys ignore a count.
-A bare `0` does nothing.
+`j` `k` `z` `x` `n` `N` `Ctrl-d` `Ctrl-u` `H` `L` `Ctrl-f` `Ctrl-b`, and in Edit mode to `j` `k` `J` `K`.
+Other keys ignore a count.
+A bare `0` does nothing, and so do other `Ctrl` keys in View mode.
 
 Multi-key sequences (`gg`, `dd`, `'1`) wait for their second key without a timeout.
 `Esc` or an invalid second key cancels them.

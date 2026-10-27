@@ -31,7 +31,7 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
     } else if body > ROW_LINES {
         // the time axis and at least one row
         let adding = app.panel_shown();
-        draw::rows(&mut app.ws, &mut app.top, adding, &mut right, w - pw, body);
+        app.page = draw::rows(&mut app.ws, &mut app.top, adding, &mut right, w - pw, body);
     }
     right.area.x = area.x + pw as u16;
     buf.merge(&right);
@@ -155,7 +155,11 @@ fn help_text(app: &App) -> (&'static str, &'static [(&'static str, &'static str)
         ("w b", "next / previous change"),
         ("gg G", "start / end"),
         ("z x", "zoom in / out"),
+        ("Ctrl-d/u", "half a screen right / left"),
+        ("H L", "screen left / right, cursor stays"),
+        ("c", "center on the cursor"),
         ("j k", "select a row"),
+        ("Ctrl-f/b", "a screen of rows down / up"),
         ("Space", "fold a group, bus or stream"),
         ("e", "examine: the whole value"),
         ("/", "search"),
