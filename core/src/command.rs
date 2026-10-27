@@ -57,6 +57,10 @@ pub fn run(app: &mut Workspace, line: &str) -> Result<Option<Msg>, String> {
             app.define(name, expr).map(drop)
         }
         "protocol" => protocol(app, arg),
+        "names" => {
+            let (sig, spec) = arg.split_once(char::is_whitespace).unwrap_or((arg, ""));
+            app.name_values(sig, spec)
+        }
         "rename" if arg.is_empty() => Err("usage: :rename <name>".into()),
         "rename" => {
             let h = app.rows.get(app.sel).and_then(|_| rows::header_of(&app.rows, app.sel)).ok_or("not in a group")?;

@@ -66,3 +66,32 @@ fn saved_only_when_not_enum() {
     assert_eq!(session::apply(&mut back, &text), Ok(vec![]));
     assert_eq!(back.rows, ws.rows);
 }
+
+#[test]
+fn named_by_the_user() {
+    // top.count has no names in the file: :names gives some, as a VCD's signals need
+    let mut ws = open();
+    run(&mut ws, "select count").unwrap();
+    run(&mut ws, "names count 0=ZERO 0b1=ONE 'h2=TWO").unwrap();
+    let Row::Signal(s) = &ws.rows[ws.sel] else { panic!() };
+    assert_eq!(s.radix, radix::ENUM);
+    let all: Vec<String> = [0, 10, 20, 30].iter().map(|&t| shown(&ws, t)).collect();
+    assert_eq!(all, ["ZERO", "ONE", "TWO", "0x3"]);
+    ws.search("two", true, 1).unwrap();
+    assert_eq!(ws.view.cursor, 20);
+    // saved, and given again on :e and from a session
+    let text = session::to_toml(&ws);
+    assert!(text.contains("[[names]]\nsignal = \"top.count\"\nvalues = \"0=ZERO 0b1=ONE 'h2=TWO\"\n"), "{text}");
+    ws.reload().unwrap();
+    assert_eq!(shown(&ws, 10), "ONE");
+    let mut back = Workspace::open(format!("{}/../tests/data/enum.fst", env!("CARGO_MANIFEST_DIR")).as_ref()).unwrap();
+    assert!(session::apply(&mut back, &text).unwrap().is_empty());
+    assert_eq!(session::to_toml(&back), text);
+    // off: back to the default radix, no names
+    run(&mut ws, "names count off").unwrap();
+    assert_eq!(shown(&ws, 10), "0x1");
+    assert!(!session::to_toml(&ws).contains("[[names]]"));
+    assert_eq!(run(&mut ws, "names count 9=NINE"), Err("9 doesn't fit in 3 bits".into()));
+    assert!(run(&mut ws, "names count ZERO").unwrap_err().starts_with("usage: :names"));
+    assert!(run(&mut ws, "names count[0] 1=ON").unwrap_err().contains("not a bit"));
+}

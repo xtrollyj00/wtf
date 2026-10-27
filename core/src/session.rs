@@ -51,6 +51,15 @@ pub fn apply(app: &mut Workspace, text: &str) -> Result<Vec<String>, String> {
             }
         }
     }
+    // names for values (`:names`), before rows pick their radix
+    if let Some(Value::Array(names)) = t.remove("names") {
+        for n in names {
+            match (n.get("signal").and_then(Value::as_str), n.get("values").and_then(Value::as_str)) {
+                (Some(sig), Some(v)) => app.name_values(sig, v).unwrap_or_else(|e| warn.push(format!("names {sig}: {e}"))),
+                _ => warn.push("names: needs a signal and values".into()),
+            }
+        }
+    }
     // protocols and their instances (spec §16), after the signals they may use
     let text = |e: &Value, k: &str| e.get(k).and_then(Value::as_str).map(String::from);
     // a table of names (`fields`, `signals`), in its order; missing is empty
@@ -229,6 +238,9 @@ pub fn rows_toml(app: &Workspace) -> String {
     let mut out = String::new();
     for (name, expr) in &app.signals {
         out += &format!("\n[[signal]]\nname = {}\nexpr = {}\n", quote(name), quote(expr));
+    }
+    for (path, spec) in &app.value_names {
+        out += &format!("\n[[names]]\nsignal = {}\nvalues = {}\n", quote(path), quote(spec));
     }
     let table = |pairs: &[(String, String)]| pairs.iter().map(|(k, v)| format!("{k} = {}", quote(v))).collect::<Vec<_>>().join(", ");
     for p in &app.protocols {

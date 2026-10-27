@@ -155,7 +155,8 @@ edits the workspace step by step instead (`help commands`).",
 - Rows: `add <path|pattern>...` (below the selected row, joining its group; a scope becomes a
   group), `rm <path|pattern>...` (`rm **` clears), `select <row> [<last row>]` (the rows the next
   commands act on), `group <name>`, `rename <name>`, `ungroup`, `radix <radix>`, `color
-  <colour|off>` (`help radix`), `undo`, `redo`. The answer lists the rows added and removed.
+  <colour|off>` (`help radix`), `names <signal> <value>=<name>...` (names for its values, as an
+  FST enum table gives them; `off` removes them), `undo`, `redo`. The answer lists the rows added and removed.
 - Cursors and view: `cursor <1-9> [time|off]` (without a time, jump to that mark), `<time>`
   (moves the cursor), `zoom <time per column>`, `fit [<from> <to>]` (all, or between cursors
   `'2 '3` or times).

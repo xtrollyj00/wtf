@@ -22,6 +22,7 @@ pub const COMMANDS: &[Command] = &[
     Command { name: "signal", usage: ":signal <name> = <signal>", desc: "Name a computed signal, e.g. :signal op = cmd[7:0] or :signal hdr = {a, b}", args: true },
     Command { name: "decode", usage: ":decode <name> <protocol> <role>=<signal>...", desc: "Decode a protocol into streams, e.g. :decode rx axis clock=clk tvalid=rx_tvalid tready=rx_tready tdata=rx_tdata tlast=rx_tlast", args: true },
     Command { name: "protocol", usage: ":protocol <name> clock=<clk> when=<expr> <field>=<signal>...", desc: "Sample a stream where when holds, e.g. :protocol cmd clock=clk when=valid && ready op=cmd[7:0]; roles=a,b makes a type for :decode", args: true },
+    Command { name: "names", usage: ":names <signal> <value>=<name>...", desc: "Name a signal's values, shown by the enum radix and searched by name, e.g. :names state 0=IDLE 1=BUSY; off removes them", args: true },
     Command { name: "records", usage: ":records <stream> [where <expr>]", desc: "List a stream's records, e.g. :records bus.wr where resp != 0; Enter jumps to one", args: true },
     Command { name: "scope", usage: ":scope [path]", desc: "Resolve names under a scope first, e.g. :scope top.cpu makes state top.cpu.state; none without a path", args: true },
     Command { name: "radix", usage: ":radix <name>", desc: "Set the radix: hex bin dec sdec oct ascii float enum, q4.12 / uq4.12 fixed point", args: true },

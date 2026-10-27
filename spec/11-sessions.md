@@ -88,6 +88,8 @@ rows = [
   `select`, `bytes`), `pair` (`signals = { request = "req", response = "resp" }`, `params = { id =
   "id" }`) and `check` (no signals, a `clock`, `params = { stall = "valid && !ready" }`: a rule's
   name and the expression that is a violation).
+- `[[names]]` entries give a signal's value names (`:names`, for the `enum` radix): `signal` and
+  `values`, in the form `:names` takes (`values = "0=IDLE 1=BUSY"`), written before the rows.
 - `[[signal]]` entries name computed signals (`:signal`), made before the rows, which can show
   them. Rows can also show unnamed slices and concatenations by their full form
   (`signal = "top.cpu.data[7:4]"`, `signal = "{top.a,top.b}"`).

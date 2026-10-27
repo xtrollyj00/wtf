@@ -46,6 +46,9 @@ pub struct Workspace {
     pub rows: Vec<Row>,
     /// Named computed signals (`:signal name = expr`) in the order defined, made again on `:e`.
     pub signals: Vec<(String, String)>,
+    /// Names given to signals' values (`:names state 0=IDLE 1=BUSY`): path and the pairs as typed,
+    /// given again on `:e`.
+    pub value_names: Vec<(String, String)>,
     /// Protocols and their instances in the order defined, sampled again on `:e`, and the streams
     /// they make (spec §16).
     pub protocols: Vec<Sampler>,
@@ -98,6 +101,7 @@ impl Workspace {
             scope: None,
             rows: Vec::new(),
             signals: Vec::new(),
+            value_names: Vec::new(),
             protocols: Vec::new(),
             decodes: Vec::new(),
             streams: Vec::new(),
@@ -356,6 +360,48 @@ impl Workspace {
         Ok(var)
     }
 
+    /// `:names <signal> <value>=<name>...`: names for a signal's values, shown by the `enum` radix
+    /// and searched by name as an FST enum table's are (spec §10); `off` removes them. Rows showing
+    /// the signal switch to `enum` (back to the default with `off`).
+    pub fn name_values(&mut self, sig: &str, spec: &str) -> Result<(), String> {
+        let usage = "usage: :names <signal> <value>=<name>..., e.g. :names state 0=IDLE 1=BUSY, or :names <signal> off";
+        let (var, bit) = self.resolve(sig)?;
+        let width = match (bit, self.trace.vars[var].width) {
+            (None, Some(w)) => w,
+            _ => return Err(format!("{sig}: names are for a whole bus or bit signal, not a bit or a string")),
+        };
+        let path = self.trace.vars[var].path.clone();
+        let names = match spec.trim() {
+            "" => return Err(usage.into()),
+            "off" => None,
+            spec => {
+                let mut names = Vec::new();
+                for pair in spec.split_whitespace() {
+                    let (v, n) = pair.split_once('=').filter(|(v, n)| !v.is_empty() && !n.is_empty()).ok_or(usage)?;
+                    let search::Target::Bits(bits) = search::parse(v, Some(width), None)? else { return Err(format!("{v}: a name is for a value without x or z bits")) };
+                    names.push((crate::trace::names_key(&bits).to_string(), n.to_string()));
+                }
+                Some(names.into())
+            }
+        };
+        let named = names.is_some();
+        self.trace.vars[var].names = names;
+        self.value_names.retain(|(p, _)| *p != path);
+        if named {
+            self.value_names.push((path, spec.split_whitespace().collect::<Vec<_>>().join(" ")));
+        }
+        let signed = self.trace.vars[var].signed;
+        for r in &mut self.rows {
+            if let Row::Signal(s) = r
+                && s.var == var
+                && (named || s.radix == radix::ENUM)
+            {
+                (s.radix, s.frac) = (radix::default_for(named, signed), 0);
+            }
+        }
+        Ok(())
+    }
+
     /// A var by full path, made again if it is a computed one (sessions, `:e`).
     pub fn var_named(&mut self, path: &str) -> Option<usize> {
         match self.trace.by_path.get(path) {
@@ -463,6 +509,11 @@ impl Workspace {
         for (name, expr) in self.signals.clone() {
             if let Err(e) = self.define(&name, &expr) {
                 missing.push(format!("{name} ({e})"));
+            }
+        }
+        for (path, spec) in self.value_names.clone() {
+            if let Err(e) = self.name_values(&path, &spec) {
+                missing.push(format!("names of {path} ({e})"));
             }
         }
         self.streams.clear();
