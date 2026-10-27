@@ -32,6 +32,9 @@ pub struct Builtin {
     pub example: &'static str,
     pub required: &'static [&'static str],
     pub optional: &'static [&'static str],
+    /// Sides of the required roles that may be left out whole, if another is given: a write-only
+    /// or read-only AXI port.
+    pub sides: &'static [&'static [&'static str]],
     /// Params besides `prefix`, given to the steps (`mode`, `baud`).
     pub params: &'static [&'static str],
     /// Sampled at the instance's clock; false: by time, or at a clock among its roles.
@@ -76,7 +79,7 @@ pub const BUILTINS: &[&str] = &["axis", "axilite", "axi4", "spi", "uart"];
 /// The protocols written in Rust, by name.
 pub fn builtin(name: &str) -> Option<Builtin> {
     match name {
-        "axis" => Some(Builtin { about: "AXI4-Stream: beats, frames by tlast with their bytes, handshake errors", example: "decode rx axis clock=aclk prefix=s_axis_", required: &["tvalid", "tready", "tdata"], optional: &["tlast", "tkeep"], params: &[], clocked: true, steps: axis, notes: AXIS }),
+        "axis" => Some(Builtin { about: "AXI4-Stream: beats, frames by tlast with their bytes, handshake errors", example: "decode rx axis clock=aclk prefix=s_axis_", required: &["tvalid", "tready", "tdata"], optional: &["tlast", "tkeep"], sides: &[], params: &[], clocked: true, steps: axis, notes: AXIS }),
         "axilite" => Some(Builtin {
             about: "AXI4-Lite: write and read transactions with their delay, handshake errors, error responses",
             example: "decode bus axilite clock=aclk prefix=s_axi_",
@@ -84,6 +87,7 @@ pub fn builtin(name: &str) -> Option<Builtin> {
                 "awvalid", "awready", "awaddr", "wvalid", "wready", "wdata", "bvalid", "bready", "arvalid", "arready", "araddr", "rvalid", "rready", "rdata",
             ],
             optional: &["awprot", "wstrb", "bresp", "arprot", "rresp"],
+            sides: &[&["awvalid", "awready", "awaddr", "wvalid", "wready", "wdata", "bvalid", "bready"], &["arvalid", "arready", "araddr", "rvalid", "rready", "rdata"]],
             params: &[],
             clocked: true,
             steps: axilite,
@@ -96,6 +100,7 @@ pub fn builtin(name: &str) -> Option<Builtin> {
                 "awvalid", "awready", "awaddr", "wvalid", "wready", "wdata", "wlast", "bvalid", "bready", "arvalid", "arready", "araddr", "rvalid", "rready", "rdata", "rlast",
             ],
             optional: &["awid", "awlen", "awsize", "awburst", "awprot", "wstrb", "bid", "bresp", "arid", "arlen", "arsize", "arburst", "arprot", "rid", "rresp"],
+            sides: &[&["awvalid", "awready", "awaddr", "wvalid", "wready", "wdata", "wlast", "bvalid", "bready"], &["arvalid", "arready", "araddr", "rvalid", "rready", "rdata", "rlast"]],
             params: &[],
             clocked: true,
             steps: axi4,
@@ -106,6 +111,7 @@ pub fn builtin(name: &str) -> Option<Builtin> {
             example: "decode flash spi sclk=spi_clk cs=spi_cs_n mosi=spi_mosi miso=spi_miso mode=0",
             required: &["sclk", "cs", "mosi"],
             optional: &["miso"],
+            sides: &[],
             params: &["mode", "bits", "order"],
             clocked: false,
             steps: spi,
@@ -116,12 +122,23 @@ pub fn builtin(name: &str) -> Option<Builtin> {
             example: "decode console uart line=uart_tx baud=115200",
             required: &["line"],
             optional: &[],
+            sides: &[],
             params: &["baud", "bits", "parity", "stop"],
             clocked: false,
             steps: uart,
             notes: UART,
         }),
         _ => None,
+    }
+}
+
+impl Builtin {
+    /// The required roles of an instance where `has` tells the roles there are: a side with none
+    /// of its roles there is left out, unless every side is.
+    pub fn needed(&self, mut has: impl FnMut(&str) -> bool) -> Vec<&'static str> {
+        let gone: Vec<&[&str]> = self.sides.iter().copied().filter(|s| !s.iter().any(|r| has(r))).collect();
+        let gone = if gone.len() == self.sides.len() { vec![] } else { gone };
+        self.required.iter().copied().filter(|r| !gone.iter().any(|s| s.contains(r))).collect()
     }
 }
 
@@ -171,8 +188,13 @@ fn axilite(given: &Given, _: &Params) -> Vec<Step> {
         ],
     );
     steps.push(Step::Check { name: "errors", rules });
-    steps.push(Step::Join { name: "wr", requests: vec!["aw", "w"], response: "b", id: None });
-    steps.push(Step::Join { name: "rd", requests: vec!["ar"], response: "r", id: None });
+    let has = |r: &str| given.iter().any(|g| g.0 == r);
+    if has("awvalid") {
+        steps.push(Step::Join { name: "wr", requests: vec!["aw", "w"], response: "b", id: None });
+    }
+    if has("arvalid") {
+        steps.push(Step::Join { name: "rd", requests: vec!["ar"], response: "r", id: None });
+    }
     steps
 }
 
@@ -195,19 +217,23 @@ fn axi4(given: &Given, _: &Params) -> Vec<Step> {
         ],
     );
     steps.push(Step::Check { name: "errors", rules });
-    let mut w = vec![("last".to_string(), "last".to_string()), ("data".into(), "data".into())];
-    if has("wstrb") {
-        w.push(("bytes".into(), "strb".into()));
-    }
-    steps.push(Step::Decode { name: "wburst", input: "w", decoder: "frame", params: w });
-    let mut r = vec![("last".to_string(), "last".to_string()), ("data".into(), "data".into())];
-    if has("rid") {
-        r.push(("key".into(), "id".into()));
-    }
-    steps.push(Step::Decode { name: "rburst", input: "r", decoder: "frame", params: r });
     let by_id = |a: &str, b: &str, req: &'static str| (has(a) && has(b)).then_some((req, "id", "id"));
-    steps.push(Step::Join { name: "wr", requests: vec!["aw", "wburst"], response: "b", id: by_id("awid", "bid", "aw") });
-    steps.push(Step::Join { name: "rd", requests: vec!["ar"], response: "rburst", id: by_id("arid", "rid", "ar") });
+    if has("awvalid") {
+        let mut w = vec![("last".to_string(), "last".to_string()), ("data".into(), "data".into())];
+        if has("wstrb") {
+            w.push(("bytes".into(), "strb".into()));
+        }
+        steps.push(Step::Decode { name: "wburst", input: "w", decoder: "frame", params: w });
+        steps.push(Step::Join { name: "wr", requests: vec!["aw", "wburst"], response: "b", id: by_id("awid", "bid", "aw") });
+    }
+    if has("arvalid") {
+        let mut r = vec![("last".to_string(), "last".to_string()), ("data".into(), "data".into())];
+        if has("rid") {
+            r.push(("key".into(), "id".into()));
+        }
+        steps.push(Step::Decode { name: "rburst", input: "r", decoder: "frame", params: r });
+        steps.push(Step::Join { name: "rd", requests: vec!["ar"], response: "rburst", id: by_id("arid", "rid", "ar") });
+    }
     steps
 }
 
@@ -243,7 +269,8 @@ fn uart(_: &Given, params: &Params) -> Vec<Step> {
 fn channels<const N: usize>(given: &Given, channels: [(&'static str, &[(&str, &str)]); N]) -> (Vec<Step>, Vec<(String, String)>) {
     let has = |r: &str| given.iter().any(|g| g.0 == r);
     let (mut steps, mut rules) = (Vec::new(), Vec::new());
-    for (c, payload) in channels {
+    // a side left out (a write-only port) has no channels there
+    for (c, payload) in channels.into_iter().filter(|c| has(&format!("{}valid", c.0))) {
         let fields: Vec<(String, String)> = payload.iter().filter(|p| has(p.1)).map(|&(f, sig)| (f.into(), sig.into())).collect();
         steps.push(Step::Sample { name: c, when: format!("{c}valid && {c}ready"), fields: fields.clone() });
         rules.push((format!("{c}_dropped"), format!("fell({c}valid) && !past({c}ready)")));
@@ -314,6 +341,9 @@ pub fn describe(name: &str, session: &[Sampler]) -> Result<String, String> {
         let mut out = vec![format!("{name}: {}", b.about), format!("roles: {} (required)", b.required.join(" "))];
         if !b.optional.is_empty() {
             out.push(format!("  {} (optional)", b.optional.join(" ")));
+        }
+        if !b.sides.is_empty() {
+            out.push("  a side may be left out whole: a write-only or read-only port".into());
         }
         out.push("params: prefix=<prefix> plays each role not given by <prefix><role> (prefix=s_axi_)".into());
         if !b.params.is_empty() {
@@ -451,11 +481,14 @@ pub fn detect(trace: &crate::trace::Trace) -> Vec<Found> {
     let file = |v: &usize| !trace.is_computed(*v);
     let mut found: Vec<Found> = Vec::new();
     for (name, b) in protocols {
-        let first = b.required[0];
-        let mut prefixes: Vec<&str> = trace.vars.iter().enumerate().filter(|(i, _)| file(i)).filter_map(|(_, v)| v.path.strip_suffix(first)).collect();
+        // a port is found by its first role, or a side's (a read-only one by arvalid)
+        let firsts: Vec<&str> = std::iter::once(b.required[0]).chain(b.sides.iter().map(|s| s[0])).collect();
+        let mut prefixes: Vec<&str> = trace.vars.iter().enumerate().filter(|(i, _)| file(i)).flat_map(|(_, v)| firsts.iter().filter_map(|f| v.path.strip_suffix(f))).collect();
         prefixes.sort();
+        prefixes.dedup();
         for prefix in prefixes {
-            let all = b.required.iter().all(|r| trace.by_path.get(&format!("{prefix}{r}")).is_some_and(file));
+            let there = |r: &str| trace.by_path.get(&format!("{prefix}{r}")).is_some_and(file);
+            let all = b.needed(there).iter().all(|r| there(r));
             if all && !found.iter().any(|f| f.prefix == prefix) {
                 found.push(Found { prefix: prefix.into(), protocol: name, clock: clock_of(trace, prefix) });
             }

@@ -323,3 +323,33 @@ fn detects_interfaces() {
     assert!(found("axi4.vcd").iter().any(|l| l.contains(" axi4 ")), "{:?}", found("axi4.vcd"));
     assert!(found("simple.vcd").is_empty());
 }
+
+/// A write-only or read-only AXI-Lite port: the side given is decoded, the other left out, and a
+/// read-only one is found by its signals.
+#[test]
+fn axilite_one_side() {
+    let mut ws = open("axilite.vcd");
+    let write: Vec<(&str, String)> = ["awvalid", "awready", "awaddr", "wvalid", "wready", "wdata", "bvalid", "bready"].iter().map(|r| (*r, format!("s_axi_{r}"))).collect();
+    let write: Vec<(&str, &str)> = write.iter().map(|(r, s)| (*r, s.as_str())).collect();
+    ws.add_decode(decode("w", "axilite", "aclk", &write, &[])).unwrap();
+    assert_eq!(table(stream(&ws, "w.wr")).len(), 2);
+    assert!(!ws.streams.iter().any(|s| s.name.starts_with("w.ar") || s.name.starts_with("w.rd")));
+    // half a side is still an error
+    let err = ws.add_decode(decode("x", "axilite", "aclk", &write[..7], &[])).unwrap_err();
+    assert_eq!(err, "x: no signal for bready");
+    let dir = Dir::new("axilite-read");
+    let vcd = dir.0.join("rd.vcd");
+    let mut text = String::from("$timescale 1ns $end\n$scope module top $end\n$var wire 1 ! aclk $end\n");
+    for (id, (r, w)) in "\"#$%&'".chars().zip([("arvalid", 1), ("arready", 1), ("araddr", 8), ("rvalid", 1), ("rready", 1), ("rdata", 8)]) {
+        text += &format!("$var wire {w} {id} m_axi_{r} $end\n");
+    }
+    text += "$upscope $end\n$enddefinitions $end\n#0\n0!\n0\"\n1#\nb0 $\n0%\n1&\nb0 '\n#5\n1!\n#10\n0!\n1\"\nb100 $\n#15\n1!\n#20\n0!\n0\"\n1%\nb1010 '\n#25\n1!\n#30\n0!\n0%\n#35\n1!\n#40\n0!\n";
+    std::fs::write(&vcd, text).unwrap();
+    let t = wtf_core::trace::Trace::open(&vcd).unwrap();
+    let found: Vec<String> = wtf_core::protocol::detect(&t).iter().map(|f| f.decode_line()).collect();
+    assert_eq!(found, ["decode m_axi axilite clock=top.aclk prefix=top.m_axi_"]);
+    let mut ws = Workspace::open(&vcd).unwrap();
+    ws.add_decode(decode("m", "axilite", "aclk", &[], &[("prefix", "m_axi_")])).unwrap();
+    assert_eq!(table(stream(&ws, "m.rd")), [row(5, 25, &["10", "4", "10"])]);
+    assert!(!ws.streams.iter().any(|s| s.name == "m.wr"));
+}

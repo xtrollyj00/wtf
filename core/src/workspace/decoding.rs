@@ -80,9 +80,9 @@ impl Workspace {
         }
         // a prefix too, through its first role: `s_axi_` + `awvalid` is `top.s_axi_awvalid`
         if let (Some(b), Some((_, prefix))) = (protocol::builtin(&d.protocol), d.params.iter_mut().find(|p| p.0 == "prefix")) {
-            let role = b.required[0];
-            let full = self.resolve(&format!("{prefix}{role}")).ok().map(|p| self.trace.vars[p.0].path.clone());
-            if let Some(full) = full.and_then(|f| f.strip_suffix(role).map(String::from)) {
+            // the first role there is: a read-only port has no awvalid
+            let full = b.required.iter().find_map(|role| self.resolve(&format!("{prefix}{role}")).ok().map(|p| (role, self.trace.vars[p.0].path.clone())));
+            if let Some(full) = full.and_then(|(role, f)| f.strip_suffix(role).map(String::from)) {
                 *prefix = full;
             }
         }
@@ -181,7 +181,9 @@ impl Workspace {
     /// A protocol written in Rust on signals: its steps' streams, `<instance>.<step>`.
     fn decode_builtin(&mut self, d: &Decode, b: protocol::Builtin) -> Result<usize, String> {
         let mut errors = Vec::new();
-        let given = self.bind(d, b.required, b.optional, b.params, &mut errors);
+        let prefix = d.params.iter().find(|p| p.0 == "prefix").map(|p| p.1.clone());
+        let required = b.needed(|r| d.signals.iter().any(|s| s.0 == r) || prefix.as_ref().is_some_and(|p| self.resolve(&format!("{p}{r}")).is_ok()));
+        let given = self.bind(d, &required, b.optional, b.params, &mut errors);
         if d.clock.is_empty() && b.clocked {
             errors.push("no clock".into());
         }

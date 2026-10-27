@@ -52,6 +52,9 @@ checks that return only violations.
                                        -> word (bits, msb or lsb first), transfer (cs low to high)
   UART:  the line and a baud rate   -> byte (each bit sampled in its middle), errors (framing, parity)
   ```
+  An AXI-Lite or AXI4 port that only writes or only reads is decoded too: a side none of whose
+  roles is given (explicitly or under the prefix) is left out, and the instance makes only the
+  other side's streams. A side given in part is still an error, naming the missing roles.
   SPI and UART sample by time, not at a clock: their decoder reads the changes of the pins (for
   SPI, of `{cs, sclk, mosi, miso}`) as records and keeps the edges and bit times itself, so they
   take no `clock`. Their settings are params of the instance: SPI's `mode`, `bits`, `order`;
