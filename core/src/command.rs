@@ -94,14 +94,18 @@ pub fn run(app: &mut Workspace, line: &str) -> Result<Option<Msg>, String> {
 
 /// `:decode name protocol key=value...`: an instance (`[[decode]]`); `clock=` is its clock,
 /// `prefix=` a param, and for `frame`, `pair` and `check` the keys that aren't roles are params. A
-/// value runs to the next `key=`, so a rule can have spaces: `bad=valid && !ready`.
+/// value runs to the next `key=`, so a rule can have spaces: `bad=valid && !ready`; one in quotes
+/// runs to the closing quote, so it can hold a `key=` (`bad="x=1"`).
 /// Answers with the streams the instance made and how many records each has, violations apart,
 /// so what there is to look at shows: `bus: records bus.aw 2, ...; violations bus.errors 2, ...`.
 fn decode(app: &mut Workspace, arg: &str) -> Result<String, String> {
     let usage = "usage: :decode <name> <protocol> <role>=<signal>...";
-    let mut words = arg.split_whitespace();
-    let (name, protocol) = (words.next().ok_or(usage)?, words.next().ok_or(usage)?);
-    let mut pairs = key_values(words).ok_or(usage)?;
+    let (name, rest) = word(arg);
+    let (protocol, rest) = word(rest);
+    if protocol.is_empty() {
+        return Err(usage.into());
+    }
+    let mut pairs = key_values(rest).ok_or(usage)?;
     let clock = pairs.iter().position(|p| p.0 == "clock").map_or(String::new(), |i| pairs.remove(i).1);
     let on_streams = matches!(protocol, "frame" | "pair" | "check");
     let (signals, params) = pairs.into_iter().partition(|(k, _)| match on_streams {
@@ -122,9 +126,11 @@ fn decode(app: &mut Workspace, arg: &str) -> Result<String, String> {
 /// its clock, `roles=a,b,c` makes it a type for `:decode`, the other keys are its fields in order.
 fn protocol(app: &mut Workspace, arg: &str) -> Result<(), String> {
     let usage = "usage: :protocol <name> [clock=<clk>] when=<expr> [roles=<a,b>] <field>=<signal>...";
-    let mut words = arg.split_whitespace();
-    let name = words.next().ok_or(usage)?;
-    let mut fields = key_values(words).ok_or(usage)?;
+    let (name, rest) = word(arg);
+    if name.is_empty() {
+        return Err(usage.into());
+    }
+    let mut fields = key_values(rest).ok_or(usage)?;
     let mut take = |k: &str| fields.iter().position(|p| p.0 == k).map(|i| fields.remove(i).1);
     let (clock, when, roles) = (take("clock").unwrap_or_default(), take("when").ok_or(usage)?, take("roles"));
     let roles = roles.map_or(Vec::new(), |r| r.split(',').map(|r| r.trim().to_string()).filter(|r| !r.is_empty()).collect());
@@ -132,19 +138,39 @@ fn protocol(app: &mut Workspace, arg: &str) -> Result<(), String> {
     app.add_protocol(p).map(drop).map_err(|e| format!("protocol {name} not made: {e}"))
 }
 
+/// The first word, and the text after it.
+fn word(text: &str) -> (&str, &str) {
+    let text = text.trim_start();
+    text.split_at(text.find(char::is_whitespace).unwrap_or(text.len()))
+}
+
 /// `key=value` words in order; a value runs to the next `key=`, so it can have spaces
-/// (`when=valid && ready`). None if the first word has no key.
-fn key_values<'a>(words: impl Iterator<Item = &'a str>) -> Option<Vec<(String, String)>> {
+/// (`when=valid && ready`), or in quotes to the closing one (`when="x=1"`). None if the first word
+/// has no key, or a quote isn't closed.
+fn key_values(text: &str) -> Option<Vec<(String, String)>> {
     let mut pairs: Vec<(String, String)> = Vec::new();
-    for w in words {
+    let mut rest = text;
+    loop {
+        let (w, after) = word(rest);
+        if w.is_empty() {
+            return Some(pairs);
+        }
         let key = w.split_once('=').filter(|(k, v)| !k.is_empty() && k.chars().all(|c| c.is_alphanumeric() || c == '_') && !v.starts_with('='));
         match (key, pairs.last_mut()) {
+            (Some((k, v)), _) if v.starts_with('"') => {
+                // from after `key="` to the closing quote, spaces and all
+                let from = &rest.trim_start()[k.len() + 2..];
+                let close = from.find('"')?;
+                pairs.push((k.into(), from[..close].into()));
+                rest = &from[close + 1..];
+                continue;
+            }
             (Some((k, v)), _) => pairs.push((k.into(), v.into())),
             (None, Some(last)) => last.1 = format!("{} {w}", last.1),
             (None, None) => return None,
         }
+        rest = after;
     }
-    Some(pairs)
 }
 
 /// `:select a [b]`: the row named `a` (a signal as `:add` names it, or a group), and with `b` the

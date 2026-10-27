@@ -45,8 +45,6 @@ Shortcuts taken so far, to fix when they get in the way.
 - Streams are worked out over the whole trace at once (spec §16 "Known limit").
 - A stream row's label is `#n` with `len` (`64B`) and the text fields (delay, rule, kind); there is
   no per-protocol label.
-- `:decode` has no quoting: a value runs to the next `key=` word, so a value can't contain one
-  (`a==1` is fine, `x=1` is taken as a key).
 - A frame's `data` is text (`de ad be ef`), held for every frame: big for long frames, and searched
   only whole (`==`), not for a part.
 - The `e` box doesn't scroll: a value longer than the screen ends in `… n more lines`.

@@ -93,7 +93,7 @@ each one's roles, params, streams and fields.
 - `decode <name> <protocol> clock=<clk> <role>=<signal>... <param>=<value>...`: built in `axis`,
   `axilite`, `axi4`, and without a clock `spi` (`mode=0`) and `uart` (`baud=115200`).
   `prefix=s_axi_` plays each role not given by `<prefix><role>`. A value runs to the next `key=`,
-  so it can have spaces.
+  so it can have spaces; in quotes it runs to the closing one (`when=\"x=1\"`).
 - An interface of the design's own: `protocol <name> clock=<clk> when=<expr> <field>=<signal>...`
   makes a record per clock cycle where `when` holds (`help expressions`), the fields sampled with
   it. A field is any expression without past: `next=pc + 4`, `imm=signed(insn[31:20])` (a field

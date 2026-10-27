@@ -144,3 +144,21 @@ fn patterns() {
     assert_eq!(no_match("x"), "no match: x");
     assert_eq!(no_match("**.x*"), "no match: **.x*");
 }
+
+/// `:decode` and `:protocol` values: to the next `key=`, or in quotes to the closing one.
+#[test]
+fn quoted_values() {
+    let mut ws = open();
+    run(&mut ws, "decode a check clock=clk hot=busy && data != 0").unwrap();
+    run(&mut ws, r#"decode b check clock=clk hot="busy && data != 0""#).unwrap();
+    let records = |ws: &wtf_core::workspace::Workspace, n: &str| ws.streams.iter().find(|s| s.name == n).unwrap().records.len();
+    assert_eq!(records(&ws, "b"), records(&ws, "a"));
+    assert!(records(&ws, "a") > 0);
+    // a quoted `key=` stays in the value; an unclosed quote is a mistake
+    assert_eq!(ws.decodes[1].params, [("hot".to_string(), "busy && data != 0".to_string())]);
+    run(&mut ws, r#"protocol p clock=clk when="busy" d="data""#).unwrap();
+    assert_eq!(ws.protocols[0].fields, [("d".to_string(), "data".to_string())]);
+    assert!(run(&mut ws, r#"decode c check clock=clk hot="busy"#).unwrap_err().starts_with("usage"));
+    let err = run(&mut ws, r#"decode c check clock=clk hot="x=1 && busy""#).unwrap_err();
+    assert_eq!(err, "c: hot: unknown signal: x");
+}
