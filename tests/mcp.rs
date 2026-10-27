@@ -213,6 +213,10 @@ fn find_runs_values_and_counts() {
     assert_eq!(s.ok("find", json!({"expr": "@clk busy", "count_only": true})), "2 matches in 1 run of consecutive cycles, first 15ns, last 25ns");
     // values as the ending edge samples them: data changes at 20ns and 30ns, just after the cycles start
     assert_eq!(s.ok("find", json!({"expr": "@clk busy", "show": ["data", "cpu.state"]})), "time\tdata\tcpu.state\n15ns\t0x96\t0x2\n25ns\t0xE1\t0x2\nas records (`help decode`): `protocol s clock=clk when=busy data=data state=cpu.state`");
+    // two signals of one last name: each field takes its scope, a slice of one a number
+    let mut line = |show: Value| s.ok("find", json!({"expr": "@clk busy", "show": show, "count": 1})).lines().last().unwrap().to_string();
+    assert!(line(json!(["cpu.state", "dma.state"])).ends_with("when=busy cpu_state=cpu.state dma_state=dma.state`"));
+    assert!(line(json!(["data[7:4]", "data[3:0]"])).ends_with("when=busy data_0=data[7:4] data_1=data[3:0]`"));
     // without a clock, at the match
     assert_eq!(s.ok("find", json!({"expr": "data == 0x40", "show": ["data:dec", "busy"]})), "time\tdata\tbusy\n60ns\t64\t0");
     // a window of the trace, and a unit of the agent's

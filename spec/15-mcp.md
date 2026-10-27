@@ -133,7 +133,10 @@ reuse wtf's own pieces:
   description and `help expressions` point to the decoders, and `decode` answers that `pair`
   matches a stream with another. A `find` with a clock and `show` is a table of events, which is
   what `protocol` makes: its answer ends with the line that makes it (`as records (help decode):
-  protocol s clock=clk when=valid && ready addr=addr`), as `info` gives the `decode` lines.
+  protocol s clock=clk when=valid && ready addr=addr`), as `info` gives the `decode` lines. A field
+  takes its signal's last name; when two shown signals share one, each takes its scope's name too
+  (`cpu_state=cpu.state dma_state=dma.state`), and a number is appended if they still match
+  (`data_0=data[7:4] data_1=data[3:0]`).
 - `command` decodes without touching the rows (`decode`, `protocol`, `signal`). `decode` answers
   with the streams it made and their records, violations apart (`bus: records bus.aw 2, ...;
   violations bus.errors 2, bus.wr.unmatched 1, ...`), then where to read more; the window shows

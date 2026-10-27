@@ -572,15 +572,19 @@ impl Wtf {
         if let (Some(_), Some((clock, when))) = (q.clock, a.expr.trim().strip_prefix('@').and_then(|e| e.split_once(char::is_whitespace)))
             && !shown.is_empty()
         {
-            // shortcut: a field is its signal's last name; two alike make the line fail, renamed by the agent then
-            let fields: Vec<String> = shown
-                .iter()
-                .map(|(n, _, _)| {
-                    let last = n.rsplit('.').next().unwrap_or(n);
-                    let field: String = last.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
-                    format!("{field}={n}")
-                })
-                .collect();
+            // a field is its signal's last name; two alike take their scope's (`cpu_state`), then a number
+            let word = |s: &str| -> String { s.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect() };
+            let mut fields: Vec<String> = shown.iter().map(|(n, _, _)| word(n.rsplit('.').next().unwrap_or(n))).collect();
+            let alike = |fields: &[String]| -> Vec<usize> { (0..fields.len()).filter(|&k| fields.iter().filter(|f| **f == fields[k]).count() > 1).collect() };
+            for k in alike(&fields) {
+                let mut parts = shown[k].0.rsplit('.');
+                let (last, scope) = (parts.next().unwrap_or(""), parts.next().map(word).unwrap_or_default());
+                fields[k] = if scope.is_empty() { word(last) } else { format!("{scope}_{}", word(last)) };
+            }
+            for k in alike(&fields) {
+                fields[k] = format!("{}_{k}", fields[k]);
+            }
+            let fields: Vec<String> = fields.iter().zip(&shown).map(|(f, (n, _, _))| format!("{f}={n}")).collect();
             lines.push(format!("as records (`help decode`): `protocol s clock={clock} when={} {}`", when.trim(), fields.join(" ")));
         }
         Ok(budget(lines.join("\n")))
