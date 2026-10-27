@@ -285,7 +285,7 @@ fn spi_words_and_transfers() {
     assert_eq!(table(stream(&ws, "f.transfer"))[1], row(500, 750, &["2", "0f 5", "1"]));
     // mistakes, all at once
     let err = ws.add_decode(decode("g", "spi", "", &pins, &[("mode", "4"), ("bits", "0"), ("speed", "1")])).unwrap_err();
-    assert_eq!(err, "g: spi has no param speed (params: prefix, mode, bits, order)");
+    assert_eq!(err, "g: spi has no param speed (params: prefix, mode, bits, order, cs_active)");
     let err = ws.add_decode(decode("g", "spi", "", &pins, &[("mode", "4"), ("bits", "0")])).unwrap_err();
     assert_eq!(err, "g: spi: mode=4: not 0, 1, 2 or 3; bits=0: not 1 - 64");
 }
@@ -352,4 +352,36 @@ fn axilite_one_side() {
     ws.add_decode(decode("m", "axilite", "aclk", &[], &[("prefix", "m_axi_")])).unwrap();
     assert_eq!(table(stream(&ws, "m.rd")), [row(5, 25, &["10", "4", "10"])]);
     assert!(!ws.streams.iter().any(|s| s.name == "m.wr"));
+}
+
+/// SPI's cs active high and UART's line idle low: the fixtures with that pin inverted decode as
+/// the fixtures do.
+#[test]
+fn inverted_cs_and_line() {
+    let dir = Dir::new("inverted");
+    let inverted = |f: &str, id: char| {
+        let text = std::fs::read_to_string(format!("{}/../tests/data/{f}", env!("CARGO_MANIFEST_DIR"))).unwrap();
+        let flip = |l: &str| match (l.chars().next(), &l[1..]) {
+            (Some('0'), rest) if rest == id.to_string() => format!("1{id}"),
+            (Some('1'), rest) if rest == id.to_string() => format!("0{id}"),
+            _ => l.to_string(),
+        };
+        let path = dir.0.join(f);
+        std::fs::write(&path, text.lines().map(flip).collect::<Vec<_>>().join("\n")).unwrap();
+        Workspace::open(&path).unwrap()
+    };
+    let pins = [("sclk", "spi_clk"), ("cs", "spi_cs_n"), ("mosi", "spi_mosi"), ("miso", "spi_miso")];
+    let mut ws = open("spi.vcd");
+    ws.add_decode(decode("f", "spi", "", &pins, &[])).unwrap();
+    let mut high = inverted("spi.vcd", '"');
+    high.add_decode(decode("f", "spi", "", &pins, &[("cs_active", "high")])).unwrap();
+    assert_eq!(table(stream(&high, "f.transfer")), table(stream(&ws, "f.transfer")));
+    let line = [("line", "uart_tx")];
+    let mut ws = open("uart.vcd");
+    ws.add_decode(decode("u", "uart", "", &line, &[("baud", "1000000")])).unwrap();
+    let mut low = inverted("uart.vcd", '!');
+    low.add_decode(decode("u", "uart", "", &line, &[("baud", "1000000"), ("idle", "low")])).unwrap();
+    assert_eq!(table(stream(&low, "u.byte")), table(stream(&ws, "u.byte")));
+    let err = low.add_decode(decode("v", "uart", "", &line, &[("baud", "1000000"), ("idle", "up")])).unwrap_err();
+    assert_eq!(err, "v: uart: idle=up: not high or low");
 }

@@ -769,7 +769,7 @@ fn spi_and_uart_with_command() {
     let dir = Dir::new("serial");
     let mut s = Server::start(&dir.0);
     let uart = s.ok("protocols", json!({"name": "uart"}));
-    for line in ["roles: line (required)", "  baud bits parity stop\n", "  <name>.byte: data\n", "  <name>.errors: rule (violations)\n", "example: decode console uart line=uart_tx baud=115200"] {
+    for line in ["roles: line (required)", "  baud bits parity stop idle\n", "  <name>.byte: data\n", "  <name>.errors: rule (violations)\n", "example: decode console uart line=uart_tx baud=115200"] {
         assert!(uart.contains(line), "{line}\n{uart}");
     }
     assert!(!uart.contains("levels"), "the line's changes are no stream of the instance's");

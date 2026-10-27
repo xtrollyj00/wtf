@@ -57,8 +57,10 @@ checks that return only violations.
   other side's streams. A side given in part is still an error, naming the missing roles.
   SPI and UART sample by time, not at a clock: their decoder reads the changes of the pins (for
   SPI, of `{cs, sclk, mosi, miso}`) as records and keeps the edges and bit times itself, so they
-  take no `clock`. Their settings are params of the instance: SPI's `mode`, `bits`, `order`;
-  UART's `baud`, `bits`, `parity` (`none`, `even`, `odd`), `stop`.
+  take no `clock`. Their settings are params of the instance: SPI's `mode`, `bits`, `order`,
+  `cs_active` (`low`, the default, or `high`); UART's `baud`, `bits`, `parity` (`none`, `even`,
+  `odd`), `stop`, `idle` (`high`, the default, or `low`, which reads the line inverted as RS-232
+  levels do).
 - **Protocols come in three kinds:**
   - **Sampled protocols**, defined in the session without Rust (`[[protocol]]`, `:protocol`): a
     clock, a predicate and fields as expressions. With `roles` one is a type, put on signals by

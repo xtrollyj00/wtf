@@ -376,7 +376,7 @@ enum SpiOut {
 }
 
 /// `spi`: SPI from the changes of `{cs, sclk, mosi}` or `{cs, sclk, mosi, miso}` (the field
-/// `value`), cs active low. A bit is sampled at each edge of sclk that `mode` (0 - 3, CPOL and CPHA)
+/// `value`), cs active low (`cs_active=high`: high). A bit is sampled at each edge of sclk that `mode` (0 - 3, CPOL and CPHA)
 /// samples on, rising for modes 0 and 3, falling for 1 and 2, with cs low, from the values just
 /// before it; it lasts to the next one. `bits` of them (MSB first, or LSB with `order=lsb`) make a
 /// word; a transfer runs from cs falling to cs rising, with its words as hex text. `out` picks the
@@ -388,6 +388,8 @@ pub struct Spi {
     bits: usize,
     lsb: bool,
     miso: bool,
+    /// cs is active high: read inverted.
+    cs_high: bool,
     prev: Option<Vec<u8>>,
     end: Tick,
     /// The bit sampled last, waiting for its end: its start, mosi, miso.
@@ -412,13 +414,14 @@ impl Spi {
         let mode = param(params, "mode", Some(0u8), |m| *m < 4, "0, 1, 2 or 3", &mut errors);
         let bits = param(params, "bits", Some(8usize), |b| (1..=64).contains(b), "1 - 64", &mut errors);
         let order = param(params, "order", Some("msb".to_string()), |o| o == "msb" || o == "lsb", "msb or lsb", &mut errors);
+        let cs_active = param(params, "cs_active", Some("low".to_string()), |a| a == "low" || a == "high", "low or high", &mut errors);
         let out = match param(params, "out", None::<String>, |o| ["bit", "word", "transfer"].contains(&o.as_str()), "bit, word or transfer", &mut errors).as_deref() {
             Some("bit") => SpiOut::Bit,
             Some("word") => SpiOut::Word,
             _ => SpiOut::Transfer,
         };
-        if let Some((k, _)) = params.iter().find(|p| !["mode", "bits", "order", "out"].contains(&p.0.as_str())) {
-            errors.push(format!("no param {k} (mode, bits, order)"));
+        if let Some((k, _)) = params.iter().find(|p| !["mode", "bits", "order", "cs_active", "out"].contains(&p.0.as_str())) {
+            errors.push(format!("no param {k} (mode, bits, order, cs_active)"));
         }
         if !errors.is_empty() {
             return Err(format!("spi: {}", errors.join("; ")));
@@ -430,6 +433,7 @@ impl Spi {
             bits: bits.unwrap_or(8),
             lsb: order.as_deref() == Some("lsb"),
             miso,
+            cs_high: cs_active.as_deref() == Some("high"),
             prev: None,
             end: 0,
             bit: None,
@@ -489,6 +493,15 @@ impl Spi {
     }
 }
 
+/// A level read the other way round; x and z stay.
+fn invert(b: u8) -> u8 {
+    match b {
+        b'0' => b'1',
+        b'1' => b'0',
+        b => b,
+    }
+}
+
 fn bits_val(b: bool) -> Option<Val> {
     Some(Val::Bits(if b { "1" } else { "0" }.into()))
 }
@@ -520,6 +533,9 @@ impl Decoder for Spi {
         // cs, sclk, mosi, miso; a missing miso reads as 0
         let mut v = b.as_bytes().to_vec();
         v.resize(4, b'0');
+        if self.cs_high {
+            v[0] = invert(v[0]);
+        }
         let t = r.start;
         self.end = r.end;
         if let Some(p) = self.prev.replace(v.clone()) {
@@ -550,7 +566,8 @@ impl Decoder for Spi {
     }
 }
 
-/// `uart`: bytes from the changes of an idle-high line (the field `value`) at `baud` bits a second:
+/// `uart`: bytes from the changes of an idle-high line (the field `value`; `idle=low` for an inverted
+/// one) at `baud` bits a second:
 /// a frame starts where the line falls, and each bit is sampled in its middle: the start bit (a
 /// frame whose start bit isn't 0 was a glitch, and is dropped), `bits` data bits (5 - 9, LSB first),
 /// a `parity` bit (`none`, `even` or `odd`) and `stop` stop bits (1 or 2; the first is checked).
@@ -563,6 +580,8 @@ pub struct Uart {
     bits: usize,
     parity: Option<bool>,
     stop: usize,
+    /// The line idles low: read inverted.
+    inverted: bool,
     level: Option<u8>,
     /// The frame being sampled: its start, and the bits sampled so far.
     frame: Option<(Tick, Vec<u8>)>,
@@ -575,9 +594,10 @@ impl Uart {
         let bits = param(params, "bits", Some(8usize), |b| (5..=9).contains(b), "5 - 9", &mut errors);
         let parity = param(params, "parity", Some("none".to_string()), |p| ["none", "even", "odd"].contains(&p.as_str()), "none, even or odd", &mut errors);
         let stop = param(params, "stop", Some(1usize), |s| *s == 1 || *s == 2, "1 or 2", &mut errors);
+        let idle = param(params, "idle", Some("high".to_string()), |i| i == "high" || i == "low", "high or low", &mut errors);
         let out = param(params, "out", None::<String>, |o| o == "byte" || o == "errors", "byte or errors", &mut errors);
-        if let Some((k, _)) = params.iter().find(|p| !["baud", "bits", "parity", "stop", "out"].contains(&p.0.as_str())) {
-            errors.push(format!("no param {k} (baud, bits, parity, stop)"));
+        if let Some((k, _)) = params.iter().find(|p| !["baud", "bits", "parity", "stop", "idle", "out"].contains(&p.0.as_str())) {
+            errors.push(format!("no param {k} (baud, bits, parity, stop, idle)"));
         }
         if fs_per_tick.is_none() {
             errors.push("the trace has no timescale to time bits by".into());
@@ -591,7 +611,7 @@ impl Uart {
             Some("odd") => Some(true),
             _ => None,
         };
-        Ok(Uart { errors: out.as_deref() == Some("errors"), period, bits: bits.unwrap_or(8), parity, stop: stop.unwrap_or(1), level: None, frame: None })
+        Ok(Uart { errors: out.as_deref() == Some("errors"), period, bits: bits.unwrap_or(8), parity, stop: stop.unwrap_or(1), inverted: idle.as_deref() == Some("low"), level: None, frame: None })
     }
 
     /// Sample the open frame's bits whose middles fall before `t`, at the line's level; the record
@@ -641,6 +661,7 @@ impl Decoder for Uart {
         let mut out = Vec::new();
         let Some(Val::Bits(b)) = &r.fields[0] else { return out };
         let v = b.as_bytes()[0].to_ascii_lowercase();
+        let v = if self.inverted { invert(v) } else { v };
         self.sample_until(r.start as f64, &mut out);
         if self.frame.is_none() && self.level == Some(b'1') && v == b'0' {
             self.frame = Some((r.start, Vec::new()));
