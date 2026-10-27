@@ -34,7 +34,6 @@ Shortcuts taken so far, to fix when they get in the way.
 - A stream that can't be sampled again on `:e` is reported and dropped, not kept to retry on the
   next `:e` (named signals are kept).
 - Sampling a stream again with fewer fields leaves the old field vars, with their old values.
-- `records` shows every field in hex; no per-field radix (`tdata:dec`).
 - Arithmetic (section 8) takes operands up to 64 bits and results up to 127 (an `i128`); a
   wider one is an error suggesting a slice.
 - In `c ? a : b`, any unknown bit the condition reads makes the result x, even where SV's `&&` /

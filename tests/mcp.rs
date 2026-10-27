@@ -573,6 +573,12 @@ fn decode_with_command() {
     assert!(s.ok("view", json!({})).contains("aclk"), "the rows stay");
     assert_eq!(s.ok("records", json!({"stream": "bus.wr"})), "2 of 2\nn\tstart\tend\tdelay\taddr\tdata\tstrb\tresp\n0\t30ns\t50ns\t10ns\t0x10\t0x11111111\t0xF\t0x0\n1\t60ns\t120ns\t20ns\t0x14\t0x22222222\t0x3\t0x0");
     assert_eq!(s.ok("records", json!({"stream": "bus.errors"})), "2 of 2\nn\tstart\tend\trule\n0\t180ns\t190ns\tr_resp\n1\t210ns\t220ns\taw_dropped");
+    // a radix for every number field (not the delay, a time), or one field's
+    let wr = |radix: &str| json!({"stream": "bus.wr", "radix": radix, "count": 1});
+    assert_eq!(s.ok("records", wr("dec")), "1 of 2\nn\tstart\tend\tdelay\taddr\tdata\tstrb\tresp\n0\t30ns\t50ns\t10ns\t16\t286331153\t15\t0");
+    assert_eq!(s.ok("records", wr("addr:dec, strb:bin")), "1 of 2\nn\tstart\tend\tdelay\taddr\tdata\tstrb\tresp\n0\t30ns\t50ns\t10ns\t16\t0x11111111\t0b1111\t0x0");
+    assert_eq!(s.tool("records", wr("delay:dec")), Err("delay isn't a number: a time or text takes no radix".into()));
+    assert_eq!(s.tool("records", wr("adr:dec")), Err("bus.wr: no field adr (fields: delay, addr, data, strb, resp)".into()));
     // `where` picks records by their fields, on each record only (never `z` between them)
     let rd = |w: &str, count_only| json!({"stream": "bus.rd", "where": w, "count_only": count_only});
     assert_eq!(s.ok("records", rd("resp != 0", false)), "1 of 1 matching, of 8\nn\tstart\tend\tdelay\taddr\tdata\tresp\n1\t170ns\t190ns\t10ns\t0x20\t0xDEADBEEF\t0x2");

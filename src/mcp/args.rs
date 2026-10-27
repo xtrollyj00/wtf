@@ -180,6 +180,8 @@ pub struct RecordsArgs {
     /// Only count the records; no list.
     #[serde(default)]
     pub count_only: bool,
+    /// hex, dec, ... for every field (`help radix`); `len:dec` for one, several with commas.
+    pub radix: Option<String>,
     /// As for `values`.
     pub unit: Option<String>,
 }

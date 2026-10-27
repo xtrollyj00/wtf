@@ -123,6 +123,8 @@ bytes and its size); `count: 1` with `from` shows one whole.
   sides, as a scoreboard checks them).
 - `group_by` names fields and answers a line per distinct value, with how many records have it
   and the first and last start: `128 × addr=0x1C data=0x3 (2.975us .. 69.015us)`.
+- Fields show in hex; `radix` gives another for every number field (`dec`) or for one
+  (`len:dec`, several with commas). Times stay in the unit.
 - `count_only` only counts, with the first and last start.",
     ),
     (

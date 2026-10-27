@@ -102,9 +102,45 @@ fn unit_of(app: &Workspace, asked: Option<usize>, ts: impl IntoIterator<Item = T
     }
 }
 
-/// A record's field, a time field in the answer's unit.
-fn field_text(app: &Workspace, f: &wtf_core::stream::Field, v: &Option<Val>, u: Unit) -> String {
-    wtf_core::stream::value_text(f, v, app.trace.fs_per_tick, Some(u.index), u.decimals)
+/// A record's field, a time field in the answer's unit, a number in its radix if one was asked.
+fn field_text(app: &Workspace, f: &wtf_core::stream::Field, v: &Option<Val>, u: Unit, radix: Option<(usize, u32)>) -> String {
+    match (v, radix) {
+        (Some(Val::Bits(b)), Some((r, frac))) if b.len() > 1 => (radix::RADIXES[r].format)(b, frac),
+        _ => wtf_core::stream::value_text(f, v, app.trace.fs_per_tick, Some(u.index), u.decimals),
+    }
+}
+
+/// The radix asked for each of a stream's fields (`dec`, `len:dec,data:hex`), None for the
+/// default: a radix for every field skips those it doesn't fit, one for a field must fit it.
+fn field_radixes(s: &wtf_core::stream::Stream, asked: Option<&str>) -> Result<Vec<Option<(usize, u32)>>, String> {
+    let mut out = vec![None; s.schema.len()];
+    for item in asked.unwrap_or("").split([',', ' ']).filter(|i| !i.is_empty()) {
+        let (field, r) = match with_radix(item) {
+            (f, Some(r)) => (Some(f), r),
+            (r, None) => (None, r),
+        };
+        let numbers = |f: &wtf_core::stream::Field| f.width.filter(|_| !f.time);
+        match field {
+            None => {
+                radix::parse_name(r).ok_or(format!("unknown radix: {r}"))?;
+                for (k, f) in s.schema.iter().enumerate() {
+                    if let Some(Ok(rf)) = numbers(f).map(|w| radix_for(r, w, false, &f.name)) {
+                        out[k] = Some(rf);
+                    }
+                }
+            }
+            Some(name) => {
+                let Some(k) = s.schema.iter().position(|f| f.name == name) else {
+                    let names: Vec<&str> = s.schema.iter().map(|f| f.name.as_str()).collect();
+                    return Err(format!("{}: no field {name} (fields: {})", s.name, names.join(", ")));
+                };
+                let f = &s.schema[k];
+                let w = numbers(f).ok_or(format!("{name} isn't a number: a time or text takes no radix"))?;
+                out[k] = Some(radix_for(r, w, false, name)?);
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// Paths with their widths as `signals` lines: those differing only in indices (`[3]`, `(3)`) and
@@ -410,6 +446,7 @@ impl Wtf {
         let from = a.from.as_deref().map(|f| at(&app, f)).transpose()?.map_or(0, |s| s.0);
         let to = a.to.as_deref().map(|t| at(&app, t)).transpose()?.map_or(app.trace.end(), |s| s.1);
         let (numbers, of) = s.select(from, to, a.filter.as_deref(), app.trace.fs_per_tick)?;
+        let radixes = field_radixes(s, a.radix.as_deref())?;
         let picked: Vec<&wtf_core::stream::Record> = numbers.iter().map(|&i| &s.records[i]).collect();
         // with `where`: how many match, of how many there are
         let (matching, of) = match a.filter {
@@ -434,9 +471,9 @@ impl Wtf {
             let page = &groups[..groups.len().min(count)];
             let u = unit(&app, &a.unit, page.iter().flat_map(|g| [g.first, g.last]))?;
             let mut lines = vec![format!("{} of {what}", page.len())];
-            let fields: Vec<&wtf_core::stream::Field> = a.group_by.iter().filter_map(|n| s.schema.iter().find(|f| f.name == *n)).collect();
+            let fields: Vec<usize> = a.group_by.iter().filter_map(|n| s.schema.iter().position(|f| f.name == *n)).collect();
             for g in page {
-                let values: Vec<String> = fields.iter().zip(&g.values).map(|(f, v)| format!("{}={}", f.name, field_text(&app, f, v, u))).collect();
+                let values: Vec<String> = fields.iter().zip(&g.values).map(|(&k, v)| format!("{}={}", s.schema[k].name, field_text(&app, &s.schema[k], v, u, radixes[k]))).collect();
                 lines.push(format!("{} × {} ({} .. {})", g.count, values.join(" "), show(&app, g.first, u), show(&app, g.last, u)));
             }
             return Ok(budget(lines.join("\n")));
@@ -449,7 +486,7 @@ impl Wtf {
         let u = unit(&app, &a.unit, page.iter().flat_map(|r| [r.start, r.end]))?;
         // several records: long values shortened, as the rest of the row is what's compared
         let whole = page.len() == 1;
-        let texts: Vec<Vec<String>> = page.iter().map(|r| s.schema.iter().zip(&r.fields).map(|(f, v)| field_text(&app, f, v, u)).map(|t| if whole { t } else { shorten(t) }).collect()).collect();
+        let texts: Vec<Vec<String>> = page.iter().map(|r| s.schema.iter().zip(&r.fields).zip(&radixes).map(|((f, v), &rf)| field_text(&app, f, v, u, rf)).map(|t| if whole { t } else { shorten(t) }).collect()).collect();
         let cut = texts.iter().flatten().any(|t| t.ends_with(" bytes)") || t.ends_with(" chars)"));
         let mut lines = vec![format!("{} of {}{matching}{of}{}", page.len(), picked.len(), if cut { " (long values shortened; one record, `count: 1` with `from`, shows them whole)" } else { "" })];
         lines.push(["n", "start", "end"].into_iter().chain(s.schema.iter().map(|f| f.name.as_str())).collect::<Vec<_>>().join("\t"));

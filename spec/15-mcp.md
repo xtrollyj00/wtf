@@ -91,7 +91,10 @@ reuse wtf's own pieces:
   scoreboard checks them). The header counts the matches too
   (`3 of 3 matching, of 157`). `group_by` names fields and answers one line per distinct value of
   them, in order of first appearance, with how many records have it and the first and last start
-  (`128 × addr=0x1C data=0x3 (2.975us .. 69.015us)`), so 128 identical polls are one line. Streams are declared in `workspace` with
+  (`128 × addr=0x1C data=0x3 (2.975us .. 69.015us)`), so 128 identical polls are one line.
+  `radix` sets the radix of every number field (`dec`; a time or text field is skipped), or of
+  some (`addr:dec, strb:bin`), in the table and in `group_by`. Naming a time or text field is an
+  error. Streams are declared in `workspace` with
   `protocols`: `{"name": "rx", "clock": "aclk", "when": "tvalid && tready", "fields": ["tdata =
   tdata", "op = cmd[7:0]"]}` (with `roles`, a type), `decode` puts types on signals: `{"name":
   "c0", "protocol": "cmd", "clock": "clk", "signals": ["valid = cmd_valid", "cmd = cmd"]}`, and
