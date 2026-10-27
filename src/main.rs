@@ -788,6 +788,33 @@ mod tests {
     }
 
     #[test]
+    fn records_list() {
+        let t = trace::Trace::open("tests/data/axis.vcd".as_ref()).unwrap();
+        let mut app = App::new(workspace::Workspace::new(t, "axis".into()));
+        let msg = |app: &App| app.msg.as_ref().map_or(String::new(), |m| m.0.clone());
+        keys(&mut app, ":records rx.frame\n");
+        assert_eq!(msg(&app), "no streams yet: make one with :decode or :protocol");
+        keys(&mut app, ":decode rx axis clock=clk tvalid=tvalid tready=tready tdata=tdata tlast=tlast tkeep=tkeep\n");
+        keys(&mut app, ":records rx.fram\n");
+        assert_eq!(msg(&app), "unknown stream: rx.fram (streams: rx.beat, rx.errors, rx.frame)");
+        keys(&mut app, ":records rx.frame where len == 99\n");
+        assert_eq!(msg(&app), "no matching records, of 4");
+        keys(&mut app, ":add rx.frame rx.errors\n:fit\n:select rx.errors\n");
+        keys(&mut app, ":records rx.frame where len >= 8\nj");
+        insta::assert_snapshot!(snapshot(&mut app, 100, Some(10)));
+        // Enter jumps to the highlighted record and selects its stream's row
+        keys(&mut app, "\n");
+        assert!(app.records.is_none());
+        assert_eq!(app.ws.view.cursor, 65); // the third frame, 8 bytes
+        assert_eq!(app.ws.sel, 0);
+        keys(&mut app, "''");
+        assert_eq!(app.ws.view.cursor, 0);
+        keys(&mut app, ":records rx.frame\nGk\x1b");
+        assert!(app.records.is_none());
+        assert_eq!(app.ws.view.cursor, 0);
+    }
+
+    #[test]
     fn stream_rows() {
         let t = trace::Trace::open("tests/data/axis.vcd".as_ref()).unwrap();
         let mut app = App::new(workspace::Workspace::new(t, "axis".into()));

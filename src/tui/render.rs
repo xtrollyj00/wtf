@@ -42,6 +42,22 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
     if let Some((title, lines)) = &app.examine {
         boxed(buf, w, body, title, lines, " Esc e close ");
     }
+    if let Some(r) = &mut app.records {
+        // the title line, a blank, then as many records as fit, scrolled to show the highlight
+        r.page = body.saturating_sub(4).max(1);
+        if r.hl < r.top {
+            r.top = r.hl;
+        } else if r.hl >= r.top + r.page {
+            r.top = r.hl + 1 - r.page;
+        }
+        // as wide as the widest record, so the box keeps its size while scrolling
+        let ww = r.items.iter().map(|i| i.1.chars().count() + 2).max().unwrap_or(0);
+        let mut lines = vec![format!("{:<ww$}", r.title), String::new()];
+        for (k, (_, l)) in r.items.iter().enumerate().skip(r.top).take(r.page) {
+            lines.push(format!("{}{l}", if k == r.hl { format!("{} ", gl().hl) } else { "  ".into() }));
+        }
+        boxed(buf, w, body, &format!("records {} {}", gl().dot, r.stream), &lines, " Enter jump  Esc close ");
+    }
     let at = if matches!(app.mode, Mode::Command | Mode::Search) {
         command_line(app, buf, w, h)
     } else {

@@ -22,6 +22,7 @@
 | `:e` | reload the file, keeping signals, groups, cursor and zoom |
 | `:w [file]` | save the session (section 11) |
 | `:wq` | save the session and quit |
+| `:records <stream> [where <expr>]` | a box listing a stream's records (section 16), `#n start–end` and every field, as the `records` tool does; `where` takes the same expression. In the box `j` / `k` move, `Ctrl-f` / `Ctrl-b` a box of records, `g` / `G` go to the first / last, `Enter` jumps the cursor to the record's start (a jump, so `''` comes back) and selects the stream's row if shown, `Esc` or `q` closes it. No `group_by` or `count_only`: those are for agents |
 | `:help` | show the keys of the current mode, like `?` |
 | `:q` | quit; refuses if the session has unsaved changes |
 | `:q!` | quit without saving |

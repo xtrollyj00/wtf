@@ -51,6 +51,21 @@ pub struct App {
     pub help: bool,
     /// The `e` box: a title and the full value of the selected signal at the cursor.
     pub examine: Option<(String, Vec<String>)>,
+    /// The `:records` list.
+    pub records: Option<Records>,
+}
+
+/// `:records`: a stream's records, one a line, to pick one and jump to it.
+pub struct Records {
+    pub stream: String,
+    /// The line above the list: how many records, of how many.
+    pub title: String,
+    /// Each record's start and its line.
+    pub items: Vec<(time::Tick, String)>,
+    pub hl: usize,
+    /// First item shown, and how many fit, as last drawn.
+    pub top: usize,
+    pub page: usize,
 }
 
 impl App {
@@ -78,6 +93,7 @@ impl App {
             quit: false,
             help: false,
             examine: None,
+            records: None,
         }
     }
 
@@ -111,6 +127,7 @@ impl App {
                 None
             }
             "e" => return self.reload(),
+            "records" => return self.open_records(arg.trim()),
             // the window picks the unit that fits; `unit` is for agents' answers (spec §15)
             "unit" => return Err("unit sets the time unit of an agent's answers; the window picks what fits".into()),
             _ => command::run(&mut self.ws, line)?,
@@ -146,6 +163,9 @@ impl App {
             }
             return;
         }
+        if self.records.is_some() {
+            return self.records_key(k);
+        }
         let mark = self.ws.mark();
         match self.mode {
             Mode::View => self.view_key(k),
@@ -162,6 +182,68 @@ impl App {
         }
     }
 
+
+    /// `:records <stream> [where <expr>]`: open the list of a stream's records (spec §7).
+    fn open_records(&mut self, arg: &str) -> Result<(), String> {
+        let (name, filter) = match arg.split_once(" where ") {
+            Some((n, f)) => (n.trim(), Some(f.trim())),
+            None => (arg, None),
+        };
+        let fpt = self.ws.trace.fs_per_tick;
+        let Some(st) = self.ws.streams.iter().find(|s| s.name == name) else {
+            let names: Vec<&str> = self.ws.streams.iter().map(|s| s.name.as_str()).collect();
+            return Err(match names.len() {
+                0 => "no streams yet: make one with :decode or :protocol".into(),
+                _ if name.is_empty() => format!("records of which stream? ({})", names.join(", ")),
+                _ => format!("unknown stream: {name} (streams: {})", names.join(", ")),
+            });
+        };
+        let (numbers, of) = st.select(0, self.ws.trace.end(), filter, fpt)?;
+        if numbers.is_empty() {
+            return Err(if filter.is_some() { format!("no matching records, of {of}") } else { "no records".into() });
+        }
+        let items = numbers
+            .iter()
+            .map(|&i| {
+                let r = &st.records[i];
+                let fields: Vec<String> = st.fields_text(i, fpt).into_iter().map(|(n, v)| format!("{n}={v}")).collect();
+                (r.start, format!("#{i}  {}{}{}  {}", time::format(r.start, fpt), gl().dash, time::format(r.end, fpt), fields.join(" ")))
+            })
+            .collect();
+        let title = match filter {
+            Some(_) => format!("{} matching records, of {of}", numbers.len()),
+            None => format!("{} records", numbers.len()),
+        };
+        self.records = Some(Records { stream: st.name.clone(), title, items, hl: 0, top: 0, page: 1 });
+        Ok(())
+    }
+
+    /// The records list has the keys: `j` / `k` and `Ctrl-f` / `Ctrl-b` move, `Enter` jumps to
+    /// the record and selects its stream's row, `Esc` / `q` close.
+    fn records_key(&mut self, k: KeyEvent) {
+        let Some(r) = &mut self.records else { return };
+        let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+        let last = r.items.len() - 1;
+        match k.code {
+            KeyCode::Esc | KeyCode::Char('q') => self.records = None,
+            KeyCode::Char('j') | KeyCode::Down => r.hl = (r.hl + 1).min(last),
+            KeyCode::Char('k') | KeyCode::Up => r.hl = r.hl.saturating_sub(1),
+            KeyCode::Char('f') if ctrl => r.hl = (r.hl + r.page).min(last),
+            KeyCode::Char('b') if ctrl => r.hl = r.hl.saturating_sub(r.page),
+            KeyCode::Char('G') => r.hl = last,
+            KeyCode::Char('g') => r.hl = 0,
+            KeyCode::Enter => {
+                let (t, name) = (r.items[r.hl].0, r.stream.clone());
+                self.records = None;
+                let row = self.ws.rows.iter().position(|row| matches!(row, Row::Signal(s) if self.ws.trace.vars[s.var].path == name));
+                if let Some(i) = row {
+                    (self.ws.sel, self.ws.bit) = (i, None);
+                }
+                self.ws.jump(t, false);
+            }
+            _ => {}
+        }
+    }
 
     /// `e`: open a box with the selected signal's whole value at the cursor, or on a stream its
     /// record's: the times and every field.
