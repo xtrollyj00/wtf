@@ -24,7 +24,6 @@ Shortcuts taken so far, to fix when they get in the way.
 
 - A named signal can't be removed, only defined again (`:signal`); removing vars would renumber
   them.
-- A named signal that uses one defined after it fails on `:e`, as they are made in order.
 - Every slice or concatenation named, even once in a search, stays a var until the trace is
   reopened, and is listed in the panel and by `signals`.
 - The signal panel is rebuilt when computed vars appear, losing its highlighted item and Space
@@ -46,8 +45,6 @@ Shortcuts taken so far, to fix when they get in the way.
 - The `e` box doesn't scroll: a value longer than the screen ends in `… n more lines`.
 - `join` pairs strictly in order (AXI-Lite has no IDs): after a lost response, the transactions
   after it are still paired, one off.
-- An instance of `frame` / `pair` / `check` on a stream made by a later instance fails on `:e`, as
-  instances are made in order.
 - The status line's `match 3 of 157` counts matches only up to 100 000 (`100000+`), so `n` stays
   quick on huge traces; past that the total isn't known.
 - The workspace's time unit isn't shown in the window.

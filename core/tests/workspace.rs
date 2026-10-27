@@ -471,3 +471,17 @@ fn computed_edge_cases() {
     assert_eq!(ws.view.cursor, 30);
     assert_eq!(ws.query("fell(calc.txt)").err().unwrap(), "fell(calc.txt): not a bit signal");
 }
+
+/// `:e` makes named signals and instances that use ones made after them.
+#[test]
+fn reloads_in_any_order() {
+    let mut ws = open();
+    for c in ["signal lo = top.cpu.data[3:0]", "signal hi = top.cpu.data[7:4]", "signal lo = hi[1:0]", "decode p check clock=clk b=top.cpu.busy", "decode f pair request=p response=p", "decode p check clock=clk b=lo == 1"] {
+        wtf_core::command::run(&mut ws, c).unwrap();
+    }
+    assert_eq!(ws.signals.iter().map(|s| s.0.as_str()).collect::<Vec<_>>(), ["lo", "hi"]);
+    // the pair before the check it reads, as a session written by hand may list them
+    ws.decodes.reverse();
+    assert_eq!(ws.reload(), Ok(("reloaded".into(), false)));
+    assert!(ws.streams.iter().any(|s| s.name == "f"));
+}

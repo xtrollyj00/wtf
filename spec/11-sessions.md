@@ -78,7 +78,8 @@ rows = [
 - `[[protocol]]` entries (after `[[signal]]`, before the rows) sample streams: `name`, `clock`,
   `when` and `fields` in their order (section 16). Each stream is a signal, and so is
   each of its fields (`rx.tdata`), so rows can show them; they are sampled again on `:e`. One that
-  can't be is reported and kept, to try again on the next `:e`.
+  can't be is reported and kept, to try again on the next `:e`. Named signals, protocols and
+  instances are made in passes, so one that uses one listed after it is made too.
   A protocol with `roles = ["valid", "ready", "cmd"]` is a type instead: its `when` and `fields`
   name the roles, its `clock` may be left out, and `[[decode]]` entries (`name`, `protocol`,
   optional `clock`, `signals = { valid = "top.cmd_valid", ... }`) put it on signals, each making

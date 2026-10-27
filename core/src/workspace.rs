@@ -498,6 +498,19 @@ impl Workspace {
     }
 
 
+    /// Make each again, in passes while some are made, so one that uses one made after it is made
+    /// too. Those left, with their errors.
+    fn again<T: Clone>(&mut self, items: Vec<T>, mut make: impl FnMut(&mut Self, T) -> Result<(), String>) -> Vec<(T, String)> {
+        let mut left: Vec<(T, String)> = items.into_iter().map(|t| (t, String::new())).collect();
+        loop {
+            let n = left.len();
+            left = left.into_iter().filter_map(|(t, _)| make(self, t.clone()).err().map(|e| (t, e))).collect();
+            if left.is_empty() || left.len() == n {
+                return left;
+            }
+        }
+    }
+
     /// `:e`: reopen the trace, keeping the layout and the view, and make computed signals again
     /// from the new values. Signals no longer in the file (or that can't be made) are dropped and
     /// listed. If the file can't be read, nothing changes.
@@ -506,10 +519,8 @@ impl Workspace {
         // no rows while computed ones are made again: theirs name vars of the old trace
         let old_rows = std::mem::take(&mut self.rows);
         let mut missing = Vec::new();
-        for (name, expr) in self.signals.clone() {
-            if let Err(e) = self.define(&name, &expr) {
-                missing.push(format!("{name} ({e})"));
-            }
+        for ((name, _), e) in self.again(self.signals.clone(), |ws, (n, e)| ws.define(&n, &e).map(drop)) {
+            missing.push(format!("{name} ({e})"));
         }
         for (path, spec) in self.value_names.clone() {
             if let Err(e) = self.name_values(&path, &spec) {
@@ -520,19 +531,14 @@ impl Workspace {
         // taken first: a protocol added would make its instances again
         let decodes = std::mem::take(&mut self.decodes);
         // one that fails is kept, to try again on the next `:e`
-        for p in std::mem::take(&mut self.protocols) {
-            let name = p.name.clone();
-            if let Err(e) = self.add_protocol(p.clone()) {
-                missing.push(format!("{name} ({e})"));
-                self.protocols.push(p);
-            }
+        let protocols = std::mem::take(&mut self.protocols);
+        for (p, e) in self.again(protocols, |ws, p| ws.add_protocol(p).map(drop)) {
+            missing.push(format!("{} ({e})", p.name));
+            self.protocols.push(p);
         }
-        for d in decodes {
-            let name = d.name.clone();
-            if let Err(e) = self.add_decode(d.clone()) {
-                missing.push(format!("{name} ({e})"));
-                self.decodes.push(d);
-            }
+        for (d, e) in self.again(decodes, |ws, d| ws.add_decode(d).map(drop)) {
+            missing.push(format!("{} ({e})", d.name));
+            self.decodes.push(d);
         }
         let mut rows: Vec<Row> = Vec::new();
         for r in old_rows {
