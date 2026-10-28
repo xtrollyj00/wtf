@@ -105,11 +105,8 @@ lists the shortcuts taken so far. [`ROADMAP.md`](ROADMAP.md) says what comes nex
 
 ## Contributing
 
-Issues and pull requests are welcome. Behaviour is specified in `spec/` first, so a change that
-alters what wtf does changes the spec with it. Commit messages follow
-[Conventional Commits](https://www.conventionalcommits.org/). `cargo test` and
-`cargo clippy --all-targets` should pass. [`CLAUDE.md`](CLAUDE.md) has the commands and the
-architecture, for people and agents alike.
+Bug reports, ideas for the screen, agent benchmark tasks and speedups are all welcome:
+[`CONTRIBUTING.md`](CONTRIBUTING.md) says how.
 
 ## License
 
