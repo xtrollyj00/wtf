@@ -91,7 +91,7 @@ When it has found something, it prepares the rows and puts marks on the events, 
 them in your open wtf window (`:undo` gives you your own view back). With no window open, it writes
 a session file for you to open. `wtf --attach` lists what agents have open.
 
-![Claude Code below a wtf window, asked which AXI4-Lite read in docs/demo.vcd fails: it decodes the bus, finds the read at 0x40 answered with SLVERR after 20ns, and presents the AR and R signals with cursors on the handshakes in the wtf window above](docs/agent/agent.gif)
+https://github.com/user-attachments/assets/7c244cad-1cd9-48b3-ba10-d42ba655e726
 
 How much it helps is measured, not claimed: `wtf-bench agent` gives an agent failing RTL
 testbenches to debug and fix, with wtf and without it (logs, prints and reruns only). Without it
