@@ -15,4 +15,4 @@ frame                         ┃    🮡── #0 10B ──🮧──🮧 #2 �
   frame.complete  Z           ┃ Z ─┘                      └────── Z ───────┘  └── Z ──
                               ┃                                  🮣──🮢  🮣───🮢
 errors                        ┃                                  🮡──🮠  🮡───🮠
- VIEW  rx.frame                                                            0ns   3ns/col   axis [+]
+ VIEW  rx.frame                                                        0ns  ·  3ns/col  ·  axis [+]

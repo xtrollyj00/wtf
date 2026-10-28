@@ -275,6 +275,10 @@ mod tests {
         keys(&mut app, ":unit ns\n");
         assert!(app.msg.as_ref().unwrap().0.starts_with("unit sets the time unit of an agent's answers"));
         assert_eq!(app.ws.unit, None);
+        // one an agent set shows on the status line
+        app.ws.unit = Some(wtf_core::time::unit_named("ns").unwrap());
+        app.msg = None;
+        assert!(snapshot(&mut app, 100, None).contains("agents in ns"));
     }
 
     #[test]

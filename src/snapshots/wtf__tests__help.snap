@@ -21,4 +21,4 @@ expression: "snapshot(&mut app, 100, Some(20))"
   /valid && ready && data == 0x40    several signals at once
   /@clk fell(valid) && !past(ready)  sampled at clk; also rose() stable()
                                                                                        Esc ? close
- VIEW  top.clk                                                              12ns   1ns/col   simple
+ VIEW  top.clk                                                          12ns  ·  1ns/col  ·  simple

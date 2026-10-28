@@ -15,4 +15,4 @@ mode       0x0  ┃── 0x0 ────🮧──── 0x3 ─────�
   mode[0]  0    ┃───────────┘              └─────────────
                 ┃ ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌──┐
 clk        0    ┃─┘  └─┘  └─┘  └─┘  └─┘  └─┘  └─┘  └─┘  └
- VIEW  calc.mode                                     0ns   2ns/col   simple [+]
+ VIEW  calc.mode                                 0ns  ·  2ns/col  ·  simple [+]

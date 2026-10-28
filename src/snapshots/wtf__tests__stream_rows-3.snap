@@ -17,4 +17,4 @@ frame             #2 8B                      🮡── #0 10B ──🮧──�
 errors                                                       ┃             🮡──🮠  🮡───🮠
 
 
- VIEW  rx.frame #2  65ns–85ns  beats=0x2 len=0x8 data=c0 00 00 00 c1 00…  65ns   3ns/col   axis [+]
+ VIEW  rx.frame #2  65ns–85ns  beats=0x2 len=0x8 data=c0 00 00 00 c…  65ns  ·  3ns/col  ·  axis [+]

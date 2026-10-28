@@ -11,4 +11,4 @@ errors      #0  15ns–55ns  beats=0x3 len=0xA data=a0 00 00 00 a1 00 00 00 a2 0
                                                                      Enter jump  Esc close
 
 
- VIEW  rx.errors                                                           0ns   2ns/col   axis [+]
+ VIEW  rx.errors                                                       0ns  ·  2ns/col  ·  axis [+]

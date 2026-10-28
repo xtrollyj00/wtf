@@ -7,4 +7,4 @@ expression: "snapshot(&mut app, 100, None)"
 frame     ┃      🮡───── #0 10B ──────🮧────🮧─ #2 8B ─🮠                        🮡────🮠
           ┃                                                   🮣────🮢    🮣────🮢
 errors    ┃                                                   🮡────🮠    🮡────🮠
- VIEW  rx.errors                                                           0ns   2ns/col   axis [+]
+ VIEW  rx.errors                                                       0ns  ·  2ns/col  ·  axis [+]

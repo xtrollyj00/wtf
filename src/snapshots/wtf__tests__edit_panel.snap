@@ -15,4 +15,4 @@ expression: "snapshot(&mut app, 80, Some(14))"
       rst                   clk        0     ┃┘ └─┘└─┘ └┘ └─┘└─┘ └┘ └─┘└
                             ▸ new signals go here ──────────────────────────────
 
- EDIT  top.clk                                       0ns   3ns/col   simple [+]
+ EDIT  top.clk                                   0ns  ·  3ns/col  ·  simple [+]

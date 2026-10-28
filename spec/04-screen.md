@@ -16,7 +16,7 @@ No signals are shown yet. The screen is empty except for a short guide in the mi
                     ?      help                               
                     q      quit                               
                                                               
- VIEW  trace.fst                                      0ns     
+ VIEW                                   0ns  ·  1ns/col  ·  trace.fst
 ```
 
 The guide disappears once a signal is added, and comes back if all signals are removed.
@@ -37,7 +37,7 @@ clk    1     ───┘   └───┘   └───┘   └───┘ 
 state  0x4   ─ 0x1 ──🮧──── 0x2 ─────🮧──── 0x4 ──────
              ────────🮦───────🮦──────🮦────────🮦──────
 data   0x3A  ─ 0x43 ─🮧 0x96 ─🮧 0xE1 🮧── 0x3A ─🮧 0x7F
- VIEW  cpu.state                                   120ns   2ns/col   trace.fst
+ VIEW  cpu.state                      120ns  ·  2ns/col  ·  trace.fst
 ```
 
 - **Rows**: each signal takes two terminal lines (section 14). The name and value sit on the lower line.
@@ -56,10 +56,12 @@ data   0x3A  ─ 0x43 ─🮧 0x96 ─🮧 0xE1 🮧── 0x3A ─🮧 0x7F
 - **Cursor and marks**: columns down to the last row. The cursor's column is tinted warm, so the
   waveform under it stays as it is; the marks' columns are a fainter, neutral tint. Without colour
   the waveform stays too, and the column's blank cells show `┃` (marks `╎`).
-- **Status line** (bottom): on the left the mode (`VIEW` reversed, `EDIT` in the accent colour, so
-  it shows when keys change the layout) and the full path of the selected signal (or a
-  message); on the right the cursor's time, the zoom (time per column) and the file
-  name with `[+]` if the session has unsaved changes. The visible time range is on the time axis.
+- **Status line** (bottom): on the left the mode as a pill (`VIEW` quiet, `EDIT` in the accent
+  colour, so it shows when keys change the layout; both reversed without colour) and the full path
+  of the selected signal, its scope dim (or a message); on the right, a dot between each, the
+  cursor's time, then dim the zoom (time per column), the time unit an agent set for its answers
+  (`agents in ns`, section 15) if one did, and the file name, with `[+]` in the accent if the
+  session has unsaved changes. The visible time range is on the time axis.
 
 ### Edit mode
 
@@ -77,7 +79,7 @@ the rows and their waveforms stay visible on the right, with a line marking wher
 │       busy         │
 │   ▸ stream         │
 └────────────────────┘
- EDIT  cpu.state                     0ns   2ns/col   trace.fst
+ EDIT  cpu.state              0ns  ·  2ns/col  ·  trace.fst
 ```
 
 See section 5 for the keys.

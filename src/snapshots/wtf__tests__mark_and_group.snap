@@ -13,4 +13,4 @@ expression: "snapshot(&mut app, 80, Some(12))"
       clk                                 Esc     close
 
    2 marked
- EDIT                                                    0ns   2ns/col   simple
+ EDIT                                                0ns  ·  2ns/col  ·  simple

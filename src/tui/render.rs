@@ -371,16 +371,31 @@ fn zoom_text(v: &View, fpt: Option<u128>) -> String {
 fn status(app: &App, buf: &mut Buffer, w: usize, y: usize) {
     let fpt = app.ws.trace.fs_per_tick;
     let mode = if app.mode == Mode::Edit { " EDIT " } else { " VIEW " };
-    // EDIT in the accent: the keys change the layout; VIEW stays quiet
-    let st = match app.mode == Mode::Edit && !pal().mono {
-        true => Style::new().bg(pal().cursor).fg(pal().cursor_text).add_modifier(Modifier::BOLD),
-        false => Style::new().add_modifier(Modifier::REVERSED),
+    // pills: EDIT in the accent, as the keys change the layout; VIEW quiet
+    let st = match (app.mode == Mode::Edit, pal().mono) {
+        (_, true) => Style::new().add_modifier(Modifier::REVERSED),
+        (true, false) => Style::new().bg(pal().cursor).fg(pal().cursor_text).add_modifier(Modifier::BOLD),
+        (false, false) => Style::new().bg(pal().selected).add_modifier(Modifier::BOLD),
     };
     put(buf, 0, y, mode, st);
-    let plus = if app.ws.modified() { " [+]" } else { "" };
-    let cursor = time::format(app.ws.view.cursor, fpt);
-    let follow = app.follow.as_ref().filter(|f| f.on).map_or(String::new(), |f| format!("following {}   ", f.id));
-    let right = format!("{follow}{cursor}   {}   {}{plus} ", zoom_text(&app.ws.view, fpt), app.ws.file_name);
+    // the cursor's time first, the rest dim, a dot between; the agents' time unit when one set it
+    let dim = Style::new().fg(pal().dim);
+    let sep = format!("  {}  ", gl().dot);
+    let mut parts: Vec<(String, Style)> = Vec::new();
+    if let Some(f) = app.follow.as_ref().filter(|f| f.on) {
+        parts.extend([(format!("following {}", f.id), Style::new().fg(pal().cursor)), (sep.clone(), dim)]);
+    }
+    parts.push((time::format(app.ws.view.cursor, fpt), Style::new()));
+    parts.extend([(sep.clone(), dim), (zoom_text(&app.ws.view, fpt), dim)]);
+    if let Some(u) = app.ws.unit {
+        parts.extend([(sep.clone(), dim), (format!("agents in {}", time::unit_name(u)), dim)]);
+    }
+    parts.extend([(sep.clone(), dim), (app.ws.file_name.clone(), dim)]);
+    if app.ws.modified() {
+        parts.push((" [+]".into(), Style::new().fg(pal().cursor)));
+    }
+    parts.push((" ".into(), Style::new()));
+    let right: String = parts.iter().map(|(t, _)| t.as_str()).collect();
     let (left, st) = match &app.msg {
         Some((m, err)) => (m.clone(), if *err { red() } else { Style::new() }),
         None => match app.ws.rows.get(app.ws.sel) {
@@ -415,8 +430,15 @@ fn status(app: &App, buf: &mut Buffer, w: usize, y: usize) {
     }
     // a long path keeps its end, where the signal name is
     let left = if len > room { format!("{}{}", gl().cut, left.chars().skip(len + 1 - room).collect::<String>()) } else { left };
-    put(buf, x, y, &left, st);
-    put(buf, w.saturating_sub(right.chars().count()), y, &right, Style::new());
+    // a path's scope dim, as in the name column, so the signal's name stands out
+    let leaf = if app.msg.is_none() && matches!(app.ws.rows.get(app.ws.sel), Some(Row::Signal(r)) if app.ws.record_at(r.var).is_none()) { left.rfind('.').map_or(0, |d| d + 1) } else { 0 };
+    put(buf, x, y, &left[..leaf], dim);
+    put(buf, x + left[..leaf].chars().count(), y, &left[leaf..], st);
+    let mut x = w.saturating_sub(right.chars().count());
+    for (t, s) in parts {
+        put(buf, x, y, &t, s);
+        x += t.chars().count();
+    }
 }
 
 fn command_line(app: &App, buf: &mut Buffer, w: usize, h: usize) -> Option<(u16, u16)> {
