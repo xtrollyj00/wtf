@@ -330,10 +330,13 @@ fn boxed(buf: &mut Buffer, w: usize, body: usize, title: &str, lines: &[Line], c
         put(buf, x0, y0 + bh - 1, &format!("{}{}{close}{}{}", gl().border[2], gl().border[4].to_string().repeat(bw - 3 - close.chars().count()), gl().border[4], gl().border[3]), dim);
     } else {
         // a card: its own background, the title in bold, how to close it dim across from it; two
-        // columns cleared on each side, so no stub of a waveform is left beside it
+        // columns cleared on each side, so no stub of a waveform is left beside it (their
+        // background stays, so a selected row's band isn't cut)
         let (cx, cw) = (x0.saturating_sub(2), (bw + 4).min(w - x0.saturating_sub(2)));
         for y in 0..bh {
-            put(buf, cx, y0 + y, &" ".repeat(cw), Style::new().bg(Color::Reset).fg(Color::Reset));
+            for x in cx..cx + cw {
+                buf[(x as u16, (y0 + y) as u16)].set_char(' ');
+            }
             put(buf, x0, y0 + y, &" ".repeat(bw), st);
         }
         put(buf, x0 + 1, y0, &top, st.add_modifier(Modifier::BOLD));
