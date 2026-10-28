@@ -337,8 +337,8 @@ pub const ROW_LINES: usize = 2;
 /// The rows (names, values at the cursor, waveforms) under the time axis and the cursor ruler,
 /// scrolled so the selection shows: `top` is the first row on screen, kept up to date. With
 /// `adding`, a line marks where new signals go and the selection isn't accented (the keys are
-/// elsewhere). Returns how many lines of rows fit.
-pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer, w: usize, body: usize) -> usize {
+/// elsewhere). Returns how many lines of rows fit, and the column the waveforms start at.
+pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer, w: usize, body: usize) -> (usize, usize) {
     // line 0 is the time axis
     // while adding, one more line marks where new signals go
     // line 1 is the cursor ruler when there is more than one cursor
@@ -521,7 +521,7 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
     if let Some((x, t)) = pill {
         put(buf, wx + x, 0, &t, Style::new().bg(pal().cursor).fg(pal().cursor_text).add_modifier(Modifier::BOLD | pal().accent()));
     }
-    fit
+    (fit, wx)
 }
 
 /// The cursor ruler (spec §9): the cursor's and each mark's number at its column, the cursor highlighted, and

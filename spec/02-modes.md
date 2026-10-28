@@ -53,3 +53,16 @@ Multi-key sequences (`gg`, `dd`, `'1`) wait for their second key without a timeo
 `Esc` or an invalid second key cancels them.
 
 `z` / `x` sit under the left hand, so one hand zooms while the other stays on `hjkl`.
+
+### Mouse
+
+The keys do everything; the mouse is for what GTKWave and Surfer users reach for first, in View
+and Edit mode while nothing is over the rows (no panel, box or command line):
+
+| Mouse | Action |
+|---|---|
+| click on a row | select it; on its waveform, also put the cursor at that column's time |
+| click on the time axis | put the cursor there |
+| wheel | move the selection down / up, as `j` / `k` |
+| `Ctrl` + wheel | zoom out / in, as `x` / `z` |
+| `Shift` + wheel, or sideways | scroll the time by an eighth of the screen, the cursor staying |

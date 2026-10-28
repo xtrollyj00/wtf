@@ -174,6 +174,7 @@ fn tui(app: &mut App) -> Result<(), String> {
         rx
     });
     let mut term = ratatui::init();
+    let _ = crossterm::execute!(std::io::stdout(), crossterm::event::EnableMouseCapture);
     let res = (|| -> std::io::Result<()> {
         while !app.quit {
             term.draw(|f| {
@@ -207,10 +208,10 @@ fn tui(app: &mut App) -> Result<(), String> {
             // links like ssh) don't queue up frames that are stale by the time they arrive
             let mut ev = crossterm::event::read()?;
             loop {
-                if let crossterm::event::Event::Key(k) = ev
-                    && k.kind == crossterm::event::KeyEventKind::Press
-                {
-                    app.key(k);
+                match ev {
+                    crossterm::event::Event::Key(k) if k.kind == crossterm::event::KeyEventKind::Press => app.key(k),
+                    crossterm::event::Event::Mouse(m) => app.mouse(m),
+                    _ => {}
                 }
                 // to the terminal's clipboard; one that can't take it ignores the sequence
                 if let Some(text) = app.yank.take() {
@@ -225,6 +226,7 @@ fn tui(app: &mut App) -> Result<(), String> {
         }
         Ok(())
     })();
+    let _ = crossterm::execute!(std::io::stdout(), crossterm::event::DisableMouseCapture);
     ratatui::restore();
     res.map_err(|e| e.to_string())
 }
@@ -863,6 +865,28 @@ mod tests {
         // and without colour, the cursor column reversed
         draw::set_palette(draw::Palette::mono());
         assert!(draw::ansi(&super::screen(&mut a, 80, None)).contains("\x1b[0;1;7m"));
+    }
+
+    #[test]
+    fn mouse() {
+        use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+        let mut app = open("vcd", Some(SESSION));
+        snapshot(&mut app, 100, None); // where the waveforms start
+        let at = |kind, column, row, modifiers| MouseEvent { kind, column, row, modifiers };
+        // a click on data's lower line, 20 columns into the waveforms
+        app.mouse(at(MouseEventKind::Down(MouseButton::Left), app.wave_x as u16 + 20, 8, KeyModifiers::NONE));
+        assert_eq!((app.ws.sel, app.ws.view.cursor), (3, app.ws.view.col_start(20)));
+        // below the rows: nothing
+        app.mouse(at(MouseEventKind::Down(MouseButton::Left), app.wave_x as u16 + 2, 19, KeyModifiers::NONE));
+        assert_eq!(app.ws.view.cursor, app.ws.view.col_start(20));
+        app.mouse(at(MouseEventKind::ScrollDown, 0, 0, KeyModifiers::NONE));
+        assert_eq!(app.ws.sel, 4);
+        // Ctrl zooms: in, then out again (all 80ns already fit, so no further)
+        let zoom = (app.ws.view.ticks, app.ws.view.cols);
+        app.mouse(at(MouseEventKind::ScrollUp, 0, 0, KeyModifiers::CONTROL));
+        assert_eq!(app.ws.view.cols, zoom.1 * 2);
+        app.mouse(at(MouseEventKind::ScrollDown, 0, 0, KeyModifiers::CONTROL));
+        assert_eq!((app.ws.view.ticks, app.ws.view.cols), zoom);
     }
 
     #[test]

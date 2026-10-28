@@ -31,7 +31,8 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
     } else if body > ROW_LINES {
         // the time axis and at least one row
         let adding = app.panel_shown();
-        app.page = draw::rows(&mut app.ws, &mut app.top, adding, &mut right, w - pw, body);
+        let (page, wx) = draw::rows(&mut app.ws, &mut app.top, adding, &mut right, w - pw, body);
+        (app.page, app.wave_x) = (page, pw + wx);
     }
     right.area.x = area.x + pw as u16;
     buf.merge(&right);

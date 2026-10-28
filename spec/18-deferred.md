@@ -2,7 +2,6 @@
 
 To be decided once prototypes exist:
 
-- Mouse support.
 - Subgroups (nesting), creating groups automatically from file scopes.
 - Remote traces (client/server), for traces on a machine reached over ssh, where drawing remotely
   lags. Until then: mount the directory with sshfs and run wtf locally, or use mosh.
