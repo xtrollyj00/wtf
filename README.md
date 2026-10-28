@@ -55,9 +55,10 @@ wtf --snapshot 120 trace.fst   # one screen as text, for CI logs and bug reports
 wtf --snapshot 120x30 --ansi --keys '?' trace.fst   # in colour, after pressing keys
 ```
 
-At first the screen is empty: press `i` to add signals (`/` searches, `Space` marks, `Enter`
-adds), `Esc` to go back to viewing, `?` for the keys of the mode you are in, `:` for commands,
-`:w` to save the session, `q` to quit.
+The first start asks which glyphs your terminal draws well and whether you want dark or light
+(`wtf --setup` asks again). Then the screen is empty: press `i` to add signals (`/` searches,
+`Space` marks, `Enter` adds), `Esc` to go back to viewing, `?` for the keys of the mode you are
+in, `:` for commands, `:w` to save the session, `q` to quit.
 
 ## With an AI agent
 
@@ -96,7 +97,7 @@ also say when and where things went wrong, in fewer simulation runs, and mostly 
 ## Documentation
 
 Start with the [user guide](docs/guide.md): a 5-minute tour of `docs/demo.vcd`, a cheat sheet,
-how to dump VCD or FST from your simulator, and how to work with an agent.
+how it looks, and how to work with an agent.
 
 The design is in [`spec/`](spec/README.md), one file per topic: the keys, commands, search,
 sessions, the MCP server and the decoders. [Known limits](spec/18-deferred.md#known-limits)

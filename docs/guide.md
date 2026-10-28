@@ -5,7 +5,6 @@ the [spec](../spec/README.md) is the full reference, linked below as `§N`.
 
 - [A 5-minute tour](#a-5-minute-tour)
 - [Cheat sheet](#cheat-sheet)
-- [Getting a trace from your simulator](#getting-a-trace-from-your-simulator)
 - [Look and feel](#look-and-feel)
 - [Working with an AI agent](#working-with-an-ai-agent)
 
@@ -236,47 +235,11 @@ Search expressions: `/0x40` a value, `/x` `/z` unknown / high impedance, `/valid
 Command line (§12): `wtf [-S <session>] [--glyphs <set>] [--snapshot <w>[x<h>] [--ansi]
 [--keys <keys>]] <trace>`, `wtf --attach [<id>]`, `wtf --mcp`.
 
-## Getting a trace from your simulator
-
-wtf reads VCD and FST, detecting the format from the content (§13). FST holds the same data,
-smaller on disk and faster to open: use it for anything large. The flags below are the
-simulators' own; see their manuals if yours differs.
-
-**Icarus Verilog.** In the testbench:
-
-```verilog
-initial begin
-  $dumpfile("dump.vcd");
-  $dumpvars(0, tb);      // 0: tb and everything below it
-end
-```
-
-Then `iverilog -o sim tb.v dut.v && vvp sim`. For FST, run `vvp sim -fst` and name the file
-`dump.fst`.
-
-**Verilator.** Build with `--trace` (VCD) or `--trace-fst` (FST). In a C++ testbench:
-
-```cpp
-Verilated::traceEverOn(true);
-auto* tfp = new VerilatedVcdC;     // VerilatedFstC with --trace-fst
-top->trace(tfp, 99);
-tfp->open("dump.vcd");
-// at each time step: tfp->dump(main_time);
-tfp->close();
-```
-
-**nvc** (VHDL): `nvc -a dut.vhd tb.vhd -e tb -r --wave=dump.fst`. The default format is FST;
-`--format=vcd` writes VCD.
-
-**GHDL** (VHDL): `ghdl -r tb --fst=dump.fst` or `--vcd=dump.vcd`. Plain `--wave` writes GHDL's own
-GHW format, which wtf does not read.
-
-**cocotb.** The simulator does the dumping, so use its option from the list above. With cocotb's
-makefiles, `make WAVES=1` asks the simulator for a waveform where the makefile supports it; look
-for the file in the simulation build directory, and set the simulator's own flags (for example
-`--trace-fst` for Verilator) if you want FST.
-
 ## Look and feel
+
+**First start.** The first time wtf opens a window, it shows a clock and a bus drawn three ways
+and asks which one your terminal draws cleanly, then whether you want dark or light. The answers
+go to the config file below; `wtf --setup` asks again (§19).
 
 **Themes.** `dark` is the default, `light` is built in. Pick one in the config file
 `~/.config/wtf/config.toml` (or `$XDG_CONFIG_HOME/wtf/config.toml`):
