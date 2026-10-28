@@ -130,7 +130,14 @@ impl Workspace {
         }
         let missing: Vec<&str> = required.iter().copied().filter(|r| !signals.iter().any(|(s, _)| s == r)).collect();
         if !missing.is_empty() {
-            errors.push(format!("no signal for {}", missing.join(", ")));
+            // where the file has this protocol's ports, the line that decodes them
+            let found: Vec<String> = protocol::detect(&self.trace)
+                .into_iter()
+                .filter(|f| f.protocol == d.protocol)
+                .map(|f| f.decode_line().replacen(&format!("decode {} ", f.name()), &format!("decode {} ", d.name), 1))
+                .collect();
+            let hint = if found.is_empty() { String::new() } else { format!(" (the file has: {})", found.join("; ")) };
+            errors.push(format!("no signal for {}{hint}", missing.join(", ")));
         }
         let (mut out, mut roles) = (Vec::new(), HashMap::new());
         for (role, sig) in &signals {

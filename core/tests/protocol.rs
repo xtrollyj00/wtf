@@ -115,7 +115,7 @@ fn builtin_instance_errors() {
     let mut ws = open("axis.vcd");
     let err = |ws: &mut Workspace, d| ws.add_decode(d).err().unwrap();
     assert_eq!(err(&mut ws, decode("rx", "axis", "", &[("tvalid", "tvalid"), ("tuser", "tdata"), ("tdata", "nope")], &[("x", "1")])),
-        "rx: no signal for tready; axis has no role tuser; tdata: unknown signal: nope; axis has no param x (params: prefix); no clock");
+        "rx: no signal for tready (the file has: decode rx axis clock=top.clk prefix=top.); axis has no role tuser; tdata: unknown signal: nope; axis has no param x (params: prefix); no clock");
     // its names are taken
     let p = Sampler { name: "axis".into(), clock: "clk".into(), when: "tvalid".into(), fields: vec![], roles: vec![] };
     assert_eq!(ws.add_protocol(p), Err("axis is a built-in protocol".into()));
@@ -336,7 +336,7 @@ fn axilite_one_side() {
     assert!(!ws.streams.iter().any(|s| s.name.starts_with("w.ar") || s.name.starts_with("w.rd")));
     // half a side is still an error
     let err = ws.add_decode(decode("x", "axilite", "aclk", &write[..7], &[])).unwrap_err();
-    assert_eq!(err, "x: no signal for bready");
+    assert_eq!(err, "x: no signal for bready (the file has: decode x axilite clock=top.aclk prefix=top.s_axi_)");
     let dir = Dir::new("axilite-read");
     let vcd = dir.0.join("rd.vcd");
     let mut text = String::from("$timescale 1ns $end\n$scope module top $end\n$var wire 1 ! aclk $end\n");
