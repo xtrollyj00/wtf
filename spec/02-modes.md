@@ -41,7 +41,7 @@
 | `''` | back to where the cursor was before the last jump |
 | `M` / `NM` | remove the mark under the cursor, or mark `N` |
 | `:` | command |
-| `?` | help: a box with the keys of the current mode (View, Edit, or the signal panel); `Esc`, `q` or `?` closes it |
+| `?` | help: a box with the keys of the current mode (View, Edit, or the signal panel), in the accent colour under dim headings (Move, Rows, Marks...), in as many columns as fit, and below them a few things to type (searches, commands), each with what it does; `Esc`, `q` or `?` closes it |
 | `q` | quit, same as `:q` |
 
 A count before a key repeats it, as in Vim: `5l`, `3w`, `3x`. Counts apply to `h` `l` `w` `b`

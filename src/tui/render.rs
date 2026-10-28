@@ -40,7 +40,7 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
         help(app, buf, w, body);
     }
     if let Some((title, lines)) = &app.examine {
-        boxed(buf, w, body, title, lines, " Esc e close ");
+        boxed(buf, w, body, title, &plain(lines), " Esc e close ");
     }
     if let Some(r) = &mut app.records {
         // the title line and a blank, then as many lines as fit; records scroll to show the
@@ -64,7 +64,7 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
                 false => format!("{}{l}", if k == r.hl { format!("{} ", gl().hl) } else { "  ".into() }),
             });
         }
-        boxed(buf, w, body, &r.name, &lines, if text { " j k scroll  Esc close " } else { " Enter jump  Esc close " });
+        boxed(buf, w, body, &r.name, &plain(&lines), if text { " j k scroll  Esc close " } else { " Enter jump  Esc close " });
     }
     let at = if matches!(app.mode, Mode::Command | Mode::Search) {
         command_line(app, buf, w, h)
@@ -138,103 +138,159 @@ fn panel(app: &mut App, buf: &mut Buffer, pw: usize, body: usize) -> Option<(u16
     Some(((3 + q.chars().count()).min(pw - 2) as u16, 1))
 }
 
-/// The keys of each mode for the `?` box: (title, (keys, action) pairs, notes under them).
-fn help_text(app: &App) -> (&'static str, &'static [(&'static str, &'static str)], &'static [&'static str]) {
+type Keys = &'static [(&'static str, &'static [(&'static str, &'static str)])];
+type Examples = &'static [(&'static str, &'static str)];
+
+/// The keys of each mode for the `?` box: its title, the keys under section headings, and a few
+/// things to type, each with what it does.
+fn help_text(app: &App) -> (&'static str, Keys, &'static str, Examples) {
     if app.panel_shown() {
-        let keys: &[(&str, &str)] = &[
-            ("j k", "move"),
-            ("l h", "open / close a scope"),
-            ("gg G", "first / last line"),
-            ("/", "search paths"),
-            ("n N", "next / previous match"),
-            ("Space", "mark a signal or scope"),
-            ("V", "mark a range"),
-            ("Ctrl-a", "mark all matches"),
-            ("Enter", "add as rows"),
-            ("Ctrl-g", "add as a group"),
-            ("u Ctrl-r", "undo / redo"),
-            ("Esc", "clear marks / close"),
+        let keys: Keys = &[
+            ("Move", &[("j k", "move"), ("l h", "open / close a scope"), ("gg G", "first / last line"), ("/", "search paths"), ("n N", "next / previous match")]),
+            ("Mark", &[("Space", "mark a signal or scope"), ("V", "mark a range"), ("Ctrl-a", "mark all matches")]),
+            ("Add", &[("Enter", "add as rows"), ("Ctrl-g", "add as a group"), ("u Ctrl-r", "undo / redo"), ("Esc", "clear marks / close")]),
         ];
-        return ("signal panel", keys, &["New signals go below the selected row (the yellow line)."]);
+        return ("signal panel", keys, "", &[("", "New signals go below the selected row, at the accent line.")]);
     }
     if app.editing_rows() {
-        let keys: &[(&str, &str)] = &[
-            ("j k", "select a row"),
-            ("a", "add signals"),
-            ("/", "add signals, searching"),
-            ("dd", "remove"),
-            ("J K", "move down / up"),
-            ("V", "select a range"),
-            ("r", "next radix"),
-            ("Space", "fold a group, bus or stream"),
-            ("e", "examine: the whole value"),
-            ("u Ctrl-r", "undo / redo"),
-            (":", "command"),
-            ("Esc", "back to View"),
+        let keys: Keys = &[
+            ("Rows", &[("j k", "select a row"), ("J K", "move down / up"), ("V", "select a range"), ("Space", "fold a group, bus or stream"), ("e", "examine: the whole value")]),
+            ("Change", &[("a", "add signals"), ("/", "add signals, searching"), ("dd", "remove"), ("r", "next radix"), ("u Ctrl-r", "undo / redo")]),
+            ("Other", &[(":", "command"), ("Esc", "back to View")]),
         ];
-        return ("EDIT", keys, &[":group <name>  :rename <name>  :radix q4.12  :rm  :w"]);
+        let commands: Examples = &[
+            (":group <name>", "group the selected rows"),
+            (":rename <name>", "rename the group"),
+            (":radix q4.12", "a radix: hex bin dec ascii, fixed point"),
+            (":color cyan", "colour the row"),
+            (":w", "save the session"),
+        ];
+        return ("EDIT", keys, "Commands", commands);
     }
-    let keys: &[(&str, &str)] = &[
-        ("h l", "cursor left / right"),
-        ("w b", "next / previous change"),
-        ("gg G", "start / end"),
-        ("z x", "zoom in / out"),
-        ("Ctrl-d/u", "half a screen right / left"),
-        ("H L", "screen left / right, cursor stays"),
-        ("c", "center on the cursor"),
-        ("j k", "select a row"),
-        ("Ctrl-f/b", "a screen of rows down / up"),
-        ("Space", "fold a group, bus or stream"),
-        ("e", "examine: the whole value"),
-        ("yy yt", "copy the value / the time"),
-        ("/", "search"),
-        ("n N", "next / previous match"),
-        ("m M", "put / remove a mark (3m: mark 3)"),
-        ("Tab", "jump to the next mark"),
-        ("'2..'9", "jump to a mark"),
-        ("''", "back to before the jump"),
-        ("i", "edit rows"),
-        (":", "command"),
-        ("q", "quit"),
+    let keys: Keys = &[
+        (
+            "Move",
+            &[
+                ("h l", "cursor left / right"),
+                ("w b", "next / prev change"),
+                ("gg G", "start / end"),
+                ("z x", "zoom in / out"),
+                ("c", "center the cursor"),
+                ("H L", "screen left / right"),
+                ("Ctrl-d/u", "half a screen"),
+            ],
+        ),
+        (
+            "Rows",
+            &[
+                ("j k", "select a row"),
+                ("Ctrl-f/b", "a screen of rows"),
+                ("Space", "fold a group or bus"),
+                ("e", "the whole value"),
+                ("yy yt", "copy value / time"),
+                ("i", "edit rows"),
+            ],
+        ),
+        ("Search", &[("/", "search"), ("n N", "next / previous match")]),
+        ("Marks", &[("m M", "put / remove a mark"), ("Tab", "next mark"), ("'2..'9", "jump to a mark"), ("''", "back before the jump")]),
+        ("Other", &[(":", "command"), ("5l 3w", "a count repeats a key"), ("q", "quit")]),
     ];
-    let notes: &[&str] = &[
-        "A count repeats a key: 5l 3w 2z.",
-        "/0x40  /-12  /x  /z  /valid && ready && data == 0x40  /@clk valid && ready",
-        "/@clk fell(valid) && !past(ready)  rose( ) stable( ) past( )  data[7:4]  {a, b}",
+    let search: Examples = &[
+        ("/0x40", "the selected row's value, in any radix"),
+        ("/x  /z", "unknown, high impedance"),
+        ("/valid && ready && data == 0x40", "several signals at once"),
+        ("/@clk fell(valid) && !past(ready)", "sampled at clk; also rose() stable()"),
     ];
-    ("VIEW", keys, notes)
+    ("VIEW", keys, "Search", search)
 }
 
-/// The `?` box: the current mode's keys in two columns, over the middle of the screen.
+/// A line of text in parts, each in its own style.
+type Line = Vec<(String, Style)>;
+
+/// The `?` box: the current mode's keys in the accent, under dim headings, in as many columns as
+/// fit; the things to type below them.
 fn help(app: &App, buf: &mut Buffer, w: usize, body: usize) {
-    let (title, keys, notes) = help_text(app);
-    let kw = keys.iter().map(|(k, _)| k.chars().count()).max().unwrap_or(0);
-    let entry = |&(k, d): &(&str, &str)| format!("{k:<kw$}  {d}");
-    let ew = keys.iter().map(|e| entry(e).chars().count()).max().unwrap_or(0);
-    let half = keys.len().div_ceil(2);
-    let mut lines: Vec<String> = (0..half)
-        .map(|i| format!("{:<ew$}    {}", entry(&keys[i]), keys.get(i + half).map(entry).unwrap_or_default()))
-        .collect();
-    if !notes.is_empty() {
-        lines.push(String::new());
-        lines.extend(notes.iter().map(|n| n.to_string()));
+    let (title, sections, heading, examples) = help_text(app);
+    let key = Style::new().fg(pal().cursor).add_modifier(Modifier::BOLD);
+    let dim = Style::new().fg(pal().dim);
+    // each column's keys as wide as its widest
+    let kw = |sec: Keys| sec.iter().flat_map(|(_, k)| k.iter()).map(|(k, _)| k.chars().count()).max().unwrap_or(0);
+    let width = |sec: Keys| sec.iter().flat_map(|(_, k)| k.iter()).map(|(_, d)| kw(sec) + 2 + d.chars().count()).max().unwrap_or(0);
+    const GAP: usize = 3;
+    let lines_of = |sec: Keys| sec.iter().map(|(_, k)| k.len() + 1).sum::<usize>() + sec.len().saturating_sub(1);
+    // the most columns that fit side by side: sections fill them in order, each about as tall
+    let mut cols: Vec<Keys> = vec![sections];
+    for n in (2..=3).rev() {
+        let target = lines_of(sections).div_ceil(n);
+        let mut split = Vec::new();
+        let mut start = 0;
+        for i in 1..sections.len() {
+            if split.len() + 1 < n && lines_of(&sections[start..i + 1]) > target {
+                split.push(&sections[start..i]);
+                start = i;
+            }
+        }
+        split.push(&sections[start..]);
+        if split.iter().map(|c| width(c) + GAP).sum::<usize>() <= w.saturating_sub(4) + GAP {
+            cols = split;
+            break;
+        }
+    }
+    let mut lines: Vec<Line> = Vec::new();
+    for (x, col) in cols.iter().enumerate() {
+        let (cw, kw) = (width(col) + if x + 1 < cols.len() { GAP } else { 0 }, kw(col));
+        let mut y = 0;
+        for (i, (head, keys)) in col.iter().enumerate() {
+            let mut text = vec![vec![(format!("{head:<cw$}"), dim)]];
+            text.extend(keys.iter().map(|(k, d)| vec![(format!("{k:<kw$}  "), key), (format!("{d:<w$}", w = cw - kw - 2), Style::new())]));
+            if i > 0 {
+                text.insert(0, vec![(" ".repeat(cw), Style::new())]);
+            }
+            for t in text {
+                if lines.len() <= y {
+                    lines.push(Vec::new());
+                }
+                // a shorter column before this one: pad to where this one starts
+                let have: usize = lines[y].iter().map(|(s, _)| s.chars().count()).sum();
+                let at: usize = cols[..x].iter().map(|c| width(c) + GAP).sum();
+                if have < at {
+                    lines[y].push((" ".repeat(at - have), Style::new()));
+                }
+                lines[y].extend(t);
+                y += 1;
+            }
+        }
+    }
+    if !examples.is_empty() {
+        lines.push(Vec::new());
+        if !heading.is_empty() {
+            lines.push(vec![(heading.to_string(), dim)]);
+        }
+        let ew = examples.iter().map(|(e, _)| e.chars().count()).max().unwrap_or(0);
+        for (e, d) in examples {
+            lines.push(match e.is_empty() {
+                true => vec![(d.to_string(), dim)],
+                false => vec![(format!("{e:<ew$}  "), Style::new().fg(pal().cursor)), (d.to_string(), dim)],
+            });
+        }
     }
     boxed(buf, w, body, &format!("help {} {title}", gl().dot), &lines, " Esc ? close ");
 }
 
 /// A box over the middle of the screen: a title, lines, and how to close it. Lines it can't hold
 /// end in `… n more lines`.
-fn boxed(buf: &mut Buffer, w: usize, body: usize, title: &str, lines: &[String], close: &str) {
+fn boxed(buf: &mut Buffer, w: usize, body: usize, title: &str, lines: &[Line], close: &str) {
     let mut lines = lines.to_vec();
     let room = body.saturating_sub(2);
     if lines.len() > room && room > 0 {
         // shortcut: a box can't scroll; add scrolling when values longer than a screen matter
         let more = lines.len() - room + 1;
         lines.truncate(room - 1);
-        lines.push(format!("{} {more} more lines", gl().cut));
+        lines.push(vec![(format!("{} {more} more lines", gl().cut), Style::new().fg(pal().dim))]);
     }
+    let len = |l: &Line| l.iter().map(|(s, _)| s.chars().count()).sum::<usize>();
     let top = format!(" {title} ");
-    let widest = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0).max(top.chars().count()).max(close.chars().count());
+    let widest = lines.iter().map(len).max().unwrap_or(0).max(top.chars().count()).max(close.chars().count());
     let inner = widest.min(w.saturating_sub(4));
     let (bw, bh) = (inner + 4, lines.len() + 2);
     if bw > w || bh > body || bw < close.chars().count() + 3 {
@@ -247,12 +303,22 @@ fn boxed(buf: &mut Buffer, w: usize, body: usize, title: &str, lines: &[String],
     let top: String = top.chars().take(bw - 2).collect();
     put(buf, x0, y0, &format!("{}{top}{}{}", gl().border[0], gl().border[4].to_string().repeat(bw - 2 - top.chars().count()), gl().border[1]), dim);
     for (i, l) in lines.iter().enumerate() {
-        let l: String = l.chars().take(inner).collect();
         put(buf, x0, y0 + 1 + i, &format!("{} ", gl().border[5]), dim);
-        put(buf, x0 + 2, y0 + 1 + i, &format!("{l:<inner$}"), st);
+        put(buf, x0 + 2, y0 + 1 + i, &" ".repeat(inner), st);
+        let mut x = 0;
+        for (text, s) in l {
+            let text: String = text.chars().take(inner - x).collect();
+            put(buf, x0 + 2 + x, y0 + 1 + i, &text, st.patch(*s));
+            x += text.chars().count();
+        }
         put(buf, x0 + bw - 2, y0 + 1 + i, &format!(" {}", gl().border[5]), dim);
     }
     put(buf, x0, y0 + bh - 1, &format!("{}{}{close}{}{}", gl().border[2], gl().border[4].to_string().repeat(bw - 3 - close.chars().count()), gl().border[4], gl().border[3]), dim);
+}
+
+/// Lines in one style.
+fn plain(lines: &[String]) -> Vec<Line> {
+    lines.iter().map(|l| vec![(l.clone(), Style::new())]).collect()
 }
 
 fn guide(app: &App, buf: &mut Buffer, w: usize, body: usize) {
