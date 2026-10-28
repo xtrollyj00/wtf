@@ -1,0 +1,27 @@
+---
+source: src/tui/setup.rs
+expression: screen(&mut s)
+---
+
+  wtf · first start
+
+  Dark or light?
+  Pick the one that suits your terminal's background.
+
+                                 ┌────┐    ┌────┐    ┌────┃    ┌────┐    ┌────
+                clk   0     ─────┘    └────┘    └────┘    ┃────┘    └────┘
+  ▌ 1 dark                  ━━━━━━━━━━┬───────────────────┃─────────┬─────────
+                data  0x3C  ━━ 0xXX ━━┴────── 0xA5 ───────┃─ 0x3C ──┴─ 0xF0 ──
+
+                                 ┌────┐    ┌────┐    ┌────┐    ┌────┐    ┌────
+                clk   0     ─────┘    └────┘    └────┘    └────┘    └────┘
+    2 light                 ━━━━━━━━━━┬───────────────────┬─────────┬─────────
+                data  0x3C  ━━ 0xXX ━━┴────── 0xA5 ───────┴─ 0x3C ──┴─ 0xF0 ──
+
+
+
+
+
+
+
+  1–2 or j k, Enter to pick · Esc for the defaults · wtf --setup asks again

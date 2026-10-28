@@ -17,7 +17,7 @@ use std::path::PathBuf;
 #[command(name = "wtf", version, about = "Waveform Terminal Frontend")]
 struct Args {
     /// The VCD or FST file to open
-    #[arg(required_unless_present_any = ["mcp", "attach"])]
+    #[arg(required_unless_present_any = ["mcp", "attach", "setup"])]
     trace: Option<PathBuf>,
     /// Load this session instead of <trace>.session.toml
     #[arg(short = 'S', value_name = "session")]
@@ -38,6 +38,9 @@ struct Args {
     /// Draw with this glyph set: unicode, box (no legacy computing glyphs) or ascii
     #[arg(long, value_name = "set", value_parser = draw::glyphs_named)]
     glyphs: Option<&'static draw::Glyphs>,
+    /// Ask again which glyphs and theme to use (asked on the first start), then open <trace> if given
+    #[arg(long, conflicts_with_all = ["snapshot", "attach"])]
+    setup: bool,
     /// Serve AI agents over MCP on stdin / stdout, e.g. `claude mcp add wtf -- wtf --mcp`
     #[arg(long, conflicts_with_all = ["trace", "session", "snapshot", "attach", "glyphs"])]
     mcp: bool,
@@ -63,10 +66,18 @@ fn run(args: Args) -> Result<(), String> {
     if args.mcp {
         return mcp::serve();
     }
+    // the first start in a terminal asks how to draw (spec §19 "First start")
+    use std::io::IsTerminal;
+    let window = args.snapshot.is_none() && args.attach != Some(None) && std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+    let setup = (args.setup || (window && config::first_start())).then(|| tui::setup::run(no_color())).flatten();
+    if args.setup && args.trace.is_none() {
+        return setup.map_or(Ok(()), Err);
+    }
     let config = config::load();
     // --glyphs over the config file over unicode (spec §19 "Precedence")
     draw::set_glyphs(args.glyphs.unwrap_or(config.glyphs));
     let mut warnings = config.warnings;
+    warnings.extend(setup);
     let (path, shared, attached) = match args.attach {
         Some(None) => {
             let list: Vec<String> = live::sessions()?.iter().map(|s| format!("{}  {}  {}", s.id, s.kind, s.trace.display())).collect();
@@ -121,10 +132,14 @@ fn run(args: Args) -> Result<(), String> {
     }
 }
 
-/// The configured palette, or none where `NO_COLOR` is set and not empty (as no-color.org says).
+/// The configured palette, or none where `NO_COLOR` is set.
 fn set_palette(p: draw::Palette) {
-    let no_color = std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty());
-    draw::set_palette(if no_color { draw::Palette::mono() } else { p });
+    draw::set_palette(if no_color() { draw::Palette::mono() } else { p });
+}
+
+/// `NO_COLOR` set and not empty, as no-color.org says.
+fn no_color() -> bool {
+    std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty())
 }
 
 /// Without a height, as tall as the content: the rows (or the guide) plus the status line.

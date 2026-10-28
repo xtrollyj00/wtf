@@ -79,7 +79,12 @@ thread_local! {
 /// Set at start, before anything is drawn. Snapshots and the agents' `render` keep the default,
 /// as `text` tells the cursor columns by their colours.
 pub fn set_palette(p: Palette) {
-    PALETTE.with(|c| c.set(Some(Box::leak(Box::new(p)))));
+    set_palette_ref(Box::leak(Box::new(p)));
+}
+
+/// For a screen that switches palettes as it draws (the first start's samples).
+pub fn set_palette_ref(p: &'static Palette) {
+    PALETTE.with(|c| c.set(Some(p)));
 }
 
 pub fn pal() -> &'static Palette {

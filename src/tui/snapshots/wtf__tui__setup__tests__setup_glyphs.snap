@@ -1,0 +1,27 @@
+---
+source: src/tui/setup.rs
+expression: screen(&mut s)
+---
+
+  wtf · first start
+
+  Which of these does your terminal draw cleanly?
+  Lines should join up; no character should be a box or a question mark.
+
+                                 ┌────┐    ┌────┐    ┌────┃    ┌────┐    ┌────
+                clk   0     ─────┘    └────┘    └────┘    ┃────┘    └────┘
+  ▌ 1 unicode               ━━━━━━━━━━🮦───────────────────┃─────────🮦─────────
+                data  0x3C  ━━ 0xXX ━━🮧────── 0xA5 ───────┃─ 0x3C ──🮧─ 0xF0 ──
+
+                                 ┌────┐    ┌────┐    ┌────┃    ┌────┐    ┌────
+                clk   0     ─────┘    └────┘    └────┘    ┃────┘    └────┘
+    2 box                   ━━━━━━━━━━┬───────────────────┃─────────┬─────────
+                data  0x3C  ━━ 0xXX ━━┴────── 0xA5 ───────┃─ 0x3C ──┴─ 0xF0 ──
+
+                                 +----+    +----+    +----┃    +----+    +----
+                clk   0     -----+    +----+    +----+    ┃----+    +----+
+    3 ascii                 ==========+-------------------┃---------+---------
+                data  0x3C  == 0xXX ==+------ 0xA5 -------┃- 0x3C --+- 0xF0 --
+
+
+  1–3 or j k, Enter to pick · Esc for the defaults · wtf --setup asks again

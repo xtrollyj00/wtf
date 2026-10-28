@@ -30,6 +30,25 @@ red = "#ff5555"         # the shade of a signal colour (section 14)
   colors.curser (keys: line, fill, …)`, `config: glyphs = "utf8"? (unicode, box, ascii)`. A file
   that isn't TOML is left out whole, with the parse error's line.
 
+### First start
+
+When wtf opens a window in a terminal (stdin and stdout both one; not `--snapshot`, `--mcp` or
+`--attach` listing) and there is no config file, it first asks two questions, each with samples
+of a clock and a bus drawn as wtf draws them:
+
+1. Which glyph set the terminal draws cleanly: `unicode`, `box` and `ascii` side by side. Fonts
+   without the legacy computing glyphs show boxes in the first; lines that don't join up mean
+   box drawing is missing too.
+2. Dark or light: the samples in each theme, in the chosen glyphs. Not asked with `NO_COLOR`.
+
+`1`-`3` (or `j` / `k` and `Enter`) answer; `Esc` takes the defaults (`unicode`, `dark`) for what
+is left; `Ctrl-c` leaves without writing, so the next start asks again. The answers are written
+as `glyphs` and `theme` to the config file, which is made if missing; then the trace opens. A
+file that can't be written is said on the status line.
+
+`wtf --setup` asks again, setting only those two keys in an existing file: its other keys and its
+comments stay. Without a trace it exits after writing.
+
 ### Themes
 
 A theme is a TOML file of colours, with the same keys and values as `[colors]`:

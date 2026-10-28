@@ -14,12 +14,55 @@ pub struct Config {
 /// `$XDG_CONFIG_HOME/wtf/`, or `~/.config/wtf/`: `config.toml` and the user's `themes/`. A missing
 /// file means the defaults.
 pub fn load() -> Config {
-    let xdg = std::env::var_os("XDG_CONFIG_HOME").filter(|v| !v.is_empty());
-    let base = xdg.map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")));
-    match base {
-        Some(b) => load_from(&b.join("wtf")),
+    match dir() {
+        Some(d) => load_from(&d),
         None => parse("", draw::truecolor(), Path::new("")),
     }
+}
+
+pub fn dir() -> Option<PathBuf> {
+    let xdg = std::env::var_os("XDG_CONFIG_HOME").filter(|v| !v.is_empty());
+    let base = xdg.map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")));
+    base.map(|b| b.join("wtf"))
+}
+
+/// The first start on this machine: there is no config file yet (spec §19 "First start").
+pub fn first_start() -> bool {
+    dir().is_some_and(|d| !d.join("config.toml").exists())
+}
+
+/// Writes the setup's answers into the config file in `dir`, made if missing; the file's other
+/// keys and comments stay.
+pub fn save(dir: &Path, keys: &[(&str, &str)]) -> Result<(), String> {
+    let path = dir.join("config.toml");
+    let old = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => "# wtf's settings (glyphs, theme, colors); `wtf --setup` asks again\n".into(),
+        Err(e) => return Err(format!("{}: {e}", path.display())),
+    };
+    std::fs::create_dir_all(dir).and_then(|_| std::fs::write(&path, set_keys(&old, keys))).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// `text` with each top-level `key = "value"` set: an existing line replaced, a missing one added
+/// before the first table.
+fn set_keys(text: &str, keys: &[(&str, &str)]) -> String {
+    let mut lines: Vec<String> = text.lines().map(String::from).collect();
+    let top = lines.iter().position(|l| l.trim_start().starts_with('[')).unwrap_or(lines.len());
+    let mut end = top;
+    for (k, v) in keys {
+        let line = format!("{k} = \"{v}\"");
+        let is_key = |l: &String| l.split_once('=').is_some_and(|(a, _)| a.trim() == *k);
+        match lines[..end].iter().position(is_key) {
+            Some(i) => lines[i] = line,
+            None => {
+                // after the last top-level line that isn't blank, so a table keeps its blank line
+                let at = lines[..end].iter().rposition(|l| !l.trim().is_empty()).map_or(0, |i| i + 1);
+                lines.insert(at, line);
+                end += 1;
+            }
+        }
+    }
+    lines.join("\n") + "\n"
 }
 
 fn load_from(dir: &Path) -> Config {
@@ -92,6 +135,19 @@ mod tests {
             std::fs::write(d.join("themes").join(format!("{n}.toml")), text).unwrap();
         }
         d
+    }
+
+    #[test]
+    fn setup_keeps_the_rest() {
+        let text = "# mine\nglyphs = \"ascii\"\n\n[colors]\ncursor = 1\n";
+        assert_eq!(set_keys(text, &[("glyphs", "box"), ("theme", "light")]), "# mine\nglyphs = \"box\"\ntheme = \"light\"\n\n[colors]\ncursor = 1\n");
+        assert_eq!(set_keys("# new\n", &[("glyphs", "box")]), "# new\nglyphs = \"box\"\n");
+        // a key of the same name in a table is not the top-level one
+        assert_eq!(set_keys("[colors]\ntheme = 1\n", &[("theme", "dark")]), "theme = \"dark\"\n[colors]\ntheme = 1\n");
+        let d = dir("save", &[]);
+        save(&d, &[("glyphs", "box")]).unwrap();
+        assert_eq!(parse(&std::fs::read_to_string(d.join("config.toml")).unwrap(), true, Path::new("")).glyphs.crossing, draw::BOX.crossing);
+        std::fs::remove_dir_all(&d).unwrap();
     }
 
     #[test]

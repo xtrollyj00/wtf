@@ -117,6 +117,15 @@ impl Trace {
         // wellen panics on a missing file, so check first
         std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
         let wave = simple::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        Ok(Self::of(wave))
+    }
+
+    /// A trace held in memory, VCD or FST as in a file.
+    pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, String> {
+        simple::read_from_reader(std::io::Cursor::new(bytes)).map(Self::of).map_err(|e| e.to_string())
+    }
+
+    fn of(wave: simple::Waveform) -> Self {
         let h = wave.hierarchy();
         let fs_per_tick = crate::time::fs_per_tick(h.timescale());
         let vars: Vec<Var> = h
@@ -132,7 +141,7 @@ impl Trace {
             })
             .collect();
         let by_path = vars.iter().enumerate().map(|(i, v)| (v.path.clone(), i)).collect();
-        Ok(Trace { wave, fs_per_tick, vars, by_path, edges: Default::default() })
+        Trace { wave, fs_per_tick, vars, by_path, edges: Default::default() }
     }
 
     pub fn end(&self) -> Tick {

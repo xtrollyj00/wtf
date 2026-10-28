@@ -5,3 +5,4 @@ pub mod app;
 pub mod commands;
 pub mod panel;
 pub mod render;
+pub mod setup;
