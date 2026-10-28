@@ -11,7 +11,8 @@
 
 - Zoom is time per column, changed by a factor of 2 per step.
 - Below one tick per column, zoom continues as columns per tick, up to 1024.
-- Zooming out stops once one column spans the whole simulation.
+- Zooming out stops once the whole simulation fits the waveforms' width, as `:fit` shows it
+  (at the step that first holds it all).
 - Zoom keeps the cursor on the same time. Near time 0 the view can't scroll further left,
   so the cursor moves on screen instead.
 

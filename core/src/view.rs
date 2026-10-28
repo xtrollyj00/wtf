@@ -105,8 +105,14 @@ impl View {
         }
     }
 
-    /// Stops once one column spans the whole simulation.
+    /// Stops once the whole simulation fits the width (or, before the width is known, once one
+    /// column spans it).
     pub fn zoom_out(&mut self) {
+        let shown = if self.cols > 1 { self.width / self.cols } else { self.ticks.saturating_mul(self.width) };
+        // as `fit` has it
+        if shown >= self.end {
+            return;
+        }
         if self.cols > 1 {
             self.rezoom(1, self.cols / 2);
         } else if self.ticks < self.end.max(1) {
@@ -224,7 +230,16 @@ mod tests {
         for _ in 0..40 {
             v.zoom_out();
         }
-        assert!(v.ticks >= 10 && v.ticks < 20);
+        assert_eq!((v.ticks, v.cols), (1, 2)); // 20 columns show all 10 ticks, as :fit
+        let mut v = View::new(1000, 100);
+        for _ in 0..40 {
+            v.zoom_out();
+        }
+        v.set_zoom(1.0);
+        for _ in 0..40 {
+            v.zoom_out();
+        }
+        assert_eq!(v.ticks, 16); // 8 would show 800 of them
         v.set_zoom(0.3);
         assert_eq!((v.ticks, v.cols), (1, 4));
     }
