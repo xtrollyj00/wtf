@@ -396,7 +396,7 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
                     let v = ws.trace.value_of(var, bit, ws.view.cursor).filter(|v| !(is_field(var) && gap(v)))?;
                     let stream = ws.stream_of(var);
                     let st = if stream.is_some_and(|s| s.violations) { red() } else { state_style(&v) };
-                    Some((label(&ws.trace, stream, s, &v), st))
+                    Some((label(&ws.trace, stream, &Sig { var, ..s.clone() }, &v), st))
                 })
                 .unwrap_or_default()
         })

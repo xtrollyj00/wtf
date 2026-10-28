@@ -1027,6 +1027,17 @@ mod tests {
     }
 
     #[test]
+    fn time_fields_value_in_time() {
+        // a field holding a time (a read's delay) shows it as a time in the value column too
+        let t = trace::Trace::open("tests/data/axilite.vcd".as_ref()).unwrap();
+        let mut app = App::new(workspace::Workspace::new(t, "axilite".into()));
+        keys(&mut app, ":decode bus axilite clock=aclk prefix=s_axi_\n:add bus.rd\n:fit\nw ");
+        let screen = snapshot(&mut app, 100, Some(14));
+        let delay = screen.lines().find(|l| l.trim_start().starts_with("rd.delay")).unwrap_or_else(|| panic!("{screen}"));
+        assert!(delay.split_whitespace().nth(1).is_some_and(|v| v.ends_with("ns")), "{screen}");
+    }
+
+    #[test]
     fn records_list() {
         let t = trace::Trace::open("tests/data/axis.vcd".as_ref()).unwrap();
         let mut app = App::new(workspace::Workspace::new(t, "axis".into()));
