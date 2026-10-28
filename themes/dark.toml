@@ -3,7 +3,8 @@
 # without truecolor; otherwise the nearest) or "default" (the terminal's own). Keys left out
 # are dark's. spec §19.
 
-line        = ["#56b6c2", 73]   # 1-bit lines and bus outlines
+line        = ["#56b6c2", 73]   # 1-bit lines
+bus         = ["#61afef", 75]   # bus and stream outlines (their labels are in the text colour)
 fill        = ["#2e6b73", 30]   # 1-bit signals toggling faster than a column
 unknown     = ["#e06c75", 168]  # X
 highz       = ["#98c379", 114]  # Z

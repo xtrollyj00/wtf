@@ -82,6 +82,7 @@ pub fn show(v: &toml::Value) -> String {
 fn slot<'a>(p: &'a mut Palette, key: &str) -> Option<&'a mut Color> {
     Some(match key {
         "line" => &mut p.line,
+        "bus" => &mut p.bus,
         "fill" => &mut p.fill,
         "unknown" => &mut p.unknown,
         "highz" => &mut p.highz,
@@ -100,7 +101,7 @@ fn slot<'a>(p: &'a mut Palette, key: &str) -> Option<&'a mut Color> {
 }
 
 fn keys() -> String {
-    const FIELDS: [&str; 14] = ["line", "fill", "unknown", "highz", "cursor", "cursor_text", "column", "cursor_dim", "selected", "panel", "hatch", "dim", "background", "text"];
+    const FIELDS: [&str; 15] = ["line", "bus", "fill", "unknown", "highz", "cursor", "cursor_text", "column", "cursor_dim", "selected", "panel", "hatch", "dim", "background", "text"];
     FIELDS.iter().chain(COLORS.iter()).copied().collect::<Vec<_>>().join(", ")
 }
 

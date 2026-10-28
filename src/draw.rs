@@ -18,6 +18,8 @@ pub const MAX_VALUE: usize = 20;
 pub struct Palette {
     /// 1-bit lines and edges.
     pub line: Color,
+    /// Bus and stream outlines; their labels are in the text's colour.
+    pub bus: Color,
     /// Fill for a 1-bit signal toggling faster than a column.
     pub fill: Color,
     pub unknown: Color,
@@ -60,7 +62,7 @@ impl Palette {
     /// `NO_COLOR`: the terminal's own colours everywhere.
     pub fn mono() -> Palette {
         let r = Color::Reset;
-        Palette { line: r, fill: r, unknown: r, highz: r, cursor: r, cursor_text: r, column: r, cursor_dim: r, selected: r, panel: r, hatch: r, dim: r, hues: [r; 8], background: r, text: r, mono: true }
+        Palette { line: r, bus: r, fill: r, unknown: r, highz: r, cursor: r, cursor_text: r, column: r, cursor_dim: r, selected: r, panel: r, hatch: r, dim: r, hues: [r; 8], background: r, text: r, mono: true }
     }
 
     /// Reversed where there is no colour: the cursor column, the selected name.
@@ -599,8 +601,13 @@ pub fn wave(trace: &Trace, view: &View, row: &Sig, bit: Option<u32>, bits: Optio
     let val = |c: usize| trace.value_of(var, bit, range(c).1 - 1);
     let blank = (' ', Style::new());
     let mut out = vec![[blank; 2]; ww];
-    // the row's own colour, or the theme's line
-    let own = row.color.map_or_else(line, |c| Style::new().fg(pal().hues[c]));
+    // the row's own colour, or the theme's: a bus's outline in a hue of its own, its labels in
+    // the text's colour so they read first
+    let own = match row.color {
+        Some(c) => Style::new().fg(pal().hues[c]),
+        None if bus => Style::new().fg(pal().bus),
+        None => line(),
+    };
 
     // Busy: two or more changes in a column, or a run of segments narrower than two columns.
     // A run of k changed columns holds k-1 one-column segments; one alone is a short pulse.
@@ -651,10 +658,11 @@ pub fn wave(trace: &Trace, view: &View, row: &Sig, bit: Option<u32>, bits: Optio
                     _ => String::new(),
                 };
                 let len = text.chars().count();
+                let text_st = if st == own && row.color.is_none() { Style::new() } else { st };
                 if len > 0 {
                     let start = a + (e - a - len) / 2;
                     for (k, ch) in text.chars().enumerate() {
-                        out[start + k][1] = (ch, st);
+                        out[start + k][1] = (ch, text_st);
                     }
                     // a gap in the bottom edge around the label
                     for x in [start - 1, start + len] {

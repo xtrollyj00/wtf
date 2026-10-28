@@ -1018,7 +1018,7 @@ mod tests {
         render::draw(&mut app, area, &mut buf);
         let fg = |y: u16, ch: &str| (0..100).map(|x| &buf[(x, y)]).find(|c| c.symbol() == ch).map(|c| c.fg);
         assert_eq!(fg(4, "🮡"), Some(draw::red().fg.unwrap()));
-        assert_eq!(fg(2, "🮡"), Some(draw::line().fg.unwrap()));
+        assert_eq!(fg(2, "🮡"), Some(draw::pal().bus));
         keys(&mut app, ":select rx.frame\n ");
         insta::assert_snapshot!(snapshot(&mut app, 100, None));
         // the instance and the expanded row come back from the session

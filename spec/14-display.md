@@ -75,7 +75,9 @@ Each set keeps every distinction the others make, so a drawing reads the same in
 
 ### Colours
 
-- The palette (lines, busy fill, X, Z, cursor, marks, selection, panels, dimmed text) comes from a
+- 1-bit lines and bus outlines have hues of their own (`line`, `bus`), and a bus's labels are
+  in the text's colour, so the values read first.
+- The palette (lines, bus outlines, busy fill, X, Z, cursor, marks, selection, panels, dimmed text) comes from a
   theme: `dark` (the default) or `light`. `dark` keeps the terminal's background and text; `light`
   paints its own over the whole screen, whatever the terminal's are. Single colours can be changed
   in the config file (section 19), `background` and `text` too.
