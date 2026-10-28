@@ -55,5 +55,6 @@ cursor     = ["#fabd2f", 214]
 
 - `--glyphs` over `glyphs` in the file, over `unicode`.
 - `NO_COLOR` over the theme and `[colors]` (section 14).
-- `--snapshot` follows the glyphs too, so a snapshot can be ASCII. `wtf --mcp` reads no config:
+- `--snapshot` follows the glyphs too, so a snapshot can be ASCII, and with `--ansi` the theme and
+  `NO_COLOR`; plain text keeps the default theme. `wtf --mcp` reads no config:
   what agents get doesn't depend on the machine.

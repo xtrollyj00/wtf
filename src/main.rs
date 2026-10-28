@@ -25,6 +25,12 @@ struct Args {
     /// Render one screen as plain text to stdout and exit
     #[arg(long, value_name = "width[xheight]", value_parser = parse_size)]
     snapshot: Option<(u16, Option<u16>)>,
+    /// With --snapshot: colour it with the configured theme, as SGR escape codes
+    #[arg(long, requires = "snapshot")]
+    ansi: bool,
+    /// With --snapshot: press these keys first, e.g. `:add **<CR>?` (<Esc>, <CR>, <Tab>, <C-x>)
+    #[arg(long, value_name = "keys", requires = "snapshot")]
+    keys: Option<String>,
     /// Open a window on a session (an agent's workspace or another window); without an id, list
     /// the open sessions
     #[arg(long, value_name = "id", conflicts_with = "trace")]
@@ -95,25 +101,42 @@ fn run(args: Args) -> Result<(), String> {
 
     match args.snapshot {
         Some((w, h)) => {
-            print!("{}", snapshot(&mut app, w, h));
+            // plain text keeps the default palette: `text` tells the cursor columns by it
+            if args.ansi {
+                set_palette(config.palette);
+            }
+            if let Some(k) = &args.keys {
+                app.keys(k);
+            }
+            let buf = screen(&mut app, w, h);
+            print!("{}", if args.ansi { draw::ansi(&buf) } else { draw::text(&buf) });
             Ok(())
         }
         None => {
-            // as no-color.org says: set and not empty
-            let no_color = std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty());
-            draw::set_palette(if no_color { draw::Palette::mono() } else { config.palette });
+            set_palette(config.palette);
             tui(&mut app)
         }
     }
 }
 
+/// The configured palette, or none where `NO_COLOR` is set and not empty (as no-color.org says).
+fn set_palette(p: draw::Palette) {
+    let no_color = std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty());
+    draw::set_palette(if no_color { draw::Palette::mono() } else { p });
+}
+
 /// Without a height, as tall as the content: the rows (or the guide) plus the status line.
-fn snapshot(app: &mut App, w: u16, h: Option<u16>) -> String {
+fn screen(app: &mut App, w: u16, h: Option<u16>) -> Buffer {
     let h = h.unwrap_or(if app.ws.rows.is_empty() { 7 } else { draw::height(&app.ws) + 1 });
     let area = Rect::new(0, 0, w, h);
     let mut buf = Buffer::empty(area);
     render::draw(app, area, &mut buf);
-    draw::text(&buf)
+    buf
+}
+
+#[cfg(test)]
+fn snapshot(app: &mut App, w: u16, h: Option<u16>) -> String {
+    draw::text(&screen(app, w, h))
 }
 
 fn tui(app: &mut App) -> Result<(), String> {
@@ -223,17 +246,7 @@ mod tests {
     }
 
     fn keys(app: &mut App, s: &str) {
-        for c in s.chars() {
-            let k = match c {
-                '\n' => KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
-                '\x1b' => KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
-                '\x08' => KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
-                // other control characters: Ctrl and the letter, e.g. \x01 is Ctrl-a
-                c if c < ' ' => KeyEvent::new(KeyCode::Char((c as u8 + b'a' - 1) as char), KeyModifiers::CONTROL),
-                c => KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE),
-            };
-            app.key(k);
-        }
+        app.keys(s);
     }
 
     const SESSION: &str = "tests/data/simple.session.toml";
@@ -825,6 +838,24 @@ mod tests {
         back.ws.sel = app.ws.sel;
         back.ws.view.cursor = 12;
         assert_eq!(value(&back), "1.046875");
+    }
+
+    #[test]
+    fn snapshot_keys_and_ansi() {
+        // Vim's names and raw control characters press the same keys; an unknown <name> is text
+        let (mut a, mut b) = (open("vcd", Some(SESSION)), open("vcd", Some(SESSION)));
+        keys(&mut a, ":<lt>x<CR>l<C-d>?<Esc>i<Tab><esc>");
+        keys(&mut b, ":<x\nl\x04?\x1bi\t\x1b");
+        assert_eq!(snapshot(&mut a, 80, None), snapshot(&mut b, 80, None));
+        assert_eq!(a.ws.view.cursor, b.ws.view.cursor);
+        // the colours as SGR codes: the theme's cursor as a background, one reset per line
+        draw::set_palette(theme::builtin("dark", true).unwrap());
+        let screen = draw::ansi(&super::screen(&mut a, 80, None));
+        assert!(screen.contains("\x1b[0;38;2;30;30;30;48;2;229;192;123m"), "{screen}");
+        assert!(screen.lines().all(|l| l.rsplit("\x1b[").next().is_none_or(|last| !l.contains('\x1b') || last.starts_with("0m"))));
+        // and without colour, the cursor column reversed
+        draw::set_palette(draw::Palette::mono());
+        assert!(draw::ansi(&super::screen(&mut a, 80, None)).contains("\x1b[0;7m"));
     }
 
     #[test]

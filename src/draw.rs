@@ -232,6 +232,45 @@ pub fn height(ws: &Workspace) -> u16 {
 
 /// A drawing as plain text, one character per cell. Colours are dropped, so cursor columns show
 /// as ┃ (the cursor) and ╎ (marks) except over label text.
+/// The screen as `text` prints it, but in its colours: an SGR code wherever the style changes,
+/// one reset at each line's end (`--snapshot --ansi`).
+pub fn ansi(buf: &Buffer) -> String {
+    use crossterm::style::Colored;
+    use ratatui::backend::IntoCrossterm;
+    let sgr = |c: &ratatui::buffer::Cell| {
+        let mut s = String::from("\x1b[0");
+        for (m, code) in [(Modifier::BOLD, ";1"), (Modifier::DIM, ";2"), (Modifier::ITALIC, ";3"), (Modifier::UNDERLINED, ";4"), (Modifier::REVERSED, ";7")] {
+            if c.modifier.contains(m) {
+                s += code;
+            }
+        }
+        if c.fg != Color::Reset {
+            s += &format!(";{}", Colored::ForegroundColor(c.fg.into_crossterm()));
+        }
+        if c.bg != Color::Reset {
+            s += &format!(";{}", Colored::BackgroundColor(c.bg.into_crossterm()));
+        }
+        s + "m"
+    };
+    let mut out = String::new();
+    for y in 0..buf.area.height {
+        let row: Vec<_> = (0..buf.area.width).map(|x| &buf[(x, y)]).collect();
+        // trailing blanks in the terminal's colours are trimmed, as `text` does
+        let end = row.iter().rposition(|c| c.symbol() != " " || c.bg != Color::Reset || !c.modifier.is_empty()).map_or(0, |i| i + 1);
+        let mut last = String::from("\x1b[0m");
+        for c in &row[..end] {
+            let code = sgr(c);
+            if code != last {
+                out += &code;
+                last = code;
+            }
+            out += c.symbol();
+        }
+        out += if last != "\x1b[0m" { "\x1b[0m\n" } else { "\n" };
+    }
+    out
+}
+
 pub fn text(buf: &Buffer) -> String {
     let (cursor, mark) = (gl().cursor.to_string(), gl().mark.to_string());
     let mut out = String::new();

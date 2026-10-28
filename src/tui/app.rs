@@ -267,6 +267,41 @@ impl App {
         }
     }
 
+    /// Feed keys written as in Vim's mappings: plain characters, `<Esc>`, `<CR>`, `<Tab>`, `<BS>`,
+    /// `<lt>` and `<C-x>`; raw control characters work too (`\n`, `\x1b`, `\x01` is Ctrl-a).
+    /// A `<` that starts no such name is itself (spec §12 `--keys`).
+    pub fn keys(&mut self, s: &str) {
+        let key = KeyEvent::new;
+        let none = KeyModifiers::NONE;
+        let mut rest = s;
+        while let Some(c) = rest.chars().next() {
+            let name = rest.strip_prefix('<').and_then(|r| r.split_once('>')).map(|(n, _)| n);
+            let named = match name.map(|n| n.to_ascii_lowercase()).as_deref() {
+                Some("esc") => Some(key(KeyCode::Esc, none)),
+                Some("cr" | "enter") => Some(key(KeyCode::Enter, none)),
+                Some("tab") => Some(key(KeyCode::Tab, none)),
+                Some("bs") => Some(key(KeyCode::Backspace, none)),
+                Some("lt") => Some(key(KeyCode::Char('<'), none)),
+                Some(n) if n.len() == 3 && n.starts_with("c-") => Some(key(KeyCode::Char(n.chars().nth(2).unwrap()), KeyModifiers::CONTROL)),
+                _ => None,
+            };
+            if let (Some(k), Some(n)) = (named, name) {
+                self.key(k);
+                rest = &rest[n.len() + 2..];
+                continue;
+            }
+            self.key(match c {
+                '\n' => key(KeyCode::Enter, none),
+                '\x1b' => key(KeyCode::Esc, none),
+                '\x08' => key(KeyCode::Backspace, none),
+                '\t' => key(KeyCode::Tab, none),
+                c if c < ' ' => key(KeyCode::Char((c as u8 + b'a' - 1) as char), KeyModifiers::CONTROL),
+                c => key(KeyCode::Char(c), none),
+            });
+            rest = &rest[c.len_utf8()..];
+        }
+    }
+
     /// Every key that changes the rows records an undo step, except collapsing and expanding
     /// groups (a View-mode action) and undo / redo themselves.
     pub fn key(&mut self, k: KeyEvent) {

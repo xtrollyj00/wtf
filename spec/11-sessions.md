@@ -112,8 +112,8 @@ As few options as possible. Everything that describes what to show (signals, gro
 cursors, zoom, time) lives in the session file (section 11), not on the command line.
 
 ```
-wtf [-S <session>] [--glyphs <set>] [--snapshot <width>[x<height>]] <trace>
-wtf --attach [<id>] [--glyphs <set>] [--snapshot <width>[x<height>]]
+wtf [-S <session>] [--glyphs <set>] [--snapshot <width>[x<height>] [--ansi] [--keys <keys>]] <trace>
+wtf --attach [<id>] [--glyphs <set>] [--snapshot <width>[x<height>] [--ansi] [--keys <keys>]]
 wtf --mcp
 wtf --help
 wtf --version
@@ -125,13 +125,15 @@ wtf --version
 | `-S <session>` | load this session instead of `<trace>.session.toml` |
 | `--glyphs <set>` | draw with this glyph set: `unicode`, `box` or `ascii` (section 14), over the config file's (section 19) |
 | `--snapshot <width>[x<height>]` | render one screen as plain text to stdout and exit, without the terminal UI; without a height, as tall as the content |
+| `--ansi` | with `--snapshot`: print the screen in its colours, as SGR escape codes, with the configured theme (section 19); `NO_COLOR` gives the reversed cells of a terminal without colour |
+| `--keys <keys>` | with `--snapshot`: press these keys first, so a mode or an overlay can be shown (`?`, `i`, `:` with its completions, `e`). Written as in Vim's mappings: plain characters, `<Esc>`, `<CR>`, `<Tab>`, `<BS>`, `<lt>` for `<`, `<C-x>`; any other `<...>` is typed as it is |
 | `--attach [<id>]` | without an id, list the open sessions (windows and agent workspaces); with one, open a window on that session's trace showing its rows and cursors (section 15) |
 | `--mcp` | serve AI agents over MCP on stdin / stdout instead of opening the screen (section 15) |
 
 - `--snapshot` is for CI logs, bug reports and wtf's own tests. Each screen cell becomes exactly
   one character, the same glyph the terminal UI draws, so columns stay aligned. What it shows comes
   from the session.
-- Snapshots have no colours; the cursor's column is drawn as `┃` (`|` in `ascii`), marks as `╎`
+- Snapshots have no colours, unless `--ansi`; the cursor's column is drawn as `┃` (`|` in `ascii`), marks as `╎`
   (`:`). The terminal UI uses colours unless `NO_COLOR` is set (section 14).
 
 ## 13. Formats
