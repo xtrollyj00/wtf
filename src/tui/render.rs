@@ -299,7 +299,8 @@ fn boxed(buf: &mut Buffer, w: usize, body: usize, title: &str, lines: &[Line], c
     }
     let len = |l: &Line| l.iter().map(|(s, _)| s.chars().count()).sum::<usize>();
     let top = format!(" {title} ");
-    let widest = lines.iter().map(len).max().unwrap_or(0).max(top.chars().count()).max(close.chars().count());
+    // the title and how to close it share the top line
+    let widest = lines.iter().map(len).max().unwrap_or(0).max(top.chars().count() + close.chars().count() + 1);
     // margins too narrow to read what is under them: the whole width
     let inner = if widest + 4 + 12 > w { w.saturating_sub(4) } else { widest };
     let (bw, bh) = (inner + 4, lines.len() + 2);
@@ -316,12 +317,15 @@ fn boxed(buf: &mut Buffer, w: usize, body: usize, title: &str, lines: &[Line], c
         put(buf, x0, y0, &format!("{}{top}{}{}", gl().border[0], gl().border[4].to_string().repeat(bw - 2 - top.chars().count()), gl().border[1]), dim);
         put(buf, x0, y0 + bh - 1, &format!("{}{}{close}{}{}", gl().border[2], gl().border[4].to_string().repeat(bw - 3 - close.chars().count()), gl().border[4], gl().border[3]), dim);
     } else {
-        // a card: its own background, the title in bold, how to close it dim in the corner
+        // a card: its own background, the title in bold, how to close it dim across from it; two
+        // columns cleared on each side, so no stub of a waveform is left beside it
+        let (cx, cw) = (x0.saturating_sub(2), (bw + 4).min(w - x0.saturating_sub(2)));
         for y in 0..bh {
+            put(buf, cx, y0 + y, &" ".repeat(cw), Style::new().bg(Color::Reset).fg(Color::Reset));
             put(buf, x0, y0 + y, &" ".repeat(bw), st);
         }
         put(buf, x0 + 1, y0, &top, st.add_modifier(Modifier::BOLD));
-        put(buf, x0 + bw - 1 - close.chars().count(), y0 + bh - 1, close, dim);
+        put(buf, x0 + bw - 1 - close.chars().count(), y0, close, dim);
     }
     for (i, l) in lines.iter().enumerate() {
         if pal().mono {
@@ -447,17 +451,24 @@ fn command_line(app: &App, buf: &mut Buffer, w: usize, h: usize) -> Option<(u16,
     let line = format!("{}{}", if search { '/' } else { ':' }, app.line);
     put(buf, 0, y, &format!("{line:<w$}"), Style::new());
     let items = if search { Vec::new() } else { crate::tui::commands::completions(&app.line) };
-    let uw = items.iter().map(|c| c.usage.len()).max().unwrap_or(0);
-    for (k, c) in items.iter().enumerate().take(y) {
+    // up to ten, scrolled to the highlight; descriptions line up after most usages, not the longest
+    let shown = items.len().min(10).min(y);
+    let first = app.hl.saturating_sub(shown.saturating_sub(1));
+    let uw = items.iter().map(|c| c.usage.len()).filter(|&n| n <= 24).max().unwrap_or(0);
+    for (k, c) in items.iter().enumerate().skip(first).take(shown) {
         let mark = if k == app.hl { format!(" {} ", gl().hl) } else { "   ".to_string() };
         let text = format!("{mark}{:<uw$}  {}", c.usage, c.desc);
-        // opaque: the cursor column, selection and grid lines must not show through
-        let st = Style::new().bg(pal().panel).fg(Color::Reset);
+        let text = match text.chars().count() > w.saturating_sub(1) {
+            true => text.chars().take(w.saturating_sub(2)).chain([gl().cut]).collect(),
+            false => text,
+        };
+        // opaque: the cursor column and the selection must not show through
+        let st = Style::new().bg(if k == app.hl { pal().selected } else { pal().panel }).fg(Color::Reset);
         let st = if k == app.hl { st.add_modifier(Modifier::BOLD) } else { st };
-        put(buf, 0, y - 1 - k, &format!("{text:<w$}"), st);
+        put(buf, 0, y - 1 - (k - first), &format!("{text:<w$}"), st);
     }
     // without a background, a rule between the list and the waveforms above it
-    if let Some(ry) = y.checked_sub(items.len() + 1).filter(|_| !items.is_empty() && pal().mono) {
+    if let Some(ry) = y.checked_sub(shown + 1).filter(|_| shown > 0 && pal().mono) {
         put(buf, 0, ry, &gl().border[4].to_string().repeat(w), Style::new().fg(pal().dim).bg(Color::Reset));
     }
     Some(((1 + app.cursor()).min(w.saturating_sub(1)) as u16, y as u16))

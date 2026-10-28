@@ -87,7 +87,8 @@ See section 5 for the keys.
 ### Command line
 
 `:` opens the command line at the bottom, in place of the status line, as in Vim.
-Above it, a list of matching commands grows upward, each with a one-line description, as in Zed.
+Above it, a list of matching commands grows upward, each with a one-line description, as in Zed:
+up to ten, scrolled to the highlight, a description cut with `…` where the screen ends.
 
 ```
 clk      ▁▁▁▁▔▔▔▔▁▁▁▁▔▔▔▔

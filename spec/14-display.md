@@ -87,8 +87,9 @@ Each set keeps every distinction the others make, so a drawing reads the same in
   and its labels; X, Z and violations keep their own colours, and the name column keeps its own.
   Set with `:color` (section 7), saved in the session (section 11).
 - **Boxes over the waveforms** (the signal panel, the `?` and `e` boxes, records, the command
-  completions) are cards: a background of their own (`panel`), the title in bold, how to close
-  it dim in the bottom corner, and no border. Without colour they get a border instead.
+  completions) are cards: a background of their own (`panel`), the title in bold with how to
+  close it dim across from it, two columns cleared on each side so no stub of a waveform is left
+  beside a card, and no border. Without colour they get a border instead.
 - **Without colour** (`NO_COLOR` set to anything but empty, as no-color.org says): the cursor's
   column is reversed, marks are drawn with their glyph where a cell is empty, the selected row's
   name is reversed. Snapshots and the agents' `render` have no colours either.

@@ -902,10 +902,13 @@ mod tests {
         let area = Rect::new(0, 0, 100, 30);
         let mut buf = Buffer::empty(area);
         render::draw(&mut app, area, &mut buf);
-        let listed = commands::completions("").len() as u16;
-        for y in 29 - listed..29 {
-            assert!((0..100).all(|x| buf[(x, y)].fg == Color::Reset && buf[(x, y)].bg == draw::pal().panel), "line {y}");
+        // ten of them, the highlight nearest the line
+        assert!(commands::completions("").len() > 10);
+        for y in 19..29 {
+            let bg = if y == 28 { draw::pal().selected } else { draw::pal().panel };
+            assert!((0..100).all(|x| buf[(x, y)].fg == Color::Reset && buf[(x, y)].bg == bg), "line {y}");
         }
+        assert!(buf[(0, 18)].bg != draw::pal().panel);
         keys(&mut app, "\x1b");
         assert!(app.mode == app::Mode::View);
     }

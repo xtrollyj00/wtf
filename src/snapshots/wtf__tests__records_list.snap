@@ -3,12 +3,12 @@ source: src/main.rs
 expression: "snapshot(&mut app, 100, Some(10))"
 ---
           0ns       20ns      40ns      60ns      80ns      100ns     120ns     140ns     160ns
-          records · rx.frame
+          records · rx.frame                                         Enter jump  Esc close
 frame     2 matching records, of 4
 
 errors      #0  15ns–55ns  beats=0x3 len=0xA data=a0 00 00 00 a1 00 00 00 a2 00 complete=1
           ▌ #2  65ns–85ns  beats=0x2 len=0x8 data=c0 00 00 00 c1 00 00 00 complete=1
-                                                                     Enter jump  Esc close
+
 
 
  VIEW  rx.errors                                                       0ns  ·  2ns/col  ·  axis [+]

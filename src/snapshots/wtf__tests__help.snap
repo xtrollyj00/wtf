@@ -2,7 +2,7 @@
 source: src/main.rs
 expression: "snapshot(&mut app, 100, Some(20))"
 ---
-  help · VIEW
+  help · VIEW                                                                          Esc ? close
   Move                            Rows                              Marks
   h l       cursor left / right   j k       select a row            m M     put / remove a mark
   w b       next / prev change    Ctrl-f/b  a screen of rows        Tab     next mark
@@ -20,5 +20,5 @@ expression: "snapshot(&mut app, 100, Some(20))"
   /x  /z                             unknown, high impedance
   /valid && ready && data == 0x40    several signals at once
   /@clk fell(valid) && !past(ready)  sampled at clk; also rose() stable()
-                                                                                       Esc ? close
+
  VIEW  top.clk                                                          12ns  ·  1ns/col  ·  simple
