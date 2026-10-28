@@ -98,7 +98,8 @@ fn simple() -> PathBuf {
 /// agent `PUT`s.
 fn fake_window(runtime: &Path, id: &str, trace: &Path, session: &str) -> mpsc::Receiver<String> {
     let listener = UnixListener::bind(runtime.join(format!("wtf-{id}.sock"))).unwrap();
-    let info = format!("window\n{}", trace.display());
+    // as a real window announces it: links resolved (live::window)
+    let info = format!("window\n{}", std::fs::canonicalize(trace).unwrap().display());
     let get = format!("rows (> selected):\n> clk\n---\n{session}");
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {

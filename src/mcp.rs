@@ -833,6 +833,8 @@ mod tests {
         // a trace of its own, so its window socket and session file belong to this test
         let dir = std::env::temp_dir().join(format!("wtf-mcp-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
+        // sessions show the full path, links resolved (macOS's temp dir is under the /var link)
+        let dir = dir.canonicalize().unwrap();
         let trace = dir.join("simple.vcd");
         std::fs::copy("tests/data/simple.vcd", &trace).unwrap();
         let agent = Wtf::new();
