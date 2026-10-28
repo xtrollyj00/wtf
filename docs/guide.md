@@ -1,6 +1,6 @@
 # wtf user guide
 
-For a hardware engineer opening wtf for the first time. The [README](../README.md) is the pitch;
+This guide is for opening wtf the first time. The [README](../README.md) says what wtf is, and
 the [spec](../spec/README.md) is the full reference, linked below as `§N`.
 
 - [A 5-minute tour](#a-5-minute-tour)
@@ -304,7 +304,7 @@ the same distinctions (§14).
 column and the selected row's name are reversed and marks keep their glyph. `NO_COLOR` wins over
 the theme.
 
-**Mouse.** The keys do everything; the mouse is for what you may reach for first. Click a row to
+**Mouse.** Everything works from the keys, and the mouse does the common moves. Click a row to
 select it, and on its waveform also to put the cursor there; click the time axis to put the
 cursor there; the wheel moves the selection; `Ctrl` + wheel zooms; `Shift` + wheel scrolls the
 time (§3).

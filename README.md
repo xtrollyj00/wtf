@@ -30,7 +30,7 @@ ready and the response, with the time between them on the ruler. Try it:
   lines.
 - **Sessions.** What you look at is saved in a TOML file next to the trace and comes back the
   next time. After you rerun the simulation, `:e` reloads it.
-- **Easy on the eyes.** Dark and light themes or your own colours, X and Z told apart by shape as
+- **Display.** Dark and light themes or your own colours, X and Z told apart by shape as
   well as colour, `NO_COLOR`, and plain box drawing or ASCII for fonts and terminals that need
   it (`--glyphs`).
 - **AI agents.** `wtf --mcp` lets an agent open your trace, find and decode what matters, and
@@ -94,6 +94,9 @@ also say when and where things went wrong, in fewer simulation runs, and mostly 
 </picture>
 
 ## Documentation
+
+Start with the [user guide](docs/guide.md): a 5-minute tour of `docs/demo.vcd`, a cheat sheet,
+how to dump VCD or FST from your simulator, and how to work with an agent.
 
 The design is in [`spec/`](spec/README.md), one file per topic: the keys, commands, search,
 sessions, the MCP server and the decoders. [Known limits](spec/18-deferred.md#known-limits)
