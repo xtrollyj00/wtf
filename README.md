@@ -15,7 +15,8 @@ ready and the response, with the time between them on the ruler. Try it:
 
 - **Vim-like.** Time is the line axis: `h` / `l` move the cursor, `w` / `b` jump between
   transitions, `gg` / `G` go to the start / end, `:2000ns` goes to a time, `z` / `x` zoom.
-  Viewing is the default; changing what is shown is a separate Edit mode (`i`).
+  Viewing is the default; changing what is shown is a separate Edit mode (`i`). The mouse works
+  too: click to place the cursor, Ctrl+wheel to zoom.
 - **Signals.** A searchable signal tree, groups, buses expanded into bits, radixes (hex, binary,
   decimal, signed, octal, ASCII, float, fixed point, and enum names from FST files), computed
   signals (`data[7:4]`, `{a, b}`).
@@ -27,6 +28,9 @@ ready and the response, with the time between them on the ruler. Try it:
   lines.
 - **Sessions.** What you look at is saved in a TOML file next to the trace and comes back the
   next time. After you rerun the simulation, `:e` reloads it.
+- **Easy on the eyes.** Dark and light themes or your own colours, X and Z told apart by shape as
+  well as colour, `NO_COLOR`, and plain box drawing or ASCII for fonts and terminals that need
+  it (`--glyphs`).
 - **AI agents.** `wtf --mcp` lets an agent open your trace, find and decode what matters, and
   show its evidence in your window.
 
@@ -46,6 +50,7 @@ This installs the `wtf` command. Linux and macOS; Windows is not supported.
 wtf trace.fst              # or .vcd; the format is read from the content
 wtf -S my.session.toml trace.fst
 wtf --snapshot 120 trace.fst   # one screen as text, for CI logs and bug reports
+wtf --snapshot 120x30 --ansi --keys '?' trace.fst   # in colour, after pressing keys
 ```
 
 At first the screen is empty: press `i` to add signals (`/` searches, `Space` marks, `Enter`
