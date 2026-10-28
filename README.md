@@ -6,11 +6,11 @@
 with an MCP server so AI agents can debug a trace with you. Also what you say when the bus goes
 `X`.
 
-![wtf showing a decoded AXI4-Lite bus: a write whose address waits two cycles for ready, its response, and a read answered with SLVERR](docs/demo.png)
+![wtf in a terminal: signals added from the signal panel, an AXI4-Lite bus decoded into writes and reads, a search for the cycles where the address waits for ready, and a jump from the list of reads to the one answered with SLVERR, unfolded into its fields](docs/demo.gif)
 
-An AXI4-Lite bus decoded into transactions (`wr`, `rd`, each with its latency) and protocol
-errors, next to the handshake it came from. Marks 2 and 3 and the cursor sit on the valid, the
-ready and the response, with the time between them on the ruler. Try it:
+Signals added from the tree, an AXI4-Lite bus decoded into its writes and reads with their
+latency, a search for the cycles where the address waits for ready (mark 2), and a jump from the
+list of reads to the one answered with SLVERR, unfolded into its fields. Try it:
 `wtf docs/demo.vcd`.
 
 ## Features

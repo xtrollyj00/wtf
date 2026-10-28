@@ -1,0 +1,9 @@
+# only what the build needs (docs/gif/Dockerfile)
+*
+!Cargo.toml
+!Cargo.lock
+!src
+!core
+!bench/Cargo.toml
+!bench/src
+!themes
