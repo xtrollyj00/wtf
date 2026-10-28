@@ -1,9 +1,9 @@
 # Turns an asciinema recording (record.sh) into a GIF and an MP4, drawn as docs/demo.gif is:
-#   python3 docs/agent/cast2gif.py agent.cast docs/agent [end]
-# writes docs/agent/agent.gif and .mp4, cut at `end` seconds of the cast if given. Each screen is replayed by pyte, a terminal emulator,
+#   python3 docs/agent/cast2gif.py agent.cast target/agent [end]
+# writes target/agent/agent.gif and .mp4, cut at `end` seconds of the cast if given. Each screen is replayed by pyte, a terminal emulator,
 # then drawn by docs/screenshot.py in headless Chromium, so bus edges join up. Runs in the image
 # of docs/gif/Dockerfile:
-#   docker run --rm -v "$PWD":/work -u "$(id -u):$(id -g)" wtf-gif python3 docs/agent/cast2gif.py agent.cast docs/agent
+#   docker run --rm -v "$PWD":/work -u "$(id -u):$(id -g)" wtf-gif python3 docs/agent/cast2gif.py agent.cast target/agent
 import json, os, subprocess, sys, tempfile
 import pyte
 
