@@ -8,8 +8,9 @@ COPY . .
 RUN cargo build --release --locked
 
 FROM debian:trixie-slim
-# a browser to draw each frame, Noto Sans Mono for docs/screenshot.py, ffmpeg to join them
-RUN apt-get update && apt-get install -y --no-install-recommends chromium ffmpeg python3 fonts-noto-core \
+# a browser to draw each frame, Noto Sans Mono for docs/screenshot.py, ffmpeg to join them,
+# pyte to replay a recording for docs/agent/cast2gif.py
+RUN apt-get update && apt-get install -y --no-install-recommends chromium ffmpeg python3 python3-pyte fonts-noto-core \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /src/target/release/wtf /usr/local/bin/wtf
 WORKDIR /work
