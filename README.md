@@ -38,13 +38,21 @@ ready and the response, with the time between them on the ruler. Try it:
 
 ## Install
 
-With a recent stable Rust (`rustup update`):
+On Linux or macOS (x86_64 or arm64):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/xtrollyj00/wtf/main/install.sh | sh
+```
+
+This puts the `wtf` command in `~/.local/bin`, checked against the release's checksum. The
+archives are on the [releases page](https://github.com/xtrollyj00/wtf/releases) too. Or build it
+with a recent stable Rust (`rustup update`):
 
 ```sh
 cargo install --git https://github.com/xtrollyj00/wtf wtf-wave
 ```
 
-This installs the `wtf` command. Linux and macOS; Windows is not supported.
+Windows is not supported.
 
 ## Use
 

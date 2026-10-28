@@ -1,0 +1,59 @@
+name: release
+
+# A tag v* builds wtf for Linux and macOS and publishes them as a GitHub release, with the
+# tag's section of CHANGELOG.md as its notes. install.sh downloads from the latest release.
+on:
+  push:
+    tags: ['v*']
+  # by hand: the builds only, to try them before tagging
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          # 22.04: an older glibc, so the binary runs on older distributions too
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-22.04 }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-22.04-arm }
+          - { target: x86_64-apple-darwin, os: macos-latest }
+          - { target: aarch64-apple-darwin, os: macos-latest }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Package
+        shell: bash
+        run: |
+          name=wtf-${{ matrix.target }}
+          mkdir "$name"
+          cp target/${{ matrix.target }}/release/wtf README.md LICENSE-APACHE LICENSE-MIT "$name"/
+          tar czf "$name.tar.gz" "$name"
+          shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wtf-${{ matrix.target }}
+          path: wtf-${{ matrix.target }}.tar.gz*
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          merge-multiple: true
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # the tag's section of the changelog, from its heading to the next
+          version=${GITHUB_REF_NAME#v}
+          awk -v v="$version" '/^## /{on = ($2 == v)} on && !/^## /' CHANGELOG.md > notes.md
+          gh release create "$GITHUB_REF_NAME" --title "wtf $version" --notes-file notes.md wtf-*.tar.gz*

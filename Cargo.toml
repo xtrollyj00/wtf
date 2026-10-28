@@ -3,6 +3,11 @@ name = "wtf-wave"
 version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
+description = "A Vim-like terminal viewer for VCD and FST waveforms, with an MCP server for AI agents"
+repository = "https://github.com/xtrollyj00/wtf"
+readme = "README.md"
+keywords = ["waveform", "vcd", "fst", "tui", "mcp"]
+categories = ["command-line-utilities", "development-tools::debugging", "simulation"]
 
 # the package is wtf-wave (wtf is taken on crates.io); the command is wtf
 [[bin]]
