@@ -32,7 +32,7 @@
   otherwise cut with `…` if three characters of them still fit (`0x4…`, `a0 00 …`), and if not only
   the outline is drawn.
 - A stream (section 16) draws a segment per record, labelled `#3 64B`, and nothing
-  between records; a segment opens with `🮣` over `🮡` and closes with `🮢` over `🮠`. Violations are red.
+  between records, nor do its fields (whose value there is `z`, section 15), in the value column too; a segment opens with `🮣` over `🮡` and closes with `🮢` over `🮠`. Violations are red. A stream row's name has `▸` / `▾` before it, as a group's, since `Space` folds and unfolds its fields.
   With a stream selected, the status line shows its record at the cursor (`rx.frame #2 65ns–85ns
   beats=0x2 len=0x8 data=c0 00 …`).
 - `X`, `U` and `x` are drawn red (red outline for buses), `Z` and `z` green.

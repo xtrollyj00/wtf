@@ -106,7 +106,7 @@ fn run(args: Args) -> Result<(), String> {
                 set_palette(config.palette);
             }
             if let Some(k) = &args.keys {
-                app.keys(k);
+                app.keys(k)?;
             }
             let buf = screen(&mut app, w, h);
             print!("{}", if args.ansi { draw::ansi(&buf) } else { draw::text(&buf) });
@@ -246,7 +246,7 @@ mod tests {
     }
 
     fn keys(app: &mut App, s: &str) {
-        app.keys(s);
+        app.keys(s).unwrap();
     }
 
     const SESSION: &str = "tests/data/simple.session.toml";
@@ -849,6 +849,7 @@ mod tests {
         // Vim's names and raw control characters press the same keys; an unknown <name> is text
         let (mut a, mut b) = (open("vcd", Some(SESSION)), open("vcd", Some(SESSION)));
         keys(&mut a, ":<lt>x<CR>l<C-d>?<Esc>i<Tab><esc>");
+        assert!(open("vcd", None).keys("<Space>a<Foo>").unwrap_err().starts_with("unknown key <Foo> (keys: "));
         keys(&mut b, ":<x\nl\x04?\x1bi\t\x1b");
         assert_eq!(snapshot(&mut a, 80, None), snapshot(&mut b, 80, None));
         assert_eq!(a.ws.view.cursor, b.ws.view.cursor);
@@ -906,7 +907,7 @@ mod tests {
         assert!(commands::completions("").len() > 10);
         for y in 19..29 {
             let bg = if y == 28 { draw::pal().selected } else { draw::pal().panel };
-            assert!((0..100).all(|x| buf[(x, y)].fg == Color::Reset && buf[(x, y)].bg == bg), "line {y}");
+            assert!((0..100).all(|x| buf[(x, y)].bg == bg), "line {y}");
         }
         assert!(buf[(0, 18)].bg != draw::pal().panel);
         keys(&mut app, "\x1b");
@@ -940,7 +941,7 @@ mod tests {
         keys(&mut app, ":select data\n:color blue\n");
         assert!(app.msg.is_none(), "{:?}", app.msg);
         let row = app.ws.rows[app.ws.sel].sig().unwrap().clone();
-        let cells = draw::wave(&app.ws.trace, &app.ws.view, &row, None, None, None, 60);
+        let cells = draw::wave(&app.ws.trace, &app.ws.view, &row, None, None, None, false, 60);
         let fgs: Vec<_> = cells.iter().map(|c| c[0].1.fg).collect();
         // its values in its colour; X and Z keep theirs
         assert!(fgs.contains(&Some(draw::pal().hues[5])) && fgs.contains(&Some(draw::pal().unknown)) && fgs.contains(&Some(draw::pal().highz)), "{fgs:?}");

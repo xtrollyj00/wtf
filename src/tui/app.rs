@@ -268,9 +268,10 @@ impl App {
     }
 
     /// Feed keys written as in Vim's mappings: plain characters, `<Esc>`, `<CR>`, `<Tab>`, `<BS>`,
-    /// `<lt>` and `<C-x>`; raw control characters work too (`\n`, `\x1b`, `\x01` is Ctrl-a).
-    /// A `<` that starts no such name is itself (spec §12 `--keys`).
-    pub fn keys(&mut self, s: &str) {
+    /// `<Space>`, `<lt>` and `<C-x>`; raw control characters work too (`\n`, `\x1b`, `\x01` is
+    /// Ctrl-a). Another `<name>` is an error, as it would be typed letter by letter; a `<` that
+    /// starts no name is itself (spec §12 `--keys`).
+    pub fn keys(&mut self, s: &str) -> Result<(), String> {
         let key = KeyEvent::new;
         let none = KeyModifiers::NONE;
         let mut rest = s;
@@ -282,7 +283,11 @@ impl App {
                 Some("tab") => Some(key(KeyCode::Tab, none)),
                 Some("bs") => Some(key(KeyCode::Backspace, none)),
                 Some("lt") => Some(key(KeyCode::Char('<'), none)),
+                Some("space") => Some(key(KeyCode::Char(' '), none)),
                 Some(n) if n.len() == 3 && n.starts_with("c-") => Some(key(KeyCode::Char(n.chars().nth(2).unwrap()), KeyModifiers::CONTROL)),
+                Some(n) if !n.is_empty() && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') => {
+                    return Err(format!("unknown key <{}> (keys: <Esc> <CR> <Tab> <BS> <Space> <lt> <C-x>; < itself is <lt>)", name.unwrap()));
+                }
                 _ => None,
             };
             if let (Some(k), Some(n)) = (named, name) {
@@ -300,6 +305,7 @@ impl App {
             });
             rest = &rest[c.len_utf8()..];
         }
+        Ok(())
     }
 
     /// Every key that changes the rows records an undo step, except collapsing and expanding
@@ -357,12 +363,16 @@ impl App {
         if numbers.is_empty() {
             return Err(if filter.is_some() { format!("no matching records, of {of}") } else { "no records".into() });
         }
+        // the numbers and the times padded to the widest, so the fields line up
+        let heads: Vec<(String, String)> = numbers.iter().map(|&i| (format!("#{i}"), format!("{}{}{}", time::format(st.records[i].start, fpt), gl().dash, time::format(st.records[i].end, fpt)))).collect();
+        let nw = heads.iter().map(|(n, _)| n.chars().count()).max().unwrap_or(0);
+        let tw = heads.iter().map(|(_, t)| t.chars().count()).max().unwrap_or(0);
         let items = numbers
             .iter()
-            .map(|&i| {
-                let r = &st.records[i];
+            .zip(heads)
+            .map(|(&i, (n, t))| {
                 let fields: Vec<String> = st.fields_text(i, fpt).into_iter().map(|(n, v)| format!("{n}={v}")).collect();
-                (Some(r.start), format!("#{i}  {}{}{}  {}", time::format(r.start, fpt), gl().dash, time::format(r.end, fpt), fields.join(" ")))
+                (Some(st.records[i].start), format!("{n:<nw$}  {t:<tw$}  {}", fields.join(" ")))
             })
             .collect();
         let title = match filter {

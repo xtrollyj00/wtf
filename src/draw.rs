@@ -308,6 +308,12 @@ pub fn state_style(v: &Val) -> Style {
     }
 }
 
+/// A stream field's value between records (spec §15): all `z`.
+// shortcut: a record whose field really is all z draws as a gap too; give gaps their own value if that matters
+fn gap(v: &Val) -> bool {
+    matches!(v, Val::Bits(b) if !b.is_empty() && b.chars().all(|c| c == 'z'))
+}
+
 /// Terminal lines per signal: two, so 1-bit edges and bus outlines connect.
 pub const ROW_LINES: usize = 2;
 
@@ -346,9 +352,18 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
                 (v, None) => format!("  {}{}", row_names[i], &ws.trace.vars[v].path[ws.trace.vars[s.var].path.len()..]),
                 _ => format!("  {}[{b}]", row_names[i]),
             },
+            // a stream folds and unfolds its fields as a group does its rows: the same marks
+            (None, Some(s)) if ws.stream_of(s.var).is_some() => {
+                let n = &row_names[i];
+                let indent = n.len() - n.trim_start().len();
+                let g = if s.bits > 0 { gl().group_open } else { gl().group_closed };
+                format!("{}{g} {}", &n[..indent], &n[indent..])
+            }
             _ => row_names[i].clone(),
         })
         .collect();
+    // a stream's field between records has no value to show
+    let is_field = |var: usize| ws.streams.iter().any(|s| ws.trace.vars[var].path.strip_prefix(s.name.as_str()).is_some_and(|f| f.starts_with('.')));
     let (values, value_styles): (Vec<String>, Vec<Style>) = lines
         .iter()
         .map(|&(i, bit)| {
@@ -356,7 +371,7 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
                 .sig()
                 .and_then(|s| {
                     let (var, bit) = ws.probe(s.var, bit);
-                    let v = ws.trace.value_of(var, bit, ws.view.cursor)?;
+                    let v = ws.trace.value_of(var, bit, ws.view.cursor).filter(|v| !(is_field(var) && gap(v)))?;
                     let stream = ws.stream_of(var);
                     let st = if stream.is_some_and(|s| s.violations) { red() } else { state_style(&v) };
                     Some((label(&ws.trace, stream, s, &v), st))
@@ -370,7 +385,7 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
         .rows
         .iter()
         .filter_map(|r| r.sig())
-        .filter_map(|s| ws.trace.value_at(s.var, ws.view.cursor).map(|v| label(&ws.trace, ws.stream_of(s.var), s, &v)))
+        .filter_map(|s| ws.trace.value_at(s.var, ws.view.cursor).filter(|v| !(is_field(s.var) && gap(v))).map(|v| label(&ws.trace, ws.stream_of(s.var), s, &v)))
         .collect();
     let nw = width(&names, MAX_NAME).max(width(&row_names, MAX_NAME));
     let vw = width(&values, MAX_VALUE).max(width(&hidden, MAX_VALUE));
@@ -434,7 +449,7 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
         let cells = match &ws.rows[i] {
             Row::Signal(s) if ws.probe(s.var, bit).0 != s.var => {
                 let field = Sig { var: ws.probe(s.var, bit).0, ..s.clone() };
-                wave(&ws.trace, &ws.view, &field, None, None, ws.stream_of(field.var), ww)
+                wave(&ws.trace, &ws.view, &field, None, None, ws.stream_of(field.var), is_field(field.var), ww)
             }
             Row::Signal(s) => {
                 let bits = bit.map(|b| {
@@ -445,7 +460,7 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
                     }
                     bit_changes.as_ref().map_or(&[][..], |(_, c)| &c[b as usize][..])
                 });
-                wave(&ws.trace, &ws.view, s, bit, bits, ws.stream_of(s.var), ww)
+                wave(&ws.trace, &ws.view, s, bit, bits, ws.stream_of(s.var), is_field(s.var), ww)
             }
             Row::Group { collapsed: true, .. } => activity(&ws.trace, &ws.view, &rows::members(&ws.rows, i), ww),
             Row::Group { .. } => Vec::new(),
@@ -582,8 +597,10 @@ fn lines_of(v: &Option<Val>, own: Style) -> (bool, bool, Style) {
 /// One signal's waveform as (top, bottom) cells per column. Each column costs two binary
 /// searches, so drawing depends on the screen size, not on the number of transitions (spec §18).
 /// For a bit of a bus, `bits` holds its changes per column (`Trace::bit_changes`). A stream's own
-/// var draws its records' labels, red for violations, and nothing between records.
-pub fn wave(trace: &Trace, view: &View, row: &Sig, bit: Option<u32>, bits: Option<&[Changes]>, stream: Option<&Stream>, ww: usize) -> Vec<[(char, Style); 2]> {
+/// var draws its records' labels, red for violations, and nothing between records; so does a
+/// stream's `field`, whose value there is all `z`.
+#[allow(clippy::too_many_arguments)]
+pub fn wave(trace: &Trace, view: &View, row: &Sig, bit: Option<u32>, bits: Option<&[Changes]>, stream: Option<&Stream>, field: bool, ww: usize) -> Vec<[(char, Style); 2]> {
     let var = row.var;
     let end = trace.end();
     let bus = bit.is_none() && trace.vars[var].width != Some(1);
@@ -598,7 +615,8 @@ pub fn wave(trace: &Trace, view: &View, row: &Sig, bit: Option<u32>, bits: Optio
         Some(b) => b.to_vec(),
         None => (0..ww).map(&range).map(|(a, b)| trace.changes_in(var, a, b)).collect(),
     };
-    let val = |c: usize| trace.value_of(var, bit, range(c).1 - 1);
+    let value = |t: Tick| trace.value_of(var, bit, t).filter(|v| !(field && gap(v)));
+    let val = |c: usize| value(range(c).1 - 1);
     let blank = (' ', Style::new());
     let mut out = vec![[blank; 2]; ww];
     // the row's own colour, or the theme's: a bus's outline in a hue of its own, its labels in
@@ -691,7 +709,7 @@ pub fn wave(trace: &Trace, view: &View, row: &Sig, bit: Option<u32>, bits: Optio
         let (top, bot, st) = lines_of(&val(c), own);
         out[c] = if n[c] == Changes::One {
             // an edge joins the lines on its left (before the change) to those on its right
-            let before = range(c).0.checked_sub(1).and_then(|t| trace.value_of(var, bit, t));
+            let before = range(c).0.checked_sub(1).and_then(value);
             let (pt, pb, _) = lines_of(&before, own);
             let t = gl().edge_up[edge(pt, top)];
             let b = gl().edge_down[edge(pb, bot)];

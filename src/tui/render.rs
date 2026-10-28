@@ -46,7 +46,7 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
         // the title line and a blank, then as many lines as fit; records scroll to show the
         // highlight, a text by the line (`hl` is its first line shown)
         let text = r.title.is_empty();
-        r.page = body.saturating_sub(if text { 2 } else { 4 }).max(1);
+        r.page = body.saturating_sub(if text { 2 } else { 3 }).max(1);
         if text {
             r.hl = r.hl.min(r.items.len().saturating_sub(r.page));
             r.top = r.hl;
@@ -57,7 +57,7 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
         }
         // as wide as the widest line, so the box keeps its size while scrolling
         let ww = r.items.iter().map(|i| i.1.chars().count() + 2).max().unwrap_or(0);
-        let mut lines = if text { Vec::new() } else { vec![format!("{:<ww$}", r.title), String::new()] };
+        let mut lines = if text { Vec::new() } else { vec![format!("{:<ww$}", r.title)] };
         for (k, (_, l)) in r.items.iter().enumerate().skip(r.top).take(r.page) {
             lines.push(match text {
                 true => format!("{l:<ww$}"),
@@ -475,21 +475,20 @@ fn command_line(app: &App, buf: &mut Buffer, w: usize, h: usize) -> Option<(u16,
     let line = format!("{}{}", if search { '/' } else { ':' }, app.line);
     put(buf, 0, y, &format!("{line:<w$}"), Style::new());
     let items = if search { Vec::new() } else { crate::tui::commands::completions(&app.line) };
-    // up to ten, scrolled to the highlight; descriptions line up after most usages, not the longest
+    // up to ten, scrolled to the highlight; the usages in a column up to 40% of the width (a
+    // longer one is cut: the description says it again), the descriptions dim after them
     let shown = items.len().min(10).min(y);
     let first = app.hl.saturating_sub(shown.saturating_sub(1));
-    let uw = items.iter().map(|c| c.usage.len()).filter(|&n| n <= 24).max().unwrap_or(0);
+    let uw = items.iter().map(|c| c.usage.chars().count()).max().unwrap_or(0).min(w * 2 / 5).max(4);
+    let cut = |s: &str, n: usize| if s.chars().count() > n { s.chars().take(n.saturating_sub(1)).chain([gl().cut]).collect() } else { s.to_string() };
     for (k, c) in items.iter().enumerate().skip(first).take(shown) {
-        let mark = if k == app.hl { format!(" {} ", gl().hl) } else { "   ".to_string() };
-        let text = format!("{mark}{:<uw$}  {}", c.usage, c.desc);
-        let text = match text.chars().count() > w.saturating_sub(1) {
-            true => text.chars().take(w.saturating_sub(2)).chain([gl().cut]).collect(),
-            false => text,
-        };
+        let ly = y - 1 - (k - first);
         // opaque: the cursor column and the selection must not show through
         let st = Style::new().bg(if k == app.hl { pal().selected } else { pal().panel }).fg(Color::Reset);
-        let st = if k == app.hl { st.add_modifier(Modifier::BOLD) } else { st };
-        put(buf, 0, y - 1 - (k - first), &format!("{text:<w$}"), st);
+        let mark = if k == app.hl { format!(" {} ", gl().hl) } else { "   ".to_string() };
+        put(buf, 0, ly, &format!("{mark:<w$}"), st);
+        put(buf, 3, ly, &cut(c.usage, uw), if k == app.hl { st.add_modifier(Modifier::BOLD) } else { st });
+        put(buf, 3 + uw + 2, ly, &cut(c.desc, w.saturating_sub(3 + uw + 2)), st.fg(pal().dim));
     }
     // without a background, a rule between the list and the waveforms above it
     if let Some(ry) = y.checked_sub(shown + 1).filter(|_| shown > 0 && pal().mono) {
