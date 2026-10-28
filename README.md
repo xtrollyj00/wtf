@@ -1,5 +1,7 @@
 # wtf
 
+[![ci](https://github.com/xtrollyj00/wtf/actions/workflows/ci.yml/badge.svg)](https://github.com/xtrollyj00/wtf/actions/workflows/ci.yml)
+
 **W**aveform **T**erminal **F**rontend: a Vim-like terminal viewer for VCD and FST waveforms,
 with an MCP server so AI agents can debug a trace with you. Also what you say when the bus goes
 `X`.
