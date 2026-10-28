@@ -30,6 +30,7 @@ rmcp = { version = "3.6.0", default-features = false, features = ["server", "tra
 serde = { version = "1.0.229", features = ["derive"] }
 tokio = { version = "1.54.0", features = ["rt", "macros", "io-std"] }
 toml = "1.1.8"
+terminal-colorsaurus = "1.0.3"
 
 [dev-dependencies]
 insta = "1.49.0"

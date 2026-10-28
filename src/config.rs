@@ -13,10 +13,11 @@ pub struct Config {
 
 /// `$XDG_CONFIG_HOME/wtf/`, or `~/.config/wtf/`: `config.toml` and the user's `themes/`. A missing
 /// file means the defaults.
-pub fn load() -> Config {
+/// `bg` is the terminal's background, if it answered: the theme's surfaces are fitted to it.
+pub fn load(bg: Option<theme::Rgb>) -> Config {
     match dir() {
-        Some(d) => load_from(&d),
-        None => parse("", draw::truecolor(), Path::new("")),
+        Some(d) => load_from(&d, bg),
+        None => parse("", draw::truecolor(), Path::new(""), bg),
     }
 }
 
@@ -65,20 +66,20 @@ fn set_keys(text: &str, keys: &[(&str, &str)]) -> String {
     lines.join("\n") + "\n"
 }
 
-fn load_from(dir: &Path) -> Config {
+fn load_from(dir: &Path, bg: Option<theme::Rgb>) -> Config {
     let (path, themes, rgb) = (dir.join("config.toml"), dir.join("themes"), draw::truecolor());
     match std::fs::read_to_string(&path) {
-        Ok(text) => parse(&text, rgb, &themes),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => parse("", rgb, &themes),
-        Err(e) => Config { warnings: vec![format!("config: {}: {e}", path.display())], ..parse("", rgb, &themes) },
+        Ok(text) => parse(&text, rgb, &themes, bg),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => parse("", rgb, &themes, bg),
+        Err(e) => Config { warnings: vec![format!("config: {}: {e}", path.display())], ..parse("", rgb, &themes, bg) },
     }
 }
 
 /// The file's text as wtf reads it, with the user's themes in `themes`. Pure apart from reading
 /// the theme named, so tests can run it on any text.
-pub fn parse(text: &str, rgb: bool, themes: &Path) -> Config {
+pub fn parse(text: &str, rgb: bool, themes: &Path, bg: Option<theme::Rgb>) -> Config {
     let mut warnings = Vec::new();
-    let dark = || theme::builtin("dark", rgb).expect("dark is built in");
+    let dark = || theme::builtin_on("dark", rgb, bg).expect("dark is built in");
     let table: toml::Table = match text.parse() {
         Ok(t) => t,
         Err(e) => {
@@ -99,8 +100,10 @@ pub fn parse(text: &str, rgb: bool, themes: &Path) -> Config {
     }
     // the theme first, so the single colours override it whatever the order in the file
     let mut palette = match table.get("theme") {
+        // none chosen: the one that suits the terminal's background
+        None if bg.is_some_and(theme::is_light) => theme::builtin("light", rgb).expect("light is built in"),
         None => dark(),
-        Some(v) => match v.as_str().and_then(|n| theme::find(n, themes, rgb, &mut warnings)) {
+        Some(v) => match v.as_str().and_then(|n| theme::find(n, themes, rgb, bg, &mut warnings)) {
             Some(p) => p,
             None => {
                 warnings.push(format!("config: theme = {}? ({})", theme::show(v), theme::names(themes).join(", ")));
@@ -146,13 +149,13 @@ mod tests {
         assert_eq!(set_keys("[colors]\ntheme = 1\n", &[("theme", "dark")]), "theme = \"dark\"\n[colors]\ntheme = 1\n");
         let d = dir("save", &[]);
         save(&d, &[("glyphs", "box")]).unwrap();
-        assert_eq!(parse(&std::fs::read_to_string(d.join("config.toml")).unwrap(), true, Path::new("")).glyphs.crossing, draw::BOX.crossing);
+        assert_eq!(parse(&std::fs::read_to_string(d.join("config.toml")).unwrap(), true, Path::new(""), None).glyphs.crossing, draw::BOX.crossing);
         std::fs::remove_dir_all(&d).unwrap();
     }
 
     #[test]
     fn valid_file_applies() {
-        let c = parse("glyphs = \"box\"\ntheme = \"light\"\n[colors]\ncursor = \"#ff0000\"\npanel = 17\nred = \"#5f87af\"\n", true, Path::new(""));
+        let c = parse("glyphs = \"box\"\ntheme = \"light\"\n[colors]\ncursor = \"#ff0000\"\npanel = 17\nred = \"#5f87af\"\n", true, Path::new(""), None);
         assert!(c.warnings.is_empty(), "{:?}", c.warnings);
         assert_eq!(c.glyphs.crossing, draw::BOX.crossing);
         assert_eq!(c.palette.line, theme::builtin("light", true).unwrap().line);
@@ -164,7 +167,7 @@ mod tests {
     #[test]
     fn every_warning() {
         let text = "foo = 1\nglyphs = \"utf8\"\ntheme = 3\n[colors]\ncurser = \"#000000\"\ncursor = \"blue\"\nred = \"#ff0000\"\n";
-        let c = parse(text, true, Path::new(""));
+        let c = parse(text, true, Path::new(""), None);
         assert_eq!(
             c.warnings,
             [
@@ -183,11 +186,20 @@ mod tests {
 
     #[test]
     fn not_toml_gives_defaults() {
-        let c = parse("glyphs = \"box\"\ntheme = \n", true, Path::new(""));
+        let c = parse("glyphs = \"box\"\ntheme = \n", true, Path::new(""), None);
         assert_eq!(c.warnings.len(), 1, "{:?}", c.warnings);
         assert!(c.warnings[0].starts_with("config: ") && c.warnings[0].ends_with("(line 2)"), "{:?}", c.warnings);
         assert_eq!(c.glyphs.crossing, draw::UNICODE.crossing);
         assert_eq!(c.palette.line, dark().line);
+    }
+
+    #[test]
+    fn theme_by_background() {
+        // no theme chosen: light on a light terminal, dark fitted to a dark one; a chosen one stays
+        let light = |text| parse(text, true, Path::new(""), Some((0xff, 0xff, 0xf0))).palette;
+        assert_eq!(light("").background, theme::builtin("light", true).unwrap().background);
+        assert_eq!(light("theme = \"dark\"").panel, Color::Rgb(232, 232, 217));
+        assert_eq!(parse("", true, Path::new(""), Some((0, 0, 0))).palette.panel, Color::Rgb(24, 24, 24));
     }
 
     #[test]
@@ -196,23 +208,23 @@ mod tests {
         // entry in one is named with it; an unknown theme lists those there are
         let d = dir("themes", &[("gruvbox", "background = \"#282828\"\nline = [\"#83a598\", 109]\n"), ("light", "line = 1\n"), ("broken", "lne = 1\n")]);
         let themes = d.join("themes");
-        let c = parse("theme = \"gruvbox\"\n[colors]\nline = 2\n", true, &themes);
+        let c = parse("theme = \"gruvbox\"\n[colors]\nline = 2\n", true, &themes, None);
         assert!(c.warnings.is_empty(), "{:?}", c.warnings);
         assert_eq!((c.palette.background, c.palette.line, c.palette.panel), (Color::Rgb(0x28, 0x28, 0x28), Color::Indexed(2), dark().panel));
-        assert_eq!(parse("theme = \"light\"", true, &themes).palette.line, Color::Indexed(1));
-        assert!(parse("theme = \"broken\"", true, &themes).warnings[0].starts_with("config: theme broken: unknown key lne (keys: line, "));
-        assert_eq!(parse("theme = \"nord\"", true, &themes).warnings, ["config: theme = \"nord\"? (broken, dark, gruvbox, light)"]);
+        assert_eq!(parse("theme = \"light\"", true, &themes, None).palette.line, Color::Indexed(1));
+        assert!(parse("theme = \"broken\"", true, &themes, None).warnings[0].starts_with("config: theme broken: unknown key lne (keys: line, "));
+        assert_eq!(parse("theme = \"nord\"", true, &themes, None).warnings, ["config: theme = \"nord\"? (broken, dark, gruvbox, light)"]);
         std::fs::remove_dir_all(&d).unwrap();
     }
 
     #[test]
     fn load_from_missing_and_written_file() {
         let d = dir("load", &[]);
-        let c = load_from(&d);
+        let c = load_from(&d, None);
         assert!(c.warnings.is_empty());
         assert_eq!(c.glyphs.crossing, draw::UNICODE.crossing);
         std::fs::write(d.join("config.toml"), "theme = \"light\"\n").unwrap();
-        let c = load_from(&d);
+        let c = load_from(&d, None);
         assert!(c.warnings.is_empty(), "{:?}", c.warnings);
         assert_eq!(c.palette.line, theme::builtin("light", draw::truecolor()).unwrap().line);
         std::fs::remove_dir_all(&d).unwrap();

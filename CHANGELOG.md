@@ -3,6 +3,13 @@
 What changed in each release. Commits follow [Conventional Commits](https://www.conventionalcommits.org/),
 so `git log v0.1.0..` has the details.
 
+## Unreleased
+
+- The dark theme fits the shades behind cards, the selected row and the cursor columns to the
+  terminal's background, which wtf asks the terminal for, so the examine card no longer blends
+  into a background other than One Dark's. With no theme chosen, a light terminal gets the light
+  theme.
+
 ## 0.1.0 (2026-10-28)
 
 The first release.

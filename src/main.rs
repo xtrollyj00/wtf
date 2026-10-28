@@ -69,11 +69,13 @@ fn run(args: Args) -> Result<(), String> {
     // the first start in a terminal asks how to draw (spec §19 "First start")
     use std::io::IsTerminal;
     let window = args.snapshot.is_none() && args.attach != Some(None) && std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
-    let setup = (args.setup || (window && config::first_start())).then(|| tui::setup::run(no_color())).flatten();
+    // asked once, before anything reads keys: the themes fit their surfaces to it
+    let bg = (window && !no_color()).then(theme::terminal_background).flatten();
+    let setup = (args.setup || (window && config::first_start())).then(|| tui::setup::run(no_color(), bg)).flatten();
     if args.setup && args.trace.is_none() {
         return setup.map_or(Ok(()), Err);
     }
-    let config = config::load();
+    let config = config::load(bg);
     // --glyphs over the config file over unicode (spec §19 "Precedence")
     draw::set_glyphs(args.glyphs.unwrap_or(config.glyphs));
     let mut warnings = config.warnings;

@@ -10,7 +10,8 @@ optional; without it wtf uses the defaults.
 
 ```toml
 glyphs = "box"          # unicode (default), box, ascii (section 14)
-theme = "light"         # dark (default), light, or one of the user's (below)
+theme = "light"         # dark, light, or one of the user's (below); default: the one that
+                        # suits the terminal's background
 
 [colors]                # change single colours of the theme
 cursor = "#e5c07b"
@@ -41,8 +42,8 @@ of a clock and a bus drawn as wtf draws them:
    box drawing is missing too.
 2. Dark or light: the samples in each theme, in the chosen glyphs. Not asked with `NO_COLOR`.
 
-`1`-`3` (or `j` / `k` and `Enter`) answer; `Esc` takes the defaults (`unicode`, `dark`) for what
-is left; `Ctrl-c` leaves without writing, so the next start asks again. The answers are written
+`1`-`3` (or `j` / `k` and `Enter`) answer; `Esc` takes the defaults (`unicode`, and the theme
+that suits the terminal's background, below) for what is left; `Ctrl-c` leaves without writing, so the next start asks again. The answers are written
 as `glyphs` and `theme` to the config file, which is made if missing; then the trace opens. A
 file that can't be written is said on the status line.
 
@@ -69,6 +70,21 @@ cursor     = ["#fabd2f", 214]
   One named as a built-in theme replaces it.
 - A bad entry in a theme is skipped and named with the theme (`config: theme gruvbox: unknown
   key lne (keys: …)`); an unknown theme lists the ones there are.
+
+### The terminal's background
+
+`dark` keeps the terminal's own background and text, so its fixed shades behind cards (`panel`),
+the selected row (`selected`) and the cursor columns (`cursor_dim`, `column`) can fall too close
+to a background they weren't made for. A window (as for the first start) asks the terminal for
+its background colour once at start (OSC 11; most terminals and tmux 3.3+ answer):
+
+- `dark`'s surfaces are steps from that colour: `panel`, `selected` and `cursor_dim` 0.07, 0.10
+  and 0.14 lighter in OKLab lightness on a dark background, darker on a light one, at least 0.21
+  from black; `column` a quarter of the way toward the accent's yellow. A theme or `[colors]`
+  that sets them still wins, and `light`, which sets its own background, is left as it is.
+- Without a `theme` in the file, a light background gets `light`; the first start selects it.
+- A terminal that doesn't answer, `NO_COLOR`, `--snapshot` and `--mcp` keep the fixed shades, so
+  what they draw doesn't depend on the terminal.
 
 ### Precedence
 

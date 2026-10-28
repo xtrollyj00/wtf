@@ -57,6 +57,8 @@ pub struct Setup {
     /// Without colour there is no theme to pick.
     mono: bool,
     themes: Vec<(&'static str, &'static Palette)>,
+    /// The theme selected at first: light on a light background.
+    suited: usize,
     base: &'static Palette,
     ws: Workspace,
 }
@@ -68,14 +70,16 @@ pub struct Answer {
 }
 
 impl Setup {
-    pub fn new(mono: bool, rgb: bool) -> Setup {
+    /// `bg` is the terminal's background, if it answered: the theme that suits it comes first.
+    pub fn new(mono: bool, rgb: bool, bg: Option<crate::theme::Rgb>) -> Setup {
         let leak = |p: Palette| -> &'static Palette { Box::leak(Box::new(p)) };
-        let themes = ["dark", "light"].map(|n| (n, leak(crate::theme::builtin(n, rgb).expect("built in")))).to_vec();
+        let themes = ["dark", "light"].map(|n| (n, leak(crate::theme::builtin_on(n, rgb, bg).expect("built in")))).to_vec();
+        let suited = bg.is_some_and(crate::theme::is_light) as usize;
         let base = if mono { leak(Palette::mono()) } else { themes[0].1 };
         let mut ws = Workspace::new(Trace::from_bytes(SAMPLE.as_bytes().to_vec()).expect("the sample is a VCD"), String::new());
         command::run(&mut ws, "add **").expect("the sample has signals");
         ws.view.cursor = 30;
-        Setup { theme_step: false, sel: 0, glyph: 0, mono, themes, base, ws }
+        Setup { theme_step: false, sel: 0, glyph: 0, mono, themes, suited, base, ws }
     }
 
     fn options(&self) -> usize {
@@ -99,7 +103,7 @@ impl Setup {
                 if !self.theme_step {
                     self.glyph = 0;
                 }
-                self.sel = 0;
+                self.sel = self.suited;
                 return Some(Some(self.answer()));
             }
             _ => {}
@@ -111,7 +115,7 @@ impl Setup {
         if !self.theme_step {
             self.glyph = self.sel;
             if !self.mono {
-                (self.theme_step, self.sel) = (true, 0);
+                (self.theme_step, self.sel) = (true, self.suited);
                 return None;
             }
         }
@@ -186,8 +190,8 @@ impl Setup {
 
 /// Runs the setup in the terminal and writes the answers to the config file. Returns a warning
 /// for the status line if the file couldn't be written.
-pub fn run(mono: bool) -> Option<String> {
-    let mut setup = Setup::new(mono, draw::truecolor());
+pub fn run(mono: bool, bg: Option<crate::theme::Rgb>) -> Option<String> {
+    let mut setup = Setup::new(mono, draw::truecolor(), bg);
     let mut term = ratatui::init();
     let answer = loop {
         if let Err(e) = term.draw(|f| setup.draw(f.area(), f.buffer_mut())) {
@@ -233,7 +237,7 @@ mod tests {
 
     #[test]
     fn screens() {
-        let mut s = Setup::new(false, true);
+        let mut s = Setup::new(false, true, None);
         insta::assert_snapshot!("setup_glyphs", screen(&mut s));
         assert!(press(&mut s, KeyCode::Char('2')).is_none());
         insta::assert_snapshot!("setup_theme", screen(&mut s));
@@ -241,22 +245,28 @@ mod tests {
 
     #[test]
     fn answers() {
-        let mut s = Setup::new(false, true);
+        let mut s = Setup::new(false, true, None);
         press(&mut s, KeyCode::Char('j'));
         assert!(press(&mut s, KeyCode::Enter).is_none());
         let a = press(&mut s, KeyCode::Char('2')).unwrap().unwrap();
         assert_eq!((a.glyphs, a.theme), ("box", Some("light")));
         // Esc: the defaults for what is left
-        let a = press(&mut Setup::new(false, true), KeyCode::Esc).unwrap().unwrap();
+        let a = press(&mut Setup::new(false, true, None), KeyCode::Esc).unwrap().unwrap();
         assert_eq!((a.glyphs, a.theme), ("unicode", Some("dark")));
-        let mut s = Setup::new(false, true);
+        let mut s = Setup::new(false, true, None);
         press(&mut s, KeyCode::Char('3'));
         let a = press(&mut s, KeyCode::Esc).unwrap().unwrap();
         assert_eq!((a.glyphs, a.theme), ("ascii", Some("dark")));
         // without colour, no theme question
-        let a = press(&mut Setup::new(true, true), KeyCode::Char('3')).unwrap().unwrap();
+        let a = press(&mut Setup::new(true, true, None), KeyCode::Char('3')).unwrap().unwrap();
         assert_eq!((a.glyphs, a.theme), ("ascii", None));
-        assert!(press(&mut Setup::new(false, true), KeyCode::Char('4')).is_none());
-        assert!(Setup::new(false, true).key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)).unwrap().is_none());
+        assert!(press(&mut Setup::new(false, true, None), KeyCode::Char('4')).is_none());
+        // on a light terminal light is selected, and the default
+        let mut s = Setup::new(false, true, Some((0xfa, 0xfa, 0xfa)));
+        press(&mut s, KeyCode::Enter);
+        assert_eq!(s.sel, 1);
+        let a = press(&mut Setup::new(false, true, Some((0xfa, 0xfa, 0xfa))), KeyCode::Esc).unwrap().unwrap();
+        assert_eq!(a.theme, Some("light"));
+        assert!(Setup::new(false, true, None).key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)).unwrap().is_none());
     }
 }
