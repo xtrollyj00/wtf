@@ -105,8 +105,10 @@ fn run(args: Args) -> Result<(), String> {
             if args.ansi {
                 set_palette(config.palette);
             }
-            if let Some(k) = &args.keys {
-                app.keys(k)?;
+            // drawn before each key, as the window is: what a key does can depend on the width
+            for k in tui::app::parse_keys(args.keys.as_deref().unwrap_or(""))? {
+                screen(&mut app, w, h);
+                app.key(k);
             }
             let buf = screen(&mut app, w, h);
             print!("{}", if args.ansi { draw::ansi(&buf) } else { draw::text(&buf) });

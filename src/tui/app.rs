@@ -271,40 +271,9 @@ impl App {
     /// `<Space>`, `<lt>` and `<C-x>`; raw control characters work too (`\n`, `\x1b`, `\x01` is
     /// Ctrl-a). Another `<name>` is an error, as it would be typed letter by letter; a `<` that
     /// starts no name is itself (spec §12 `--keys`).
+    #[cfg(test)]
     pub fn keys(&mut self, s: &str) -> Result<(), String> {
-        let key = KeyEvent::new;
-        let none = KeyModifiers::NONE;
-        let mut rest = s;
-        while let Some(c) = rest.chars().next() {
-            let name = rest.strip_prefix('<').and_then(|r| r.split_once('>')).map(|(n, _)| n);
-            let named = match name.map(|n| n.to_ascii_lowercase()).as_deref() {
-                Some("esc") => Some(key(KeyCode::Esc, none)),
-                Some("cr" | "enter") => Some(key(KeyCode::Enter, none)),
-                Some("tab") => Some(key(KeyCode::Tab, none)),
-                Some("bs") => Some(key(KeyCode::Backspace, none)),
-                Some("lt") => Some(key(KeyCode::Char('<'), none)),
-                Some("space") => Some(key(KeyCode::Char(' '), none)),
-                Some(n) if n.len() == 3 && n.starts_with("c-") => Some(key(KeyCode::Char(n.chars().nth(2).unwrap()), KeyModifiers::CONTROL)),
-                Some(n) if !n.is_empty() && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') => {
-                    return Err(format!("unknown key <{}> (keys: <Esc> <CR> <Tab> <BS> <Space> <lt> <C-x>; < itself is <lt>)", name.unwrap()));
-                }
-                _ => None,
-            };
-            if let (Some(k), Some(n)) = (named, name) {
-                self.key(k);
-                rest = &rest[n.len() + 2..];
-                continue;
-            }
-            self.key(match c {
-                '\n' => key(KeyCode::Enter, none),
-                '\x1b' => key(KeyCode::Esc, none),
-                '\x08' => key(KeyCode::Backspace, none),
-                '\t' => key(KeyCode::Tab, none),
-                c if c < ' ' => key(KeyCode::Char((c as u8 + b'a' - 1) as char), KeyModifiers::CONTROL),
-                c => key(KeyCode::Char(c), none),
-            });
-            rest = &rest[c.len_utf8()..];
-        }
+        parse_keys(s)?.into_iter().for_each(|k| self.key(k));
         Ok(())
     }
 
@@ -1051,6 +1020,45 @@ fn common_scope(paths: &[&str]) -> String {
     let first = scopes.first().cloned().unwrap_or_default();
     let n = (0..first.len()).take_while(|&i| scopes.iter().all(|s| s.get(i) == Some(&first[i]))).count();
     first[..n].join(".")
+}
+
+/// Keys as `App::keys` takes them, each a key event.
+pub fn parse_keys(s: &str) -> Result<Vec<KeyEvent>, String> {
+    let key = KeyEvent::new;
+    let none = KeyModifiers::NONE;
+    let mut rest = s;
+    let mut out = Vec::new();
+    while let Some(c) = rest.chars().next() {
+        let name = rest.strip_prefix('<').and_then(|r| r.split_once('>')).map(|(n, _)| n);
+        let named = match name.map(|n| n.to_ascii_lowercase()).as_deref() {
+            Some("esc") => Some(key(KeyCode::Esc, none)),
+            Some("cr" | "enter") => Some(key(KeyCode::Enter, none)),
+            Some("tab") => Some(key(KeyCode::Tab, none)),
+            Some("bs") => Some(key(KeyCode::Backspace, none)),
+            Some("lt") => Some(key(KeyCode::Char('<'), none)),
+            Some("space") => Some(key(KeyCode::Char(' '), none)),
+            Some(n) if n.len() == 3 && n.starts_with("c-") => Some(key(KeyCode::Char(n.chars().nth(2).unwrap()), KeyModifiers::CONTROL)),
+            Some(n) if !n.is_empty() && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') => {
+                return Err(format!("unknown key <{}> (keys: <Esc> <CR> <Tab> <BS> <Space> <lt> <C-x>; < itself is <lt>)", name.unwrap()));
+            }
+            _ => None,
+        };
+        if let (Some(k), Some(n)) = (named, name) {
+            out.push(k);
+            rest = &rest[n.len() + 2..];
+            continue;
+        }
+        out.push(match c {
+            '\n' => key(KeyCode::Enter, none),
+            '\x1b' => key(KeyCode::Esc, none),
+            '\x08' => key(KeyCode::Backspace, none),
+            '\t' => key(KeyCode::Tab, none),
+            c if c < ' ' => key(KeyCode::Char((c as u8 + b'a' - 1) as char), KeyModifiers::CONTROL),
+            c => key(KeyCode::Char(c), none),
+        });
+        rest = &rest[c.len_utf8()..];
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
