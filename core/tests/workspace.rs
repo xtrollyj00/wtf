@@ -503,3 +503,16 @@ fn reloads_and_reports_whats_left() {
     assert_eq!(msg, "reloaded; not in trace: ds (unknown signal: top.dma.state[0]), dd (unknown signal: ds[0])");
     assert!(ws.trace.by_path.contains_key("lo"), "lo is made in a second pass");
 }
+
+#[test]
+fn first_value_after_the_start_is_a_change() {
+    // axi4.vcd gives its signals their first value at 2ns, after the clock's at 0
+    let mut ws = Workspace::open(format!("{}/../tests/data/axi4.vcd", env!("CARGO_MANIFEST_DIR")).as_ref()).unwrap();
+    wtf_core::command::run(&mut ws, "add top.m_axi_rresp top.aclk").unwrap();
+    let (t, v) = (&ws.trace, ws.trace.by_path["top.m_axi_rresp"]);
+    assert_eq!((t.value_at(v, 1), t.next_change(v, 0)), (None, Some(2)));
+    assert_eq!(t.changes_in(v, 0, 3), wtf_core::trace::Changes::One);
+    // the clock's value at 0 is its initial value, not a change
+    let clk = t.by_path["top.aclk"];
+    assert_eq!(t.changes_in(clk, 0, 1), wtf_core::trace::Changes::None);
+}

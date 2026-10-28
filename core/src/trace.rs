@@ -212,14 +212,14 @@ impl Trace {
     }
 
     /// Time-table indices of the var's entries, and the position of the first real change
-    /// (entries at the first time are the initial value, not a transition).
+    /// (entries at the trace's first time are the initial value, not a transition; a var first
+    /// given a value later changes then, from none).
     fn indices(&self, var: usize) -> (&[u32], usize) {
         let ti = match self.vars[var].source {
             Source::File(s) => self.wave.get_signal(s).map_or(&[][..], |s| s.time_indices()),
             Source::Computed(_) => &[],
         };
-        let first = ti.first().map_or(0, |&f| ti.partition_point(|&x| x <= f));
-        (ti, first)
+        (ti, ti.partition_point(|&x| x == 0))
     }
 
     fn tt_pos(&self, t: Tick, inclusive: bool) -> u32 {
