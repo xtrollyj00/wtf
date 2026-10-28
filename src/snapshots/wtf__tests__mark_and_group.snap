@@ -2,15 +2,15 @@
 source: src/main.rs
 expression: "snapshot(&mut app, 80, Some(12))"
 ---
-  signals
-  / to search
-  ▾ top                                           simple
-    ▾ cpu
-      + state                             /       search
-      + data                              Space   mark
-        busy                              Enter   add
-    ▸ dma                                 Ctrl-g  add as a group
-      clk                                 Esc     close
-
-   2 marked
+  signals                                         w t f
+  / to search                           waveform terminal frontend
+  ▾ top
+    ▾ cpu                                         simple
+      + state                             6 signals  ·  0ns–80ns
+      + data
+        busy                              /       search
+    ▸ dma                                 Space   mark
+      clk                                 Enter   add
+                                          Ctrl-g  add as a group
+   2 marked                               Esc     close
  EDIT                                                0ns  ·  2ns/col  ·  simple

@@ -127,7 +127,7 @@ fn set_palette(p: draw::Palette) {
 
 /// Without a height, as tall as the content: the rows (or the guide) plus the status line.
 fn screen(app: &mut App, w: u16, h: Option<u16>) -> Buffer {
-    let h = h.unwrap_or(if app.ws.rows.is_empty() { 7 } else { draw::height(&app.ws) + 1 });
+    let h = h.unwrap_or(if app.ws.rows.is_empty() { render::guide_height(app) + 1 } else { draw::height(&app.ws) + 1 });
     let area = Rect::new(0, 0, w, h);
     let mut buf = Buffer::empty(area);
     render::draw(app, area, &mut buf);

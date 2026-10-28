@@ -347,20 +347,44 @@ fn plain(lines: &[String]) -> Vec<Line> {
     lines.iter().map(|l| vec![(l.clone(), Style::new())]).collect()
 }
 
+/// The launch guide: a small wordmark, the trace's name and what is in it, the keys to start with.
 fn guide(app: &App, buf: &mut Buffer, w: usize, body: usize) {
-    let lines: &[&str] = if app.panel_shown() {
+    let keys: &[(&str, &str)] = if app.panel_shown() {
         // the panel is open: how to add from it
-        &[&app.ws.file_name, "", "/       search", "Space   mark", "Enter   add", "Ctrl-g  add as a group", "Esc     close"]
+        &[("/", "search"), ("Space", "mark"), ("Enter", "add"), ("Ctrl-g", "add as a group"), ("Esc", "close")]
     } else {
-        &[&app.ws.file_name, "", "i       add signals", ":       commands", "?       help", "q       quit"]
+        &[("i", "add signals"), (":", "commands"), ("?", "help"), ("q", "quit")]
     };
-    let bw = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
-    let y0 = body.saturating_sub(lines.len()) / 2;
-    for (i, l) in lines.iter().enumerate().filter(|(i, _)| y0 + i < body) {
-        // the file name is centred on its own, the key list as a block
-        let x = if i == 0 { (w.saturating_sub(l.chars().count())) / 2 } else { w.saturating_sub(bw) / 2 };
-        put(buf, x, y0 + i, l, Style::new());
+    let t = &app.ws.trace;
+    let fpt = t.fs_per_tick;
+    let signals = (0..t.vars.len()).filter(|&v| !t.is_computed(v)).count();
+    let facts = format!("{signals} signals  {}  {}{}{}", gl().dot, time::format(t.start(), fpt), gl().dash, time::format(t.end(), fpt));
+    let (dim, bold) = (Style::new().fg(pal().dim), Style::new().add_modifier(Modifier::BOLD));
+    let centred: [(String, Style); 6] = [
+        ("w t f".into(), bold.fg(pal().cursor)),
+        ("waveform terminal frontend".into(), dim),
+        (String::new(), dim),
+        (app.ws.file_name.clone(), bold),
+        (facts, dim),
+        (String::new(), dim),
+    ];
+    let kw = keys.iter().map(|(k, _)| k.chars().count()).max().unwrap_or(0);
+    let bw = keys.iter().map(|(_, d)| kw + 2 + d.chars().count()).max().unwrap_or(0);
+    let y0 = body.saturating_sub(centred.len() + keys.len()) / 2;
+    for (i, (l, st)) in centred.iter().enumerate().filter(|(i, _)| y0 + i < body) {
+        put(buf, w.saturating_sub(l.chars().count()) / 2, y0 + i, l, *st);
     }
+    // the keys as a block
+    for (i, (k, d)) in keys.iter().enumerate().filter(|(i, _)| y0 + centred.len() + i < body) {
+        let (x, y) = (w.saturating_sub(bw) / 2, y0 + centred.len() + i);
+        put(buf, x, y, k, bold.fg(pal().cursor));
+        put(buf, x + kw + 2, y, d, Style::new());
+    }
+}
+
+/// Lines the launch guide takes, with a blank above and below.
+pub fn guide_height(app: &App) -> u16 {
+    if app.panel_shown() { 13 } else { 12 }
 }
 
 fn zoom_text(v: &View, fpt: Option<u128>) -> String {

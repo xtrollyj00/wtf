@@ -2,10 +2,16 @@
 source: src/main.rs
 expression: "snapshot(&mut open(\"vcd\", None), 60, None)"
 ---
-                           simple
 
-                    i       add signals
-                    :       commands
-                    ?       help
-                    q       quit
+                           w t f
+                 waveform terminal frontend
+
+                           simple
+                   6 signals  ·  0ns–80ns
+
+                       i  add signals
+                       :  commands
+                       ?  help
+                       q  quit
+
  VIEW                            0ns  ·  2ns/col  ·  simple

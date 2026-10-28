@@ -5,18 +5,23 @@ wtf prints usage and exits.
 
 ### At launch
 
-No signals are shown yet. The screen is empty except for a short guide in the middle:
+No signals are shown yet. The screen is empty except for a short guide in the middle: a small
+wordmark in the accent colour, the file's name in bold, what is in it (dim), and the keys to
+start with, in the accent.
 
 ```
-                                                              
-                            trace.fst                         
-                                                              
-                    i      add signals                        
-                    :      commands                           
-                    ?      help                               
-                    q      quit                               
-                                                              
- VIEW                                   0ns  ·  1ns/col  ·  trace.fst
+                             w t f
+                   waveform terminal frontend
+
+                           trace.fst
+                    42 signals  ·  0ns–1.2us
+
+                         i  add signals
+                         :  commands
+                         ?  help
+                         q  quit
+
+ VIEW                          0ns  ·  2ns/col  ·  trace.fst
 ```
 
 The guide disappears once a signal is added, and comes back if all signals are removed.
