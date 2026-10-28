@@ -12,6 +12,7 @@ cursor_text = ["#1e1e1e", 234]  # text on the accent
 column      = ["#4b422c", 58]   # behind the cursor's column
 cursor_dim  = ["#35322a", 237]  # behind the marks' columns
 selected    = ["#2c313c", 236]  # behind the selected row
+panel       = ["#21252b", 235]  # behind the signal panel, help and completions
 hatch       = ["#7f848e", 245]  # busy bus columns
 dim         = ["#5c6370", 241]  # scopes, time labels, headings
 grid        = ["#2c313c", 236]  # grid lines

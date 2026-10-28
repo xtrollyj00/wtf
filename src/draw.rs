@@ -31,6 +31,8 @@ pub struct Palette {
     pub cursor_dim: Color,
     /// Background behind both lines of the selected signal.
     pub selected: Color,
+    /// Background of the boxes over the waveforms: the signal panel, help, completions.
+    pub panel: Color,
     pub hatch: Color,
     /// Scope prefixes, column separators and time axis labels.
     pub dim: Color,
@@ -60,7 +62,7 @@ impl Palette {
     /// `NO_COLOR`: the terminal's own colours everywhere.
     pub fn mono() -> Palette {
         let r = Color::Reset;
-        Palette { line: r, fill: r, unknown: r, highz: r, cursor: r, cursor_text: r, column: r, cursor_dim: r, selected: r, hatch: r, dim: r, grid: r, hues: [r; 8], background: r, text: r, mono: true }
+        Palette { line: r, fill: r, unknown: r, highz: r, cursor: r, cursor_text: r, column: r, cursor_dim: r, selected: r, panel: r, hatch: r, dim: r, grid: r, hues: [r; 8], background: r, text: r, mono: true }
     }
 
     /// Reversed where there is no colour: the cursor column, the selected name.

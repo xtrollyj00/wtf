@@ -4,6 +4,6 @@ expression: "snapshot(&mut app, 60, Some(5))"
 ---
                    0ns       10ns      20ns      30ns
                    ┊    ┌────┐ ┃  ┌────┐    ┌────┐    ┌────┐
-────────────────────────────────────────────────────────────
+clk          0     ─────┘    └─┃──┘    └────┘    └────┘    └
  ▌ :zoom <time>  Set the time per column, e.g. :zoom 1ns
 :zo

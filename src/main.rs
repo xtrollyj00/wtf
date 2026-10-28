@@ -900,7 +900,7 @@ mod tests {
         render::draw(&mut app, area, &mut buf);
         let listed = commands::completions("").len() as u16;
         for y in 29 - listed..29 {
-            assert!((0..100).all(|x| buf[(x, y)].fg == Color::Reset && buf[(x, y)].bg == Color::Reset), "line {y}");
+            assert!((0..100).all(|x| buf[(x, y)].fg == Color::Reset && buf[(x, y)].bg == draw::pal().panel), "line {y}");
         }
         keys(&mut app, "\x1b");
         assert!(app.mode == app::Mode::View);

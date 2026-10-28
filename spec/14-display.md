@@ -65,7 +65,7 @@ Each set keeps every distinction the others make, so a drawing reads the same in
 | cursor off screen | `◂2`, `2▸` | as `unicode` | `<2`, `2>` |
 | group open / closed, signal shown (panel) | `▾`, `▸`, `●` | as `unicode` | `v`, `>`, `*` |
 | highlighted completion, insertion point | `▌`, `▸` | as `unicode` | `>`, `>` |
-| panel and help borders | `┌─┐│└┘` | as `unicode` | `+-+\|++` |
+| panel and help borders (without colour) | `┌─┐│└┘` | as `unicode` | `+-+\|++` |
 | in text (`help · keys`, `65ns–85ns`) | `·`, `–` | as `unicode` | `-`, `-` |
 
 - In `ascii`, an edge and a bus crossing are both `+` on both lines: a 1-bit signal has one line
@@ -86,6 +86,9 @@ Each set keeps every distinction the others make, so a drawing reads the same in
   shade, so a colour suits dark and light terminals alike. It colours the row's line or outline
   and its labels; X, Z and violations keep their own colours, and the name column keeps its own.
   Set with `:color` (section 7), saved in the session (section 11).
+- **Boxes over the waveforms** (the signal panel, the `?` and `e` boxes, records, the command
+  completions) are cards: a background of their own (`panel`), the title in bold, how to close
+  it dim in the bottom corner, and no border. Without colour they get a border instead.
 - **Without colour** (`NO_COLOR` set to anything but empty, as no-color.org says): the cursor's
   column is reversed, marks are drawn with their glyph where a cell is empty, the selected row's
   name is reversed, and there is no grid. Snapshots and the agents' `render` have no colours either.

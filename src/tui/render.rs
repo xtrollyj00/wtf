@@ -80,11 +80,20 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
 fn panel(app: &mut App, buf: &mut Buffer, pw: usize, body: usize) -> Option<(u16, u16)> {
     let dim = Style::new().fg(pal().dim);
     let inner = pw - 2;
-    put(buf, 0, 0, &format!("{} signals {}{}", gl().border[0], gl().border[4].to_string().repeat(pw.saturating_sub(11)), gl().border[1]), dim);
-    for y in 1..body.saturating_sub(1) {
-        put(buf, 0, y, &format!("{v}{}{v}", " ".repeat(inner), v = gl().border[5]), dim);
+    if pal().mono {
+        // no background to tell the panel by: a border
+        put(buf, 0, 0, &format!("{} signals {}{}", gl().border[0], gl().border[4].to_string().repeat(pw.saturating_sub(11)), gl().border[1]), dim);
+        for y in 1..body.saturating_sub(1) {
+            put(buf, 0, y, &format!("{v}{}{v}", " ".repeat(inner), v = gl().border[5]), dim);
+        }
+        put(buf, 0, body.saturating_sub(1), &format!("{}{}{}", gl().border[2], gl().border[4].to_string().repeat(inner), gl().border[3]), dim);
+    } else {
+        let st = Style::new().bg(pal().panel).fg(Color::Reset);
+        for y in 0..body {
+            put(buf, 0, y, &" ".repeat(pw), st);
+        }
+        put(buf, 2, 0, "signals", st.add_modifier(Modifier::BOLD));
     }
-    put(buf, 0, body.saturating_sub(1), &format!("{}{}{}", gl().border[2], gl().border[4].to_string().repeat(inner), gl().border[3]), dim);
     if !app.panel.marked.is_empty() {
         put(buf, 2, body.saturating_sub(1), &format!(" {} marked ", app.panel.marked.len()), Style::new().fg(pal().cursor));
     }
@@ -298,12 +307,26 @@ fn boxed(buf: &mut Buffer, w: usize, body: usize, title: &str, lines: &[Line], c
     }
     let (x0, y0) = ((w - bw) / 2, (body - bh) / 2);
     // opaque: the waveforms and cursor columns must not show through
-    let st = Style::new().bg(Color::Reset).fg(Color::Reset);
+    let st = Style::new().bg(pal().panel).fg(Color::Reset);
     let dim = st.fg(pal().dim);
     let top: String = top.chars().take(bw - 2).collect();
-    put(buf, x0, y0, &format!("{}{top}{}{}", gl().border[0], gl().border[4].to_string().repeat(bw - 2 - top.chars().count()), gl().border[1]), dim);
+    if pal().mono {
+        // no background to tell the box by: a border
+        put(buf, x0, y0, &format!("{}{top}{}{}", gl().border[0], gl().border[4].to_string().repeat(bw - 2 - top.chars().count()), gl().border[1]), dim);
+        put(buf, x0, y0 + bh - 1, &format!("{}{}{close}{}{}", gl().border[2], gl().border[4].to_string().repeat(bw - 3 - close.chars().count()), gl().border[4], gl().border[3]), dim);
+    } else {
+        // a card: its own background, the title in bold, how to close it dim in the corner
+        for y in 0..bh {
+            put(buf, x0, y0 + y, &" ".repeat(bw), st);
+        }
+        put(buf, x0 + 1, y0, &top, st.add_modifier(Modifier::BOLD));
+        put(buf, x0 + bw - 1 - close.chars().count(), y0 + bh - 1, close, dim);
+    }
     for (i, l) in lines.iter().enumerate() {
-        put(buf, x0, y0 + 1 + i, &format!("{} ", gl().border[5]), dim);
+        if pal().mono {
+            put(buf, x0, y0 + 1 + i, &format!("{} ", gl().border[5]), dim);
+            put(buf, x0 + bw - 2, y0 + 1 + i, &format!(" {}", gl().border[5]), dim);
+        }
         put(buf, x0 + 2, y0 + 1 + i, &" ".repeat(inner), st);
         let mut x = 0;
         for (text, s) in l {
@@ -311,9 +334,7 @@ fn boxed(buf: &mut Buffer, w: usize, body: usize, title: &str, lines: &[Line], c
             put(buf, x0 + 2 + x, y0 + 1 + i, &text, st.patch(*s));
             x += text.chars().count();
         }
-        put(buf, x0 + bw - 2, y0 + 1 + i, &format!(" {}", gl().border[5]), dim);
     }
-    put(buf, x0, y0 + bh - 1, &format!("{}{}{close}{}{}", gl().border[2], gl().border[4].to_string().repeat(bw - 3 - close.chars().count()), gl().border[4], gl().border[3]), dim);
 }
 
 /// Lines in one style.
@@ -408,12 +429,12 @@ fn command_line(app: &App, buf: &mut Buffer, w: usize, h: usize) -> Option<(u16,
         let mark = if k == app.hl { format!(" {} ", gl().hl) } else { "   ".to_string() };
         let text = format!("{mark}{:<uw$}  {}", c.usage, c.desc);
         // opaque: the cursor column, selection and grid lines must not show through
-        let st = Style::new().bg(Color::Reset).fg(Color::Reset);
+        let st = Style::new().bg(pal().panel).fg(Color::Reset);
         let st = if k == app.hl { st.add_modifier(Modifier::BOLD) } else { st };
         put(buf, 0, y - 1 - k, &format!("{text:<w$}"), st);
     }
-    // a rule between the list and the waveforms above it
-    if let Some(ry) = y.checked_sub(items.len() + 1).filter(|_| !items.is_empty()) {
+    // without a background, a rule between the list and the waveforms above it
+    if let Some(ry) = y.checked_sub(items.len() + 1).filter(|_| !items.is_empty() && pal().mono) {
         put(buf, 0, ry, &gl().border[4].to_string().repeat(w), Style::new().fg(pal().dim).bg(Color::Reset));
     }
     Some(((1 + app.cursor()).min(w.saturating_sub(1)) as u16, y as u16))
