@@ -152,7 +152,7 @@ reuse wtf's own pieces:
   `:cursor <n> off`). `render` without signals draws the workspace, so the agent can check what it
   prepared; `view` describes it (rows, cursors with Δt, visible range).
 - **Present**: `present` shows the workspace in the user's wtf window for the same trace, if one
-  is open: its layout and cursors replace the window's, as one undo step (`u` restores the
+  is open: its layout and cursors replace the window's, as one undo step (`:undo`, or `u` in Edit mode, restores the
   user's view), and the status line says `agent: presented …`. Without a window it writes a
   session file and says how to open it (`wtf -S <file> <trace>`), so headless work still ends
   in something to look at.
@@ -172,9 +172,9 @@ reuse wtf's own pieces:
   the trace's full path without waiting for the window's main loop, so listing is instant.
   Listing removes sockets nobody listens on (left by killed processes).
 - **Attach**: `wtf --attach <id>` opens a window on the session's trace with its usual session
-  file, then shows the session's rows and cursors on top, as `present` does (`u` restores the
+  file, then shows the session's rows and cursors on top, as `present` does (`:undo` restores the
   usual view). It follows the session: every 500 ms it reads the agent's session, and when it has
-  changed it shows it as `present` does (one undo step, `u` restores), so the agent's updates
+  changed it shows it as `present` does (one undo step, `:undo` restores), so the agent's updates
   arrive as it makes them (`:follow off` stops, section 7). The user's moves stay until the agent's
   next change, and the right of the status line starts with `following <id>`. If the session goes away, the window stays as it is and says
   `not following <id>`. `:w` saves to the trace's session file. `wtf --attach` alone lists the
