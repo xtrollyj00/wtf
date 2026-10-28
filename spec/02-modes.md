@@ -23,7 +23,7 @@
 | `w` / `b` | next / previous transition of the selected signal |
 | `j` / `k` | select the next / previous signal |
 | `Space` | collapse / expand the selected group (section 6), or expand a bus into its bits or a stream into its fields / fold them |
-| `e` | examine: a box with the selected signal's whole value at the cursor; on a stream, its record there (times and every field, a frame's `data` 16 bytes a line); `Esc`, `q` or `e` closes it |
+| `e` | examine: a box with the selected signal's whole value at the cursor; on a stream, its record there (times and every field, a frame's `data` 16 bytes a line); `Esc`, `q` or `e` closes it. A box longer than the screen takes its whole width and scrolls: `j` / `k`, `Ctrl-d` / `Ctrl-u`, `g` / `G`, its last line saying which lines show |
 | `gg` / `G` | time cursor to the start / end of the simulation |
 | `Ctrl-d` / `Ctrl-u` | move the screen half its width right / left, the cursor the same distance (at the start or end of the simulation the cursor still moves) |
 | `H` / `L` | move the screen half its width left / right; the cursor keeps its time, even off screen, and the next cursor move scrolls back to it |
@@ -41,7 +41,7 @@
 | `''` | back to where the cursor was before the last jump |
 | `M` / `NM` | remove the mark under the cursor, or mark `N` |
 | `:` | command |
-| `?` | help: a box with the keys of the current mode (View, Edit, or the signal panel), in the accent colour under dim headings (Move, Rows, Marks...), in as many columns as fit, and below them a few things to type (searches, commands), each with what it does; `Esc`, `q` or `?` closes it |
+| `?` | help: a box with the keys of the current mode (View, Edit, or the signal panel), in the accent colour under dim headings (Move, Rows, Marks...), in as many columns as fit, and below them a few things to type (searches, commands), each with what it does; `Esc`, `q` or `?` closes it; it scrolls as the `e` box does |
 | `q` | quit, same as `:q` |
 
 A count before a key repeats it, as in Vim: `5l`, `3w`, `3x`. Counts apply to `h` `l` `w` `b`

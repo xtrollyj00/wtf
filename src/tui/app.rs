@@ -26,6 +26,8 @@ pub struct App {
     pub page: usize,
     /// The screen column the waveforms start at, as last drawn: where a click places the cursor.
     pub wave_x: usize,
+    /// The first line the help or `e` box shows, when it is longer than the screen.
+    pub scroll: usize,
     pub mode: Mode,
     /// The mode the command line returns to.
     ret: Mode,
@@ -114,6 +116,7 @@ impl App {
             top: 0,
             page: 1,
             wave_x: 0,
+            scroll: 0,
             mode: Mode::View,
             ret: Mode::View,
             panel,
@@ -322,16 +325,21 @@ impl App {
     /// Every key that changes the rows records an undo step, except collapsing and expanding
     /// groups (a View-mode action) and undo / redo themselves.
     pub fn key(&mut self, k: KeyEvent) {
-        if self.help {
-            // the help box takes no other keys
-            if matches!(k.code, KeyCode::Esc | KeyCode::Char('q' | '?')) {
-                self.help = false;
-            }
-            return;
-        }
-        if self.examine.is_some() {
-            if matches!(k.code, KeyCode::Esc | KeyCode::Char('q' | 'e')) {
-                self.examine = None;
+        // the help and e boxes take no other keys: they scroll and close
+        if self.help || self.examine.is_some() {
+            let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+            match k.code {
+                KeyCode::Esc | KeyCode::Char('q') => (self.help, self.examine, self.scroll) = (false, None, 0),
+                KeyCode::Char('?') if self.help => (self.help, self.scroll) = (false, 0),
+                KeyCode::Char('e') if !self.help => (self.examine, self.scroll) = (None, 0),
+                KeyCode::Char('j') | KeyCode::Down => self.scroll += 1,
+                KeyCode::Char('k') | KeyCode::Up => self.scroll = self.scroll.saturating_sub(1),
+                KeyCode::Char('d' | 'f') if ctrl => self.scroll += 10,
+                KeyCode::Char('u' | 'b') if ctrl => self.scroll = self.scroll.saturating_sub(10),
+                KeyCode::Char('g') => self.scroll = 0,
+                // the box keeps it in range when drawn
+                KeyCode::Char('G') => self.scroll = usize::MAX,
+                _ => {}
             }
             return;
         }

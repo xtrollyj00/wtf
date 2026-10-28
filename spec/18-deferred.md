@@ -41,7 +41,6 @@ Shortcuts taken so far, to fix when they get in the way.
   no per-protocol label.
 - A frame's `data` is text (`de ad be ef`), held for every frame: big for long frames, and searched
   only whole (`==`), not for a part.
-- The `e` box doesn't scroll: a value longer than the screen ends in `… n more lines`.
 - `join` pairs strictly in order (AXI-Lite has no IDs): after a lost response, the transactions
   after it are still paired, one off.
 - The status line's `match 3 of 157` counts matches only up to 100 000 (`100000+`), so `n` stays

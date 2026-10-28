@@ -898,6 +898,15 @@ mod tests {
         assert!(app.help && app.ws.view.cursor == 12 && app.ws.sel == 0); // the box takes no other keys
         keys(&mut app, "q");
         assert!(!app.help && !app.quit);
+        // too long for a small screen: the whole width, scrolled by j k, G to the end
+        keys(&mut app, "?");
+        assert!(snapshot(&mut app, 60, Some(20)).contains("lines 1–16 of "));
+        keys(&mut app, "G");
+        let screen = snapshot(&mut app, 60, Some(20));
+        assert!(screen.contains("sampled at clk") && !screen.contains("cursor left / right"), "{screen}");
+        keys(&mut app, "q?");
+        assert_eq!(app.scroll, 0);
+        keys(&mut app, "q");
         keys(&mut app, "i?");
         assert!(snapshot(&mut app, 100, Some(20)).contains("help · EDIT"));
         keys(&mut app, "\x1ba?");

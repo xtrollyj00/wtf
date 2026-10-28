@@ -38,10 +38,12 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
     buf.merge(&right);
     let search = if pw > 0 { panel(app, buf, pw, body) } else { None };
     if app.help {
-        help(app, buf, w, body);
+        let mut scroll = app.scroll;
+        help(app, buf, w, body, &mut scroll);
+        app.scroll = scroll;
     }
     if let Some((title, lines)) = &app.examine {
-        boxed(buf, w, body, title, &plain(lines), " Esc e close ");
+        boxed(buf, w, body, title, &plain(lines), " Esc e close ", &mut app.scroll);
     }
     if let Some(r) = &mut app.records {
         // the title line and a blank, then as many lines as fit; records scroll to show the
@@ -65,7 +67,7 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
                 false => format!("{}{l}", if k == r.hl { format!("{} ", gl().hl) } else { "  ".into() }),
             });
         }
-        boxed(buf, w, body, &r.name, &plain(&lines), if text { " j k scroll  Esc close " } else { " Enter jump  Esc close " });
+        boxed(buf, w, body, &r.name, &plain(&lines), if text { " j k scroll  Esc close " } else { " Enter jump  Esc close " }, &mut 0);
     }
     let at = if matches!(app.mode, Mode::Command | Mode::Search) {
         command_line(app, buf, w, h)
@@ -219,7 +221,7 @@ type Line = Vec<(String, Style)>;
 
 /// The `?` box: the current mode's keys in the accent, under dim headings, in as many columns as
 /// fit; the things to type below them.
-fn help(app: &App, buf: &mut Buffer, w: usize, body: usize) {
+fn help(app: &App, buf: &mut Buffer, w: usize, body: usize, scroll: &mut usize) {
     let (title, sections, heading, examples) = help_text(app);
     let key = Style::new().fg(pal().cursor).add_modifier(Modifier::BOLD);
     let dim = Style::new().fg(pal().dim);
@@ -277,33 +279,42 @@ fn help(app: &App, buf: &mut Buffer, w: usize, body: usize) {
             lines.push(vec![(heading.to_string(), dim)]);
         }
         let ew = examples.iter().map(|(e, _)| e.chars().count()).max().unwrap_or(0);
+        // too narrow for both side by side: what it does under each
+        let stacked = examples.iter().any(|(_, d)| ew + 2 + d.chars().count() > w.saturating_sub(4));
         for (e, d) in examples {
-            lines.push(match e.is_empty() {
-                true => vec![(d.to_string(), dim)],
-                false => vec![(format!("{e:<ew$}  "), Style::new().fg(pal().cursor)), (d.to_string(), dim)],
-            });
+            let ex = (if stacked { e.to_string() } else { format!("{e:<ew$}  ") }, Style::new().fg(pal().cursor));
+            match (e.is_empty(), stacked) {
+                (true, _) => lines.push(vec![(d.to_string(), dim)]),
+                (false, true) => lines.extend([vec![ex], vec![(format!("  {d}"), dim)]]),
+                (false, false) => lines.push(vec![ex, (d.to_string(), dim)]),
+            }
         }
     }
-    boxed(buf, w, body, &format!("help {} {title}", gl().dot), &lines, " Esc ? close ");
+    boxed(buf, w, body, &format!("help {} {title}", gl().dot), &lines, " Esc ? close ", scroll);
 }
 
 /// A box over the middle of the screen: a title, lines, and how to close it. Lines it can't hold
 /// end in `… n more lines`.
-fn boxed(buf: &mut Buffer, w: usize, body: usize, title: &str, lines: &[Line], close: &str) {
-    let mut lines = lines.to_vec();
+fn boxed(buf: &mut Buffer, w: usize, body: usize, title: &str, lines: &[Line], close: &str, top: &mut usize) {
+    let all = lines.len();
     let room = body.saturating_sub(2);
-    if lines.len() > room && room > 0 {
-        // shortcut: a box can't scroll; add scrolling when values longer than a screen matter
-        let more = lines.len() - room + 1;
-        lines.truncate(room - 1);
-        lines.push(vec![(format!("{} {more} more lines", gl().cut), Style::new().fg(pal().dim))]);
+    // too long for the screen: the lines from `top`, and where they are on the last line
+    let full = all > room && room > 1;
+    let mut lines = lines.to_vec();
+    if full {
+        *top = (*top).min(all - (room - 1));
+        lines = lines[*top..*top + room - 1].to_vec();
+        let at = format!("{} lines {}{}{} of {all}  j k scroll", gl().cut, *top + 1, gl().dash, *top + room - 1);
+        lines.push(vec![(at, Style::new().fg(pal().dim))]);
+    } else {
+        *top = 0;
     }
     let len = |l: &Line| l.iter().map(|(s, _)| s.chars().count()).sum::<usize>();
     let top = format!(" {title} ");
     // the title and how to close it share the top line
     let widest = lines.iter().map(len).max().unwrap_or(0).max(top.chars().count() + close.chars().count() + 1);
-    // margins too narrow to read what is under them: the whole width
-    let inner = if widest + 4 + 12 > w { w.saturating_sub(4) } else { widest };
+    // margins too narrow to read what is under them, or too long for the screen: the whole width
+    let inner = if widest + 4 + 12 > w || full { w.saturating_sub(4) } else { widest };
     let (bw, bh) = (inner + 4, lines.len() + 2);
     if bw > w || bh > body || bw < close.chars().count() + 3 {
         return;
