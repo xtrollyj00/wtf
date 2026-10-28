@@ -3,15 +3,15 @@ source: src/main.rs
 expression: "snapshot(&mut app, 100, Some(20))"
 ---
 ┌ help · VIEW ────────────────────────────────────────────────────────────────────────────────────┐
-│ Move                            Rows                              Marks                         │─
-│ h l       cursor left / right   j k       select a row            m M     put / remove a mark   │
-│ w b       next / prev change    Ctrl-f/b  a screen of rows        Tab     next mark             │
-│ gg G      start / end           Space     fold a group or bus     '2..'9  jump to a mark        │
+│ Move                            Rows                              Marks                         │┐
+│ h l       cursor left / right   j k       select a row            m M     put / remove a mark   │└
+│ w b       next / prev change    Ctrl-f/b  a screen of rows        Tab     next mark             │┊
+│ gg G      start / end           Space     fold a group or bus     '2..'9  jump to a mark        │┊
 │ z x       zoom in / out         e         the whole value         ''      back before the jump  │─
 │ c         center the cursor     yy yt     copy value / time                                     │─
 │ H L       screen left / right   i         edit rows               Other                         │─
 │ Ctrl-d/u  half a screen                                           :       command               │─
-│                                 Search                            5l 3w   a count repeats a key │
+│                                 Search                            5l 3w   a count repeats a key │┊
 │                                 /         search                  q       quit                  │─
 │                                 n N       next / previous match                                 │─
 │                                                                                                 │─

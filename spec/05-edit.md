@@ -79,14 +79,14 @@ clears `[+]`.
 A group is a named set of rows with a header row. Groups have one level (no nesting yet).
 
 ```
-              │     │
-▌▾ cpu        │     │
-              │     │   ┌───┐   ┌───┐   ┌───
-    clk       │ 0   │───┘   └───┘   └───┘
-              │     │───────🮦──────────────
-    state     │ 0x1 │─ 0x1 ─🮧─── 0x2 ──────
-              │     │   ▄▄  ▄▄▄▄   ▄
- ▸ stream (4) │     │───▀▀──▀▀▀▀───▀───     ← collapsed: shows activity
+
+▌▾ cpu
+                       ┌───┐   ┌───┐   ┌───
+    clk        0    ───┘   └───┘   └───┘
+                    ───────🮦──────────────
+    state      0x1  ─ 0x1 ─🮧─── 0x2 ──────
+                       ▄▄  ▄▄▄▄   ▄
+ ▸ stream (4)       ───▀▀──▀▀▀▀───▀───     ← collapsed: shows activity
 ```
 
 - **Collapse / expand**: `Space` on a group header, in View and Edit mode.

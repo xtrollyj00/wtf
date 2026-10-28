@@ -115,7 +115,7 @@ mod tests {
                 "config: unknown key foo (keys: glyphs, theme, colors)",
                 "config: glyphs = \"utf8\"? (unicode, box, ascii)",
                 "config: theme = 3? (dark, light)",
-                "config: unknown key colors.curser (keys: line, fill, unknown, highz, cursor, cursor_text, cursor_dim, selected, hatch, dim, grid, background, text, red, orange, yellow, green, cyan, blue, magenta, gray)",
+                "config: unknown key colors.curser (keys: line, fill, unknown, highz, cursor, cursor_text, column, cursor_dim, selected, hatch, dim, grid, background, text, red, orange, yellow, green, cyan, blue, magenta, gray)",
                 "config: colors.cursor = \"blue\"? (\"#rrggbb\", 0-255, [\"#rrggbb\", 0-255] or \"default\")",
             ]
         );

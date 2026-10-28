@@ -25,17 +25,18 @@ the cursor.
 
 ### View mode
 
-Only the waveforms, a name column, a value column and the status line. No panels, no borders.
+Only the waveforms, a name column, a value column and the status line. No panels, no borders,
+no lines between the columns.
 
 ```
-      │       │60ns      80ns      100ns     120ns
-      │       │1─────── 40ns ──────3── 20ns ─2
-      │       │   ┌───┐   ┌───┐   ┌───┐   ┌───┐   ┌───
-clk   │ 1     │───┘   └───┘   └───┘   └───┘   └───┘
-      │       │────────🮦──────────────🮦────────────────
-state │ 0x4   │─ 0x1 ──🮧──── 0x2 ─────🮧──── 0x4 ──────
-      │       │────────🮦───────🮦──────🮦────────🮦──────
-data  │ 0x3A  │─ 0x43 ─🮧 0x96 ─🮧 0xE1 🮧── 0x3A ─🮧 0x7F
+             60ns      80ns      100ns     120ns
+             1─────── 40ns ──────3── 20ns ─2
+                ┌───┐   ┌───┐   ┌───┐   ┌───┐   ┌───
+clk    1     ───┘   └───┘   └───┘   └───┘   └───┘
+             ────────🮦──────────────🮦────────────────
+state  0x4   ─ 0x1 ──🮧──── 0x2 ─────🮧──── 0x4 ──────
+             ────────🮦───────🮦──────🮦────────🮦──────
+data   0x3A  ─ 0x43 ─🮧 0x96 ─🮧 0xE1 🮧── 0x3A ─🮧 0x7F
  VIEW  cpu.state                                   120ns   2ns/col   trace.fst
 ```
 
@@ -46,13 +47,15 @@ data  │ 0x3A  │─ 0x43 ─🮧 0x96 ─🮧 0xE1 🮧── 0x3A ─🮧 0x
   It is as wide as the longest name, up to a limit. The selected signal's name is bold in the accent colour,
   and both of its lines get a background across the whole width.
 - **Time axis**: the top line shows times at round steps above the waveforms. Faint dotted grid
-  lines (`┊`) run down from each time, behind the waveforms.
-- **Column separators**: thin vertical lines between the names, the values and the waveforms.
+  lines (`┊`) run down from each time to the last row, behind the waveforms; without colour there
+  are none, as they would be as loud as the waveforms.
+- **Columns**: the names, the values and the waveforms, two spaces apart.
 - **Value column**: each signal's value at the cursor, so all values can be read at once
   even where a segment is too narrow for its label. Empty for group headers.
 - **Cursor ruler**: a line above the waveforms, shown only when there is more than one cursor (section 9).
-- **Cursor and marks**: columns across all rows. The cursor is a highlighted column, so the data
-  under it stays readable; the marks are drawn less strongly.
+- **Cursor and marks**: columns down to the last row. The cursor's column is tinted, so the
+  waveform under it stays as it is, and its head on the time axis is in the accent colour; the
+  marks' columns are fainter still.
 - **Status line** (bottom): on the left the mode (`VIEW` reversed, `EDIT` in the accent colour, so
   it shows when keys change the layout) and the full path of the selected signal (or a
   message); on the right the cursor's time, the zoom (time per column) and the file
@@ -65,11 +68,11 @@ the rows and their waveforms stay visible on the right, with a line marking wher
 `Esc` closes the panel again.
 
 ```
-┌ signals ───────────┐      │     │   ┌───┐   ┌───┐   ┌───
-│ / _                │clk   │ 0   │───┘   └───┘   └───┘
-│ ▾ top              │      │     │───────🮦──────────────
-│   ▾ cpu            │▌state│ 0x1 │─ 0x1 ─🮧─── 0x2 ──────
-│     ● clk          │ ▸ new signals go here ──────────────
+┌ signals ───────────┐                ┌───┐   ┌───┐   ┌───
+│ / _                │clk    0     ───┘   └───┘   └───┘
+│ ▾ top              │             ───────🮦──────────────
+│   ▾ cpu            │state  0x1   ─ 0x1 ─🮧─── 0x2 ──────
+│     ● clk          │▸ new signals go here ───────────────
 │     ● state        │
 │       busy         │
 │   ▸ stream         │

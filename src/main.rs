@@ -952,12 +952,17 @@ mod tests {
             render::draw(app, area, &mut buf);
             buf
         };
-        // the grid goes where the rows draw nothing, with colour or without: never into a label's gaps
+        // the grid goes where the rows draw nothing, never into a label's gaps; none without colour
         let grid = |buf: &Buffer| buf.content.iter().enumerate().filter(|(_, c)| c.symbol() == "┊").map(|(i, _)| i).collect::<Vec<_>>();
-        let colour: Vec<_> = (60..130).map(|w| grid(&screen(&mut app, w))).collect();
+        for w in 60..130 {
+            let buf = screen(&mut app, w);
+            let w = w as usize;
+            let next_to_text = |i: usize| [i - 1, i + 1].iter().any(|&j| j / w == i / w && buf.content[j].symbol().chars().all(char::is_alphanumeric));
+            let cells = grid(&buf);
+            assert!(!cells.is_empty() && !cells.into_iter().any(next_to_text), "width {w}\n{}", draw::text(&buf));
+        }
         draw::set_palette(draw::Palette::mono());
-        let mono: Vec<_> = (60..130).map(|w| grid(&screen(&mut app, w))).collect();
-        assert!(colour == mono);
+        assert!((60..130).all(|w| grid(&screen(&mut app, w)).is_empty()));
         // light paints the whole screen over the terminal's colours
         draw::set_palette(theme::builtin("light", true).unwrap());
         keys(&mut app, ":");

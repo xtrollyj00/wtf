@@ -45,5 +45,6 @@ mark by number at its position, the cursor highlighted, and the Δt between neig
   and the Δt to them is still shown.
 - A Δt label that doesn't fit between two cursors is left out, like bus labels.
 - Without marks the ruler is hidden.
-- The ruler sits under the time axis. Marks' columns are drawn in a dim amber, the cursor's in
-  full amber. `--snapshot` shows them as `╎` and `┃`.
+- The ruler sits under the time axis. Marks' columns are tinted a faint amber, the cursor's a
+  stronger one, with its head on the time axis in full amber. `--snapshot` shows them as `╎` and
+  `┃`.

@@ -22,10 +22,12 @@ pub struct Palette {
     pub fill: Color,
     pub unknown: Color,
     pub highz: Color,
-    /// The cursor is a highlighted column, so the data under it stays readable.
+    /// The accent: the cursor's head on the time axis, the selected name, EDIT.
     pub cursor: Color,
     pub cursor_text: Color,
-    /// The other cursors' columns.
+    /// Behind the cursor's column: a tint, so the waveform under it stays as it is.
+    pub column: Color,
+    /// The other cursors' columns, fainter.
     pub cursor_dim: Color,
     /// Background behind both lines of the selected signal.
     pub selected: Color,
@@ -58,7 +60,7 @@ impl Palette {
     /// `NO_COLOR`: the terminal's own colours everywhere.
     pub fn mono() -> Palette {
         let r = Color::Reset;
-        Palette { line: r, fill: r, unknown: r, highz: r, cursor: r, cursor_text: r, cursor_dim: r, selected: r, hatch: r, dim: r, grid: r, hues: [r; 8], background: r, text: r, mono: true }
+        Palette { line: r, fill: r, unknown: r, highz: r, cursor: r, cursor_text: r, column: r, cursor_dim: r, selected: r, hatch: r, dim: r, grid: r, hues: [r; 8], background: r, text: r, mono: true }
     }
 
     /// Reversed where there is no colour: the cursor column, the selected name.
@@ -116,7 +118,6 @@ pub struct Glyphs {
     pub busy_bus: char,
     pub cut: char,
     pub grid: char,
-    pub sep: char,
     pub cursor: char,
     pub mark: char,
     /// A cursor off screen to the left / right.
@@ -146,7 +147,6 @@ pub const UNICODE: Glyphs = Glyphs {
     busy_bus: '╳',
     cut: '…',
     grid: '┊',
-    sep: '│',
     cursor: '┃',
     mark: '╎',
     left: '◂',
@@ -176,7 +176,6 @@ pub const ASCII: Glyphs = Glyphs {
     busy_bus: '#',
     cut: '~',
     grid: '.',
-    sep: '|',
     cursor: '|',
     mark: ':',
     left: '<',
@@ -279,8 +278,8 @@ pub fn text(buf: &Buffer) -> String {
             .map(|x| {
                 let cell = &buf[(x, y)];
                 match cell.symbol() {
-                    // (the EDIT badge shares the cursor's colour, but is bold)
-                    s if cell.bg == pal().cursor && !cell.modifier.contains(Modifier::BOLD) && !s.chars().all(char::is_alphanumeric) => cursor.as_str(),
+                    // the column, and its head on the time axis (the EDIT badge shares the head's colour, but is bold)
+                    s if (cell.bg == pal().column || cell.bg == pal().cursor && !cell.modifier.contains(Modifier::BOLD)) && !s.chars().all(char::is_alphanumeric) => cursor.as_str(),
                     s if cell.bg == pal().cursor_dim && !s.chars().all(char::is_alphanumeric) => mark.as_str(),
                     s => s,
                 }
@@ -376,25 +375,20 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
         .collect();
     let nw = width(&names, MAX_NAME).max(width(&row_names, MAX_NAME));
     let vw = width(&values, MAX_VALUE).max(width(&hidden, MAX_VALUE));
-    // name │ value │wave
-    let (sep1, sep2) = (nw + 1, nw + 3 + vw + 1);
-    let wx = sep2 + 1;
+    // name, value, wave, with a gap of two between them
+    let (vx, wx) = (nw + 2, nw + 2 + vw + 2);
     ws.view.set_width(w.saturating_sub(wx) as u64);
     let ww = w.saturating_sub(wx);
 
-    // the time axis, and its grid lines first: the rows draw over them, except where they draw
-    // nothing (a label's gaps are drawn, so the grid stays out of them)
+    // the time axis; its grid lines go in after the rows, where they draw nothing
     let dim = Style::new().fg(pal().dim);
     let mut free = 0;
-    for (c, t) in axis(&ws.view, ws.trace.fs_per_tick) {
-        let x = wx + c;
+    let ticks = axis(&ws.view, ws.trace.fs_per_tick);
+    for (c, t) in &ticks {
         // labels that would run into the previous one or off the edge are left out; their grid line stays
-        if c >= free && c + t.chars().count() <= ww {
-            put(buf, x, 0, &t, dim);
+        if *c >= free && c + t.chars().count() <= ww {
+            put(buf, wx + c, 0, t, dim);
             free = c + t.chars().count() + 2;
-        }
-        for y in 1..body {
-            put(buf, x, y, &gl().grid.to_string(), Style::new().fg(pal().grid));
         }
     }
 
@@ -433,7 +427,7 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
             put(buf, leaf, yb, &name[leaf..], Style::new());
         }
         let value: String = values[l].chars().take(vw).collect();
-        put(buf, nw + 3, yb, &value, value_styles[l]);
+        put(buf, vx, yb, &value, value_styles[l]);
         let cells = match &ws.rows[i] {
             Row::Signal(s) if ws.probe(s.var, bit).0 != s.var => {
                 let field = Sig { var: ws.probe(s.var, bit).0, ..s.clone() };
@@ -470,22 +464,33 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
             y += 1;
         }
     }
-    for y in (0..body).filter(|y| Some(*y) != marker) {
-        put(buf, sep1, y, &gl().sep.to_string(), dim);
-        put(buf, sep2, y, &gl().sep.to_string(), dim);
+    // the grid down to the last row, in cells the rows left blank (a label's gaps are drawn, so
+    // it stays out of them); none without colour, where it would be as loud as the waveforms
+    let end = y.min(body);
+    for (c, _) in ticks.iter().filter(|_| !pal().mono) {
+        for gy in (1..end).filter(|&gy| Some(gy) != marker) {
+            let cell = &buf[((wx + c) as u16, gy as u16)];
+            if cell.symbol() == " " && cell.fg == Color::Reset {
+                put(buf, wx + c, gy, &gl().grid.to_string(), Style::new().fg(pal().grid));
+            }
+        }
     }
     if head > 1 {
         ruler(ws, buf, wx, ww, 1);
     }
-    // the marks first, so the cursor is on top where they share a column
+    // the marks first, so the cursor is on top where they share a column; down to the last row
     for (i, t) in cursors.into_iter().filter(|&(i, _)| i != 0).chain([(0, ws.view.cursor)]) {
         if let Some(c) = ws.view.col_of(t) {
-            let area = Rect::new((wx + c as usize) as u16, 0, 1, body as u16);
+            let area = Rect::new((wx + c as usize) as u16, 0, 1, end as u16);
             let st = match i == 0 {
-                true => Style::new().bg(pal().cursor).fg(pal().cursor_text).add_modifier(pal().accent()),
+                true => Style::new().bg(pal().column).add_modifier(pal().accent()),
                 false => Style::new().bg(pal().cursor_dim),
             };
             buf.set_style(area, st);
+            // the cursor's head, on the time axis, in the accent
+            if i == 0 {
+                buf.set_style(Rect::new(area.x, 0, 1, 1), Style::new().bg(pal().cursor).fg(pal().cursor_text));
+            }
             if pal().mono && i != 0 {
                 for y in area.top()..area.bottom() {
                     if buf[(area.x, y)].symbol() == " " {

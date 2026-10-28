@@ -87,6 +87,7 @@ fn slot<'a>(p: &'a mut Palette, key: &str) -> Option<&'a mut Color> {
         "highz" => &mut p.highz,
         "cursor" => &mut p.cursor,
         "cursor_text" => &mut p.cursor_text,
+        "column" => &mut p.column,
         "cursor_dim" => &mut p.cursor_dim,
         "selected" => &mut p.selected,
         "hatch" => &mut p.hatch,
@@ -99,7 +100,7 @@ fn slot<'a>(p: &'a mut Palette, key: &str) -> Option<&'a mut Color> {
 }
 
 fn keys() -> String {
-    const FIELDS: [&str; 13] = ["line", "fill", "unknown", "highz", "cursor", "cursor_text", "cursor_dim", "selected", "hatch", "dim", "grid", "background", "text"];
+    const FIELDS: [&str; 14] = ["line", "fill", "unknown", "highz", "cursor", "cursor_text", "column", "cursor_dim", "selected", "hatch", "dim", "grid", "background", "text"];
     FIELDS.iter().chain(COLORS.iter()).copied().collect::<Vec<_>>().join(", ")
 }
 

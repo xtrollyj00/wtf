@@ -1,9 +1,8 @@
 ---
 source: src/main.rs
-assertion_line: 598
 expression: "snapshot(&mut app, 40, None)"
 ---
-     │      │0ns         50ns
-     │      │┃─🮦──🮦─🮦──╳╳🮣──🮦─────
-data │ 0xXX │┃─🮧──🮧─🮧──╳╳🮡──🮧─────
+            0ns         50ns
+            ┃─🮦──🮦─🮦──╳╳🮣──🮦─────
+data  0xXX  ┃─🮧──🮧─🮧──╳╳🮡──🮧─────
  VIEW  …ata  0ns   4ns/col   simple [+]

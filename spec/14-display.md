@@ -61,7 +61,6 @@ Each set keeps every distinction the others make, so a drawing reads the same in
 | busy bus | `╳` | `╳` | `#` |
 | label cut | `…` | `…` | `~` |
 | grid | `┊` | `┊` | `.` |
-| column separator | `│` | `│` | `\|` |
 | cursor, marks (where there is no colour) | `┃`, `╎` | as `unicode` | `\|`, `:` |
 | cursor off screen | `◂2`, `2▸` | as `unicode` | `<2`, `2>` |
 | group open / closed, signal shown (panel) | `▾`, `▸`, `●` | as `unicode` | `v`, `>`, `*` |
@@ -89,7 +88,7 @@ Each set keeps every distinction the others make, so a drawing reads the same in
   Set with `:color` (section 7), saved in the session (section 11).
 - **Without colour** (`NO_COLOR` set to anything but empty, as no-color.org says): the cursor's
   column is reversed, marks are drawn with their glyph where a cell is empty, the selected row's
-  name is reversed. Snapshots and the agents' `render` have no colours either.
+  name is reversed, and there is no grid. Snapshots and the agents' `render` have no colours either.
 - A 1-bit signal's X and Z stretches are labelled like a bus value (`─── X ───`) where they fit:
   without colour (`NO_COLOR`, snapshots, `render`) both draw the same two lines.
 
