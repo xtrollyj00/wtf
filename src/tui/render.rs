@@ -210,7 +210,7 @@ fn help_text(app: &App) -> (&'static str, Keys, &'static str, Examples) {
         ("/valid && ready && data == 0x40", "several signals at once"),
         ("/@clk fell(valid) && !past(ready)", "sampled at clk; also rose() stable()"),
     ];
-    ("VIEW", keys, "Search", search)
+    ("VIEW", keys, "Search expressions", search)
 }
 
 /// A line of text in parts, each in its own style.
@@ -300,7 +300,8 @@ fn boxed(buf: &mut Buffer, w: usize, body: usize, title: &str, lines: &[Line], c
     let len = |l: &Line| l.iter().map(|(s, _)| s.chars().count()).sum::<usize>();
     let top = format!(" {title} ");
     let widest = lines.iter().map(len).max().unwrap_or(0).max(top.chars().count()).max(close.chars().count());
-    let inner = widest.min(w.saturating_sub(4));
+    // margins too narrow to read what is under them: the whole width
+    let inner = if widest + 4 + 12 > w { w.saturating_sub(4) } else { widest };
     let (bw, bh) = (inner + 4, lines.len() + 2);
     if bw > w || bh > body || bw < close.chars().count() + 3 {
         return;

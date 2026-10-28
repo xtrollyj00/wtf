@@ -36,8 +36,6 @@ pub struct Palette {
     pub hatch: Color,
     /// Scope prefixes, column separators and time axis labels.
     pub dim: Color,
-    /// Grid lines under the time axis labels.
-    pub grid: Color,
     /// The shades of the signal colours, in the order of `rows::COLORS`.
     pub hues: [Color; 8],
     /// The screen's background and text; Reset keeps the terminal's.
@@ -62,7 +60,7 @@ impl Palette {
     /// `NO_COLOR`: the terminal's own colours everywhere.
     pub fn mono() -> Palette {
         let r = Color::Reset;
-        Palette { line: r, fill: r, unknown: r, highz: r, cursor: r, cursor_text: r, column: r, cursor_dim: r, selected: r, panel: r, hatch: r, dim: r, grid: r, hues: [r; 8], background: r, text: r, mono: true }
+        Palette { line: r, fill: r, unknown: r, highz: r, cursor: r, cursor_text: r, column: r, cursor_dim: r, selected: r, panel: r, hatch: r, dim: r, hues: [r; 8], background: r, text: r, mono: true }
     }
 
     /// Reversed where there is no colour: the cursor column, the selected name.
@@ -119,7 +117,6 @@ pub struct Glyphs {
     pub fill: [char; 2],
     pub busy_bus: char,
     pub cut: char,
-    pub grid: char,
     pub cursor: char,
     pub mark: char,
     /// A cursor off screen to the left / right.
@@ -148,7 +145,6 @@ pub const UNICODE: Glyphs = Glyphs {
     fill: ['▄', '▀'],
     busy_bus: '╳',
     cut: '…',
-    grid: '┊',
     cursor: '┃',
     mark: '╎',
     left: '◂',
@@ -177,7 +173,6 @@ pub const ASCII: Glyphs = Glyphs {
     fill: ['#'; 2],
     busy_bus: '#',
     cut: '~',
-    grid: '.',
     cursor: '|',
     mark: ':',
     left: '<',
@@ -382,21 +377,25 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
     ws.view.set_width(w.saturating_sub(wx) as u64);
     let ww = w.saturating_sub(wx);
 
-    // the time axis; its grid lines go in after the rows, where they draw nothing
+    // the time axis, with the cursor's time in the accent at its column (kept on screen); the
+    // labels it would touch are left out, as are those that would run into the previous one
     let dim = Style::new().fg(pal().dim);
+    let pill = ws.view.col_of(ws.view.cursor).map(|c| {
+        let t = time::format(ws.view.cursor, ws.trace.fs_per_tick);
+        ((c as usize).min(ww.saturating_sub(t.chars().count())), t)
+    });
     let mut free = 0;
-    let ticks = axis(&ws.view, ws.trace.fs_per_tick);
-    for (c, t) in &ticks {
-        // labels that would run into the previous one or off the edge are left out; their grid line stays
-        if *c >= free && c + t.chars().count() <= ww {
-            put(buf, wx + c, 0, t, dim);
-            free = c + t.chars().count() + 2;
+    for (c, t) in axis(&ws.view, ws.trace.fs_per_tick) {
+        let len = t.chars().count();
+        let clear = pill.as_ref().is_none_or(|(x, p)| c + len + 1 < *x || c > x + p.chars().count());
+        if c >= free && c + len <= ww && clear {
+            put(buf, wx + c, 0, &t, dim);
+            free = c + len + 2;
         }
     }
 
     // bit lines of an expanded bus share one pass over the bus (row, [bit][column])
     let mut bit_changes: Option<(usize, Vec<Vec<Changes>>)> = None;
-    let mut marker = None;
     let mut y = head;
     for (l, &(i, bit)) in lines.iter().enumerate().skip(*top).take(fit) {
         // name and value sit on the bottom line, level with a low signal
@@ -462,21 +461,10 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
             let text = format!("{indent}{} new signals go here ", gl().insert);
             let fill = w.saturating_sub(text.chars().count());
             put(buf, 0, y, &format!("{text}{}", gl().line.to_string().repeat(fill)), Style::new().fg(pal().cursor));
-            marker = Some(y);
             y += 1;
         }
     }
-    // the grid down to the last row, in cells the rows left blank (a label's gaps are drawn, so
-    // it stays out of them); none without colour, where it would be as loud as the waveforms
     let end = y.min(body);
-    for (c, _) in ticks.iter().filter(|_| !pal().mono) {
-        for gy in (1..end).filter(|&gy| Some(gy) != marker) {
-            let cell = &buf[((wx + c) as u16, gy as u16)];
-            if cell.symbol() == " " && cell.fg == Color::Reset {
-                put(buf, wx + c, gy, &gl().grid.to_string(), Style::new().fg(pal().grid));
-            }
-        }
-    }
     if head > 1 {
         ruler(ws, buf, wx, ww, 1);
     }
@@ -484,23 +472,20 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
     for (i, t) in cursors.into_iter().filter(|&(i, _)| i != 0).chain([(0, ws.view.cursor)]) {
         if let Some(c) = ws.view.col_of(t) {
             let area = Rect::new((wx + c as usize) as u16, 0, 1, end as u16);
-            let st = match i == 0 {
-                true => Style::new().bg(pal().column).add_modifier(pal().accent()),
-                false => Style::new().bg(pal().cursor_dim),
-            };
-            buf.set_style(area, st);
-            // the cursor's head, on the time axis, in the accent
-            if i == 0 {
-                buf.set_style(Rect::new(area.x, 0, 1, 1), Style::new().bg(pal().cursor).fg(pal().cursor_text));
-            }
-            if pal().mono && i != 0 {
-                for y in area.top()..area.bottom() {
+            buf.set_style(area, Style::new().bg(if i == 0 { pal().column } else { pal().cursor_dim }));
+            // without colour, a glyph where the column is blank, the waveform kept where it isn't
+            if pal().mono {
+                for y in area.top() + 1..area.bottom() {
                     if buf[(area.x, y)].symbol() == " " {
-                        buf[(area.x, y)].set_char(gl().mark);
+                        buf[(area.x, y)].set_char(if i == 0 { gl().cursor } else { gl().mark });
                     }
                 }
             }
         }
+    }
+    // bold: `text` shows it as it is, not as the cursor's column
+    if let Some((x, t)) = pill {
+        put(buf, wx + x, 0, &t, Style::new().bg(pal().cursor).fg(pal().cursor_text).add_modifier(Modifier::BOLD | pal().accent()));
     }
     fit
 }

@@ -234,7 +234,7 @@ mod tests {
     use wtf_core::{radix, rows, trace};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use crate::tui::commands;
-    use ratatui::style::Color;
+    use ratatui::style::{Color, Modifier};
 
     fn open(ext: &str, session: Option<&str>) -> App {
         let t = trace::Trace::open(format!("tests/data/simple.{ext}").as_ref()).unwrap();
@@ -851,11 +851,11 @@ mod tests {
         // the colours as SGR codes: the theme's cursor as a background, one reset per line
         draw::set_palette(theme::builtin("dark", true).unwrap());
         let screen = draw::ansi(&super::screen(&mut a, 80, None));
-        assert!(screen.contains("\x1b[0;38;2;30;30;30;48;2;229;192;123m"), "{screen}");
+        assert!(screen.contains("\x1b[0;1;38;2;30;30;30;48;2;229;192;123m"), "{screen}");
         assert!(screen.lines().all(|l| l.rsplit("\x1b[").next().is_none_or(|last| !l.contains('\x1b') || last.starts_with("0m"))));
         // and without colour, the cursor column reversed
         draw::set_palette(draw::Palette::mono());
-        assert!(draw::ansi(&super::screen(&mut a, 80, None)).contains("\x1b[0;7m"));
+        assert!(draw::ansi(&super::screen(&mut a, 80, None)).contains("\x1b[0;1;7m"));
     }
 
     #[test]
@@ -952,17 +952,14 @@ mod tests {
             render::draw(app, area, &mut buf);
             buf
         };
-        // the grid goes where the rows draw nothing, never into a label's gaps; none without colour
-        let grid = |buf: &Buffer| buf.content.iter().enumerate().filter(|(_, c)| c.symbol() == "┊").map(|(i, _)| i).collect::<Vec<_>>();
-        for w in 60..130 {
-            let buf = screen(&mut app, w);
-            let w = w as usize;
-            let next_to_text = |i: usize| [i - 1, i + 1].iter().any(|&j| j / w == i / w && buf.content[j].symbol().chars().all(char::is_alphanumeric));
-            let cells = grid(&buf);
-            assert!(!cells.is_empty() && !cells.into_iter().any(next_to_text), "width {w}\n{}", draw::text(&buf));
-        }
+        // without colour the cursor's column keeps the waveform: a glyph only where it is blank,
+        // reversed only in its time on the axis
         draw::set_palette(draw::Palette::mono());
-        assert!((60..130).all(|w| grid(&screen(&mut app, w)).is_empty()));
+        let buf = screen(&mut open("vcd", Some(SESSION)), 100);
+        let x = (0..100).find(|&x| buf[(x, 0)].modifier.contains(Modifier::REVERSED)).unwrap();
+        let column: Vec<_> = (1..13).map(|y| &buf[(x, y)]).collect();
+        assert!(column.iter().all(|c| !c.modifier.contains(Modifier::REVERSED)));
+        assert!(column.iter().any(|c| c.symbol() == "┃") && column.iter().any(|c| !" ┃".contains(c.symbol())));
         // light paints the whole screen over the terminal's colours
         draw::set_palette(theme::builtin("light", true).unwrap());
         keys(&mut app, ":");

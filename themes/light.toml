@@ -9,13 +9,12 @@ unknown     = ["#c62828", 160]  # X
 highz       = ["#2e7d32", 28]   # Z
 cursor      = ["#c18401", 136]  # the accent: the cursor's time, the selected name, EDIT
 cursor_text = ["#fafafa", 231]  # text on the accent
-column      = ["#f3e2b3", 223]  # behind the cursor's column
-cursor_dim  = ["#f5efdf", 230]  # behind the marks' columns
+column      = ["#f2d896", 222]  # behind the cursor's column
+cursor_dim  = ["#e6e6e6", 253]  # behind the marks' columns, fainter and neutral
 selected    = ["#e4e8ee", 254]  # behind the selected row
 panel       = ["#eef0f3", 255]  # behind the signal panel, help and completions
 hatch       = ["#8a8f98", 245]  # busy bus columns
 dim         = ["#7a808a", 244]  # scopes, time labels, headings
-grid        = ["#e4e8ee", 254]  # grid lines
 background  = ["#fafafa", 231]  # the screen; "default" keeps the terminal's
 text        = ["#383a42", 237]  # text; "default" keeps the terminal's
 

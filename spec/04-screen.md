@@ -46,16 +46,16 @@ data   0x3A  ─ 0x43 ─🮧 0x96 ─🮧 0xE1 🮧── 0x3A ─🮧 0x7F
   is greyed, so the leaf names stand out.
   It is as wide as the longest name, up to a limit. The selected signal's name is bold in the accent colour,
   and both of its lines get a background across the whole width.
-- **Time axis**: the top line shows times at round steps above the waveforms. Faint dotted grid
-  lines (`┊`) run down from each time to the last row, behind the waveforms; without colour there
-  are none, as they would be as loud as the waveforms.
+- **Time axis**: the top line shows times at round steps above the waveforms, and the cursor's
+  time in the accent colour at its column (kept on screen at the right edge); labels it would
+  touch are left out. No grid runs down from them: in the gaps of the waveforms it read as specks.
 - **Columns**: the names, the values and the waveforms, two spaces apart.
 - **Value column**: each signal's value at the cursor, so all values can be read at once
   even where a segment is too narrow for its label. Empty for group headers.
 - **Cursor ruler**: a line above the waveforms, shown only when there is more than one cursor (section 9).
-- **Cursor and marks**: columns down to the last row. The cursor's column is tinted, so the
-  waveform under it stays as it is, and its head on the time axis is in the accent colour; the
-  marks' columns are fainter still.
+- **Cursor and marks**: columns down to the last row. The cursor's column is tinted warm, so the
+  waveform under it stays as it is; the marks' columns are a fainter, neutral tint. Without colour
+  the waveform stays too, and the column's blank cells show `┃` (marks `╎`).
 - **Status line** (bottom): on the left the mode (`VIEW` reversed, `EDIT` in the accent colour, so
   it shows when keys change the layout) and the full path of the selected signal (or a
   message); on the right the cursor's time, the zoom (time per column) and the file

@@ -14,12 +14,12 @@ theme = "light"         # dark (default), light, or one of the user's (below)
 
 [colors]                # change single colours of the theme
 cursor = "#e5c07b"
-grid = 236
+panel = 235
 red = "#ff5555"         # the shade of a signal colour (section 14)
 ```
 
 - `[colors]` keys are the palette's: `line`, `fill`, `unknown`, `highz`, `cursor`, `cursor_text`,
-  `column`, `cursor_dim`, `selected`, `panel`, `hatch`, `dim`, `grid`, `background`, `text`, and the signal colours `red`, `orange`,
+  `column`, `cursor_dim`, `selected`, `panel`, `hatch`, `dim`, `background`, `text`, and the signal colours `red`, `orange`,
   `yellow`, `green`, `cyan`, `blue`, `magenta`, `gray`. A value is `"#rrggbb"` (the nearest
   256-colour shade on terminals without truecolor), a 256-colour index, `["#rrggbb", index]` (that
   index without truecolor, for colours the nearest shade turns gray) or `"default"` (the

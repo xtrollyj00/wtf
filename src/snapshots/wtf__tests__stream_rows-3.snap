@@ -2,19 +2,19 @@
 source: src/main.rs
 expression: "snapshot(&mut app, 100, Some(16))"
 ---
-                                        0ns             50ns ┃           100ns            150ns
-                                        ┊    🮣────────────🮦──┃──────🮢    ┊           🮣──🮢 ┊
-frame             #2 8B                 ┊    🮡── #0 10B ──🮧──┃ #2 … 🮠    ┊           🮡──🮠 ┊
+                                        0ns                  65ns        100ns            150ns
+                                             🮣────────────🮦──┃──────🮢                🮣──🮢
+frame             #2 8B                      🮡── #0 10B ──🮧──┃ #2 … 🮠                🮡──🮠
                                  rx.frame #2 8B                     🮦────────────────🮦──🮦───────
   frame.beats     0x2            65ns – 85ns (20ns)                 🮧── 0xZZZZZZZZ ──🮧──🮧 0xZZ…
                                                                     🮦────────────────🮦──🮦───────
   frame.len       0x8            beats     0x2                      🮧── 0xZZZZZZZZ ──🮧──🮧 0xZZ…
-                                 len       0x8                      🮢    ┊           🮣──🮢 ┊
-  frame.data      c0 00 00 00 c  data      c0 00 00 00 c1 00 00 00  🮠    ┊           🮡──🮠 ┊
+                                 len       0x8                      🮢                🮣──🮢
+  frame.data      c0 00 00 00 c  data      c0 00 00 00 c1 00 00 00  🮠                🮡──🮠
                                  complete  1                        ┬────────────────┬──┬───────
   frame.complete  1                                    Esc e close  └────── Z ───────┘  └── Z ──
-                                        ┊               ┊    ┃           ┊ 🮣──🮢  🮣───🮢    ┊
-errors                                  ┊               ┊    ┃           ┊ 🮡──🮠  🮡───🮠    ┊
+                                                             ┃             🮣──🮢  🮣───🮢
+errors                                                       ┃             🮡──🮠  🮡───🮠
 
 
  VIEW  rx.frame #2  65ns–85ns  beats=0x2 len=0x8 data=c0 00 00 00 c1 00…  65ns   3ns/col   axis [+]

@@ -96,12 +96,12 @@ mod tests {
 
     #[test]
     fn valid_file_applies() {
-        let c = parse("glyphs = \"box\"\ntheme = \"light\"\n[colors]\ncursor = \"#ff0000\"\ngrid = 17\nred = \"#5f87af\"\n", true, Path::new(""));
+        let c = parse("glyphs = \"box\"\ntheme = \"light\"\n[colors]\ncursor = \"#ff0000\"\npanel = 17\nred = \"#5f87af\"\n", true, Path::new(""));
         assert!(c.warnings.is_empty(), "{:?}", c.warnings);
         assert_eq!(c.glyphs.crossing, draw::BOX.crossing);
         assert_eq!(c.palette.line, theme::builtin("light", true).unwrap().line);
         assert_eq!(c.palette.cursor, Color::Rgb(255, 0, 0));
-        assert_eq!(c.palette.grid, Color::Indexed(17));
+        assert_eq!(c.palette.panel, Color::Indexed(17));
         assert_eq!(c.palette.hues[0], Color::Rgb(0x5f, 0x87, 0xaf));
     }
 
@@ -115,7 +115,7 @@ mod tests {
                 "config: unknown key foo (keys: glyphs, theme, colors)",
                 "config: glyphs = \"utf8\"? (unicode, box, ascii)",
                 "config: theme = 3? (dark, light)",
-                "config: unknown key colors.curser (keys: line, fill, unknown, highz, cursor, cursor_text, column, cursor_dim, selected, panel, hatch, dim, grid, background, text, red, orange, yellow, green, cyan, blue, magenta, gray)",
+                "config: unknown key colors.curser (keys: line, fill, unknown, highz, cursor, cursor_text, column, cursor_dim, selected, panel, hatch, dim, background, text, red, orange, yellow, green, cyan, blue, magenta, gray)",
                 "config: colors.cursor = \"blue\"? (\"#rrggbb\", 0-255, [\"#rrggbb\", 0-255] or \"default\")",
             ]
         );
@@ -142,7 +142,7 @@ mod tests {
         let themes = d.join("themes");
         let c = parse("theme = \"gruvbox\"\n[colors]\nline = 2\n", true, &themes);
         assert!(c.warnings.is_empty(), "{:?}", c.warnings);
-        assert_eq!((c.palette.background, c.palette.line, c.palette.grid), (Color::Rgb(0x28, 0x28, 0x28), Color::Indexed(2), dark().grid));
+        assert_eq!((c.palette.background, c.palette.line, c.palette.panel), (Color::Rgb(0x28, 0x28, 0x28), Color::Indexed(2), dark().panel));
         assert_eq!(parse("theme = \"light\"", true, &themes).palette.line, Color::Indexed(1));
         assert!(parse("theme = \"broken\"", true, &themes).warnings[0].starts_with("config: theme broken: unknown key lne (keys: line, "));
         assert_eq!(parse("theme = \"nord\"", true, &themes).warnings, ["config: theme = \"nord\"? (broken, dark, gruvbox, light)"]);
