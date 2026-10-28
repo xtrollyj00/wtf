@@ -3,13 +3,6 @@
 What changed in each release. Commits follow [Conventional Commits](https://www.conventionalcommits.org/),
 so `git log v0.1.0..` has the details.
 
-## Unreleased
-
-- The dark theme fits the shades behind cards, the selected row and the cursor columns to the
-  terminal's background, which wtf asks the terminal for, so the examine card no longer blends
-  into a background other than One Dark's. With no theme chosen, a light terminal gets the light
-  theme.
-
 ## 0.1.0 (2026-10-28)
 
 The first release.
@@ -26,5 +19,8 @@ The first release.
   evidence in your window.
 - Dark and light themes, the config file, `unicode`, `box` and `ascii` glyph sets chosen on the
   first start, `NO_COLOR`, the mouse.
+- The dark theme fits the shades behind cards, the selected row and the cursor columns to the
+  terminal's background, which wtf asks the terminal for; with no theme chosen, a light terminal
+  gets the light theme.
 - `--snapshot` renders a screen as text or, with `--ansi`, in colour, after `--keys`.
 - Linux and macOS, x86_64 and arm64.
