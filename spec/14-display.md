@@ -35,7 +35,10 @@
   between records, nor do its fields (whose value there is `z`, section 15), in the value column too; a segment opens with `🮣` over `🮡` and closes with `🮢` over `🮠`. Violations are red. A stream row's name has `▸` / `▾` before it, as a group's, since `Space` folds and unfolds its fields.
   With a stream selected, the status line shows its record at the cursor (`rx.frame #2 65ns–85ns
   beats=0x2 len=0x8 data=c0 00 …`).
-- `X`, `U` and `x` are drawn red (red outline for buses), `Z` and `z` green.
+- `X`, `U` and `x` are drawn red (red outline for buses), `Z` and `z` green, and each with a line
+  of its own, so the shape tells them from a value and from each other where colour can't (a
+  colour-blind eye, `NO_COLOR`) and a stretch is too short for its label: X heavy (`━`), Z dotted
+  (`┄`).
 - The glyphs above are the `unicode` set; the others are below.
 
 ### Glyphs
@@ -54,6 +57,7 @@ Each set keeps every distinction the others make, so a drawing reads the same in
 | Drawn | `unicode` | `box` | `ascii` |
 |---|---|---|---|
 | line (1-bit high / low, bus outline) | `─` | `─` | `-` |
+| the line of an X, of a Z | `━`, `┄` | as `unicode` | `=`, `.` |
 | 1-bit edge, upper / lower line | `┌┐┬╷` / `└┘┴╵` | as `unicode` | `+` / `+` |
 | bus crossing, upper / lower | `🮦` / `🮧` | `┬` / `┴` | `+` / `+` |
 | segment opens, upper / lower | `🮣` / `🮡` | `┌` / `└` | `+` / `+` |
@@ -95,8 +99,8 @@ Each set keeps every distinction the others make, so a drawing reads the same in
 - **Without colour** (`NO_COLOR` set to anything but empty, as no-color.org says): the cursor's
   column is reversed, marks are drawn with their glyph where a cell is empty, the selected row's
   name is reversed. Snapshots and the agents' `render` have no colours either.
-- A 1-bit signal's X and Z stretches are labelled like a bus value (`─── X ───`) where they fit:
-  without colour (`NO_COLOR`, snapshots, `render`) both draw the same two lines.
+- A 1-bit signal's X and Z stretches are labelled like a bus value (`━━━ X ━━━`) where they fit,
+  and drawn on both lines, each with its own line (above).
 
 ### Values
 

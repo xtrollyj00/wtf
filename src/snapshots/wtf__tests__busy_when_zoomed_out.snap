@@ -3,6 +3,6 @@ source: src/main.rs
 expression: "snapshot(&mut app, 40, None)"
 ---
             0ns         50ns
-            ┃─🮦──🮦─🮦──╳╳🮣──🮦─────
-data  0xXX  ┃─🮧──🮧─🮧──╳╳🮡──🮧─────
+            ┃━🮦──🮦─🮦──╳╳🮣┄┄🮦─────
+data  0xXX  ┃━🮧──🮧─🮧──╳╳🮡┄┄🮧─────
  VIEW  … 0ns  ·  4ns/col  ·  simple [+]

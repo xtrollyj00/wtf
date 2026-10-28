@@ -107,6 +107,10 @@ pub fn fill_screen(buf: &mut Buffer) {
 pub struct Glyphs {
     /// 1-bit high / low lines and bus outlines.
     pub line: char,
+    /// The lines of an X (any unknown bit) and of a Z: a shape, not only a colour, tells them
+    /// from a value and from each other.
+    pub unknown: char,
+    pub highz: char,
     /// A 1-bit edge on the upper / lower line, by the lines before and after it:
     /// [rise, fall, both (pulse), neither].
     pub edge_up: [char; 4],
@@ -139,6 +143,8 @@ pub struct Glyphs {
 
 pub const UNICODE: Glyphs = Glyphs {
     line: '─',
+    unknown: '━',
+    highz: '┄',
     edge_up: ['┌', '┐', '┬', '╷'],
     edge_down: ['└', '┘', '┴', '╵'],
     crossing: ['🮦', '🮧'],
@@ -167,6 +173,8 @@ pub const BOX: Glyphs = Glyphs { crossing: ['┬', '┴'], open: ['┌', '└'],
 /// 7-bit only. An edge and a crossing are both `+`; a 1-bit signal has one line beside it, a bus two.
 pub const ASCII: Glyphs = Glyphs {
     line: '-',
+    unknown: '=',
+    highz: '.',
     edge_up: ['+'; 4],
     edge_down: ['+'; 4],
     crossing: ['+'; 2],
@@ -312,6 +320,15 @@ pub fn state_style(v: &Val) -> Style {
 // shortcut: a record whose field really is all z draws as a gap too; give gaps their own value if that matters
 fn gap(v: &Val) -> bool {
     matches!(v, Val::Bits(b) if !b.is_empty() && b.chars().all(|c| c == 'z'))
+}
+
+/// The line a value is drawn with: X's, Z's (as `state_style` tells them), or a value's.
+fn rail(v: &Val) -> char {
+    match v {
+        Val::Bits(b) if b.contains(['x', 'u', 'w', '-']) => gl().unknown,
+        Val::Bits(b) if b.contains('z') => gl().highz,
+        _ => gl().line,
+    }
 }
 
 /// Terminal lines per signal: two, so 1-bit edges and bus outlines connect.
@@ -661,7 +678,7 @@ pub fn wave(trace: &Trace, view: &View, row: &Sig, bit: Option<u32>, bits: Optio
                     true => red(),
                     false => Some(state_style(&v)).filter(|s| *s != Style::new()).unwrap_or(own),
                 };
-                out[c..e].iter_mut().for_each(|o| *o = [(gl().line, st); 2]);
+                out[c..e].iter_mut().for_each(|o| *o = [(rail(&v), st); 2]);
                 if opens {
                     let crossing = c > 0 && !busy[c - 1] && out[c - 1][0].0 != ' ';
                     out[c] = if crossing { gl().crossing.map(|g| (g, st)) } else { gl().open.map(|g| (g, st)) };
@@ -684,7 +701,7 @@ pub fn wave(trace: &Trace, view: &View, row: &Sig, bit: Option<u32>, bits: Optio
                     }
                     // a gap in the bottom edge around the label
                     for x in [start - 1, start + len] {
-                        if out[x][1].0 == gl().line {
+                        if out[x][1].0 == rail(&v) {
                             out[x][1].0 = ' ';
                         }
                     }
@@ -715,7 +732,8 @@ pub fn wave(trace: &Trace, view: &View, row: &Sig, bit: Option<u32>, bits: Optio
             let b = gl().edge_down[edge(pb, bot)];
             [(t, own), (b, own)]
         } else {
-            [if top { (gl().line, st) } else { blank }, if bot { (gl().line, st) } else { blank }]
+            let r = val(c).as_ref().map_or(gl().line, rail);
+            [if top { (r, st) } else { blank }, if bot { (r, st) } else { blank }]
         };
     }
     // X and Z draw both lines as a bus does, and get its label: colour isn't always there to
@@ -736,7 +754,7 @@ pub fn wave(trace: &Trace, view: &View, row: &Sig, bit: Option<u32>, bits: Optio
                     out[start + k][1].0 = ch;
                 }
                 for x in [start - 1, start + len] {
-                    if out[x][1].0 == gl().line {
+                    if out[x][1].0 == rail(&v) {
                         out[x][1].0 = ' ';
                     }
                 }

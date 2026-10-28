@@ -4,10 +4,10 @@
 # are dark's. spec §19.
 
 line        = ["#0e7490", 30]   # 1-bit lines
-bus         = ["#4078f2", 33]   # bus and stream outlines (their labels are in the text colour)
+bus         = ["#6f42c1", 98]   # bus and stream outlines (their labels are in the text colour)
 fill        = ["#9fd3da", 152]  # 1-bit signals toggling faster than a column
 unknown     = ["#c62828", 160]  # X
-highz       = ["#2e7d32", 28]   # Z
+highz       = ["#00897b", 36]   # Z
 cursor      = ["#c18401", 136]  # the accent: the cursor's time, the selected name, EDIT
 cursor_text = ["#fafafa", 231]  # text on the accent
 column      = ["#f2d896", 222]  # behind the cursor's column
