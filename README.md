@@ -63,6 +63,9 @@ wtf --snapshot 120 trace.fst   # one screen as text, for CI logs and bug reports
 wtf --snapshot 120x30 --ansi --keys '?' trace.fst   # in colour, after pressing keys
 ```
 
+wtf shows what the file holds. A VCD keeps less than an FST: no enum names and no scope types,
+so a struct or union is a plain scope.
+
 The first start asks which glyphs your terminal draws well and whether you want dark or light
 (`wtf --setup` asks again). Then the screen is empty: press `i` to add signals (`/` searches,
 `Space` marks, `Enter` adds), `Esc` to go back to viewing, `?` for the keys of the mode you are

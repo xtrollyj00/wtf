@@ -224,7 +224,7 @@ fn row_names_keep_the_composite() {
         format!("clk pkt.valid pkt.state pkt.pair.hi pkt.pair.lo a b packed2[3] packed2[2] packed2[1] packed2[0] mem[0] mem[1] mem[2] mem[3] {grid} {pkts} byte_ word.pair.hi word.pair.lo {generate}")
     );
     assert_eq!(row_names("types-verilator.vcd"), format!("clk pkt a b packed2 mem[0] mem[1] mem[2] mem[3] {grid} pkts[0] pkts[1] word gen[0].p gen[1].p"));
-    // shortcut: Icarus's foreach loop variables are rows too, fixed by a later piece
+    // Icarus's foreach loop variables and genvars are in the file, so they are rows too (spec §18)
     assert_eq!(
         row_names("types-icarus.fst"),
         "clk packed2 pkt word gen[0].g gen[0].p gen[1].g gen[1].p $ivl_foreach0.i $ivl_foreach1.i $ivl_foreach1.j $ivl_foreach2.i $ivl_foreach3.i $ivl_foreach4.i $ivl_foreach4.j"

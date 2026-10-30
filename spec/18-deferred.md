@@ -60,9 +60,13 @@ Shortcuts taken so far, to fix when they get in the way.
     element 1;
   - nvc dumps an enum as a string var (`pkt.state` is `busy`), its type not kept: it is a
     string to wtf (`signals` says so), compared as text, with no enum radix;
-  - a VCD from Verilator writes a struct as a module scope, so its fields are shown by their leaf
-    (`hi`, not `pkt.pair.hi`), listed scopes first, and adding it takes only its direct fields;
-    it is no composite row, nor is a packed struct dumped as one var;
+  - a VCD has no scope types: Verilator writes a struct as a module scope, as an FST doesn't, so
+    it is no composite row (nor is a packed struct dumped as one var); its fields are shown by
+    their leaf (`hi`, not `pkt.pair.hi`), listed scopes first, and adding it takes only its
+    direct fields. The format lost the type; wtf doesn't guess it back;
+  - Icarus dumps the blocks of its `foreach` loops (`$ivl_foreach0.i`) and generate loops'
+    genvars (`gen[0].g`, a parameter): they are in the file, so they are signals, added by
+    `:add **` as any other;
   - a module or instance named as a signal (`value_at top.cpu`) is an error listing its signals;
     finding the scopes a name ends with goes through every path, O(signals), only on such an
     error;
