@@ -511,7 +511,7 @@ fn present_and_user_view() {
 
     // the user's view, then adopted into the workspace
     assert_eq!(s.ok("user_view", json!({})), "rows (> selected):\n> clk");
-    assert_eq!(s.ok("user_view", json!({"adopt": true})), "rows (> selected):\n> clk\n(adopted into the workspace; not in trace: top.gone)");
+    assert_eq!(s.ok("user_view", json!({"adopt": true})), "rows (> selected):\n> clk\n(adopted into the workspace; agent: presented 1 signals, 2 cursors; not in trace: top.gone)");
     let view = s.ok("view", json!({}));
     assert!(view.contains("> clk  top.clk") && view.contains("2: 50ns, +40ns after 1") && !view.contains("data"), "{view}");
 }

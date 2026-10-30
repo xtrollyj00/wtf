@@ -126,14 +126,15 @@ pub fn name(r: usize, frac: u32, width: u32) -> String {
     }
 }
 
-/// Whether radix `r` can show a signal of this width, whose values the file names or not.
-pub fn fits(r: usize, width: u32, named: bool) -> bool {
-    if r == ENUM { named } else { (RADIXES[r].fits)(width) }
+/// Whether radix `r` can show a signal of this width, whose values the file names or not; `need`
+/// is the width a fixed-point radix needs (`parse_name`).
+pub fn fits(r: usize, need: Option<u32>, width: u32, named: bool) -> bool {
+    need.is_none_or(|n| n == width) && if r == ENUM { named } else { (RADIXES[r].fits)(width) }
 }
 
 /// The radix `r` moves to from `r`: the next one that fits, without fixed point.
 pub fn next(r: usize, width: u32, named: bool) -> usize {
-    (1..=RADIXES.len()).map(|k| (r + k) % RADIXES.len()).find(|&n| !RADIXES[n].fixed && fits(n, width, named)).unwrap_or(r)
+    (1..=RADIXES.len()).map(|k| (r + k) % RADIXES.len()).find(|&n| !RADIXES[n].fixed && fits(n, None, width, named)).unwrap_or(r)
 }
 
 /// Hex, the radix of values without a row (a record's fields).

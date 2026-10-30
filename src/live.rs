@@ -176,6 +176,18 @@ pub fn request(id: &str, req: Request) -> Result<String, String> {
     }
 }
 
+/// The answer to `GET`: the session in words, `---`, then as session TOML.
+pub fn get_answer(described: &str, toml: &str) -> String {
+    format!("{described}\n---\n{toml}")
+}
+
+/// Session `id`'s answer to `GET`: the session in words, and as session TOML.
+pub fn get(id: &str) -> Result<(String, String), String> {
+    let answer = request(id, Request::Get)?;
+    let (described, toml) = answer.split_once("\n---\n").unwrap_or((&answer, ""));
+    Ok((described.to_string(), toml.to_string()))
+}
+
 fn call(id: &str, req: String) -> Result<String, String> {
     let path = sock(id).map_err(|e| e.to_string())?;
     let mut s = match UnixStream::connect(&path) {

@@ -136,8 +136,6 @@ pub fn apply(app: &mut Workspace, text: &str) -> Result<Vec<String>, String> {
         if let Some(to) = view.remove("to").and_then(|v| time(&v, &mut warn)) {
             app.view.show_until(to);
         }
-        // written by wtf before cursors 2 - 9 became marks (spec §9)
-        view.remove("active_cursor");
         unknown("view.", &view, &mut warn);
     }
     app.view.cursor = 0;
@@ -183,7 +181,7 @@ fn rows_of(app: &mut Workspace, rows: Value, grouped: bool, out: &mut Vec<Row>, 
                     let width = app.trace.vars[var].width.unwrap_or(0);
                     let named = app.trace.vars[var].names.is_some();
                     let (radix, frac) = match radix {
-                        Some((r, frac, need)) if radix::fits(r, width, named) && need.is_none_or(|n| n == width) => (r, frac),
+                        Some((r, frac, need)) if radix::fits(r, need, width, named) => (r, frac),
                         Some((r, frac, need)) => {
                             warn.push(format!("radix {} doesn't fit {path}", radix::name(r, frac, need.unwrap_or(width))));
                             (radix::default_for(named, app.trace.vars[var].signed), 0)
@@ -325,6 +323,16 @@ pub fn rows_toml(app: &Workspace) -> String {
 
 /// The whole session: view, cursors and layout.
 pub fn to_toml(app: &Workspace) -> String {
+    toml(app, false)
+}
+
+/// The session as another window takes it (`present`, `wtf --attach`): with `to`, the end of the
+/// visible range, so a window of another width shows the same stretch.
+pub fn to_shared_toml(app: &Workspace) -> String {
+    toml(app, true)
+}
+
+fn toml(app: &Workspace, shared: bool) -> String {
     let fpt = app.trace.fs_per_tick;
     let v = &app.view;
     // below one tick per column the zoom is a fraction of a tick, written as plain ticks
@@ -332,11 +340,12 @@ pub fn to_toml(app: &Workspace) -> String {
     let cursors: String =
         app.cursor_list().iter().map(|&(i, t)| format!("{} = {}\n", i + 1, quote(&time::format_exact(t, fpt)))).collect();
     format!(
-        "# wtf session\nversion = {VERSION}\n{}{}\n[view]\nzoom = {}\ntime = {}\n\n[cursors]\n{cursors}{}",
+        "# wtf session\nversion = {VERSION}\n{}{}\n[view]\nzoom = {}\ntime = {}\n{}\n[cursors]\n{cursors}{}",
         app.scope.as_ref().map_or(String::new(), |s| format!("scope = {}\n", quote(s))),
         app.unit.map_or(String::new(), |u| format!("unit = {}\n", quote(time::unit_name(u)))),
         quote(&zoom),
         quote(&time::format_exact(v.start, fpt)),
+        if shared { format!("to = {}\n", quote(&time::format_exact(v.last_visible().min(app.trace.end()), fpt))) } else { String::new() },
         rows_toml(app)
     )
 }

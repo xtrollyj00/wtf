@@ -88,8 +88,7 @@ fn run(args: Args) -> Result<(), String> {
         }
         Some(Some(id)) => {
             let s = live::sessions()?.into_iter().find(|s| s.id == id).ok_or(format!("no session {id}; `wtf --attach` lists them"))?;
-            let answer = live::request(&id, live::Request::Get)?;
-            let text = answer.split_once("\n---\n").map_or(String::new(), |(_, t)| t.to_string());
+            let (_, text) = live::get(&id)?;
             (s.trace, Some(text), Some(id))
         }
         None => (args.trace.expect("clap requires it"), None, None),
@@ -129,7 +128,7 @@ fn run(args: Args) -> Result<(), String> {
         }
         None => {
             set_palette(config.palette);
-            tui(&mut app)
+            tui::run(&mut app)
         }
     }
 }
@@ -156,96 +155,6 @@ fn screen(app: &mut App, w: u16, h: Option<u16>) -> Buffer {
 #[cfg(test)]
 fn snapshot(app: &mut App, w: u16, h: Option<u16>) -> String {
     draw::text(&screen(app, w, h))
-}
-
-fn tui(app: &mut App) -> Result<(), String> {
-    // the agent's way in (`wtf --mcp`); without it the window works as before, and says why
-    let live = match live::window(&std::process::id().to_string(), &app.ws.trace_path) {
-        Ok(l) => Some(l),
-        Err(e) => {
-            app.msg = Some((format!("no link for agents: {e}"), true));
-            None
-        }
-    };
-    // the agent's session, read every half second while attached, each change sent on
-    let agent = app.follow.as_ref().map(|f| {
-        let (tx, rx) = std::sync::mpsc::channel();
-        let id = f.id.clone();
-        std::thread::spawn(move || {
-            let mut last = String::new();
-            loop {
-                std::thread::sleep(std::time::Duration::from_millis(500));
-                let now = live::request(&id, live::Request::Get).map(|a| a.split_once("\n---\n").map_or(String::new(), |(_, t)| t.to_string()));
-                let gone = now.is_err();
-                if now.as_ref().is_ok_and(|t| *t == last) {
-                    continue;
-                }
-                if let Ok(t) = &now {
-                    last = t.clone();
-                }
-                if tx.send(now).is_err() || gone {
-                    return;
-                }
-            }
-        });
-        rx
-    });
-    let mut term = ratatui::init();
-    let _ = crossterm::execute!(std::io::stdout(), crossterm::event::EnableMouseCapture);
-    let res = (|| -> std::io::Result<()> {
-        while !app.quit {
-            term.draw(|f| {
-                if let Some((x, y)) = render::draw(app, f.area(), f.buffer_mut()) {
-                    f.set_cursor_position((x, y));
-                }
-            })?;
-            // wait for a key, answering the agent in between
-            while !crossterm::event::poll(std::time::Duration::from_millis(50))? {
-                if let Some(inc) = live.as_ref().and_then(|(_, rx)| rx.try_recv().ok()) {
-                    let answer = match inc.request {
-                        live::Request::Get => Ok(mcp::link_answer(&app.ws)),
-                        live::Request::Put(text) => app.present(&text),
-                    };
-                    let _ = inc.reply.send(answer);
-                    break;
-                }
-                if app.watch(tui::app::stamp(&app.ws.trace_path), std::time::Instant::now()) {
-                    break;
-                }
-                if let Some(now) = agent.as_ref().and_then(|rx| rx.try_recv().ok())
-                    && app.agent_changed(now)
-                {
-                    break;
-                }
-            }
-            if !crossterm::event::poll(std::time::Duration::ZERO)? {
-                continue;
-            }
-            // handle every event already waiting before drawing again, so held keys (and slow
-            // links like ssh) don't queue up frames that are stale by the time they arrive
-            let mut ev = crossterm::event::read()?;
-            loop {
-                match ev {
-                    crossterm::event::Event::Key(k) if k.kind == crossterm::event::KeyEventKind::Press => app.key(k),
-                    crossterm::event::Event::Mouse(m) => app.mouse(m),
-                    _ => {}
-                }
-                // to the terminal's clipboard; one that can't take it ignores the sequence
-                if let Some(text) = app.yank.take() {
-                    use crossterm::clipboard::{ClipboardSelection, ClipboardType, CopyToClipboard};
-                    crossterm::execute!(std::io::stdout(), CopyToClipboard { content: text, destination: ClipboardSelection(vec![ClipboardType::Clipboard]) })?;
-                }
-                if app.quit || !crossterm::event::poll(std::time::Duration::ZERO)? {
-                    break;
-                }
-                ev = crossterm::event::read()?;
-            }
-        }
-        Ok(())
-    })();
-    let _ = crossterm::execute!(std::io::stdout(), crossterm::event::DisableMouseCapture);
-    ratatui::restore();
-    res.map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

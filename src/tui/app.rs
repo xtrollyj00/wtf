@@ -477,8 +477,7 @@ impl App {
             return self.examine = Some((format!("{} {}", st.name, st.label(i, fpt)), lines));
         }
         let (var, bit) = self.ws.probe(s, self.ws.bit);
-        let path = &self.ws.trace.vars[var].path;
-        let name = bit.map_or(path.clone(), |b| format!("{path}[{b}]"));
+        let name = self.ws.trace.probe_path((var, bit));
         let line = crate::draw::line_sig(&self.ws, s, var);
         let mut value = match self.ws.trace.value_of(var, bit, self.ws.view.cursor) {
             Some(_) if self.ws.stream_of(var).is_some() => vec!["no record here".into()],
@@ -504,7 +503,7 @@ impl App {
                     walk(app, c, depth + 1, out);
                 } else {
                     let v = &t.vars[c];
-                    let sig = rows::Sig { var: c, radix: wtf_core::radix::default_for(v.names.is_some(), v.signed), frac: 0, grouped: false, open: Vec::new(), color: None };
+                    let sig = rows::Sig::of(c, v);
                     let value = t.value_at(c, app.ws.view.cursor).map_or("-".into(), |x| rows::label(v, &sig, &x));
                     out.push((name, Some(value)));
                 }

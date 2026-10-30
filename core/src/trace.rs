@@ -266,6 +266,23 @@ impl Trace {
         !self.vars[var].children.is_empty()
     }
 
+    /// An array, its children indexed (`mem[0]`), rather than a struct.
+    pub fn is_array(&self, var: usize) -> bool {
+        self.vars[var].children.iter().any(|&c| self.vars[c].path.ends_with(']'))
+    }
+
+    /// The signals in a struct or array, nested ones' included, in order; a signal is its own.
+    pub fn leaves(&self, var: usize) -> Vec<usize> {
+        let (mut out, mut stack) = (Vec::new(), vec![var]);
+        while let Some(v) = stack.pop() {
+            match self.is_composite(v) {
+                true => stack.extend(self.vars[v].children.iter().rev()),
+                false => out.push(v),
+            }
+        }
+        out
+    }
+
     /// Add a computed signal from its values in time order (`changes`, times may repeat: the last
     /// value at a time counts), or replace the one with that path. Returns its var.
     pub fn add_computed(&mut self, path: &str, width: Option<u32>, changes: Vec<(Tick, Val)>) -> Result<usize, String> {
@@ -577,6 +594,17 @@ fn bit_of(v: Val, bit: Option<u32>) -> Option<Val> {
 // shortcut: a bit's changes are found by checking each change of its bus, so a bit of a busy bus
 // costs time proportional to the bus's changes in view; index bits if that is ever too slow.
 impl Trace {
+    /// A signal's width, 1 for a bit of it.
+    pub fn probe_width(&self, (var, bit): (usize, Option<u32>)) -> Option<u32> {
+        if bit.is_some() { Some(1) } else { self.vars[var].width }
+    }
+
+    /// A signal's full path, a bit of a bus as `data[3]`.
+    pub fn probe_path(&self, (var, bit): (usize, Option<u32>)) -> String {
+        let path = &self.vars[var].path;
+        bit.map_or(path.clone(), |b| format!("{path}[{b}]"))
+    }
+
     pub fn value_of(&self, var: usize, bit: Option<u32>, t: Tick) -> Option<Val> {
         bit_of(self.value_at(var, t)?, bit)
     }

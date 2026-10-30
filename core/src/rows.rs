@@ -25,6 +25,13 @@ pub struct Sig {
     pub color: Option<usize>,
 }
 
+impl Sig {
+    /// A row for `var` in its default radix, folded, ungrouped and without a colour of its own.
+    pub fn of(var: usize, v: &Var) -> Sig {
+        Sig { var, radix: radix::default_for(v.names.is_some(), v.signed), frac: 0, grouped: false, open: Vec::new(), color: None }
+    }
+}
+
 /// The colours a row can have. The interfaces give each its shade.
 pub const COLORS: [&str; 8] = ["red", "orange", "yellow", "green", "cyan", "blue", "magenta", "gray"];
 

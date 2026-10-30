@@ -236,7 +236,7 @@ fn radix_for(r: &str, width: u32, named: bool, n: &str) -> Result<(usize, u32), 
     if r == radix::ENUM && !named {
         return Err(format!("enum: the file names no values of {n}"));
     }
-    if !radix::fits(r, width, named) || need.is_some_and(|n| n != width) {
+    if !radix::fits(r, need, width, named) {
         return Err(format!("{} doesn't fit {n} ({width} bits)", radix::name(r, frac, need.unwrap_or(width))));
     }
     Ok((r, frac))
@@ -256,13 +256,13 @@ fn probes(app: &mut Workspace, names: &[String], radix_name: &Option<String>) ->
     for n in names {
         let (n, own) = with_radix(n);
         let p = app.resolve(n)?;
-        let width = if p.1.is_some() { 1 } else { app.trace.vars[p.0].width.unwrap_or(0) };
+        let width = app.trace.probe_width(p).unwrap_or(0);
         let named = p.1.is_none() && app.trace.vars[p.0].names.is_some();
         let (r, frac) = match own.or(radix_name.as_deref()) {
             None => (radix::default_for(named, p.1.is_none() && app.trace.vars[p.0].signed), 0),
             Some(r) => radix_for(r, width, named, n)?,
         };
-        out.push((n.to_string(), p, Sig { var: p.0, radix: r, frac, grouped: false, open: Vec::new(), color: None }));
+        out.push((n.to_string(), p, Sig { radix: r, frac, ..Sig::of(p.0, &app.trace.vars[p.0]) }));
     }
     let vars: Vec<usize> = out.iter().map(|(_, p, _)| p.0).collect();
     app.trace.load(&vars);
@@ -389,24 +389,13 @@ impl Wtf {
         });
         let wholes: Vec<&str> = hits.iter().filter(|&&v| t.is_composite(v)).map(|&v| t.vars[v].path.as_str()).collect();
         let inside = |path: &str| wholes.iter().any(|w| path.len() > w.len() && path.starts_with(w) && path[w.len()..].starts_with(['.', '[']));
-        let leaves = |v: usize| {
-            let mut stack = vec![v];
-            let mut n = 0;
-            while let Some(x) = stack.pop() {
-                match t.is_composite(x) {
-                    true => stack.extend(&t.vars[x].children),
-                    false => n += 1,
-                }
-            }
-            n
-        };
         let mut shown: Vec<(&str, String)> = Vec::new();
         for &v in hits.iter().filter(|&&v| !inside(&t.vars[v].path)) {
             let var = &t.vars[v];
             if t.is_composite(v) {
-                let kind = if var.children.iter().any(|&c| t.vars[c].path.ends_with(']')) { "array" } else { "struct" };
+                let kind = if t.is_array(v) { "array" } else { "struct" };
                 let text = if var.width.is_some() { bits(var.width) } else { "text".into() };
-                shown.push((&var.path, format!("{kind}, {text}, {} signals", leaves(v))));
+                shown.push((&var.path, format!("{kind}, {text}, {} signals", t.leaves(v).len())));
             } else {
                 shown.push((&var.path, bits(var.width)));
             }
@@ -543,15 +532,9 @@ impl Wtf {
                 let mut out = vec![(n.clone(), p, s)];
                 if p.1.is_none() && app.trace.is_composite(p.0) {
                     let base = app.trace.vars[p.0].path.len();
-                    let mut stack: Vec<usize> = app.trace.vars[p.0].children.iter().rev().copied().collect();
-                    while let Some(v) = stack.pop() {
-                        if app.trace.is_composite(v) {
-                            stack.extend(app.trace.vars[v].children.iter().rev());
-                            continue;
-                        }
+                    for v in app.trace.leaves(p.0) {
                         let var = &app.trace.vars[v];
-                        let r = radix::default_for(var.names.is_some(), var.signed);
-                        out.push((format!("{n}{}", &var.path[base..]), (v, None), Sig { var: v, radix: r, frac: 0, grouped: false, open: Vec::new(), color: None }));
+                        out.push((format!("{n}{}", &var.path[base..]), (v, None), Sig::of(v, var)));
                     }
                 }
                 out
@@ -755,7 +738,7 @@ impl Wtf {
         if app.rows.is_empty() {
             return Err("the workspace has no signals yet: set it up with `workspace` or `command`".into());
         }
-        let text = shared(&app);
+        let text = session::to_shared_toml(&app);
         match live::window_on(&app.trace_path) {
             Some(id) => live::request(&id, live::Request::Put(text)).map(|m| format!("shown in the user's window: {m}")),
             None => {
@@ -773,18 +756,13 @@ impl Wtf {
         let w = current(self)?;
         let mut app = lock(&w);
         let id = live::window_on(&app.trace_path).ok_or("no wtf window is open on this trace")?;
-        let answer = live::request(&id, live::Request::Get)?;
-        let (described, toml) = answer.split_once("\n---\n").unwrap_or((&answer, ""));
+        let (described, toml) = live::get(&id)?;
         if a.adopt {
-            app.marks = [None; 9];
-            app.rows.clear();
-            let warn = session::apply(&mut app, toml)?;
-            if !warn.is_empty() {
-                return Ok(format!("{described}\n(adopted into the workspace; {})", warn.join("; ")));
-            }
-            return Ok(format!("{described}\n(adopted into the workspace)"));
+            let (msg, warned) = app.present(&toml)?;
+            let warn = if warned { format!("; {msg}") } else { String::new() };
+            return Ok(format!("{described}\n(adopted into the workspace{warn})"));
         }
-        Ok(budget(described.to_string()))
+        Ok(budget(described))
     }
 
     #[tool(description = "Reopen the trace file, after the simulation was run again.")]
@@ -808,15 +786,9 @@ fn screen(app: &mut Workspace, w: u16, asked: &Option<String>) -> Result<String,
     Ok(format!("{} - {}:\n{}", show(app, from, u), show(app, to, rounded), text.trim_end_matches('\n')))
 }
 
-/// window of another width shows the same stretch.
-pub fn shared(app: &Workspace) -> String {
-    let to = format!("to = \"{}\"\n", time::format_exact(app.view.last_visible().min(app.trace.end()), app.trace.fs_per_tick));
-    session::to_toml(app).replacen("\n[cursors]", &format!("{to}\n[cursors]"), 1)
-}
-
-/// The answer to `GET` on the link: the session in words, `---`, then as `shared`.
+/// The answer to `GET` on the link: the session in words, `---`, then as another window takes it.
 pub fn link_answer(app: &Workspace) -> String {
-    format!("{}\n---\n{}", describe(app, None), shared(app))
+    live::get_answer(&describe(app, None), &session::to_shared_toml(app))
 }
 
 /// The workspace in words, for `view`, its times in `unit` (default: the one that fits them).

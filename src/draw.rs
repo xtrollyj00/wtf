@@ -240,10 +240,7 @@ pub fn put(buf: &mut Buffer, x: usize, y: usize, s: &str, style: Style) {
 pub fn line_sig(ws: &Workspace, s: &Sig, var: usize) -> Sig {
     match var == s.var || ws.stream_of(s.var).is_some() {
         true => Sig { var, ..s.clone() },
-        false => {
-            let v = &ws.trace.vars[var];
-            Sig { var, radix: wtf_core::radix::default_for(v.names.is_some(), v.signed), frac: 0, ..s.clone() }
-        }
+        false => Sig { color: s.color, ..Sig::of(var, &ws.trace.vars[var]) },
     }
 }
 
