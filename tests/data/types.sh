@@ -21,6 +21,15 @@ else
     echo "verilator not found: skipped" >&2
 fi
 
+if command -v iverilog >/dev/null; then
+    iverilog -g2012 -o "$work/types.vvp" "$here/types.sv"
+    (cd "$work" && vvp -n types.vvp >/dev/null && vvp -n types.vvp -fst >/dev/null)
+    mv "$work/dump.vcd" "$here/types-icarus.vcd"
+    mv "$work/dump.fst" "$here/types-icarus.fst"
+else
+    echo "iverilog not found: skipped" >&2
+fi
+
 if command -v nvc >/dev/null; then
     cd "$work"
     nvc -a "$here/types.vhd" -e types
