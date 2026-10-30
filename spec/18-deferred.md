@@ -60,6 +60,8 @@ Shortcuts taken so far, to fix when they get in the way.
     (`hi`, not `pkt.pair.hi`), listed scopes first, and adding it takes only its direct fields;
   - a struct or scope named as a signal (`value_at pkt`) is an error listing its signals; finding
     the scopes a name ends with goes through every path, O(signals), only on such an error;
+  - wellen 0.25.7 can't read a GHW file (GHDL) with a multidimensional array ("not yet
+    implemented"): opening it is an error; GHDL's VCD has no records or arrays at all;
   - wellen 0.25.7 misnames the elements of a Verilator FST's 2-D unpacked array whose indices are
     equal (`grid[1][1]` becomes `types.grid[1].grid[1].`): an upstream bug.
 

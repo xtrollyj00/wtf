@@ -13,7 +13,8 @@
 //!
 //! types-verilator.{vcd,fst} are without --trace-structs, types-verilator-structs.* with it;
 //! types-icarus.{vcd,fst} are Icarus's (`vvp -fst`); types-nvc.{vcd,fst} with --dump-arrays,
-//! types-nvc-noarrays.fst without.
+//! types-nvc-noarrays.fst without. types-ghdl.{vcd,fst,ghw} are GHDL's, types-ghdl-nogrid.ghw
+//! the design without `grid`.
 
 use std::path::PathBuf;
 use wtf_core::time::Tick;
@@ -160,7 +161,7 @@ const NVC_COMMON: &[(&str, &str)] = &[
     ("PKT.PAIR.HI", "types.pkt.pair.hi = 1010"),
     ("link.addr", "types.link.addr = 00111100"),
     ("gen(1).p", "unknown"), // shortcut: as pkt
-    ("gen[1].p.hi", "types.gen(1).p.hi = 1001"),
+    ("gen[1].p.hi", "types.gen[1].p.hi = 1001"),
     // nvc drops a 2-D array, in VCD as in FST
     ("grid(1, 2)", "unknown"),
     ("grid(1)(2)", "unknown"),
@@ -220,7 +221,7 @@ fn row_names_keep_the_composite() {
     for file in ["types-nvc.fst", "types-nvc.vcd"] {
         assert_eq!(
             row_names(file),
-            format!("clk pkt.valid pkt.state pkt.pair.hi pkt.pair.lo {pkts} rows[0][0] rows[0][1] rows[0][2] rows[1][0] rows[1][1] rows[1][2] link.addr link.data[0] link.data[1] link.data[2] gen(0).p.hi gen(0).p.lo gen(1).p.hi gen(1).p.lo"),
+            format!("clk pkt.valid pkt.state pkt.pair.hi pkt.pair.lo {pkts} rows[0][0] rows[0][1] rows[0][2] rows[1][0] rows[1][1] rows[1][2] link.addr link.data[0] link.data[1] link.data[2] gen[0].p.hi gen[0].p.lo gen[1].p.hi gen[1].p.lo"),
             "{file}"
         );
     }
@@ -265,7 +266,7 @@ fn add_a_composite() {
     // shortcut: the error mixes forms (types.gen(1), types.gen[1].p), fixed by a later piece
     assert_eq!(
         added("types-nvc.fst", "add types.gen[1]"),
-        "no signals directly in types.gen(1): add types.gen(1).** for all of it, or one of its scopes: types.gen(1).p"
+        "no signals directly in types.gen[1]: add types.gen[1].** for all of it, or one of its scopes: types.gen[1].p"
     );
     // shortcut: a Verilator VCD writes struct scopes as modules, so :add takes only the fields
     // directly in it (not pkt.pair) and pkts is a plain scope, fixed by a later piece
@@ -276,4 +277,50 @@ fn add_a_composite() {
     let mut ws = fixture(structs);
     let e = ws.resolve("pkt").unwrap_err();
     assert!(e.starts_with("unknown signal: pkt is a scope of 4 signals (types.pkt.valid"), "{e}");
+}
+
+/// GHDL's VCD has only scalars and vectors (records and arrays are comments); its FST keeps the 2-D
+/// grid (elements are scopes `0`, `1` in the file); its GHW is as nvc's, but wellen can't read one with a 2-D array.
+#[test]
+fn ghdl() {
+    let ghw = [
+        ("pkt.valid", "types.pkt.valid = 1"),
+        ("pkt.state", "types.pkt.state = busy"),
+        ("pkt.pair.hi", "types.pkt.pair.hi = 1010"),
+        ("pkt", "unknown"), // shortcut: a record is a scope, no whole value, fixed by a later piece
+        ("pkts(1).pair.lo", "types.pkts[1].pair.lo = 0111"),
+        ("rows(1)(2)", "types.rows[1][2] = 0101"),
+        ("link.data(1)", "types.link.data[1] = 0010"),
+        ("gen[1].p.hi", "types.gen[1].p.hi = 1001"),
+    ];
+    check("types-ghdl-nogrid.ghw", &ghw);
+    assert_eq!(
+        row_names("types-ghdl-nogrid.ghw"),
+        "clk pkt.valid pkt.state pkt.pair.hi pkt.pair.lo pkts[0].valid pkts[0].state pkts[0].pair.hi pkts[0].pair.lo pkts[1].valid pkts[1].state pkts[1].pair.hi pkts[1].pair.lo rows[0][0] rows[0][1] rows[0][2] rows[1][0] rows[1][1] rows[1][2] link.addr link.data[0] link.data[1] link.data[2] gen[0].p.hi gen[0].p.lo gen[1].p.hi gen[1].p.lo"
+    );
+    // shortcut: wellen can't read a GHW with a 2-D array (grid): an error, not a crash; upstream
+    let err = Workspace::open(&PathBuf::from(format!("{}/../tests/data/types-ghdl.ghw", env!("CARGO_MANIFEST_DIR")))).err().unwrap();
+    assert!(err.ends_with("wellen can't read it: not yet implemented: support multi-dimensional arrays!"), "{err}");
+
+    // GHDL's FST has every signal, the 2-D grid too; the enum is 8 bits with its names
+    check(
+        "types-ghdl.fst",
+        &[
+            ("pkt.state", "types.pkt.state = busy"),
+            ("pkt.pair.hi", "types.pkt.pair.hi = 1010"),
+            ("gen(1).p.hi", "types.gen[1].p.hi = 1001"),
+            // array elements are scopes named 0, 1 in the file: indices, as every simulator's
+            ("pkts(1).pair.lo", "types.pkts[1].pair.lo = 0111"),
+            ("grid(1, 2)", "types.grid[1][2] = 0101"),
+            ("rows(1)(2)", "types.rows[1][2] = 0101"),
+            ("link.data(1)", "types.link.data[1] = 0010"),
+        ],
+    );
+    assert_eq!(
+        row_names("types-ghdl.fst"),
+        "clk pkt.valid pkt.state pkt.pair.hi pkt.pair.lo pkts[0].valid pkts[0].state pkts[0].pair.hi pkts[0].pair.lo pkts[1].valid pkts[1].state pkts[1].pair.hi pkts[1].pair.lo grid[0][0] grid[0][1] grid[0][2] grid[1][0] grid[1][1] grid[1][2] rows[0][0] rows[0][1] rows[0][2] rows[1][0] rows[1][1] rows[1][2] link.addr link.data[0] link.data[1] link.data[2] gen[0].p.hi gen[0].p.lo gen[1].p.hi gen[1].p.lo"
+    );
+
+    // GHDL's VCD drops records and arrays ("pkt is not handled"): only clk
+    assert_eq!(row_names("types-ghdl.vcd"), "clk");
 }

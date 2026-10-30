@@ -275,8 +275,8 @@ mod tests {
             open("types-nvc.fst"),
             "types|  pkt|    valid|    state|    pair|      hi|      lo|  pkts|    [0]|      valid|      state|      pair|        hi|\
              \x20       lo|    [1]|      valid|      state|      pair|        hi|        lo|  rows|    [0]|      [0]|      [1]|      [2]|\
-             \x20   [1]|      [0]|      [1]|      [2]|  link|    addr|    data|      [0]|      [1]|      [2]|  gen(0)|    p|      hi|\
-             \x20     lo|  gen(1)|    p|      hi|      lo|  clk"
+             \x20   [1]|      [0]|      [1]|      [2]|  link|    addr|    data|      [0]|      [1]|      [2]|  gen|    [0]|      p|\
+             \x20       hi|        lo|    [1]|      p|        hi|        lo|  clk"
         );
     }
 

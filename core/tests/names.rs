@@ -37,8 +37,8 @@ fn either_case() {
 fn either_indexing() {
     let mut ws = open();
     // generate scopes, whichever the simulator wrote
-    assert_eq!(path(&mut ws, "gen_stages(1).x"), "dut.gen_stages(1).x");
-    assert_eq!(path(&mut ws, "dut.GEN_STAGES[1].X"), "dut.gen_stages(1).x");
+    assert_eq!(path(&mut ws, "gen_stages(1).x"), "dut.gen_stages[1].x");
+    assert_eq!(path(&mut ws, "dut.GEN_STAGES[1].X"), "dut.gen_stages[1].x");
     assert_eq!(path(&mut ws, "blk(2).y"), "dut.blk[2].y");
     // bits and slices
     assert_eq!(path(&mut ws, "data(7)"), "dut.data[7]");
@@ -56,7 +56,7 @@ fn nvc_names() {
     assert_eq!(path(&mut ws, "ARR(1)"), "vhdl.arr[1]");
     assert_eq!(path(&mut ws, "vhdl.arr[0]"), "vhdl.arr[0]");
     assert_eq!(path(&mut ws, "arr(1)(3)"), "vhdl.arr[1][3]");
-    assert_eq!(path(&mut ws, "GEN[1].X"), "vhdl.gen(1).x");
+    assert_eq!(path(&mut ws, "GEN[1].X"), "vhdl.gen[1].x");
     // a session saved when paths kept nvc's form still finds the element
     let v = ws.var_named("vhdl.arr.[1]").unwrap();
     assert_eq!(ws.trace.vars[v].path, "vhdl.arr[1]");
@@ -83,7 +83,7 @@ fn add_either_form() {
     let names = wtf_core::rows::display_names(&ws.trace, &ws.rows);
     let names: Vec<&str> = names.iter().map(|n| n.trim()).collect();
     // a scope is a group, a signal a row of its own
-    assert_eq!(names, ["▾ gen_stages(0)", "x", "headers_vld", "y"]);
+    assert_eq!(names, ["▾ gen_stages[0]", "x", "headers_vld", "y"]);
 }
 
 #[test]

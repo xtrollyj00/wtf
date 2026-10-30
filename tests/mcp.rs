@@ -169,7 +169,11 @@ fn reading_tools() {
     assert_eq!(s.ok("signals", json!({"pattern": "nope"})), "no match: nope");
     // array elements and generate instances of one width are one line, the indices as ranges
     s.ok("open", json!({"trace": std::fs::canonicalize("tests/data/vhdl.fst").unwrap()}));
-    assert_eq!(s.ok("signals", json!({"pattern": "vhdl"})), "vhdl.clk (1 bit)\nvhdl.arr[0..1] (4 bits, 2 signals)\nvhdl.gen(0..1).x (1 bit, 2 signals)");
+    assert_eq!(s.ok("signals", json!({"pattern": "vhdl"})), "vhdl.clk (1 bit)\nvhdl.arr[0..1] (4 bits, 2 signals)\nvhdl.gen[0..1].x (1 bit, 2 signals)");
+    // a file wellen can't read is an error, not a crash or a hang
+    let ghw = std::fs::canonicalize("tests/data/types-ghdl.ghw").unwrap();
+    assert!(s.tool("open", json!({"trace": ghw})).unwrap_err().ends_with("wellen can't read it: not yet implemented: support multi-dimensional arrays!"));
+    s.ok("open", json!({"trace": std::fs::canonicalize("tests/data/vhdl.fst").unwrap()}));
     // 1 fs ticks: the time as asked, not the span's end (20.000499ns)
     assert_eq!(s.ok("value_at", json!({"signals": ["clk"], "time": "20ns"})), "at 20ns:\nclk = 0 (1 earlier in 20ns)");
     s.ok("open", json!({"trace": simple()}));

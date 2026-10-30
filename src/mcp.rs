@@ -367,7 +367,7 @@ impl Wtf {
         Ok(out)
     }
 
-    #[tool(description = "List signals with their widths; arrays and generate instances fold to one line (`gen(0..4).x`).")]
+    #[tool(description = "List signals with their widths; arrays and generate instances fold to one line (`gen[0..4].x`).")]
     fn signals(&self, Parameters(a): Parameters<SignalsArgs>) -> Result<String, String> {
         let w = current(self)?;
         let app = lock(&w);

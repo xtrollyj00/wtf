@@ -148,13 +148,13 @@ impl Trace {
     pub fn open(path: &std::path::Path) -> Result<Self, String> {
         // wellen panics on a missing file, so check first
         std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let wave = simple::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let wave = unpanic(|| simple::read(path)).map_err(|e| format!("{}: {e}", path.display()))?;
         Ok(Self::of(wave))
     }
 
     /// A trace held in memory, VCD or FST as in a file.
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, String> {
-        simple::read_from_reader(std::io::Cursor::new(bytes)).map(Self::of).map_err(|e| e.to_string())
+        unpanic(|| simple::read_from_reader(std::io::Cursor::new(bytes))).map(Self::of)
     }
 
     fn of(wave: simple::Waveform) -> Self {
@@ -371,30 +371,51 @@ impl Trace {
     }
 }
 
+/// A scope's or var's name with its indices as Verilog writes them: nvc's and GHDL's `gen(0)` is
+/// `gen[0]`, GHDL's array element `0` (a bare number, which no identifier is) is `[0]`.
+fn index_form(name: &str) -> String {
+    match !name.is_empty() && name.bytes().all(|b| b.is_ascii_digit()) {
+        true => format!("[{name}]"),
+        false => brackets(name),
+    }
+}
+
 /// Every var's path in one form whatever the simulator or format wrote (`mem[0]`, not nvc's and
-/// FST's `mem.[0]`), and how many of its parts are its HDL name: those under the innermost scope
+/// FST's `mem.[0]`, GHDL's `mem.0`; `gen[0]`, not `gen(0)`), and how many of its parts are its HDL name: those under the innermost scope
 /// that isn't a struct, record, array or index.
 fn paths(h: &wellen::Hierarchy) -> HashMap<wellen::VarRef, (String, usize)> {
     fn walk<'a>(h: &'a wellen::Hierarchy, s: wellen::ScopeRef, chain: &mut Vec<&'a wellen::Scope>, out: &mut HashMap<wellen::VarRef, (String, usize)>) {
         use wellen::ScopeType::*;
         chain.push(&h[s]);
         // how many scopes, from the innermost, are part of the HDL name
-        let inside = chain.iter().rev().take_while(|c| c.name(h).starts_with('[') || matches!(c.scope_type(), Struct | Union | VhdlRecord | VhdlArray | SvArray)).count();
+        let inside = chain.iter().rev().take_while(|c| index_form(c.name(h)).starts_with('[') || matches!(c.scope_type(), Struct | Union | VhdlRecord | VhdlArray | SvArray)).count();
         for v in h[s].vars(h) {
-            let names: Vec<&str> = chain.iter().map(|c| c.name(h)).chain([h[v].name(h)]).collect();
-            let decl = parts(&join(names[names.len() - 1 - inside..].iter().copied())).len();
-            out.insert(v, (join(names.iter().copied()), decl));
+            let names: Vec<String> = chain.iter().map(|c| c.name(h)).chain([h[v].name(h)]).map(index_form).collect();
+            let decl = parts(&join(names[names.len() - 1 - inside..].iter().map(String::as_str))).len();
+            out.insert(v, (join(names.iter().map(String::as_str)), decl));
         }
         for sub in h[s].scopes(h) {
             walk(h, sub, chain, out);
         }
         chain.pop();
     }
-    let mut out: HashMap<_, _> = h.vars().map(|v| (v, (h[v].name(h).to_string(), 1))).collect();
+    let mut out: HashMap<_, _> = h.vars().map(|v| (v, (index_form(h[v].name(h)), 1))).collect();
     for s in h.scopes() {
         walk(h, s, &mut Vec::new(), &mut out);
     }
     out
+}
+
+/// wellen's reading, with its panics (`not yet implemented: support multi-dimensional arrays!` in
+/// a GHW file) as errors: a file wtf can't read is no reason to crash.
+fn unpanic(read: impl FnOnce() -> wellen::Result<simple::Waveform>) -> Result<simple::Waveform, String> {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(read)) {
+        Ok(r) => r.map_err(|e| e.to_string()),
+        Err(p) => {
+            let msg = p.downcast_ref::<String>().map(String::as_str).or(p.downcast_ref::<&str>().copied()).unwrap_or("unknown error");
+            Err(format!("wellen can't read it: {msg}"))
+        }
+    }
 }
 
 fn val(v: SignalValueRef) -> Val {
