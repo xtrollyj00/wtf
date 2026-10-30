@@ -378,21 +378,23 @@ fn add_one(app: &mut Workspace, arg: &str) -> Result<(), String> {
     if found.is_empty() {
         let ca = crate::trace::canon(arg);
         let a = crate::trace::parts(&ca);
-        let mut inner: Vec<String> = Vec::new();
-        // compared, and named, in either HDL's form: nvc's `gen(1)` is one part, `gen[1]` two
+        let (mut here, mut inner) = (arg.clone(), Vec::new());
+        // compared in either HDL's form, named as in the trace: nvc's `gen(1)` is one part
         for v in &app.trace.vars {
-            let c = crate::trace::canon(&v.path);
-            let p = crate::trace::parts(&c);
-            if p.len() > a.len() + 1 && p.starts_with(&a) {
-                let scope = crate::trace::join(p[..=a.len()].iter().copied());
+            let p = crate::trace::parts(&v.path);
+            let k = (1..p.len()).find(|&k| crate::trace::parts(&crate::trace::canon(&crate::trace::join(p[..k].iter().copied()))) == a);
+            if let Some(k) = k.filter(|&k| p.len() > k + 1) {
+                here = crate::trace::join(p[..k].iter().copied());
+                let scope = crate::trace::join(p[..=k].iter().copied());
                 if !inner.contains(&scope) {
                     inner.push(scope);
                 }
             }
         }
         if !inner.is_empty() {
+            // named as the trace writes it
             let list = inner.iter().take(5).cloned().collect::<Vec<_>>().join(", ");
-            return Err(format!("no signals directly in {arg}: add {arg}.** for all of it, or one of its scopes: {list}"));
+            return Err(format!("no signals directly in {here}: add {here}.** for all of it, or one of its scopes: {list}"));
         }
         return Err(no_match(arg));
     }

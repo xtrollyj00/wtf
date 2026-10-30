@@ -265,7 +265,7 @@ fn add_a_composite() {
     // shortcut: the error mixes forms (types.gen(1), types.gen[1].p), fixed by a later piece
     assert_eq!(
         added("types-nvc.fst", "add types.gen[1]"),
-        "no signals directly in types.gen(1): add types.gen(1).** for all of it, or one of its scopes: types.gen[1].p"
+        "no signals directly in types.gen(1): add types.gen(1).** for all of it, or one of its scopes: types.gen(1).p"
     );
     // shortcut: a Verilator VCD writes struct scopes as modules, so :add takes only the fields
     // directly in it (not pkt.pair) and pkts is a plain scope, fixed by a later piece
