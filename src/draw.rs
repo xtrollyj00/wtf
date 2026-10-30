@@ -498,7 +498,8 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
             // the scope is greyed so the leaf names stand out
             let leaf = name.rfind('.').map_or(0, |d| d + 1);
             put(buf, 0, yb, &name[..leaf], Style::new().fg(pal().dim));
-            put(buf, leaf, yb, &name[leaf..], Style::new());
+            // a column, not a byte: a marker before the name (`▸`) is one column of three bytes
+            put(buf, name[..leaf].chars().count(), yb, &name[leaf..], Style::new());
         }
         let value: String = values[l].chars().take(vw).collect();
         put(buf, vx, yb, &value, value_styles[l]);

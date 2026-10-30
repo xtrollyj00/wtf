@@ -498,6 +498,13 @@ mod tests {
         let mut app = App::new(workspace::Workspace::new(t, "types".into()));
         keys(&mut app, ":add types.grid types.pkt types.pkts\n:10ns\n");
         assert_eq!(app.ws.rows.len(), 3);
+        // a name after a marker keeps its leaf in the name column when not selected
+        // (gen[0].p and gen[1].p both shown keep their scope; gen[1].p is selected)
+        keys(&mut app, ":add gen(0).p gen(1).p\n");
+        let screen = snapshot(&mut app, 80, None);
+        let line = screen.lines().find(|l| l.starts_with("▸ gen[0]")).unwrap_or_else(|| panic!("{screen}"));
+        assert!(line.starts_with("▸ gen[0].p  0x0 "), "{line}");
+        keys(&mut app, ":rm gen(0).p gen(1).p\n");
         insta::assert_snapshot!("composite_folded", snapshot(&mut app, 80, None));
         // grid opens into its rows, grid[1] into its elements; the selection stays on grid[1]
         keys(&mut app, "kk jj ");
