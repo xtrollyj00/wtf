@@ -477,8 +477,7 @@ impl App {
             return self.examine = Some((format!("{} {}", st.name, st.label(i, fpt)), lines));
         }
         let (var, bit) = self.ws.probe(s, self.ws.bit);
-        let path = &self.ws.trace.vars[var].path;
-        let name = bit.map_or(path.clone(), |b| format!("{path}[{b}]"));
+        let name = self.ws.trace.probe_path((var, bit));
         let line = crate::draw::line_sig(&self.ws, s, var);
         let mut value = match self.ws.trace.value_of(var, bit, self.ws.view.cursor) {
             Some(_) if self.ws.stream_of(var).is_some() => vec!["no record here".into()],

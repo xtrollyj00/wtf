@@ -216,6 +216,23 @@ pub fn value_text(f: &Field, v: &Option<Val>, fpt: Option<u128>, unit: Option<us
     }
 }
 
+/// A record per value of a signal (or bit), from where it takes the value to its next change, in
+/// the field `value`: what SPI and UART decode, as they sample by time. Its values must be loaded.
+pub fn changes(trace: &Trace, name: &str, p: Probe) -> Stream {
+    let start = trace.start();
+    let mut changes = vec![(start, trace.value_of(p.0, p.1, start))];
+    changes.extend(trace.walk(p.0, p.1, start, true));
+    let end = trace.end();
+    let ends: Vec<Tick> = changes.iter().skip(1).map(|c| c.0).collect();
+    let records = changes
+        .into_iter()
+        .enumerate()
+        .map(|(i, (t, v))| Record { start: t, end: ends.get(i).copied().unwrap_or(end.max(t + 1)), fields: vec![v] })
+        .collect();
+    let schema = vec![Field { name: "value".into(), width: trace.probe_width(p), time: false, signed: false }];
+    Stream { name: name.into(), schema, records, violations: false }
+}
+
 /// The stateless sampler: a record for each clock cycle whose ending edge samples `q` true, from
 /// the cycle's starting edge to its ending one, with `fields` (name, signal, width) sampled where
 /// the predicate is (just before the ending edge).

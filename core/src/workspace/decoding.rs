@@ -25,8 +25,8 @@ impl Workspace {
         let mut probes = Vec::new();
         for &(field, sig) in fields {
             let p = self.resolve(sig).map_err(|e| format!("{name}.{field}: {e}"))?;
-            probes.push((field.to_string(), p, if p.1.is_some() { Some(1) } else { self.trace.vars[p.0].width }));
-            self.roles.insert(field.to_string(), self.path_of(p));
+            probes.push((field.to_string(), p, self.trace.probe_width(p)));
+            self.roles.insert(field.to_string(), self.trace.probe_path(p));
         }
         Ok((self.query(&format!("@{clock} {when}"))?, probes))
     }
@@ -146,8 +146,8 @@ impl Workspace {
             } else {
                 match self.resolve(sig) {
                     Ok(p) => {
-                        roles.insert(role.clone(), self.path_of(p));
-                        out.push((role.clone(), if p.1.is_some() { Some(1) } else { self.trace.vars[p.0].width }));
+                        roles.insert(role.clone(), self.trace.probe_path(p));
+                        out.push((role.clone(), self.trace.probe_width(p)));
                     }
                     Err(e) => errors.push(format!("{role}: {e}")),
                 }
@@ -162,15 +162,9 @@ impl Workspace {
         out
     }
 
-    /// A signal's full path, a bit of a bus as `data[3]`.
-    fn path_of(&self, (var, bit): search::Probe) -> String {
-        let path = &self.trace.vars[var].path;
-        bit.map_or(path.clone(), |b| format!("{path}[{b}]"))
-    }
-
     /// The full path of a signal named as in a search.
     fn full_path(&mut self, name: &str) -> Result<String, String> {
-        self.resolve(name).map(|p| self.path_of(p))
+        self.resolve(name).map(|p| self.trace.probe_path(p))
     }
 
     /// A protocol of the session's on signals: the stream of the instance's name.
@@ -217,19 +211,8 @@ impl Workspace {
                 protocol::Step::Changes { name, signal } => {
                     // kept for the decoders after it, not a stream of the instance's
                     let made = self.resolve(&signal).map(|p| {
-                        let width = if p.1.is_some() { Some(1) } else { self.trace.vars[p.0].width };
                         self.trace.load(&[p.0]);
-                        let start = self.trace.start();
-                        let mut changes = vec![(start, self.trace.value_of(p.0, p.1, start))];
-                        changes.extend(self.trace.walk(p.0, p.1, start, true));
-                        let end = self.trace.end();
-                        let ends: Vec<Tick> = changes.iter().skip(1).map(|c| c.0).collect();
-                        let records = changes
-                            .into_iter()
-                            .enumerate()
-                            .map(|(i, (t, v))| Record { start: t, end: ends.get(i).copied().unwrap_or(end.max(t + 1)), fields: vec![v] })
-                            .collect();
-                        Stream { name: name.into(), schema: vec![stream::Field { name: "value".into(), width, time: false, signed: false }], records, violations: false }
+                        stream::changes(&self.trace, name, p)
                     });
                     match made {
                         Ok(s) => {

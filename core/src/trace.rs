@@ -594,6 +594,17 @@ fn bit_of(v: Val, bit: Option<u32>) -> Option<Val> {
 // shortcut: a bit's changes are found by checking each change of its bus, so a bit of a busy bus
 // costs time proportional to the bus's changes in view; index bits if that is ever too slow.
 impl Trace {
+    /// A signal's width, 1 for a bit of it.
+    pub fn probe_width(&self, (var, bit): (usize, Option<u32>)) -> Option<u32> {
+        if bit.is_some() { Some(1) } else { self.vars[var].width }
+    }
+
+    /// A signal's full path, a bit of a bus as `data[3]`.
+    pub fn probe_path(&self, (var, bit): (usize, Option<u32>)) -> String {
+        let path = &self.vars[var].path;
+        bit.map_or(path.clone(), |b| format!("{path}[{b}]"))
+    }
+
     pub fn value_of(&self, var: usize, bit: Option<u32>, t: Tick) -> Option<Val> {
         bit_of(self.value_at(var, t)?, bit)
     }

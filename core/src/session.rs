@@ -323,6 +323,16 @@ pub fn rows_toml(app: &Workspace) -> String {
 
 /// The whole session: view, cursors and layout.
 pub fn to_toml(app: &Workspace) -> String {
+    toml(app, false)
+}
+
+/// The session as another window takes it (`present`, `wtf --attach`): with `to`, the end of the
+/// visible range, so a window of another width shows the same stretch.
+pub fn to_shared_toml(app: &Workspace) -> String {
+    toml(app, true)
+}
+
+fn toml(app: &Workspace, shared: bool) -> String {
     let fpt = app.trace.fs_per_tick;
     let v = &app.view;
     // below one tick per column the zoom is a fraction of a tick, written as plain ticks
@@ -330,11 +340,12 @@ pub fn to_toml(app: &Workspace) -> String {
     let cursors: String =
         app.cursor_list().iter().map(|&(i, t)| format!("{} = {}\n", i + 1, quote(&time::format_exact(t, fpt)))).collect();
     format!(
-        "# wtf session\nversion = {VERSION}\n{}{}\n[view]\nzoom = {}\ntime = {}\n\n[cursors]\n{cursors}{}",
+        "# wtf session\nversion = {VERSION}\n{}{}\n[view]\nzoom = {}\ntime = {}\n{}\n[cursors]\n{cursors}{}",
         app.scope.as_ref().map_or(String::new(), |s| format!("scope = {}\n", quote(s))),
         app.unit.map_or(String::new(), |u| format!("unit = {}\n", quote(time::unit_name(u)))),
         quote(&zoom),
         quote(&time::format_exact(v.start, fpt)),
+        if shared { format!("to = {}\n", quote(&time::format_exact(v.last_visible().min(app.trace.end()), fpt))) } else { String::new() },
         rows_toml(app)
     )
 }

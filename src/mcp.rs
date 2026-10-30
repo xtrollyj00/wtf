@@ -256,7 +256,7 @@ fn probes(app: &mut Workspace, names: &[String], radix_name: &Option<String>) ->
     for n in names {
         let (n, own) = with_radix(n);
         let p = app.resolve(n)?;
-        let width = if p.1.is_some() { 1 } else { app.trace.vars[p.0].width.unwrap_or(0) };
+        let width = app.trace.probe_width(p).unwrap_or(0);
         let named = p.1.is_none() && app.trace.vars[p.0].names.is_some();
         let (r, frac) = match own.or(radix_name.as_deref()) {
             None => (radix::default_for(named, p.1.is_none() && app.trace.vars[p.0].signed), 0),
@@ -738,7 +738,7 @@ impl Wtf {
         if app.rows.is_empty() {
             return Err("the workspace has no signals yet: set it up with `workspace` or `command`".into());
         }
-        let text = shared(&app);
+        let text = session::to_shared_toml(&app);
         match live::window_on(&app.trace_path) {
             Some(id) => live::request(&id, live::Request::Put(text)).map(|m| format!("shown in the user's window: {m}")),
             None => {
@@ -786,15 +786,9 @@ fn screen(app: &mut Workspace, w: u16, asked: &Option<String>) -> Result<String,
     Ok(format!("{} - {}:\n{}", show(app, from, u), show(app, to, rounded), text.trim_end_matches('\n')))
 }
 
-/// window of another width shows the same stretch.
-pub fn shared(app: &Workspace) -> String {
-    let to = format!("to = \"{}\"\n", time::format_exact(app.view.last_visible().min(app.trace.end()), app.trace.fs_per_tick));
-    session::to_toml(app).replacen("\n[cursors]", &format!("{to}\n[cursors]"), 1)
-}
-
-/// The answer to `GET` on the link: the session in words, `---`, then as `shared`.
+/// The answer to `GET` on the link: the session in words, `---`, then as another window takes it.
 pub fn link_answer(app: &Workspace) -> String {
-    live::get_answer(&describe(app, None), &shared(app))
+    live::get_answer(&describe(app, None), &session::to_shared_toml(app))
 }
 
 /// The workspace in words, for `view`, its times in `unit` (default: the one that fits them).
