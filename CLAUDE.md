@@ -12,6 +12,10 @@ server (`wtf --mcp`) so AI agents can debug traces and show their evidence in th
   the code) whenever behaviour changes; code comments cite it as `spec §N`. Read only the
   sections a change touches, not the whole spec.
 - Spec §18 "Known limits" lists shortcuts taken; add one there when you take one.
+- Until 1.0.0 (README "Before 1.0.0"): no backward compatibility. Change the session format, tool
+  arguments, keys or commands to the best design and drop the old form, no aliases or migration;
+  mark it breaking (Conventions). A feature changes the spec in the same branch, no separate
+  review of the spec first.
 
 ## Commands
 
