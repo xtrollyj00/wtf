@@ -50,7 +50,12 @@ impl Panel {
         let mut root = Scope::default();
         for (i, v) in trace.vars.iter().enumerate() {
             // a concatenation `{top.a,top.b}` is a signal at the top
-            let mut parts: Vec<&str> = if v.path.starts_with('{') { vec![&v.path] } else { v.path.split('.').collect() };
+            // an array's elements nest under it (`mem` > `[0]`); a computed slice `top.x[7:4]` stays whole
+            let mut parts: Vec<&str> = match () {
+                _ if v.path.starts_with('{') => vec![&v.path],
+                _ if trace.is_computed(i) => v.path.split('.').collect(),
+                _ => wtf_core::trace::parts(&v.path),
+            };
             let leaf = parts.pop().unwrap_or_default();
             let mut s = &mut root;
             for p in parts {
@@ -203,7 +208,7 @@ impl Panel {
 
 fn flatten(s: &Scope, prefix: &str, depth: usize, out: &mut Vec<Node>) {
     for (name, sub) in &s.scopes {
-        let path = if prefix.is_empty() { name.to_string() } else { format!("{prefix}.{name}") };
+        let path = wtf_core::trace::join([prefix, name].into_iter().filter(|p| !p.is_empty()));
         let at = out.len();
         // top-level scopes start open, so the panel doesn't open on a single closed line
         out.push(Node { name: name.to_string(), path: path.clone(), depth, var: None, end: 0, open: depth == 0 });
@@ -211,7 +216,7 @@ fn flatten(s: &Scope, prefix: &str, depth: usize, out: &mut Vec<Node>) {
         out[at].end = out.len();
     }
     for &(name, var) in &s.vars {
-        let path = if prefix.is_empty() { name.to_string() } else { format!("{prefix}.{name}") };
+        let path = wtf_core::trace::join([prefix, name].into_iter().filter(|p| !p.is_empty()));
         out.push(Node { name: name.to_string(), path, depth, var: Some(var), end: out.len() + 1, open: false });
     }
 }

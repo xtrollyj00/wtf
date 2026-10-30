@@ -221,8 +221,8 @@ pub fn same_layout(a: &[Row], b: &[Row]) -> bool {
 /// Row names: leaf names with enough scope added to tell equal leaves apart, group signals
 /// indented under their header, and a header's signal count when it is collapsed.
 pub fn display_names(trace: &Trace, rows: &[Row]) -> Vec<String> {
-    let paths: Vec<&str> = rows.iter().filter_map(Row::sig).map(|s| trace.vars[s.var].path.as_str()).collect();
-    let mut leaves = unique_leaves(&paths).into_iter();
+    let vars: Vec<usize> = rows.iter().filter_map(Row::sig).map(|s| s.var).collect();
+    let mut leaves = unique_leaves(trace, &vars).into_iter();
     rows.iter()
         .enumerate()
         .map(|(i, r)| match r {
@@ -233,16 +233,22 @@ pub fn display_names(trace: &Trace, rows: &[Row]) -> Vec<String> {
         .collect()
 }
 
-fn unique_leaves(paths: &[&str]) -> Vec<String> {
-    // a concatenation `{top.a,top.b}` and an expression `top.a+1` are shown whole
+/// A var's name ends: at least its HDL name (`pkts[1].pair.lo`, not `lo`), more as needed.
+fn unique_leaves(trace: &Trace, vars: &[usize]) -> Vec<String> {
+    // a concatenation `{top.a,top.b}` and an expression `top.a+1` are shown whole; other computed
+    // names (`top.x[7:4]`) split at the dots only, so a slice stays with its signal
     let whole = |p: &str| p.starts_with('{') || matches!(crate::computed::form(p), Some(crate::computed::Form::Expr(_)));
-    let parts: Vec<Vec<&str>> = paths.iter().map(|p| if whole(p) { vec![*p] } else { p.split('.').collect() }).collect();
-    let mut depth = vec![1; paths.len()];
-    let name = |i: usize, d: usize| parts[i][parts[i].len().saturating_sub(d)..].join(".");
+    let parts: Vec<Vec<&str>> = vars
+        .iter()
+        .map(|&v| (v, trace.vars[v].path.as_str()))
+        .map(|(v, p)| if whole(p) { vec![p] } else if trace.is_computed(v) { p.split('.').collect() } else { crate::trace::parts(p) })
+        .collect();
+    let mut depth: Vec<usize> = vars.iter().zip(&parts).map(|(&v, p)| trace.vars[v].decl.min(p.len())).collect();
+    let name = |i: usize, d: usize| crate::trace::join(parts[i][parts[i].len().saturating_sub(d)..].iter().copied());
     loop {
-        let names: Vec<String> = (0..paths.len()).map(|i| name(i, depth[i])).collect();
+        let names: Vec<String> = (0..vars.len()).map(|i| name(i, depth[i])).collect();
         let mut changed = false;
-        for i in 0..paths.len() {
+        for i in 0..vars.len() {
             if depth[i] < parts[i].len() && names.iter().enumerate().any(|(j, n)| j != i && *n == names[i]) {
                 depth[i] += 1;
                 changed = true;

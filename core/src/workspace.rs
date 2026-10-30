@@ -404,7 +404,8 @@ impl Workspace {
 
     /// A var by full path, made again if it is a computed one (sessions, `:e`).
     pub fn var_named(&mut self, path: &str) -> Option<usize> {
-        match self.trace.by_path.get(path) {
+        // sessions saved before paths had one form name nvc's array elements `arr.[1]`
+        match self.trace.by_path.get(path).or_else(|| self.trace.by_path.get(&path.replace(".[", "["))) {
             Some(&v) => Some(v),
             None => self.compute(computed::form(path)?).ok(),
         }

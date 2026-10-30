@@ -408,8 +408,8 @@ pub fn glob(pat: &str, path: &str) -> bool {
             Some((c, rest)) => s.first() == Some(c) && wild(rest, &s[1..]),
         }
     }
-    let p: Vec<&str> = pat.split('.').collect();
-    let s: Vec<&str> = path.split('.').collect();
+    let p = crate::trace::parts(pat);
+    let s = crate::trace::parts(path);
     segs(&p, &s)
 }
 

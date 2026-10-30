@@ -45,8 +45,10 @@ clk      ▁▁▁▁▔▔▔▔▁▁▁▁▔▔▔▔
   indices differently: case doesn't matter (`HEADERS_VLD` is the trace's `headers_vld`), and
   parentheses are brackets, so `gen_stages(4).stage_i.x` and `gen_stages[4].stage_i.x` name the
   same signal whichever the simulator wrote, `data(3)` is `data[3]`, `data(7 downto 4)` is
-  `data[7:4]`, and an array element is named as written in the HDL (`axi_tdata(6)` for nvc's
-  `axi_tdata.[6]`). A search is an expression
+  `data[7:4]`, and an array element is named as written in the HDL (`axi_tdata(6)`). Paths have one
+  form whatever the simulator or format wrote: an index joins its array without a dot
+  (`axi_tdata[6]`, `pkts[1].pair.lo`, where nvc and FST files write `axi_tdata.[6]`); globs and the
+  panel split a path at its indices as at its dots. A search is an expression
   when it contains a name or an operator; a bare value searches the selected signal as above.
 - A match of an expression is where it **becomes true**. With a clock, `/@aclk wvalid && wready`,
   a match is **every clock cycle** whose ending rising edge of `aclk` samples the expression true

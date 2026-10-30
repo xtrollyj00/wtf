@@ -908,7 +908,8 @@ impl App {
             return;
         }
         let paths: Vec<&str> = vars.iter().map(|&v| self.ws.trace.vars[v].path.as_str()).collect();
-        let name = common_scope(&paths).rsplit('.').next().filter(|n| !n.is_empty()).unwrap_or("group").to_string();
+        let scope = common_scope(&paths);
+        let name = wtf_core::trace::parts(&scope).into_iter().rfind(|n| !n.is_empty() && !n.starts_with('[')).unwrap_or("group").to_string();
         self.ws.add_group(&name, &vars);
         self.open_command();
         self.line = format!("rename {name}");
@@ -1063,13 +1064,13 @@ fn wrap(v: &str) -> Vec<String> {
 }
 
 fn common_scope(paths: &[&str]) -> String {
-    let scopes: Vec<Vec<&str>> = paths.iter().map(|p| p.split('.').collect::<Vec<_>>()).map(|mut v| {
+    let scopes: Vec<Vec<&str>> = paths.iter().map(|p| wtf_core::trace::parts(p)).map(|mut v| {
         v.pop();
         v
     }).collect();
     let first = scopes.first().cloned().unwrap_or_default();
     let n = (0..first.len()).take_while(|&i| scopes.iter().all(|s| s.get(i) == Some(&first[i]))).count();
-    first[..n].join(".")
+    wtf_core::trace::join(first[..n].iter().copied())
 }
 
 /// Keys as `App::keys` takes them, each a key event.

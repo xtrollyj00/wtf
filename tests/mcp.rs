@@ -169,7 +169,7 @@ fn reading_tools() {
     assert_eq!(s.ok("signals", json!({"pattern": "nope"})), "no match: nope");
     // array elements and generate instances of one width are one line, the indices as ranges
     s.ok("open", json!({"trace": std::fs::canonicalize("tests/data/vhdl.fst").unwrap()}));
-    assert_eq!(s.ok("signals", json!({"pattern": "vhdl"})), "vhdl.clk (1 bit)\nvhdl.arr.[0..1] (4 bits, 2 signals)\nvhdl.gen(0..1).x (1 bit, 2 signals)");
+    assert_eq!(s.ok("signals", json!({"pattern": "vhdl"})), "vhdl.clk (1 bit)\nvhdl.arr[0..1] (4 bits, 2 signals)\nvhdl.gen(0..1).x (1 bit, 2 signals)");
     // 1 fs ticks: the time as asked, not the span's end (20.000499ns)
     assert_eq!(s.ok("value_at", json!({"signals": ["clk"], "time": "20ns"})), "at 20ns:\nclk = 0 (1 earlier in 20ns)");
     s.ok("open", json!({"trace": simple()}));
@@ -195,7 +195,7 @@ fn struct_fields() {
     let mut s = Server::start(&dir.0);
     s.ok("open", json!({"trace": std::fs::canonicalize("tests/data/types-verilator-structs.fst").unwrap()}));
     assert_eq!(s.ok("signals", json!({"pattern": "types.pkt.**"})), "types.pkt.valid (1 bit)\ntypes.pkt.state (2 bits)\ntypes.pkt.pair.hi (4 bits)\ntypes.pkt.pair.lo (4 bits)");
-    assert_eq!(s.ok("signals", json!({"pattern": "pkts"})), "types.pkts.[0..1].valid (1 bit, 2 signals)\ntypes.pkts.[0..1].state (2 bits, 2 signals)\ntypes.pkts.[0..1].pair.hi (4 bits, 2 signals)\ntypes.pkts.[0..1].pair.lo (4 bits, 2 signals)");
+    assert_eq!(s.ok("signals", json!({"pattern": "pkts"})), "types.pkts[0..1].valid (1 bit, 2 signals)\ntypes.pkts[0..1].state (2 bits, 2 signals)\ntypes.pkts[0..1].pair.hi (4 bits, 2 signals)\ntypes.pkts[0..1].pair.lo (4 bits, 2 signals)");
     assert_eq!(s.ok("value_at", json!({"signals": ["pkt.state", "pkts(1).pair.lo"], "time": "10ns"})), "at 10ns:\npkt.state = BUSY\npkts(1).pair.lo = 0x7");
 }
 

@@ -30,6 +30,7 @@ match the highlight is on (`2/5`).
 | `Esc` | end a `V` range, then clear the marks, then close the panel and go back to the rows |
 
 The tree lists each scope's subscopes first, then its signals. Top-level scopes start expanded.
+An array's elements nest under it, one level per index (`grid` > `[1]` > `[2]`).
 Adding several signals: mark them (`/state`, `Enter`, `Space`, `n`, `Space`), then `Enter` or `Ctrl-g`.
 There is no prompt; `u` takes a wrong add back. Marked signals show `+`, and the panel's lower border
 counts them. They are added in the order they were marked. A group from `Ctrl-g` goes below the group the selected row is in, if any.

@@ -4,7 +4,7 @@
 //! 15, 25), `dut.headers_vld` (high 10ns - 20ns), `dut.data` (8 bits, 0xA5 from 10ns),
 //! `dut.gen_stages(0).x` (high from 20ns) and `dut.gen_stages(1).x` (from 10ns), `dut.blk[2].y`
 //! (from 10ns); 0 - 30ns at 1ns ticks. `tests/data/vhdl.fst` is what nvc dumps of vhdl.vhd:
-//! `vhdl.clk`, the array elements `vhdl.arr.[0]` and `vhdl.arr.[1]`, `vhdl.gen(0).x` and
+//! `vhdl.clk`, the array elements `vhdl.arr[0]` and `vhdl.arr[1]`, `vhdl.gen(0).x` and
 //! `vhdl.gen(1).x`.
 
 use std::path::PathBuf;
@@ -53,10 +53,13 @@ fn either_indexing() {
 fn nvc_names() {
     let mut ws = fixture("vhdl.fst");
     // array elements, not bits of a bus
-    assert_eq!(path(&mut ws, "ARR(1)"), "vhdl.arr.[1]");
-    assert_eq!(path(&mut ws, "vhdl.arr[0]"), "vhdl.arr.[0]");
-    assert_eq!(path(&mut ws, "arr(1)(3)"), "vhdl.arr.[1][3]");
+    assert_eq!(path(&mut ws, "ARR(1)"), "vhdl.arr[1]");
+    assert_eq!(path(&mut ws, "vhdl.arr[0]"), "vhdl.arr[0]");
+    assert_eq!(path(&mut ws, "arr(1)(3)"), "vhdl.arr[1][3]");
     assert_eq!(path(&mut ws, "GEN[1].X"), "vhdl.gen(1).x");
+    // a session saved when paths kept nvc's form still finds the element
+    let v = ws.var_named("vhdl.arr.[1]").unwrap();
+    assert_eq!(ws.trace.vars[v].path, "vhdl.arr[1]");
     let q = ws.query("@clk gen(1).x && arr(1) == 0xC && arr(0)(1)").unwrap();
     let s = Search { from: 0, to: None, forward: true, merge: true, runs: usize::MAX, matches: u64::MAX };
     assert_eq!(query::find(&ws.trace, &q, &s).runs.len(), 1);

@@ -144,7 +144,7 @@ fn field_radixes(s: &wtf_core::stream::Stream, asked: Option<&str>) -> Result<Ve
 }
 
 /// Paths with their widths as `signals` lines: those differing only in indices (`[3]`, `(3)`) and
-/// of one width are one line, each index a range: `mux_in.[0..15].[0..15] (8 bits, 256 signals)`.
+/// of one width are one line, each index a range: `mux_in[0..15][0..15] (8 bits, 256 signals)`.
 /// A barrel shifter's 256 elements, one line each, were most of an agent's answer.
 fn collapse<'a>(vars: impl Iterator<Item = (&'a str, String)>) -> Vec<String> {
     /// Paths alike but for their indices: each index's range, how many, the first.

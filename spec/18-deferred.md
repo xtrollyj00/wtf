@@ -57,11 +57,10 @@ Shortcuts taken so far, to fix when they get in the way.
     (`pkt.state`) and no enum names, and `x[1]` of a flat packed 2-D vector is bit 1, not
     element 1;
   - VHDL's multi-index `grid(1, 2)` isn't a name (nvc doesn't dump 2-D arrays anyway);
-  - paths keep the simulator's form: `mem.[0]` (nvc, Verilator FST) beside `pkts[0]` (VCD), so
-    the same design reads differently by format; struct fields sort scopes first, not in
-    declaration order;
+  - struct fields sort scopes first, not in declaration order; a VCD from Verilator writes a
+    struct as a module scope, so its fields are shown by their leaf (`hi`, not `pkt.pair.hi`);
   - wellen 0.25.7 misnames the elements of a Verilator FST's 2-D unpacked array whose indices are
-    equal (`grid[1][1]` becomes `types.grid.[1].grid.[1].`): an upstream bug.
+    equal (`grid[1][1]` becomes `types.grid[1].grid[1].`): an upstream bug.
 
 ### Performance (draft)
 
