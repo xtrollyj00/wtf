@@ -30,6 +30,26 @@ else
     echo "iverilog not found: skipped" >&2
 fi
 
+if command -v ghdl >/dev/null; then
+    ghdl() { (cd "$work" && command ghdl "$@"); }
+elif command -v docker >/dev/null; then
+    ghdl() { docker run --rm -u "$(id -u):$(id -g)" -v "$here:$here" -v "$work:$work" -w "$work" ghdl/ghdl:6.0.0-mcode-ubuntu-24.04 ghdl "$@"; }
+fi
+if command -v ghdl >/dev/null || command -v docker >/dev/null; then
+    ghdl -a --std=08 "$here/types.vhd"
+    ghdl -e --std=08 types
+    ghdl -r --std=08 types --stop-time=30ns --vcd="$here/types-ghdl.vcd"
+    ghdl -r --std=08 types --stop-time=30ns --fst="$here/types-ghdl.fst"
+    ghdl -r --std=08 types --stop-time=30ns --wave="$here/types-ghdl.ghw"
+    # wellen can't read a GHW with a 2-D array: the same design without grid
+    grep -v grid "$here/types.vhd" > "$work/nogrid.vhd"
+    ghdl -a --std=08 --work=nogrid "$work/nogrid.vhd"
+    ghdl -e --std=08 --work=nogrid types
+    ghdl -r --std=08 --work=nogrid types --stop-time=30ns --wave="$here/types-ghdl-nogrid.ghw"
+else
+    echo "ghdl not found (nor docker): skipped" >&2
+fi
+
 if command -v nvc >/dev/null; then
     cd "$work"
     nvc -a "$here/types.vhd" -e types
