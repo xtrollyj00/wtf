@@ -136,8 +136,6 @@ pub fn apply(app: &mut Workspace, text: &str) -> Result<Vec<String>, String> {
         if let Some(to) = view.remove("to").and_then(|v| time(&v, &mut warn)) {
             app.view.show_until(to);
         }
-        // written by wtf before cursors 2 - 9 became marks (spec §9)
-        view.remove("active_cursor");
         unknown("view.", &view, &mut warn);
     }
     app.view.cursor = 0;
@@ -183,7 +181,7 @@ fn rows_of(app: &mut Workspace, rows: Value, grouped: bool, out: &mut Vec<Row>, 
                     let width = app.trace.vars[var].width.unwrap_or(0);
                     let named = app.trace.vars[var].names.is_some();
                     let (radix, frac) = match radix {
-                        Some((r, frac, need)) if radix::fits(r, width, named) && need.is_none_or(|n| n == width) => (r, frac),
+                        Some((r, frac, need)) if radix::fits(r, need, width, named) => (r, frac),
                         Some((r, frac, need)) => {
                             warn.push(format!("radix {} doesn't fit {path}", radix::name(r, frac, need.unwrap_or(width))));
                             (radix::default_for(named, app.trace.vars[var].signed), 0)

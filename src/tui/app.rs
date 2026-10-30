@@ -504,7 +504,7 @@ impl App {
                     walk(app, c, depth + 1, out);
                 } else {
                     let v = &t.vars[c];
-                    let sig = rows::Sig { var: c, radix: wtf_core::radix::default_for(v.names.is_some(), v.signed), frac: 0, grouped: false, open: Vec::new(), color: None };
+                    let sig = rows::Sig::of(c, v);
                     let value = t.value_at(c, app.ws.view.cursor).map_or("-".into(), |x| rows::label(v, &sig, &x));
                     out.push((name, Some(value)));
                 }

@@ -52,16 +52,11 @@ pub fn find(trace: &Trace, q: &Query, s: &Search) -> Found {
     if let Some(clock) = q.clock {
         return find_clocked(trace, q, clock, s);
     }
-    let merge = q.clock.filter(|_| s.merge);
     let past = |x: Tick| s.to.is_some_and(|to| if s.forward { x > to } else { x < to });
     let mut found = Found { runs: Vec::new(), total: 0, more: false };
     let mut t = s.from;
     while let Some(x) = search::find_query(trace, q, t, s.forward).filter(|&x| !past(x)) {
-        let extends = merge.zip(found.runs.last()).is_some_and(|(c, run)| next_edge(trace, c, run.last, s.forward) == Some(x));
-        if extends {
-            let run = found.runs.last_mut().unwrap();
-            (run.last, run.cycles) = (x, run.cycles + 1);
-        } else if found.runs.len() == s.runs {
+        if found.runs.len() == s.runs {
             found.more = true;
             break;
         } else {
@@ -212,11 +207,6 @@ pub fn edges(trace: &Trace, clock: Probe) -> Arc<Vec<Tick>> {
     let out: crate::trace::Edges = Arc::new(search::find_all(trace, clock.0, clock.1, &rise, 0, true).collect());
     trace.edges.borrow_mut().insert(clock, out.clone());
     out
-}
-
-/// The rising edge of `clock` after (backward: before) `t`.
-fn next_edge(trace: &Trace, clock: Probe, t: Tick, forward: bool) -> Option<Tick> {
-    search::find(trace, clock.0, clock.1, &Target::Bits("1".into()), t, forward)
 }
 
 /// The time whose values a match at `t` stands for: with a clock, just before the cycle's ending

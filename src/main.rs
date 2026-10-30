@@ -88,8 +88,7 @@ fn run(args: Args) -> Result<(), String> {
         }
         Some(Some(id)) => {
             let s = live::sessions()?.into_iter().find(|s| s.id == id).ok_or(format!("no session {id}; `wtf --attach` lists them"))?;
-            let answer = live::request(&id, live::Request::Get)?;
-            let text = answer.split_once("\n---\n").map_or(String::new(), |(_, t)| t.to_string());
+            let (_, text) = live::get(&id)?;
             (s.trace, Some(text), Some(id))
         }
         None => (args.trace.expect("clap requires it"), None, None),
@@ -175,7 +174,7 @@ fn tui(app: &mut App) -> Result<(), String> {
             let mut last = String::new();
             loop {
                 std::thread::sleep(std::time::Duration::from_millis(500));
-                let now = live::request(&id, live::Request::Get).map(|a| a.split_once("\n---\n").map_or(String::new(), |(_, t)| t.to_string()));
+                let now = live::get(&id).map(|(_, t)| t);
                 let gone = now.is_err();
                 if now.as_ref().is_ok_and(|t| *t == last) {
                     continue;

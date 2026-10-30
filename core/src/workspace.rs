@@ -272,7 +272,7 @@ impl Workspace {
             && let Ok((v, None)) = self.resolve(base)
         {
             if self.trace.is_composite(v) {
-                let array = self.trace.vars[v].children.iter().any(|&c| self.trace.vars[c].path.ends_with(']'));
+                let array = self.trace.is_array(v);
                 match self.by_end(name) {
                     Ok(e) => return Ok((e, None)),
                     Err(e) if array => return Err(e),
@@ -893,7 +893,7 @@ impl Workspace {
             .collect();
         let Some(first) = sigs.first() else { return Err("1-bit signals have no radix".into()) };
         let (r, frac, need) = r.unwrap_or((radix::next(first.radix, width(first), named(first)), 0, None));
-        let fits = |s: &Sig| radix::fits(r, width(s), named(s)) && need.is_none_or(|n| n == width(s));
+        let fits = |s: &Sig| radix::fits(r, need, width(s), named(s));
         if !sigs.iter().any(|s| fits(s)) {
             if r == radix::ENUM {
                 return Err("enum: the file names no values of this signal".into());
@@ -929,7 +929,7 @@ impl Workspace {
 
     /// A row for a var in its default radix. Its values must be loaded (`Trace::load`).
     pub fn sig(&self, var: usize, grouped: bool) -> Row {
-        Row::Signal(Sig { var, radix: radix::default_for(self.trace.vars[var].names.is_some(), self.trace.vars[var].signed), frac: 0, grouped, open: Vec::new(), color: None })
+        Row::Signal(Sig { grouped, ..Sig::of(var, &self.trace.vars[var]) })
     }
 
     /// New rows go below the selected row and join its group, if it is in one; with a group's

@@ -58,7 +58,6 @@ fn warns_and_keeps_going() {
         colour = "pink"
         unit = "furlong"
         [view]
-        active_cursor = 2
         zoom = "fast"
         time = "soon"
         speed = 3

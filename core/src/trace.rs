@@ -266,6 +266,23 @@ impl Trace {
         !self.vars[var].children.is_empty()
     }
 
+    /// An array, its children indexed (`mem[0]`), rather than a struct.
+    pub fn is_array(&self, var: usize) -> bool {
+        self.vars[var].children.iter().any(|&c| self.vars[c].path.ends_with(']'))
+    }
+
+    /// The signals in a struct or array, nested ones' included, in order; a signal is its own.
+    pub fn leaves(&self, var: usize) -> Vec<usize> {
+        let (mut out, mut stack) = (Vec::new(), vec![var]);
+        while let Some(v) = stack.pop() {
+            match self.is_composite(v) {
+                true => stack.extend(self.vars[v].children.iter().rev()),
+                false => out.push(v),
+            }
+        }
+        out
+    }
+
     /// Add a computed signal from its values in time order (`changes`, times may repeat: the last
     /// value at a time counts), or replace the one with that path. Returns its var.
     pub fn add_computed(&mut self, path: &str, width: Option<u32>, changes: Vec<(Tick, Val)>) -> Result<usize, String> {

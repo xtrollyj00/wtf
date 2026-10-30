@@ -1003,22 +1003,13 @@ pub fn probes(e: &Expr, out: &mut Vec<(Probe, u32)>) {
 /// clock, the start of each clock cycle (a rising edge) whose ending edge samples it true, as a
 /// flip-flop does just before the edge: the cursor lands where the transfer's cycle begins.
 pub fn find_query(trace: &Trace, q: &Query, from: Tick, forward: bool) -> Option<Tick> {
-    let rise = Target::Bits("1".into());
-    let edge = |t, forward| q.clock.and_then(|(cv, cb)| find(trace, cv, cb, &rise, t, forward));
-    // with a clock, a sample is just before an edge, and the one before it just before the edge
-    // before; without, the tick before
-    let prev = |t: Tick| if q.clock.is_some() { edge(t + 1, false).and_then(|e| e.checked_sub(1)) } else { t.checked_sub(1) };
+    if q.clock.is_some() {
+        let s = crate::query::Search { from, to: None, forward, merge: false, runs: 1, matches: 1 };
+        return crate::query::find(trace, q, &s).runs.first().map(|r| r.first);
+    }
+    let prev = |t: Tick| t.checked_sub(1);
     let held = |t: Tick| t.checked_sub(1).is_some_and(|p| eval(trace, &q.expr, p, &prev));
     let mut t = from;
-    if q.clock.is_some() {
-        let mut start = edge(from, forward)?;
-        loop {
-            if edge(start, true).is_some_and(held) {
-                return Some(start);
-            }
-            start = edge(start, forward)?;
-        }
-    }
     // a value of one signal (`/0x40`): one walk over its changes
     if let Expr::Cmp { sig, past: 0, op: Op::Eq, target: Some(target) } = &q.expr {
         return find(trace, sig.0, sig.1, target, from, forward);

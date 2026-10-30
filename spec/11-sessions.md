@@ -15,8 +15,7 @@ A session is everything needed to reopen a trace exactly as you left it:
   wtf starts with an empty session and `:w` creates it.
 - When loading, signals that don't exist in the trace are skipped and listed on the status line.
   Cursors and the visible time past the end of the simulation move to the end. A group nested
-  inside a group is flattened, with a warning. `active_cursor`, written by wtf before marks, is
-  read and ignored.
+  inside a group is flattened, with a warning.
 - A failed save never leaves a half-written session file; the old file stays and the error is shown.
 
 ### Unsaved changes
