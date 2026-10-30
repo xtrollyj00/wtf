@@ -2,7 +2,7 @@
 source: src/main.rs
 expression: "snapshot(&mut app, 80, None)"
 ---
-                0ns       20ns      40ns      60ns      80ns
+                0         20ns      40ns      60ns      80ns
                 ┃───────────🮦──────────────🮦─────────────
 mode       0x0  ┃── 0x0 ────🮧──── 0x3 ─────🮧──── 0xA ────
                 ┃                          ┌─────────────
@@ -15,4 +15,4 @@ mode       0x0  ┃── 0x0 ────🮧──── 0x3 ─────�
   mode[0]  0    ┃───────────┘              └─────────────
                 ┃ ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌──┐
 clk        0    ┃─┘  └─┘  └─┘  └─┘  └─┘  └─┘  └─┘  └─┘  └
- VIEW  calc.mode                                 0ns  ·  2ns/col  ·  simple [+]
+ VIEW  calc.mode                                   0  ·  2ns/col  ·  simple [+]

@@ -2,7 +2,7 @@
 source: src/main.rs
 expression: "snapshot(&mut open(\"vcd\", Some(SESSION)), 100, None)"
 ---
-                   0ns         12ns    20ns      30ns      40ns      50ns      60ns      70ns
+                   0           12ns    20ns      30ns      40ns      50ns      60ns      70ns
                         ┌────┐ ┃  ┌────┐    ┌────┐    ┌────┐    ┌────┐    ┌────┐    ┌────┐    ┌────┐
 clk          0     ─────┘    └─┃──┘    └────┘    └────┘    └────┘    └────┘    └────┘    └────┘    └
                                ┃

@@ -4,7 +4,8 @@
 
 - The file's timescale (VCD `$timescale`, FST header) converts ticks into real time.
 - Times are shown in the largest unit that keeps the value at 1 or more, with up to 3 decimals
-  and trailing zeros dropped: `12.5ns`, `1.234us`, `0ps`. Files without a timescale show raw ticks.
+  and trailing zeros dropped: `12.5ns`, `1.234us`. Zero is a bare `0`, as no unit fits it better
+  than another (the time axis starts `0`, then `5ns`). Files without a timescale show raw ticks.
 - Answers to agents follow their own rule, a time unit per workspace (section 15).
 
 ### Zoom

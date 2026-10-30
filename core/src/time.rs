@@ -20,12 +20,15 @@ pub fn fs_per_tick(ts: Option<wellen::Timescale>) -> Option<u128> {
 }
 
 /// A time in `unit` (an index into the units, `s` first), or with None the largest unit that keeps
-/// it at 1 or more (zero in the file's own unit); with `decimals` rounded to that many and trailing
+/// it at 1 or more (zero is a bare `0`); with `decimals` rounded to that many and trailing
 /// zeros dropped (`2595.000001ns` to 3 is `2595ns`), with None exact, every decimal it takes to read
 /// back to the same tick. Plain ticks without a timescale. The one formatter: the interfaces pick
 /// the unit and the precision.
 pub fn format_as(t: Tick, fpt: Option<u128>, unit: Option<usize>, decimals: Option<u32>) -> String {
     let Some(fpt) = fpt else { return t.to_string() };
+    if t == 0 && unit.is_none() {
+        return "0".into();
+    }
     let fs = t as u128 * fpt;
     let (name, ufs) = UNITS[unit.unwrap_or_else(|| unit_for([t], Some(fpt)))];
     let (whole, frac) = match decimals {
@@ -128,8 +131,8 @@ mod tests {
 
     #[test]
     fn formats() {
-        assert_eq!(format(0, NS), "0ns");
-        assert_eq!(format(0, Some(1000)), "0ps");
+        assert_eq!(format(0, NS), "0");
+        assert_eq!(format(0, Some(1000)), "0");
         assert_eq!(format(12, NS), "12ns");
         assert_eq!(format(1234, NS), "1.234us");
         assert_eq!(format(2000, NS), "2us");
@@ -156,7 +159,7 @@ mod tests {
         assert_eq!(format_exact(16_432, NS), "16.432us");
         assert_eq!(format_exact(2_000, NS), "2us");
         assert_eq!(format_exact(460, NS), "460ns");
-        assert_eq!(format_exact(0, NS), "0ns");
+        assert_eq!(format_exact(0, NS), "0");
         assert_eq!(format_exact(7, None), "7");
         assert_eq!(parse(&format_exact(16_432, NS), NS), Ok(16_432.0));
         // 1fs ticks, as real traces have: every digit kept, and read back to the same tick

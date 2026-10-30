@@ -7,11 +7,11 @@ expression: "snapshot(&mut open(\"vcd\", None), 60, None)"
                  waveform terminal frontend
 
                            simple
-                   6 signals  ·  0ns–80ns
+                    6 signals  ·  0–80ns
 
                        i  add signals
                        :  commands
                        ?  help
                        q  quit
 
- VIEW                            0ns  ·  2ns/col  ·  simple
+ VIEW                              0  ·  2ns/col  ·  simple

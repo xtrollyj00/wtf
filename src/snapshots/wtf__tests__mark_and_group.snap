@@ -6,11 +6,11 @@ expression: "snapshot(&mut app, 80, Some(12))"
   / to search                           waveform terminal frontend
   ▾ top
     ▾ cpu                                         simple
-      + state                             6 signals  ·  0ns–80ns
+      + state                              6 signals  ·  0–80ns
       + data
         busy                              /       search
     ▸ dma                                 Space   mark
       clk                                 Enter   add
                                           Ctrl-g  add as a group
    2 marked                               Esc     close
- EDIT                                                0ns  ·  2ns/col  ·  simple
+ EDIT                                                  0  ·  2ns/col  ·  simple
