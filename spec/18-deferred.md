@@ -61,7 +61,9 @@ Shortcuts taken so far, to fix when they get in the way.
   - a struct or scope named as a signal (`value_at pkt`) is an error listing its signals; finding
     the scopes a name ends with goes through every path, O(signals), only on such an error;
   - wellen 0.25.7 can't read a GHW file (GHDL) with a multidimensional array ("not yet
-    implemented"): opening it is an error; GHDL's VCD has no records or arrays at all;
+    implemented"): opening it is an error, though the panic's message still goes to stderr (the
+    panic hook is process-wide, so it isn't swapped around the read); GHDL's VCD has no records
+    or arrays at all;
   - wellen 0.25.7 misnames the elements of a Verilator FST's 2-D unpacked array whose indices are
     equal (`grid[1][1]` becomes `types.grid[1].grid[1].`): an upstream bug.
 
