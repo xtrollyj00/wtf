@@ -1,0 +1,44 @@
+$date
+  Fri Oct 30 18:23:12 2026
+$end
+$version
+  GHDL v0
+$end
+$timescale
+  1 fs
+$end
+$scope module standard $end
+$upscope $end
+$scope module textio $end
+$upscope $end
+$scope module std_logic_1164 $end
+$upscope $end
+$scope module types $end
+$var reg 1 ! clk $end
+$comment pkt is not handled $end
+$comment pkts is not handled $end
+$comment grid is not handled $end
+$comment rows is not handled $end
+$comment link is not handled $end
+$scope module gen(0) $end
+$comment p is not handled $end
+$upscope $end
+$scope module gen(1) $end
+$comment p is not handled $end
+$upscope $end
+$upscope $end
+$enddefinitions $end
+#0
+0!
+#5000000
+1!
+#10000000
+0!
+#15000000
+1!
+#20000000
+0!
+#25000000
+1!
+#30000000
+0!

@@ -144,7 +144,7 @@ fn field_radixes(s: &wtf_core::stream::Stream, asked: Option<&str>) -> Result<Ve
 }
 
 /// Paths with their widths as `signals` lines: those differing only in indices (`[3]`, `(3)`) and
-/// of one width are one line, each index a range: `mux_in.[0..15].[0..15] (8 bits, 256 signals)`.
+/// of one width are one line, each index a range: `mux_in[0..15][0..15] (8 bits, 256 signals)`.
 /// A barrel shifter's 256 elements, one line each, were most of an agent's answer.
 fn collapse<'a>(vars: impl Iterator<Item = (&'a str, String)>) -> Vec<String> {
     /// Paths alike but for their indices: each index's range, how many, the first.
@@ -367,7 +367,7 @@ impl Wtf {
         Ok(out)
     }
 
-    #[tool(description = "List signals with their widths; arrays and generate instances fold to one line (`gen(0..4).x`).")]
+    #[tool(description = "List signals with their widths; arrays and generate instances fold to one line (`gen[0..4].x`).")]
     fn signals(&self, Parameters(a): Parameters<SignalsArgs>) -> Result<String, String> {
         let w = current(self)?;
         let app = lock(&w);
@@ -509,7 +509,15 @@ impl Wtf {
                 (_, v) => format!("{n} = {v}"),
             })
             .collect();
-        Ok(budget(format!("at {}:\n{}", show(&app, t, unit(&app, &a.unit, [t])?), lines.join("\n"))))
+        // before there is a unit, in the asked time's own: `20ns` is the span's end, 20.000499ns
+        let own = (a.unit.is_none() && app.time_unit().is_none() && time::has_unit(&a.time))
+            .then(|| time::unit_named(a.time.trim().trim_start_matches(|c: char| c.is_ascii_digit() || c == '.')))
+            .transpose()?;
+        let u = match own {
+            Some(index) => Unit { index, decimals: Some(3) },
+            None => unit(&app, &a.unit, [t])?,
+        };
+        Ok(budget(format!("at {}:\n{}", show(&app, t, u), lines.join("\n"))))
     }
 
     #[tool(description = "The times a search expression matches, as a table. With `@clk ` first, a match is a clock cycle whose ending edge samples it true, reported at the cycle's starting edge; without, where the expression becomes true, so back-to-back handshakes are one match. `show` adds values (and the `protocol` line making them records), `count_only` counts (`help expressions`). For a bus, decode it instead (`help decode`).")]

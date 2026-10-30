@@ -278,14 +278,52 @@ fn paths(app: &Workspace, arg: &str) -> Vec<usize> {
     matching(app, &crate::trace::canon(arg), &crate::trace::canon)
 }
 
-/// The vars whose path, in `form`, is `arg`, matches it as a pattern, or is directly in it.
+/// The vars whose path, in `form`, is `arg`, matches it as a pattern, or is in it: directly in a
+/// scope, anywhere in a struct, record or array (part of one signal's HDL name).
 fn matching(app: &Workspace, arg: &str, form: &dyn Fn(&str) -> String) -> Vec<usize> {
-    let prefix = format!("{arg}.");
-    let hit = |p: &str| match arg.contains('*') {
-        true => glob(arg, p),
-        false => p == arg || p.strip_prefix(&prefix).is_some_and(|leaf| !leaf.contains('.')),
+    let a = crate::trace::parts(arg);
+    let hit = |v: &crate::trace::Var| {
+        let path = form(&v.path);
+        if arg.contains('*') {
+            return glob(arg, &path);
+        }
+        let p = crate::trace::parts(&path);
+        let rest = p.len().saturating_sub(a.len());
+        p.starts_with(&a) && (rest <= 1 || a.len() > p.len() - v.decl.min(p.len()))
     };
-    app.trace.vars.iter().enumerate().filter(|(_, v)| hit(&form(&v.path))).map(|(i, _)| i).collect()
+    app.trace.vars.iter().enumerate().filter(|(_, v)| hit(v)).map(|(i, _)| i).collect()
+}
+
+/// The group a scope's signals make: named after the scope, from where its HDL name starts if it
+/// is inside one (`grid[1]`, `pkt.pair`).
+fn group_name(app: &Workspace, arg: &str, var: usize) -> String {
+    let v = &app.trace.vars[var];
+    let p = crate::trace::parts(&v.path);
+    // the parts of the path `arg` names, in whichever form it was written
+    let key = crate::trace::canon(arg);
+    let n = (1..=p.len()).find(|&k| crate::trace::canon(&crate::trace::join(p[..k].iter().copied())) == key).unwrap_or(p.len().saturating_sub(1)).max(1);
+    let mut start = (p.len() - v.decl.min(p.len())).min(n - 1);
+    while start > 0 && p[start].starts_with('[') {
+        start -= 1;
+    }
+    crate::trace::join(p[start..n.min(p.len())].iter().copied())
+}
+
+/// Scopes ending in `arg` (`pkt` for `top.pkt`), when no path is `arg`.
+fn scopes_ending(app: &Workspace, arg: &str) -> Vec<String> {
+    let a = crate::trace::canon(arg);
+    let mut out: Vec<String> = Vec::new();
+    for v in &app.trace.vars {
+        let p = crate::trace::parts(&v.path);
+        for k in 1..p.len() {
+            let scope = crate::trace::join(p[..k].iter().copied());
+            let c = crate::trace::canon(&scope);
+            if (c == a || c.ends_with(&format!(".{a}"))) && !out.contains(&scope) {
+                out.push(scope);
+            }
+        }
+    }
+    out
 }
 
 /// `:add a b ...`: each in turn, below the previous. Names that fail are reported (as an error
@@ -323,12 +361,40 @@ fn add_one(app: &mut Workspace, arg: &str) -> Result<(), String> {
         app.add_rows(&[v]);
         return Ok(());
     }
-    let arg = &scoped(app, arg);
-    let found = paths(app, arg);
+    let mut arg = scoped(app, arg);
+    let mut found = paths(app, &arg);
+    if found.is_empty() && !arg.contains('*') {
+        // the end of a scope's path, as a signal can be named by the end of its path
+        match &scopes_ending(app, &arg)[..] {
+            [one] => {
+                arg = one.clone();
+                found = paths(app, &arg);
+            }
+            [] => {}
+            many => return Err(format!("ambiguous: {arg} ({} scopes: {})", many.len(), many.iter().take(5).cloned().collect::<Vec<_>>().join(", "))),
+        }
+    }
+    let arg = &arg;
     if found.is_empty() {
-        let scope = format!("{arg}.");
-        if app.trace.vars.iter().any(|v| v.path.starts_with(&scope)) {
-            return Err(format!("no signals directly in {arg}"));
+        let ca = crate::trace::canon(arg);
+        let a = crate::trace::parts(&ca);
+        let (mut here, mut inner) = (arg.clone(), Vec::new());
+        // compared in either HDL's form, named as in the trace: nvc's `gen(1)` is one part
+        for v in &app.trace.vars {
+            let p = crate::trace::parts(&v.path);
+            let k = (1..p.len()).find(|&k| crate::trace::parts(&crate::trace::canon(&crate::trace::join(p[..k].iter().copied()))) == a);
+            if let Some(k) = k.filter(|&k| p.len() > k + 1) {
+                here = crate::trace::join(p[..k].iter().copied());
+                let scope = crate::trace::join(p[..=k].iter().copied());
+                if !inner.contains(&scope) {
+                    inner.push(scope);
+                }
+            }
+        }
+        if !inner.is_empty() {
+            // named as the trace writes it
+            let list = inner.iter().take(5).cloned().collect::<Vec<_>>().join(", ");
+            return Err(format!("no signals directly in {here}: add {here}.** for all of it, or one of its scopes: {list}"));
         }
         return Err(no_match(arg));
     }
@@ -342,9 +408,8 @@ fn add_one(app: &mut Workspace, arg: &str) -> Result<(), String> {
         app.add_rows(&new);
     } else {
         // named as in the trace, whichever form it was named in
-        let path = app.trace.vars[new[0]].path.clone();
-        let scope = path.rsplit_once('.').map_or(arg.as_str(), |(s, _)| s);
-        app.add_group(scope.rsplit('.').next().unwrap_or(scope), &new);
+        let name = group_name(app, arg, new[0]);
+        app.add_group(&name, &new);
     }
     Ok(())
 }
@@ -408,8 +473,8 @@ pub fn glob(pat: &str, path: &str) -> bool {
             Some((c, rest)) => s.first() == Some(c) && wild(rest, &s[1..]),
         }
     }
-    let p: Vec<&str> = pat.split('.').collect();
-    let s: Vec<&str> = path.split('.').collect();
+    let p = crate::trace::parts(pat);
+    let s = crate::trace::parts(path);
     segs(&p, &s)
 }
 

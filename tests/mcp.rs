@@ -169,7 +169,13 @@ fn reading_tools() {
     assert_eq!(s.ok("signals", json!({"pattern": "nope"})), "no match: nope");
     // array elements and generate instances of one width are one line, the indices as ranges
     s.ok("open", json!({"trace": std::fs::canonicalize("tests/data/vhdl.fst").unwrap()}));
-    assert_eq!(s.ok("signals", json!({"pattern": "vhdl"})), "vhdl.clk (1 bit)\nvhdl.arr.[0..1] (4 bits, 2 signals)\nvhdl.gen(0..1).x (1 bit, 2 signals)");
+    assert_eq!(s.ok("signals", json!({"pattern": "vhdl"})), "vhdl.clk (1 bit)\nvhdl.arr[0..1] (4 bits, 2 signals)\nvhdl.gen[0..1].x (1 bit, 2 signals)");
+    // a file wellen can't read is an error, not a crash or a hang
+    let ghw = std::fs::canonicalize("tests/data/types-ghdl.ghw").unwrap();
+    assert!(s.tool("open", json!({"trace": ghw})).unwrap_err().ends_with("wellen can't read it: not yet implemented: support multi-dimensional arrays!"));
+    s.ok("open", json!({"trace": std::fs::canonicalize("tests/data/vhdl.fst").unwrap()}));
+    // 1 fs ticks: the time as asked, not the span's end (20.000499ns)
+    assert_eq!(s.ok("value_at", json!({"signals": ["clk"], "time": "20ns"})), "at 20ns:\nclk = 0 (1 earlier in 20ns)");
     s.ok("open", json!({"trace": simple()}));
     assert_eq!(s.ok("signals", json!({"pattern": "**sta*"})), "no match: **sta* (a pattern matches the whole path: **.*sta* for sta anywhere)");
     assert_eq!(s.ok("signals", json!({"pattern": "**.*sta*"})), "top.cpu.state (3 bits)\ntop.dma.state (3 bits)");
@@ -183,6 +189,18 @@ fn reading_tools() {
     assert_eq!(s.ok("find", json!({"expr": "{busy, data[0]} == 2"})), "time\n20ns");
     insta::assert_snapshot!("render_signals", s.ok("render", json!({"signals": ["clk", "data", "busy"], "from": "0ns", "to": "40ns", "width": 60})));
     assert_eq!(s.ok("reload", json!({})), "reloaded simple.vcd: now 0 - 80ns");
+}
+
+/// Composite types (tests/data/types-verilator-structs.fst, as in core/tests/types.rs): a struct's
+/// fields are signals under its name, an enum field shows its names.
+#[test]
+fn struct_fields() {
+    let dir = Dir::new("structs");
+    let mut s = Server::start(&dir.0);
+    s.ok("open", json!({"trace": std::fs::canonicalize("tests/data/types-verilator-structs.fst").unwrap()}));
+    assert_eq!(s.ok("signals", json!({"pattern": "types.pkt.**"})), "types.pkt.valid (1 bit)\ntypes.pkt.state (2 bits)\ntypes.pkt.pair.hi (4 bits)\ntypes.pkt.pair.lo (4 bits)");
+    assert_eq!(s.ok("signals", json!({"pattern": "pkts"})), "types.pkts[0..1].valid (1 bit, 2 signals)\ntypes.pkts[0..1].state (2 bits, 2 signals)\ntypes.pkts[0..1].pair.hi (4 bits, 2 signals)\ntypes.pkts[0..1].pair.lo (4 bits, 2 signals)");
+    assert_eq!(s.ok("value_at", json!({"signals": ["pkt.state", "pkts(1).pair.lo"], "time": "10ns"})), "at 10ns:\npkt.state = BUSY\npkts(1).pair.lo = 0x7");
 }
 
 /// Enum names from the file (spec §10): tests/data/enum.fst, as in core/tests/enums.rs.

@@ -10,7 +10,7 @@ reuse wtf's own pieces:
 | `open(trace)` | open a trace in a new workspace of the agent's, which becomes the current one |
 | `use(session)` | make another of this server's workspaces the current one |
 | `info` | file, time range, timescale, number of signals, and the interfaces a built-in protocol decodes, each with its `decode` line (`open` answers with it too) |
-| `signals(pattern)` | signals with their widths; `*` / `**` globs, or any path containing the text; array elements and generate instances of one width are one line, the indices as ranges (`mux_in.[0..15] (8 bits, 16 signals)`, `gen(0..4).x`) |
+| `signals(pattern)` | signals with their widths; `*` / `**` globs, or any path containing the text; array elements and generate instances of one width are one line, the indices as ranges (`mux_in[0..15] (8 bits, 16 signals)`, `gen[0..4].x`) |
 | `values(signals, from, to, radix, unit)` | the value at `from`, then each change up to `to`, as `time value` lines |
 | `value_at(signals, time, radix, unit)` | values at one time |
 | `find(expr, from, to, backward, count, show, count_only, unit)` | match times of a search expression (section 8), `@clk` included, as a table |
@@ -59,7 +59,7 @@ reuse wtf's own pieces:
   A time given as text in an MCP call stands for a span: every tick that prints as it (`2595ns`
   is 2594.9995ns to 2595.0005ns; a finer time, `2595.0004ns`, is narrower; `fs` or a plain tick
   count is one tick). `value_at` reads the span's end, after everything that printed as the
-  time, and says when a signal changes inside the span (`0x5 (0x4 earlier in 2595ns)`). `from`
+  time, answers `at` the time as asked (before there is a unit, in the asked time's), and says when a signal changes inside the span (`0x5 (0x4 earlier in 2595ns)`). `from`
   in `records`, `values` and `render` takes the span's start, `to` its end; `find` searches after
   the span's end (before its start, backward), and `find` `to` takes the whole span. `workspace`
   `range` takes spans, its cursors keep the time written. The TUI's times are points.

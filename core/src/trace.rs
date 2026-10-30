@@ -17,6 +17,9 @@ pub struct Var {
     pub signed: bool,
     /// A duration in ticks (a pair's `delay`), shown as a time: the femtoseconds per tick.
     pub time: Option<u128>,
+    /// How many of the path's `parts` are its name in the HDL: 1, or more inside a struct, record
+    /// or array (`pkts[1].pair.lo` is 4), which a shown name keeps whole.
+    pub decl: usize,
     source: Source,
 }
 
@@ -39,7 +42,34 @@ pub fn names_key(bits: &str) -> &str {
     }
 }
 
-/// A name with VHDL's indexing as Verilog's (spec §8): `(…)` as `[…]`, `downto` in them as `:`,
+/// A path's parts as the signal tree nests them: split at the dots and before each index
+/// (`top.grid[1][2]` is `top`, `grid`, `[1]`, `[2]`). Brackets inside a part's own name stay.
+pub fn parts(path: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    for p in path.split('.') {
+        let mut start = 0;
+        for (i, _) in p.match_indices('[').filter(|&(i, _)| i > 0) {
+            out.push(&p[start..i]);
+            start = i;
+        }
+        out.push(&p[start..]);
+    }
+    out
+}
+
+/// The path of these parts, as `parts` splits it: an index joins without a dot.
+pub fn join<'a>(parts: impl IntoIterator<Item = &'a str>) -> String {
+    let mut out = String::new();
+    for p in parts {
+        if !out.is_empty() && !p.starts_with('[') {
+            out.push('.');
+        }
+        out.push_str(p);
+    }
+    out
+}
+
+/// A name with VHDL's indexing as Verilog's (spec §8): `(…)` as `[…]`, `(1, 2)` as `[1][2]`, `downto` in them as `:`,
 /// without the spaces in them and the dots before them (nvc names an array element
 /// `axi_tdata.[6]`). Case is kept.
 pub fn brackets(name: &str) -> String {
@@ -65,6 +95,8 @@ pub fn brackets(name: &str) -> String {
                 depth -= 1;
                 out.push(']');
             }
+            // VHDL's multi-index `grid(1, 2)` is `grid[1][2]`
+            ',' if depth > 0 => out.push_str("]["),
             c if depth > 0 && c.is_whitespace() => {}
             c => out.push(c),
         }
@@ -116,23 +148,25 @@ impl Trace {
     pub fn open(path: &std::path::Path) -> Result<Self, String> {
         // wellen panics on a missing file, so check first
         std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let wave = simple::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let wave = unpanic(|| simple::read(path)).map_err(|e| format!("{}: {e}", path.display()))?;
         Ok(Self::of(wave))
     }
 
     /// A trace held in memory, VCD or FST as in a file.
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, String> {
-        simple::read_from_reader(std::io::Cursor::new(bytes)).map(Self::of).map_err(|e| e.to_string())
+        unpanic(|| simple::read_from_reader(std::io::Cursor::new(bytes))).map(Self::of)
     }
 
     fn of(wave: simple::Waveform) -> Self {
         let h = wave.hierarchy();
         let fs_per_tick = crate::time::fs_per_tick(h.timescale());
+        let mut paths = paths(h);
         let vars: Vec<Var> = h
             .all_vars()
-            .map(|r| &h[r])
-            .map(|v| Var {
-                path: v.full_name(h),
+            .map(|r| (paths.remove(&r).unwrap_or_default(), &h[r]))
+            .map(|((path, decl), v)| Var {
+                path,
+                decl,
                 width: v.signal_encoding(h).length(),
                 names: v.enum_type(h).map(|(_, m)| m.iter().map(|(b, n)| (names_key(b).to_string(), n.to_string())).collect()),
                 signed: false,
@@ -183,7 +217,7 @@ impl Trace {
                 list.pop();
             }
         }
-        let var = Var { path: path.to_string(), width, names: None, signed: false, time: None, source: Source::Computed(list) };
+        let var = Var { path: path.to_string(), width, names: None, signed: false, time: None, decl: 1, source: Source::Computed(list) };
         match self.by_path.get(path) {
             Some(&i) if matches!(self.vars[i].source, Source::Computed(_)) => {
                 self.vars[i] = var;
@@ -333,6 +367,53 @@ impl Trace {
                 pos -= ti[first..pos].iter().rev().take_while(|&&x| x == g).count();
                 Some((tt[g as usize], v))
             }))
+        }
+    }
+}
+
+/// A scope's or var's name with its indices as Verilog writes them: nvc's and GHDL's `gen(0)` is
+/// `gen[0]`, GHDL's array element `0` (a bare number, which no identifier is) is `[0]`.
+fn index_form(name: &str) -> String {
+    match !name.is_empty() && name.bytes().all(|b| b.is_ascii_digit()) {
+        true => format!("[{name}]"),
+        false => brackets(name),
+    }
+}
+
+/// Every var's path in one form whatever the simulator or format wrote (`mem[0]`, not nvc's and
+/// FST's `mem.[0]`, GHDL's `mem.0`; `gen[0]`, not `gen(0)`), and how many of its parts are its HDL name: those under the innermost scope
+/// that isn't a struct, record, array or index.
+fn paths(h: &wellen::Hierarchy) -> HashMap<wellen::VarRef, (String, usize)> {
+    fn walk<'a>(h: &'a wellen::Hierarchy, s: wellen::ScopeRef, chain: &mut Vec<&'a wellen::Scope>, out: &mut HashMap<wellen::VarRef, (String, usize)>) {
+        use wellen::ScopeType::*;
+        chain.push(&h[s]);
+        // how many scopes, from the innermost, are part of the HDL name
+        let inside = chain.iter().rev().take_while(|c| index_form(c.name(h)).starts_with('[') || matches!(c.scope_type(), Struct | Union | VhdlRecord | VhdlArray | SvArray)).count();
+        for v in h[s].vars(h) {
+            let names: Vec<String> = chain.iter().map(|c| c.name(h)).chain([h[v].name(h)]).map(index_form).collect();
+            let decl = parts(&join(names[names.len() - 1 - inside..].iter().map(String::as_str))).len();
+            out.insert(v, (join(names.iter().map(String::as_str)), decl));
+        }
+        for sub in h[s].scopes(h) {
+            walk(h, sub, chain, out);
+        }
+        chain.pop();
+    }
+    let mut out: HashMap<_, _> = h.vars().map(|v| (v, (index_form(h[v].name(h)), 1))).collect();
+    for s in h.scopes() {
+        walk(h, s, &mut Vec::new(), &mut out);
+    }
+    out
+}
+
+/// wellen's reading, with its panics (`not yet implemented: support multi-dimensional arrays!` in
+/// a GHW file) as errors: a file wtf can't read is no reason to crash.
+fn unpanic(read: impl FnOnce() -> wellen::Result<simple::Waveform>) -> Result<simple::Waveform, String> {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(read)) {
+        Ok(r) => r.map_err(|e| e.to_string()),
+        Err(p) => {
+            let msg = p.downcast_ref::<String>().map(String::as_str).or(p.downcast_ref::<&str>().copied()).unwrap_or("unknown error");
+            Err(format!("wellen can't read it: {msg}"))
         }
     }
 }

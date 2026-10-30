@@ -46,8 +46,10 @@ data   0x3A  ─ 0x43 ─🮧 0x96 ─🮧 0xE1 🮧── 0x3A ─🮧 0x7F
 ```
 
 - **Rows**: each signal takes two terminal lines (section 14). The name and value sit on the lower line.
-- **Name column**: the leaf name of each signal (`clk`, `state`). If two shown signals share a leaf
-  name, enough of their scope is added to tell them apart (`cpu.state`, `dma.state`). That scope
+- **Name column**: the leaf name of each signal (`clk`, `state`); inside a struct, record or array,
+  its whole name in the HDL (`pkts[1].pair.lo`, `mem[3]`, not `lo`, `[3]`; a VCD from Verilator
+  writes a struct as a module, so there it is the leaf). If two shown signals share a name, enough
+  of their scope is added to tell them apart (`cpu.state`, `dma.state`). That scope
   is greyed, so the leaf names stand out.
   It is as wide as the longest name, up to a limit. The selected signal's name is bold in the accent colour,
   and both of its lines get a background across the whole width.
