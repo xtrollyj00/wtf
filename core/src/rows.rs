@@ -244,7 +244,15 @@ fn unique_leaves(trace: &Trace, vars: &[usize]) -> Vec<String> {
         .map(|(v, p)| if whole(p) { vec![p] } else if trace.is_computed(v) { p.split('.').collect() } else { crate::trace::parts(p) })
         .collect();
     let mut depth: Vec<usize> = vars.iter().zip(&parts).map(|(&v, p)| trace.vars[v].decl.min(p.len())).collect();
-    let name = |i: usize, d: usize| crate::trace::join(parts[i][parts[i].len().saturating_sub(d)..].iter().copied());
+    // a name never starts at an index: `gen[0].p.hi`, not `[0].p.hi`
+    let name = |i: usize, d: usize| {
+        let p = &parts[i];
+        let mut start = p.len().saturating_sub(d);
+        while start > 0 && p[start].starts_with('[') {
+            start -= 1;
+        }
+        crate::trace::join(p[start..].iter().copied())
+    };
     loop {
         let names: Vec<String> = (0..vars.len()).map(|i| name(i, depth[i])).collect();
         let mut changed = false;

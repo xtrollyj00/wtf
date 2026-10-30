@@ -302,7 +302,10 @@ fn group_name(app: &Workspace, arg: &str, var: usize) -> String {
     // the parts of the path `arg` names, in whichever form it was written
     let key = crate::trace::canon(arg);
     let n = (1..=p.len()).find(|&k| crate::trace::canon(&crate::trace::join(p[..k].iter().copied())) == key).unwrap_or(p.len().saturating_sub(1)).max(1);
-    let start = (p.len() - v.decl.min(p.len())).min(n - 1);
+    let mut start = (p.len() - v.decl.min(p.len())).min(n - 1);
+    while start > 0 && p[start].starts_with('[') {
+        start -= 1;
+    }
     crate::trace::join(p[start..n.min(p.len())].iter().copied())
 }
 
