@@ -671,7 +671,7 @@ mod tests {
         assert_eq!(app.msg.as_ref().unwrap().0, format!("written: {}", file.display()));
         assert!(!app.ws.modified() && app.ws.session_path == file);
         let text = std::fs::read_to_string(&file).unwrap();
-        assert!(text.contains("radix = \"bin\"") && text.contains("expanded = true") && text.contains("collapsed = true"), "{text}");
+        assert!(text.contains("radix = \"bin\"") && text.contains("open = [\"state\"]") && text.contains("collapsed = true"), "{text}");
         // the file reads back to the same session
         let mut back = open("fst", Some(file.to_str().unwrap()));
         assert_eq!(session::to_toml(&back.ws), session::to_toml(&app.ws));

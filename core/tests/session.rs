@@ -14,7 +14,7 @@ fn round_trip() {
     ws.toggle_group(); // cpu.state expanded into its bits
     let text = session::to_toml(&ws);
     assert!(text.starts_with("# wtf session\nversion = 1\n"), "{text}");
-    assert!(text.contains("radix = \"dec\", color = \"red\"") && text.contains("expanded = true") && text.contains("[cursors]\n1 = \"35ns\"\n2 = \"35ns\"\n3 = \"50ns\"\n"), "{text}");
+    assert!(text.contains("radix = \"dec\", color = \"red\"") && text.contains("open = [\"state\"]") && text.contains("[cursors]\n1 = \"35ns\"\n2 = \"35ns\"\n3 = \"50ns\"\n"), "{text}");
     let mut back = open();
     assert_eq!(session::apply(&mut back, &text), Ok(vec![]));
     assert_eq!(session::to_toml(&back), text);

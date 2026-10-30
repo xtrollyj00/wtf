@@ -169,7 +169,6 @@ fn rows_of(app: &mut Workspace, rows: Value, grouped: bool, out: &mut Vec<Row>, 
                     None
                 })
             });
-            let expanded = row.remove("expanded").and_then(|e| e.as_bool()).unwrap_or(false);
             let levels: Vec<String> = match row.remove("open") {
                 Some(Value::Array(a)) => a.iter().filter_map(|n| n.as_str().map(str::to_string)).collect(),
                 Some(_) => {
@@ -191,7 +190,7 @@ fn rows_of(app: &mut Workspace, rows: Value, grouped: bool, out: &mut Vec<Row>, 
                         }
                         None => (radix::default_for(named, app.trace.vars[var].signed), 0),
                     };
-                    let mut open: Vec<usize> = if expanded { vec![var] } else { Vec::new() };
+                    let mut open: Vec<usize> = Vec::new();
                     for name in levels {
                         match open_var(app, var, &name) {
                             Some(v) if !open.contains(&v) => open.push(v),
@@ -240,16 +239,14 @@ fn signal_keys(app: &Workspace, s: &Sig) -> Vec<String> {
     if let Some(c) = s.color {
         keys.push(format!("color = {}", quote(rows::COLORS[c])));
     }
-    match &s.open[..] {
-        [] => {}
-        [v] if *v == s.var && !app.trace.is_composite(s.var) => keys.push("expanded = true".into()),
-        open => keys.push(format!("open = [{}]", open.iter().map(|&v| quote(&open_name(app, s.var, v))).collect::<Vec<_>>().join(", "))),
+    if !s.open.is_empty() {
+        keys.push(format!("open = [{}]", s.open.iter().map(|&v| quote(&open_name(app, s.var, v))).collect::<Vec<_>>().join(", ")));
     }
     keys
 }
 
-/// A level open under a row, named from the row's name on (`pkts`, `pkts[1]`, `pkts[1].pair`, spec
-/// §11).
+/// A level open under a row, named from the row's name on (`pkts`, `pkts[1]`, `pkts[1].pair`; a
+/// bus or stream opened is its own name, spec §11).
 pub fn open_name(app: &Workspace, row: usize, var: usize) -> String {
     let base = &app.trace.vars[row].path;
     rows::child_name(base) + &app.trace.vars[var].path[base.len()..]

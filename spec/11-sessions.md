@@ -58,7 +58,7 @@ signal = "top.cpu.clk"
 [[rows]]
 group = "cpu"
 rows = [
-  { signal = "top.cpu.state", radix = "dec", color = "orange", expanded = true },
+  { signal = "top.cpu.state", radix = "dec", color = "orange", open = ["state"] },
   { signal = "top.cpu.pc" },
   { signal = "top.cpu.pkts", open = ["pkts", "pkts[1]", "pkts[1].pair"] },
 ]
@@ -98,14 +98,14 @@ rows = [
   them. Rows can also show unnamed slices and concatenations by their full form
   (`signal = "top.cpu.data[7:4]"`, `signal = "{top.a,top.b}"`).
 - `[[rows]]` entries are shown in file order. An entry is either a signal (`signal`, optional `radix`,
-  `color`, `expanded` and `open`, written only where they differ from the defaults)
+  `color` and `open`, written only where they differ from the defaults)
   or a group (`group`, optional `collapsed`, and its own `rows`). The same shape inside groups
   leaves room for subgroups later.
-- `open` lists the open levels of a struct, record or array row (section 6, "Composite rows"),
-  each by its name starting at the row's (`pkts`, `pkts[1]`, `pkts[1].pair`), parents before
-  their children; a bus in it named there shows its bits. `expanded = true` on a bus or a stream shows
-  its bits or fields. A name in `open` that isn't in the row is skipped with a warning, so a
-  trace whose types changed still loads.
+- `open` lists what is open under a row (section 6): the row's own name opens a bus into its
+  bits, a stream into its fields, a struct, record or array one level (`open = ["state"]`); its
+  levels are named from the row's name on (`pkts`, `pkts[1]`, `pkts[1].pair`), parents before
+  their children, and a bus in it named there shows its bits. A name in `open` that isn't in the
+  row is skipped with a warning, so a trace whose types changed still loads.
 - Times are strings with units, as in commands. A plain number means file ticks. wtf writes times
   exactly: in the largest unit that keeps them at 1 or more, with every decimal needed
   (`16.432us`, `2.595000001us`), read back to the same tick. A zoom finer than one tick per column

@@ -836,7 +836,6 @@ pub fn describe(app: &Workspace, unit: Option<usize>) -> String {
                 let color = s.color.map(|c| format!("  {}", rows::COLORS[c])).unwrap_or_default();
                 let bits = match &s.open[..] {
                     [] => String::new(),
-                    [v] if *v == s.var && !app.trace.is_composite(s.var) => "  (expanded)".into(),
                     open => format!("  (open: {})", open.iter().map(|&v| wtf_core::session::open_name(app, s.var, v)).collect::<Vec<_>>().join(", ")),
                 };
                 format!("  {}{radix}{color}{bits}", var.path)
