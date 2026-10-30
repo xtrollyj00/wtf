@@ -15,6 +15,8 @@ pub struct Var {
     pub names: Option<Names>,
     /// Its values are two's complement: a computed signal that can be negative (`a - b`).
     pub signed: bool,
+    /// A real (VHDL `real`, SV `real`); a var without a width that isn't one holds text.
+    pub real: bool,
     /// A duration in ticks (a pair's `delay`), shown as a time: the femtoseconds per tick.
     pub time: Option<u128>,
     /// How many of the path's `parts` are its name in the HDL: 1, or more inside a struct, record
@@ -176,6 +178,7 @@ impl Trace {
                 width: v.signal_encoding(h).length(),
                 names: v.enum_type(h).map(|(_, m)| m.iter().map(|(b, n)| (names_key(b).to_string(), n.to_string())).collect()),
                 signed: false,
+                real: v.signal_encoding(h) == wellen::SignalEncoding::Real,
                 time: None,
                 children: Vec::new(),
                 source: Source::File(v.signal_ref()),
@@ -298,7 +301,7 @@ impl Trace {
                 list.pop();
             }
         }
-        let var = Var { path: path.to_string(), width, names: None, signed: false, time: None, decl: 1, children: Vec::new(), source: Source::Computed(list) };
+        let var = Var { path: path.to_string(), width, names: None, signed: false, real: false, time: None, decl: 1, children: Vec::new(), source: Source::Computed(list) };
         match self.by_path.get(path) {
             Some(&i) if matches!(self.vars[i].source, Source::Computed(_)) && !self.is_composite(i) => {
                 self.vars[i] = var;
@@ -535,7 +538,7 @@ fn composites(vars: &mut Vec<Var>, by_path: &mut HashMap<String, usize>) {
                 // a signal of the file with that path: no composite there
                 Some(_) => break,
                 None => {
-                    vars.push(Var { path: scope.clone(), width: None, names: None, signed: false, time: None, decl: k - start, children: Vec::new(), source: Source::Composite });
+                    vars.push(Var { path: scope.clone(), width: None, names: None, signed: false, real: false, time: None, decl: k - start, children: Vec::new(), source: Source::Composite });
                     by_path.insert(scope, vars.len() - 1);
                     (vars.len() - 1, true)
                 }

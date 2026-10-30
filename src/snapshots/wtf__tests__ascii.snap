@@ -2,7 +2,7 @@
 source: src/main.rs
 expression: text
 ---
-  signals                                    0ns       10ns      20ns      30ns
+  signals                                    0         10ns      20ns      30ns
   / to search                                            2- 8ns -3- 10ns --1
   v top                                           +----+ :  +----:    +----|
     > cpu                 clk          0     -----+    +-:--+    :----+    |----
@@ -18,7 +18,7 @@ expression: text
                                              ------------:-------:---------|----
                           dma.state    0x0   ------------:-- 0x0 :---------|----
  EDIT  top.cpu.data                                 30ns  -  1ns/col  -  simple
-           0ns       20ns      40ns      60ns      80ns      100ns     120ns     140ns     160ns
+           0         20ns      40ns      60ns      80ns      100ns     120ns     140ns     160ns
            |      +-------------------+----+---------+                        +----+
 > frame    |      +----- #0 10B ------+----+- #2 8B -+                        +----+
- VIEW  rx.frame                                                        0ns  -  2ns/col  -  axis [+]
+ VIEW  rx.frame                                                          0  -  2ns/col  -  axis [+]

@@ -2,7 +2,7 @@
 source: tests/mcp.rs
 expression: "shot(format!(\"{pid}-1\"))"
 ---
-            0ns       20ns ╎    40ns      60ns      80ns
+            0         20ns ╎    40ns      60ns      80ns
             1──── 30ns ────2
             ┃━━━━🮦────🮦────╎────╳╳🮣──🮦┄┄┄┄🮦──────────
 data  0xXX  ┃━━━━🮧────🮧────╎────╳╳🮡──🮧┄┄┄┄🮧── 0x40 ──

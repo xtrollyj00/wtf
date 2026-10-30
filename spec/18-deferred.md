@@ -55,12 +55,19 @@ Shortcuts taken so far, to fix when they get in the way.
     6, "Composite rows"), worked out from its signals at each lookup, O(signals in it); with a
     text field its value is text, so it compares only whole (`==`); a union's value joins its
     members, each the same bits (`word` is `0xC3C3`);
-  - a packed struct dumped as one var (Verilator without `--trace-structs`) has no field names
-    (`pkt.state`) and no enum names, and `x[1]` of a flat packed 2-D vector is bit 1, not
-    element 1;
-  - a VCD from Verilator writes a struct as a module scope, so its fields are shown by their leaf
-    (`hi`, not `pkt.pair.hi`), listed scopes first, and adding it takes only its direct fields;
-    it is no composite row, nor is a packed struct dumped as one var;
+  - a packed struct dumped as one var (Verilator without `--trace-structs`, Icarus) has no field
+    names (`pkt.state`) and no enum names, and `x[1]` of a flat packed 2-D vector is bit 1, not
+    element 1: the file has one var; a field is a slice the user names (`:signal pkt.state =
+    pkt[9:8]`);
+  - nvc dumps an enum as a string var (`pkt.state` is `busy`), its type not kept: it is a
+    string to wtf (`signals` says so), compared as text, with no enum radix;
+  - a VCD has no scope types: Verilator writes a struct as a module scope, as an FST doesn't, so
+    it is no composite row (nor is a packed struct dumped as one var); its fields are shown by
+    their leaf (`hi`, not `pkt.pair.hi`), listed scopes first, and adding it takes only its
+    direct fields. The format lost the type; wtf doesn't guess it back;
+  - Icarus dumps the blocks of its `foreach` loops (`$ivl_foreach0.i`) and generate loops'
+    genvars (`gen[0].g`, a parameter): they are in the file, so they are signals, added by
+    `:add **` as any other;
   - a module or instance named as a signal (`value_at top.cpu`) is an error listing its signals;
     finding the scopes a name ends with goes through every path, O(signals), only on such an
     error;

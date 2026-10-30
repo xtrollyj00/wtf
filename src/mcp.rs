@@ -373,7 +373,11 @@ impl Wtf {
         let app = lock(&w);
         let p = a.pattern.to_lowercase();
         let t = &app.trace;
-        let bits = |w: Option<u32>| w.map_or("real or string".into(), |w| format!("{w} bit{}", if w == 1 { "" } else { "s" }));
+        let what = |v: &wtf_core::trace::Var| match v.width {
+            Some(w) => format!("{w} bit{}", if w == 1 { "" } else { "s" }),
+            None if v.real => "real".into(),
+            None => "string".into(),
+        };
         // a pattern lists signals; a text a struct or array as one line, not the signals in it
         let mut hits: Vec<usize> = match p.contains('*') {
             true => (0..t.vars.len()).filter(|&v| !t.is_composite(v) && wtf_core::command::glob(&a.pattern, &t.vars[v].path)).collect(),
@@ -394,10 +398,10 @@ impl Wtf {
             let var = &t.vars[v];
             if t.is_composite(v) {
                 let kind = if t.is_array(v) { "array" } else { "struct" };
-                let text = if var.width.is_some() { bits(var.width) } else { "text".into() };
+                let text = if var.width.is_some() { what(var) } else { "text".into() };
                 shown.push((&var.path, format!("{kind}, {text}, {} signals", t.leaves(v).len())));
             } else {
-                shown.push((&var.path, bits(var.width)));
+                shown.push((&var.path, what(var)));
             }
         }
         let found = collapse(shown.into_iter());

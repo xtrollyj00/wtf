@@ -171,6 +171,13 @@ fn reading_tools() {
     s.ok("open", json!({"trace": std::fs::canonicalize("tests/data/vhdl.fst").unwrap()}));
     assert_eq!(s.ok("signals", json!({"pattern": "vhdl"})), "vhdl.clk (1 bit)\nvhdl.arr (array, 8 bits, 2 signals)\nvhdl.gen[0..1].x (1 bit, 2 signals)");
     assert_eq!(s.ok("signals", json!({"pattern": "vhdl.**"})), "vhdl.clk (1 bit)\nvhdl.arr[0..1] (4 bits, 2 signals)\nvhdl.gen[0..1].x (1 bit, 2 signals)");
+    // without a width: a real, or a string (nvc dumps an enum as one, its type not kept)
+    let reals = dir.0.join("real.vcd");
+    std::fs::write(&reals, "$timescale 1ns $end\n$scope module top $end\n$var real 64 r level $end\n$upscope $end\n$enddefinitions $end\n#0\nr1.5 r\n").unwrap();
+    s.ok("open", json!({"trace": reals}));
+    assert_eq!(s.ok("signals", json!({"pattern": "level"})), "top.level (real)");
+    s.ok("open", json!({"trace": std::fs::canonicalize("tests/data/types-nvc.fst").unwrap()}));
+    assert_eq!(s.ok("signals", json!({"pattern": "types.pkt.state"})), "types.pkt.state (string)");
     // a file wellen can't read is an error, not a crash or a hang
     let ghw = std::fs::canonicalize("tests/data/types-ghdl.ghw").unwrap();
     assert!(s.tool("open", json!({"trace": ghw})).unwrap_err().ends_with("wellen can't read it: not yet implemented: support multi-dimensional arrays!"));

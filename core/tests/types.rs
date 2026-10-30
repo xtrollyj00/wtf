@@ -56,12 +56,12 @@ fn check(file: &str, cases: &[(&str, &str)]) {
 const VERILATOR_PLAIN: &[(&str, &str)] = &[
     ("pkt", "types.pkt = 10110100101"),
     ("pkt[9:8]", "types.pkt[9:8] = 01"), // the state, by bits: no field names, no enum names
-    // shortcut: a packed struct's fields don't resolve on the one var, fixed by a later piece
+    // a packed struct dumped as one var has no fields in the file (spec §18)
     ("pkt.pair.hi", "unknown"),
     ("pkt.state", "unknown"),
     ("loose.a", "types.loose.a = 00111100"),
     ("packed2[15:8]", "types.packed2[15:8] = 00100010"),
-    // shortcut: SV's packed2[1] is element 1 (0x22); wtf takes bit 1, fixed by a later piece
+    // SV's packed2[1] is element 1 (0x22); the file has one flat var, so wtf takes bit 1 (spec §18)
     ("packed2[1]", "types.packed2[1] = 0"),
     ("mem[2]", "types.mem[2] = 00010010"),
     ("mem(2)", "types.mem[2] = 00010010"),
@@ -70,7 +70,7 @@ const VERILATOR_PLAIN: &[(&str, &str)] = &[
     ("grid(1, 2)", "types.grid[1][2] = 0101"),
     ("grid[1]", "types.grid[1] = 001101000101"), // a composite: its elements joined
     ("pkts(1)", "types.pkts[1] = 00000000111"),
-    ("pkts[1].pair.lo", "unknown"), // shortcut: as pkt.pair.hi
+    ("pkts[1].pair.lo", "unknown"), // as pkt.pair.hi
     ("word", "types.word = 11000011"),
     ("gen(1).p", "types.gen[1].p = 10010110"),
     ("gen(1).p(7 downto 4)", "types.gen[1].p[7:4] = 1001"),
@@ -93,7 +93,7 @@ fn icarus() {
             &[
                 ("pkt", "types.pkt = 10110100101"),
                 ("pkt[9:8]", "types.pkt[9:8] = 01"),
-                ("pkt.state", "unknown"), // shortcut: as Verilator's without --trace-structs
+                ("pkt.state", "unknown"), // as Verilator's without --trace-structs
                 ("packed2[15:8]", "types.packed2[15:8] = 00100010"),
                 ("word", "types.word = 11000011"),
                 ("gen(1).p", "types.gen[1].p = 10010110"),
@@ -138,7 +138,7 @@ fn verilator_structs() {
             ("gen(1).p", "types.gen[1].p = 10010110"),
         ],
     );
-    // shortcut: the VCD writes a struct as a module scope, so it is none (spec §18)
+    // the VCD writes a struct as a module scope, so it is none (spec §18)
     check("types-verilator-structs.vcd", &[("pkt", "unknown"), ("pkt.pair", "unknown"), ("pkts[1]", "unknown"), ("gen(1).p", "unknown")]);
     // the VCD writes an array of structs' scopes pkts[1], the FST pkts / [1]
     check(
@@ -217,14 +217,14 @@ fn row_names_keep_the_composite() {
         row_names("types-verilator-structs.fst"),
         format!("clk pkt.valid pkt.state pkt.pair.hi pkt.pair.lo loose.a loose.b packed2[3] packed2[2] packed2[1] packed2[0] mem[0] mem[1] mem[2] mem[3] {fst_grid} {pkts} word.byte_ word.pair.hi word.pair.lo {generate}")
     );
-    // shortcut: a Verilator VCD writes struct scopes as modules, so a one-deep field shows bare
+    // a Verilator VCD writes struct scopes as modules, so a one-deep field shows bare
     // (a, byte_ for loose.a, word.byte_), fixed by a later piece
     assert_eq!(
         row_names("types-verilator-structs.vcd"),
         format!("clk pkt.valid pkt.state pkt.pair.hi pkt.pair.lo a b packed2[3] packed2[2] packed2[1] packed2[0] mem[0] mem[1] mem[2] mem[3] {grid} {pkts} byte_ word.pair.hi word.pair.lo {generate}")
     );
     assert_eq!(row_names("types-verilator.vcd"), format!("clk pkt a b packed2 mem[0] mem[1] mem[2] mem[3] {grid} pkts[0] pkts[1] word gen[0].p gen[1].p"));
-    // shortcut: Icarus's foreach loop variables are rows too, fixed by a later piece
+    // Icarus's foreach loop variables and genvars are in the file, so they are rows too (spec §18)
     assert_eq!(
         row_names("types-icarus.fst"),
         "clk packed2 pkt word gen[0].g gen[0].p gen[1].g gen[1].p $ivl_foreach0.i $ivl_foreach1.i $ivl_foreach1.j $ivl_foreach2.i $ivl_foreach3.i $ivl_foreach4.i $ivl_foreach4.j"
@@ -271,7 +271,7 @@ fn add_a_composite() {
         added(structs, "add types.gen"),
         "no signals directly in types.gen: add types.gen.** for all of it, or one of its scopes: types.gen[0], types.gen[1]"
     );
-    // shortcut: a Verilator VCD writes struct scopes as modules, so :add takes only the fields
+    // a Verilator VCD writes struct scopes as modules, so :add takes only the fields
     // directly in it (not pkt.pair) and pkts is a plain scope, fixed by a later piece
     let vcd = "types-verilator-structs.vcd";
     assert_eq!(added(vcd, "add types.pkt"), "▾ pkt valid state");

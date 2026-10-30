@@ -2,7 +2,7 @@
 source: src/main.rs
 expression: "snapshot(&mut app, 100, Some(16))"
 ---
-                                        0ns                  65ns        100ns            150ns
+                                        0                    65ns        100ns            150ns
                                              🮣────────────🮦──┃──────🮢                🮣──🮢
 ▾ frame           #2 8B                      🮡── #0 10B ──🮧──┃ #2 … 🮠                🮡──🮠
                                  rx.frame #2 8B        Esc e close                   🮣──🮢
