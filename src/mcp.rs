@@ -262,7 +262,7 @@ fn probes(app: &mut Workspace, names: &[String], radix_name: &Option<String>) ->
             None => (radix::default_for(named, p.1.is_none() && app.trace.vars[p.0].signed), 0),
             Some(r) => radix_for(r, width, named, n)?,
         };
-        out.push((n.to_string(), p, Sig { var: p.0, radix: r, frac, grouped: false, bits: 0, color: None }));
+        out.push((n.to_string(), p, Sig { var: p.0, radix: r, frac, grouped: false, open: Vec::new(), color: None }));
     }
     let vars: Vec<usize> = out.iter().map(|(_, p, _)| p.0).collect();
     app.trace.load(&vars);
@@ -372,13 +372,46 @@ impl Wtf {
         let w = current(self)?;
         let app = lock(&w);
         let p = a.pattern.to_lowercase();
-        let found = collapse(
-            app.trace
-                .vars
-                .iter()
-                .filter(|v| if p.contains('*') { wtf_core::command::glob(&a.pattern, &v.path) } else { v.path.to_lowercase().contains(&p) })
-                .map(|v| (v.path.as_str(), v.width.map_or("real or string".into(), |w| format!("{w} bit{}", if w == 1 { "" } else { "s" })))),
-        );
+        let t = &app.trace;
+        let bits = |w: Option<u32>| w.map_or("real or string".into(), |w| format!("{w} bit{}", if w == 1 { "" } else { "s" }));
+        // a pattern lists signals; a text a struct or array as one line, not the signals in it
+        let mut hits: Vec<usize> = match p.contains('*') {
+            true => (0..t.vars.len()).filter(|&v| !t.is_composite(v) && wtf_core::command::glob(&a.pattern, &t.vars[v].path)).collect(),
+            false => (0..t.vars.len()).filter(|&v| t.vars[v].path.to_lowercase().contains(&p)).collect(),
+        };
+        // a composite where its first signal is in the file
+        hits.sort_by_key(|&v| {
+            let mut x = v;
+            while let Some(&c) = t.vars[x].children.first() {
+                x = c;
+            }
+            x
+        });
+        let wholes: Vec<&str> = hits.iter().filter(|&&v| t.is_composite(v)).map(|&v| t.vars[v].path.as_str()).collect();
+        let inside = |path: &str| wholes.iter().any(|w| path.len() > w.len() && path.starts_with(w) && path[w.len()..].starts_with(['.', '[']));
+        let leaves = |v: usize| {
+            let mut stack = vec![v];
+            let mut n = 0;
+            while let Some(x) = stack.pop() {
+                match t.is_composite(x) {
+                    true => stack.extend(&t.vars[x].children),
+                    false => n += 1,
+                }
+            }
+            n
+        };
+        let mut shown: Vec<(&str, String)> = Vec::new();
+        for &v in hits.iter().filter(|&&v| !inside(&t.vars[v].path)) {
+            let var = &t.vars[v];
+            if t.is_composite(v) {
+                let kind = if var.children.iter().any(|&c| t.vars[c].path.ends_with(']')) { "array" } else { "struct" };
+                let text = if var.width.is_some() { bits(var.width) } else { "text".into() };
+                shown.push((&var.path, format!("{kind}, {text}, {} signals", leaves(v))));
+            } else {
+                shown.push((&var.path, bits(var.width)));
+            }
+        }
+        let found = collapse(shown.into_iter());
         let more = found.len().saturating_sub(MAX_LINES);
         let mut out = found.into_iter().take(MAX_LINES).collect::<Vec<_>>().join("\n");
         if more > 0 {
@@ -502,7 +535,29 @@ impl Wtf {
         let mut app = lock(&w);
         // after everything that prints as the time, and a change among it said
         let (lo, t) = at(&app, &a.time)?;
-        let lines: Vec<String> = probes(&mut app, &a.signals, &a.radix)?
+        let mut asked = probes(&mut app, &a.signals, &a.radix)?;
+        // a struct or array: its whole value, then each signal in it (spec §15)
+        asked = asked
+            .into_iter()
+            .flat_map(|(n, p, s)| {
+                let mut out = vec![(n.clone(), p, s)];
+                if p.1.is_none() && app.trace.is_composite(p.0) {
+                    let base = app.trace.vars[p.0].path.len();
+                    let mut stack: Vec<usize> = app.trace.vars[p.0].children.iter().rev().copied().collect();
+                    while let Some(v) = stack.pop() {
+                        if app.trace.is_composite(v) {
+                            stack.extend(app.trace.vars[v].children.iter().rev());
+                            continue;
+                        }
+                        let var = &app.trace.vars[v];
+                        let r = radix::default_for(var.names.is_some(), var.signed);
+                        out.push((format!("{n}{}", &var.path[base..]), (v, None), Sig { var: v, radix: r, frac: 0, grouped: false, open: Vec::new(), color: None }));
+                    }
+                }
+                out
+            })
+            .collect();
+        let lines: Vec<String> = asked
             .iter()
             .map(|(n, p, s)| match (value(&app, *p, s, lo), value(&app, *p, s, t)) {
                 (early, v) if early != v => format!("{n} = {v} ({early} earlier in {})", a.time.trim()),
@@ -779,7 +834,11 @@ pub fn describe(app: &Workspace, unit: Option<usize>) -> String {
                 let w = var.width.unwrap_or(0);
                 let radix = if w > 1 { format!("  {}", radix::name(s.radix, s.frac, w)) } else { String::new() };
                 let color = s.color.map(|c| format!("  {}", rows::COLORS[c])).unwrap_or_default();
-                let bits = if s.bits > 0 { "  (expanded)" } else { "" };
+                let bits = match &s.open[..] {
+                    [] => String::new(),
+                    [v] if *v == s.var && !app.trace.is_composite(s.var) => "  (expanded)".into(),
+                    open => format!("  (open: {})", open.iter().map(|&v| wtf_core::session::open_name(app, s.var, v)).collect::<Vec<_>>().join(", ")),
+                };
                 format!("  {}{radix}{color}{bits}", var.path)
             }
             Row::Group { collapsed: true, .. } => "  (collapsed)".into(),

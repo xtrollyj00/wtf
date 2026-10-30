@@ -271,6 +271,11 @@ fn paths(app: &Workspace, arg: &str) -> Vec<usize> {
     if let Some(&v) = app.trace.by_path.get(arg) {
         return vec![v];
     }
+    // a struct, record or array in either HDL's form is one signal, not the signals in it
+    let c = crate::trace::canon(arg);
+    if let Some(v) = app.trace.vars.iter().position(|v| !v.children.is_empty() && crate::trace::canon(&v.path) == c) {
+        return vec![v];
+    }
     let found = matching(app, arg, &|p| p.to_string());
     if !found.is_empty() {
         return found;
@@ -285,7 +290,8 @@ fn matching(app: &Workspace, arg: &str, form: &dyn Fn(&str) -> String) -> Vec<us
     let hit = |v: &crate::trace::Var| {
         let path = form(&v.path);
         if arg.contains('*') {
-            return glob(arg, &path);
+            // a pattern takes the signals, not the composites they make up
+            return v.children.is_empty() && glob(arg, &path);
         }
         let p = crate::trace::parts(&path);
         let rest = p.len().saturating_sub(a.len());

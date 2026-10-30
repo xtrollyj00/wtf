@@ -7,7 +7,7 @@ use wtf_core::stream::Stream;
 use wtf_core::time::{self, Tick};
 use wtf_core::trace::{Changes, Trace, Val};
 use wtf_core::view::View;
-use wtf_core::workspace::Workspace;
+use wtf_core::workspace::{Sub, Workspace};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -235,10 +235,22 @@ pub fn put(buf: &mut Buffer, x: usize, y: usize, s: &str, style: Style) {
     buf.set_string(x as u16, y as u16, s, style);
 }
 
+/// A line's signal: a composite's child in the default radix for it (spec §6), a stream's field or
+/// a bit in its row's.
+pub fn line_sig(ws: &Workspace, s: &Sig, var: usize) -> Sig {
+    match var == s.var || ws.stream_of(s.var).is_some() {
+        true => Sig { var, ..s.clone() },
+        false => {
+            let v = &ws.trace.vars[var];
+            Sig { var, radix: wtf_core::radix::default_for(v.names.is_some(), v.signed), frac: 0, ..s.clone() }
+        }
+    }
+}
+
 /// Lines a workspace's drawing takes: the time axis, the cursor ruler if there is one, and the
 /// rows.
 pub fn height(ws: &Workspace) -> u16 {
-    (rows::lines(&ws.rows).len() * ROW_LINES) as u16 + 1 + (ws.cursor_list().len() > 1) as u16
+    (ws.lines().len() * ROW_LINES) as u16 + 1 + (ws.cursor_list().len() > 1) as u16
 }
 
 /// A drawing as plain text, one character per cell. Colours are dropped, so cursor columns show
@@ -350,7 +362,7 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
     let cursors = ws.cursor_list();
     let head = 1 + (cursors.len() > 1) as usize;
     let fit = (body.saturating_sub(head + adding as usize) / ROW_LINES).max(1);
-    let lines = rows::lines(&ws.rows);
+    let lines = ws.lines();
     let p = lines.iter().position(|&l| l == (ws.sel, ws.bit)).unwrap_or(0);
     if p < *top {
         *top = p;
@@ -365,41 +377,63 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
             *n = format!("{g}{}", n.chars().skip(1).collect::<String>());
         }
     }
-    // a bit line is named after its bus, indented under it: `data[3]`; a field after its stream:
-    // `frame.len`
+    // the lines under a row, indented a level deeper each (spec §6): a bit after its bus,
+    // `data[3]`; a stream's field after its stream, `frame.len`; a composite's child by its field
+    // or index, `valid`, `pkts[0]`. A stream or composite folds and unfolds as a group does its
+    // rows: the same marks
+    let mut subs: Option<(usize, Vec<Sub>)> = None;
+    let shows: Vec<Option<Sub>> = lines
+        .iter()
+        .map(|&(i, line)| {
+            let s = ws.rows[i].sig()?;
+            let Some(b) = line else { return Some(Sub { var: s.var, bit: None, depth: 0 }) };
+            if subs.as_ref().is_none_or(|(r, _)| *r != i) {
+                subs = Some((i, ws.subs(s)));
+            }
+            let list = &subs.as_ref().expect("set above").1;
+            list.get(list.len().checked_sub(b as usize + 1)?).cloned()
+        })
+        .collect();
     let names: Vec<String> = lines
         .iter()
-        .map(|&(i, bit)| match (bit, ws.rows[i].sig()) {
-            (Some(b), Some(s)) => match ws.probe(s.var, bit) {
-                (v, None) => format!("  {}{}", row_names[i], &ws.trace.vars[v].path[ws.trace.vars[s.var].path.len()..]),
-                _ => format!("  {}[{b}]", row_names[i]),
-            },
-            // a stream folds and unfolds its fields as a group does its rows: the same marks
-            (None, Some(s)) if ws.stream_of(s.var).is_some() => {
-                let n = &row_names[i];
-                let indent = n.len() - n.trim_start().len();
-                let g = if s.bits > 0 { gl().group_open } else { gl().group_closed };
-                format!("{}{g} {}", &n[..indent], &n[indent..])
+        .zip(&shows)
+        .map(|(&(i, line), l)| {
+            let (Some(s), Some(l)) = (ws.rows[i].sig(), l) else { return row_names[i].clone() };
+            let n = &row_names[i];
+            let indent = &n[..n.len() - n.trim_start().len()];
+            let marked = |var: usize, name: &str| match ws.stream_of(var).is_some() || ws.trace.is_composite(var) {
+                true => format!("{} {name}", if s.open.contains(&var) { gl().group_open } else { gl().group_closed }),
+                false => name.to_string(),
+            };
+            if line.is_none() {
+                return format!("{indent}{}", marked(s.var, n.trim_start()));
             }
-            _ => row_names[i].clone(),
+            let own = |v: usize| match v == s.var {
+                true => n.trim_start().to_string(),
+                false if ws.stream_of(s.var).is_some() => format!("{}{}", n.trim_start(), &ws.trace.vars[v].path[ws.trace.vars[s.var].path.len()..]),
+                false => rows::child_name(&ws.trace.vars[v].path),
+            };
+            let name = match l.bit {
+                Some(bit) => format!("{}[{bit}]", own(l.var)),
+                None => marked(l.var, &own(l.var)),
+            };
+            format!("{indent}{}{name}", "  ".repeat(l.depth + 1))
         })
         .collect();
     // a stream's field between records has no value to show
     let is_field = |var: usize| ws.streams.iter().any(|s| ws.trace.vars[var].path.strip_prefix(s.name.as_str()).is_some_and(|f| f.starts_with('.')));
     let (values, value_styles): (Vec<String>, Vec<Style>) = lines
         .iter()
-        .map(|&(i, bit)| {
-            ws.rows[i]
-                .sig()
-                .and_then(|s| {
-                    let (var, bit) = ws.probe(s.var, bit);
-                    let v = ws.trace.value_of(var, bit, ws.view.cursor).filter(|v| !(is_field(var) && gap(v)))?;
-                    let stream = ws.stream_of(var);
-                    let st = if stream.is_some_and(|s| s.violations) { red() } else { state_style(&v) };
-                    Some((label(&ws.trace, stream, &Sig { var, ..s.clone() }, &v), st))
-                })
-                .unwrap_or_default()
+        .zip(&shows)
+        .map(|(&(i, _), l)| {
+            let (s, l) = (ws.rows[i].sig()?, l.as_ref()?);
+            let var = l.var;
+            let v = ws.trace.value_of(var, l.bit, ws.view.cursor).filter(|v| !(is_field(var) && gap(v)))?;
+            let stream = ws.stream_of(var);
+            let st = if stream.is_some_and(|s| s.violations) { red() } else { state_style(&v) };
+            Some((label(&ws.trace, stream, &line_sig(ws, s, var), &v), st))
         })
+        .map(Option::unwrap_or_default)
         .unzip();
     let width = |v: &[String], max| v.iter().map(|s| s.chars().count()).max().unwrap_or(0).min(max);
     // hidden rows count too, so collapsing a group doesn't shift the waveforms
@@ -433,7 +467,7 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
         }
     }
 
-    // bit lines of an expanded bus share one pass over the bus (row, [bit][column])
+    // bit lines of an expanded bus share one pass over the bus (var, [bit][column])
     let mut bit_changes: Option<(usize, Vec<Vec<Changes>>)> = None;
     let mut y = head;
     for (l, &(i, bit)) in lines.iter().enumerate().skip(*top).take(fit) {
@@ -469,20 +503,19 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
         let value: String = values[l].chars().take(vw).collect();
         put(buf, vx, yb, &value, value_styles[l]);
         let cells = match &ws.rows[i] {
-            Row::Signal(s) if ws.probe(s.var, bit).0 != s.var => {
-                let field = Sig { var: ws.probe(s.var, bit).0, ..s.clone() };
-                wave(&ws.trace, &ws.view, &field, None, None, ws.stream_of(field.var), is_field(field.var), ww)
-            }
+            Row::Signal(_) if shows[l].is_none() => Vec::new(),
             Row::Signal(s) => {
-                let bits = bit.map(|b| {
-                    if bit_changes.as_ref().is_none_or(|(r, _)| *r != i) {
+                let l = shows[l].as_ref().expect("checked above");
+                let line = line_sig(ws, s, l.var);
+                let bits = l.bit.map(|b| {
+                    if bit_changes.as_ref().is_none_or(|(v, _)| *v != l.var) {
                         let v = &ws.view;
                         let ranges: Vec<_> = (0..ww as u64).map(|c| (v.col_start(c), v.col_start(c + 1))).collect();
-                        bit_changes = Some((i, ws.trace.bit_changes(s.var, &ranges)));
+                        bit_changes = Some((l.var, ws.trace.bit_changes(l.var, &ranges)));
                     }
                     bit_changes.as_ref().map_or(&[][..], |(_, c)| &c[b as usize][..])
                 });
-                wave(&ws.trace, &ws.view, s, bit, bits, ws.stream_of(s.var), is_field(s.var), ww)
+                wave(&ws.trace, &ws.view, &line, l.bit, bits, ws.stream_of(l.var), is_field(l.var), ww)
             }
             Row::Group { collapsed: true, .. } => activity(&ws.trace, &ws.view, &rows::members(&ws.rows, i), ww),
             Row::Group { .. } => Vec::new(),

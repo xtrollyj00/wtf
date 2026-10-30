@@ -107,10 +107,16 @@ fn declare(app: &mut Workspace, a: &WorkspaceArgs) -> Result<String, String> {
         }
         Some(Value::Table(row))
     };
-    let mut rows = Vec::new();
+    let (mut rows, mut opens) = (Vec::new(), Vec::new());
     for spec in &a.rows {
         match spec {
             RowSpec::Signal(n) => rows.extend(signal(n)),
+            RowSpec::Open { signal: n, open } => {
+                let Some(Value::Table(mut row)) = signal(n) else { continue };
+                opens.push((n.clone(), row["signal"].as_str().unwrap_or_default().to_string(), open.clone()));
+                row.insert("open".into(), Value::Array(open.iter().map(|o| Value::String(o.clone())).collect()));
+                rows.push(Value::Table(row));
+            }
             RowSpec::Group { group, rows: members, collapsed } => {
                 let mut g = Table::new();
                 g.insert("group".into(), Value::String(group.clone()));
@@ -120,6 +126,12 @@ fn declare(app: &mut Workspace, a: &WorkspaceArgs) -> Result<String, String> {
                 g.insert("rows".into(), Value::Array(members.iter().filter_map(|n| signal(n)).collect()));
                 rows.push(Value::Table(g));
             }
+        }
+    }
+    for (n, path, open) in opens {
+        let var = app.trace.by_path[&path];
+        for name in open.iter().filter(|o| session::open_var(app, var, o).is_none()) {
+            errors.push(format!("{n} has no {name} to open; its levels are named from {} on", session::open_name(app, var, var)));
         }
     }
     let exact = |t: Tick| Value::String(time::format_exact(t, app.trace.fs_per_tick));

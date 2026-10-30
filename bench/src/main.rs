@@ -11,7 +11,7 @@ mod mcp;
 mod run;
 
 const USAGE: &str = "usage:
-  wtf-bench gen [--size 1G] [--format vcd|fst] [--modules 200] <dir>
+  wtf-bench gen [--size 1G] [--format vcd|fst] [--modules 200] [--mem 0] <dir>
   wtf-bench run [--wtf <path>] <trace>
   wtf-bench mcp [--wtf <path>] <trace>
   wtf-bench agent run|report ...";

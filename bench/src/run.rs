@@ -43,10 +43,28 @@ pub fn main(args: &[String]) -> Result<(), String> {
     let rss_loaded = rss();
 
     let session = std::env::temp_dir().join(format!("wtf-bench-{}.session.toml", std::process::id()));
-    let first = snapshot(&wtf, &trace, &session, "time = \"0ns\"\nzoom = \"1ns\"")?;
+    let rows: String = ["top.clk", "top.hot", "top.u0.s_axi_awvalid", "top.u0.s_axi_awready", "top.u0.s_axi_awaddr", "top.u0.state"]
+        .iter()
+        .map(|s| format!("[[rows]]\nsignal = \"{s}\"\n\n"))
+        .collect();
+    let first = snapshot(&wtf, &trace, &session, "time = \"0ns\"\nzoom = \"1ns\"", &rows)?;
     row("first screen, wtf --snapshot", first, if fst { "1 s" } else { "2 s" });
-    let whole = snapshot(&wtf, &trace, &session, &format!("time = \"0ns\"\nto = \"{end}ns\""))?;
+    let whole = snapshot(&wtf, &trace, &session, &format!("time = \"0ns\"\nto = \"{end}ns\""), &rows)?;
     row("whole trace on screen, wtf --snapshot", whole, "the first screen + 50 ms");
+    // `gen --mem N`: the array as one row, folded and one level open (spec §6)
+    if let Some(&mem) = ws.trace.by_path.get("top.mem") {
+        let n = ws.trace.vars[mem].children.len();
+        let (add, r) = time(|| command::run(&mut ws, "add top.mem"));
+        r?;
+        row(&format!("add top.mem ({n} x 32 bits)"), add, "1 s");
+        let (value, v) = time(|| ws.trace.value_at(mem, end).map_or(0, |v| format!("{v:?}").len()));
+        row(&format!("its value at the end ({v} B)"), value, "none yet");
+        let mem_rows = "[[rows]]\nsignal = \"top.mem\"\n";
+        let folded = snapshot(&wtf, &trace, &session, &format!("time = \"0ns\"\nto = \"{end}ns\""), mem_rows)?;
+        row("top.mem folded, whole trace", folded, "the first screen + 50 ms");
+        let open = snapshot(&wtf, &trace, &session, &format!("time = \"0ns\"\nto = \"{end}ns\""), &format!("{mem_rows}open = [\"mem\"]\n"))?;
+        row("top.mem open, whole trace", open, "the first screen + 50 ms");
+    }
     std::fs::remove_file(&session).ok();
 
     let mb = |b: Option<u64>| b.map_or("n/a".into(), |b| format!("{} MB", b >> 20));
@@ -77,12 +95,8 @@ fn row(what: &str, d: Duration, target: &str) {
     println!("{what:<44}{:>10.3?}    target: {target}", d);
 }
 
-/// One screen of top.hot and u0's write address, with this `[view]`; the wall time of it.
-fn snapshot(wtf: &Path, trace: &Path, session: &Path, view: &str) -> Result<Duration, String> {
-    let rows: String = ["top.clk", "top.hot", "top.u0.s_axi_awvalid", "top.u0.s_axi_awready", "top.u0.s_axi_awaddr", "top.u0.state"]
-        .iter()
-        .map(|s| format!("[[rows]]\nsignal = \"{s}\"\n\n"))
-        .collect();
+/// One screen of these rows, with this `[view]`; the wall time of it.
+fn snapshot(wtf: &Path, trace: &Path, session: &Path, view: &str, rows: &str) -> Result<Duration, String> {
     std::fs::write(session, format!("version = 1\n\n[view]\n{view}\n\n{rows}")).map_err(|e| e.to_string())?;
     let (d, out) = time(|| std::process::Command::new(wtf).env("XDG_CONFIG_HOME", "/nonexistent").arg("--snapshot").arg("200x40").arg("-S").arg(session).arg(trace).output());
     let out = out.map_err(|e| format!("{}: {e}", wtf.display()))?;

@@ -20,6 +20,9 @@ pub struct Var {
     /// How many of the path's `parts` are its name in the HDL: 1, or more inside a struct, record
     /// or array (`pkts[1].pair.lo` is 4), which a shown name keeps whole.
     pub decl: usize,
+    /// A struct, record or array dumped as a scope (spec §6 "Composite rows"): its fields or
+    /// elements in declaration order. Empty for other vars.
+    pub children: Vec<usize>,
     source: Source,
 }
 
@@ -114,6 +117,9 @@ enum Source {
     /// Values in time order, each different from the one before; the first is the initial value,
     /// not a change (as a file's values at its first time are).
     Computed(Vec<(Tick, Val)>),
+    /// A struct, record or array: its values are its children's (`Var.children`), joined when
+    /// asked.
+    Composite,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -161,7 +167,7 @@ impl Trace {
         let h = wave.hierarchy();
         let fs_per_tick = crate::time::fs_per_tick(h.timescale());
         let mut paths = paths(h);
-        let vars: Vec<Var> = h
+        let mut vars: Vec<Var> = h
             .all_vars()
             .map(|r| (paths.remove(&r).unwrap_or_default(), &h[r]))
             .map(|((path, decl), v)| Var {
@@ -171,10 +177,12 @@ impl Trace {
                 names: v.enum_type(h).map(|(_, m)| m.iter().map(|(b, n)| (names_key(b).to_string(), n.to_string())).collect()),
                 signed: false,
                 time: None,
+                children: Vec::new(),
                 source: Source::File(v.signal_ref()),
             })
             .collect();
-        let by_path = vars.iter().enumerate().map(|(i, v)| (v.path.clone(), i)).collect();
+        let mut by_path: HashMap<String, usize> = vars.iter().enumerate().map(|(i, v)| (v.path.clone(), i)).collect();
+        composites(&mut vars, &mut by_path);
         Trace { wave, fs_per_tick, vars, by_path, edges: Default::default() }
     }
 
@@ -187,19 +195,75 @@ impl Trace {
     }
 
     /// Read the values of these variables from the file (lazy loading, spec §18). Computed ones
-    /// have theirs already.
+    /// have theirs already; a composite's are its signals'.
     pub fn load(&mut self, vars: &[usize]) {
-        let refs: Vec<_> = vars
+        let mut all = vars.to_vec();
+        let mut i = 0;
+        while i < all.len() {
+            all.extend_from_slice(&self.vars[all[i]].children);
+            i += 1;
+        }
+        let refs: Vec<_> = all
             .iter()
             .filter_map(|&v| match self.vars[v].source {
                 Source::File(s) => Some(s),
-                Source::Computed(_) => None,
+                _ => None,
             })
             .filter(|s| self.wave.get_signal(*s).is_none())
             .collect();
         if !refs.is_empty() {
             self.wave.load_signals(&refs);
         }
+    }
+
+    /// A composite's value from its children's (spec §6 "Composite rows"), worked out when asked,
+    /// so a big array costs nothing until shown, and then only what is asked: their bits joined, the first the most
+    /// significant, or with a text field an SV aggregate, `'{valid:1, state:busy, pair:'{hi:A,
+    /// lo:5}}` (spec §6 "Composite rows").
+    fn join_values(&self, var: usize, vals: &[Option<Val>]) -> Val {
+        let children = &self.vars[var].children;
+        if self.vars[var].width.is_some() {
+            let bits = children.iter().zip(vals).map(|(&c, v)| match v {
+                Some(Val::Bits(b)) => b.clone(),
+                _ => "x".repeat(self.vars[c].width.unwrap_or(0) as usize),
+            });
+            return Val::Bits(bits.collect());
+        }
+        let items = children.iter().zip(vals).map(|(&c, v)| match v {
+            Some(Val::Bits(b)) => self.aggregate(c, b),
+            Some(Val::Text(t)) => t.clone(),
+            None => "x".into(),
+        });
+        Val::Text(self.braced(var, items))
+    }
+
+    /// The bits of a var as an aggregate's item: a composite's split into its fields, a leaf in hex
+    /// without `0x`, or by its name.
+    fn aggregate(&self, var: usize, bits: &str) -> String {
+        let v = &self.vars[var];
+        if v.children.is_empty() {
+            return v.name_of(bits).map_or_else(|| (crate::radix::RADIXES[0].format)(bits, 0).trim_start_matches("0x").to_string(), str::to_string);
+        }
+        let mut at = 0;
+        let items = v.children.iter().map(|&c| {
+            let w = (self.vars[c].width.unwrap_or(0) as usize).min(bits.len() - at);
+            at += w;
+            self.aggregate(c, &bits[at - w..at])
+        });
+        let items: Vec<String> = items.collect();
+        self.braced(var, items.into_iter())
+    }
+
+    /// `'{a:1, b:2}`, an array's elements without names: `'{8, 7}`.
+    fn braced(&self, var: usize, items: impl Iterator<Item = String>) -> String {
+        let named = self.vars[var].children.iter().map(|&c| parts(&self.vars[c].path).last().and_then(|p| (!p.starts_with('[')).then(|| format!("{p}:"))).unwrap_or_default());
+        let all: Vec<String> = named.zip(items).map(|(n, i)| n + &i).collect();
+        format!("'{{{}}}", all.join(", "))
+    }
+
+    /// A struct, record or array dumped as a scope (spec §6 "Composite rows").
+    pub fn is_composite(&self, var: usize) -> bool {
+        !self.vars[var].children.is_empty()
     }
 
     /// Add a computed signal from its values in time order (`changes`, times may repeat: the last
@@ -217,9 +281,9 @@ impl Trace {
                 list.pop();
             }
         }
-        let var = Var { path: path.to_string(), width, names: None, signed: false, time: None, decl: 1, source: Source::Computed(list) };
+        let var = Var { path: path.to_string(), width, names: None, signed: false, time: None, decl: 1, children: Vec::new(), source: Source::Computed(list) };
         match self.by_path.get(path) {
-            Some(&i) if matches!(self.vars[i].source, Source::Computed(_)) => {
+            Some(&i) if matches!(self.vars[i].source, Source::Computed(_)) && !self.is_composite(i) => {
                 self.vars[i] = var;
                 // its edges, if it was a clock, are another signal's now
                 self.edges.get_mut().retain(|k, _| k.0 != i);
@@ -238,19 +302,21 @@ impl Trace {
     pub fn first_time(&self, var: usize) -> Option<Tick> {
         match &self.vars[var].source {
             Source::Computed(list) => list.first().map(|x| x.0),
+            Source::Composite => self.vars[var].children.iter().filter_map(|&c| self.first_time(c)).min(),
             Source::File(s) => self.wave.get_signal(*s)?.time_indices().first().map(|&i| self.wave.time_table()[i as usize]),
         }
     }
 
+    /// Not a signal of the file: a computed signal, a stream or a composite.
     pub fn is_computed(&self, var: usize) -> bool {
-        self.computed(var).is_some()
+        !matches!(self.vars[var].source, Source::File(_))
     }
 
     /// The values of a computed var, if it is one.
     fn computed(&self, var: usize) -> Option<&[(Tick, Val)]> {
         match &self.vars[var].source {
             Source::Computed(list) => Some(list),
-            Source::File(_) => None,
+            _ => None,
         }
     }
 
@@ -260,7 +326,7 @@ impl Trace {
     fn indices(&self, var: usize) -> (&[u32], usize) {
         let ti = match self.vars[var].source {
             Source::File(s) => self.wave.get_signal(s).map_or(&[][..], |s| s.time_indices()),
-            Source::Computed(_) => &[],
+            _ => &[],
         };
         (ti, ti.partition_point(|&x| x == 0))
     }
@@ -271,6 +337,10 @@ impl Trace {
     }
 
     pub fn value_at(&self, var: usize, t: Tick) -> Option<Val> {
+        if self.is_composite(var) {
+            let vals: Vec<Option<Val>> = self.vars[var].children.iter().map(|&c| self.value_at(c, t)).collect();
+            return vals.iter().any(Option::is_some).then(|| self.join_values(var, &vals));
+        }
         if let Some(list) = self.computed(var) {
             let i = list.partition_point(|x| x.0 <= t);
             return i.checked_sub(1).map(|i| list[i].1.clone());
@@ -285,6 +355,18 @@ impl Trace {
 
     /// Changes in [t0, t1). Two binary searches, independent of the number of transitions.
     pub fn changes_in(&self, var: usize, t0: Tick, t1: Tick) -> Changes {
+        if self.is_composite(var) {
+            // the first change at t0 or after, and the one after it
+            let first = match t0 {
+                0 => self.next_change(var, 0),
+                _ => self.next_change(var, t0 - 1),
+            };
+            return match first.filter(|&f| f < t1) {
+                None => Changes::None,
+                Some(f) if self.next_change(var, f).is_some_and(|n| n < t1) => Changes::Many,
+                Some(_) => Changes::One,
+            };
+        }
         if let Some(list) = self.computed(var) {
             let changes = list.get(1..).unwrap_or(&[]);
             let (a, b) = (changes.partition_point(|x| x.0 < t0), changes.partition_point(|x| x.0 < t1));
@@ -308,6 +390,9 @@ impl Trace {
     }
 
     pub fn next_change(&self, var: usize, t: Tick) -> Option<Tick> {
+        if self.is_composite(var) {
+            return self.vars[var].children.iter().filter_map(|&c| self.next_change(c, t)).min();
+        }
         if let Some(list) = self.computed(var) {
             let changes = list.get(1..).unwrap_or(&[]);
             return changes.get(changes.partition_point(|x| x.0 <= t)).map(|x| x.0);
@@ -319,6 +404,9 @@ impl Trace {
     }
 
     pub fn prev_change(&self, var: usize, t: Tick) -> Option<Tick> {
+        if self.is_composite(var) {
+            return self.vars[var].children.iter().filter_map(|&c| self.prev_change(c, t)).max();
+        }
         if let Some(list) = self.computed(var) {
             let changes = list.get(1..).unwrap_or(&[]);
             return changes.partition_point(|x| x.0 < t).checked_sub(1).map(|i| changes[i].0);
@@ -333,6 +421,13 @@ impl Trace {
     /// search to start, then a step per change, where `next_change` and `value_at` search each
     /// time. For whatever walks a signal (searches, clock edges, decoders).
     fn walk_var(&self, var: usize, t: Tick, forward: bool) -> Box<dyn Iterator<Item = (Tick, Val)> + '_> {
+        if self.is_composite(var) {
+            let mut at = t;
+            return Box::new(std::iter::from_fn(move || {
+                at = if forward { self.next_change(var, at)? } else { self.prev_change(var, at)? };
+                Some((at, self.value_at(var, at)?))
+            }));
+        }
         if let Some(list) = self.computed(var) {
             let changes = list.get(1..).unwrap_or(&[]);
             return if forward {
@@ -344,7 +439,7 @@ impl Trace {
         let (ti, first) = self.indices(var);
         let Some(sig) = (match self.vars[var].source {
             Source::File(s) => self.wave.get_signal(s),
-            Source::Computed(_) => None,
+            _ => None,
         }) else {
             return Box::new(std::iter::empty());
         };
@@ -404,6 +499,46 @@ fn paths(h: &wellen::Hierarchy) -> HashMap<wellen::VarRef, (String, usize)> {
         walk(h, s, &mut Vec::new(), &mut out);
     }
     out
+}
+
+/// A var for every struct, record or array a var's HDL name passes through (`types.pkts`,
+/// `types.pkts[1]`, `types.pkts[1].pair` for `types.pkts[1].pair.lo`), its children in the file's
+/// order, which is the declaration order; widths summed, None with a text field in it.
+fn composites(vars: &mut Vec<Var>, by_path: &mut HashMap<String, usize>) {
+    let files = vars.len();
+    for leaf in 0..files {
+        let path = vars[leaf].path.clone();
+        let p = parts(&path);
+        let start = p.len() - vars[leaf].decl.min(p.len());
+        let mut child = leaf;
+        for k in (start + 1..p.len()).rev() {
+            let scope = join(p[..k].iter().copied());
+            let (c, new) = match by_path.get(&scope) {
+                Some(&c) if c >= files => (c, false),
+                // a signal of the file with that path: no composite there
+                Some(_) => break,
+                None => {
+                    vars.push(Var { path: scope.clone(), width: None, names: None, signed: false, time: None, decl: k - start, children: Vec::new(), source: Source::Composite });
+                    by_path.insert(scope, vars.len() - 1);
+                    (vars.len() - 1, true)
+                }
+            };
+            let ch = &mut vars[c].children;
+            if ch.last() != Some(&child) && !ch.contains(&child) {
+                ch.push(child);
+            }
+            if !new {
+                break;
+            }
+            child = c;
+        }
+    }
+    // inner composites first, so a width is summed from its children's
+    let mut order: Vec<usize> = (files..vars.len()).collect();
+    order.sort_by_key(|&c| std::cmp::Reverse(parts(&vars[c].path).len()));
+    for c in order {
+        vars[c].width = vars[c].children.iter().map(|&x| vars[x].width).sum();
+    }
 }
 
 /// wellen's reading, with its panics (`not yet implemented: support multi-dimensional arrays!` in

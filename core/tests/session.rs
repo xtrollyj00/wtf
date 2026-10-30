@@ -27,6 +27,29 @@ fn round_trip() {
     assert_eq!(session::rows_toml(&back), back.saved);
 }
 
+/// A struct or array row keeps its open levels, named from the row's name
+/// (tests/data/types-verilator-structs.fst, as in types.rs).
+#[test]
+fn composite_rows() {
+    let types = || wtf_core::workspace::Workspace::open(&std::path::PathBuf::from(format!("{}/../tests/data/types-verilator-structs.fst", env!("CARGO_MANIFEST_DIR")))).unwrap();
+    let mut ws = types();
+    wtf_core::command::run(&mut ws, "add types.pkts types.pkt").unwrap();
+    ws.sel = 0;
+    ws.toggle_group(); // pkts
+    ws.bit = Some(0);
+    ws.toggle_group(); // pkts[1]
+    let text = session::to_toml(&ws);
+    assert!(text.contains("signal = \"types.pkts\"\nopen = [\"pkts\", \"pkts[1]\"]\n\n[[rows]]\nsignal = \"types.pkt\"\n"), "{text}");
+    let mut back = types();
+    assert_eq!(session::apply(&mut back, &text), Ok(vec![]));
+    assert_eq!(session::to_toml(&back), text);
+    assert_eq!(back.rows, ws.rows);
+    // a level the row doesn't have is skipped with a warning
+    let mut back = types();
+    let warn = session::apply(&mut back, &text.replace(r#""pkts[1]""#, r#""pkts[7]", "pkt.pair""#)).unwrap();
+    assert_eq!(warn, ["types.pkts has no pkts[7] to open", "types.pkts has no pkt.pair to open"]);
+}
+
 #[test]
 fn warns_and_keeps_going() {
     let mut ws = open();

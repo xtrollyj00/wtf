@@ -12,8 +12,8 @@ pub struct Node {
     /// End (exclusive) of this node's subtree in `nodes`.
     pub end: usize,
     pub open: bool,
-    /// A struct, record or array: one signal in the HDL, so its signals go together.
-    pub composite: bool,
+    /// The signal a struct, record or array is (spec §6 "Composite rows"), added as one row.
+    pub whole: Option<usize>,
 }
 
 pub struct Panel {
@@ -55,7 +55,8 @@ impl Panel {
     /// The tree is built from the signals' full paths, so scopes without signals don't appear.
     pub fn new(trace: &Trace) -> Self {
         let mut root = Scope::default();
-        for (i, v) in trace.vars.iter().enumerate() {
+        // a composite is its scope's node, not a signal of its own in the tree
+        for (i, v) in trace.vars.iter().enumerate().filter(|(i, _)| !trace.is_composite(*i)) {
             // a concatenation `{top.a,top.b}` is a signal at the top
             // an array's elements nest under it (`mem` > `[0]`); a computed slice `top.x[7:4]` stays whole
             let mut parts: Vec<&str> = match () {
@@ -81,6 +82,9 @@ impl Panel {
         }
         let mut nodes = Vec::new();
         flatten(&root, "", 0, &mut nodes);
+        for n in nodes.iter_mut().filter(|n| n.var.is_none()) {
+            n.whole = trace.by_path.get(&n.path).copied().filter(|&v| trace.is_composite(v));
+        }
         Panel { nodes, sel: 0, query: None, pattern: String::new(), matches: Vec::new(), origin: 0, top: 0, vars: trace.vars.len(), marked: Vec::new(), anchor: None }
     }
 
@@ -189,12 +193,12 @@ impl Panel {
         vis[pa.min(ps)..=pa.max(ps)].to_vec()
     }
 
-    /// The signals of a node: itself, those directly in a scope, or all of a struct or array.
+    /// The signals of a node: itself, a struct or array as one, or those directly in a scope.
     pub fn vars_of(&self, i: usize) -> Vec<usize> {
         let n = &self.nodes[i];
-        match n.var {
+        match n.var.or(n.whole) {
             Some(v) => vec![v],
-            None => self.nodes[i + 1..n.end].iter().filter(|c| n.composite || c.depth == n.depth + 1).filter_map(|c| c.var).collect(),
+            None => self.nodes[i + 1..n.end].iter().filter(|c| c.depth == n.depth + 1).filter_map(|c| c.var.or(c.whole)).collect(),
         }
     }
 
@@ -229,13 +233,13 @@ fn flatten(s: &Scope, prefix: &str, depth: usize, out: &mut Vec<Node>) {
             let path = wtf_core::trace::join([prefix, name].into_iter().filter(|p| !p.is_empty()));
             let at = out.len();
             // top-level scopes start open, so the panel doesn't open on a single closed line
-            out.push(Node { name: name.to_string(), path: path.clone(), depth, var: None, end: 0, open: depth == 0, composite: sub.composite });
+            out.push(Node { name: name.to_string(), path: path.clone(), depth, var: None, end: 0, open: depth == 0, whole: None });
             flatten(sub, &path, depth + 1, out);
             out[at].end = out.len();
         } else {
             let (name, var) = s.vars[k];
             let path = wtf_core::trace::join([prefix, name].into_iter().filter(|p| !p.is_empty()));
-            out.push(Node { name: name.to_string(), path, depth, var: Some(var), end: out.len() + 1, open: false, composite: false });
+            out.push(Node { name: name.to_string(), path, depth, var: Some(var), end: out.len() + 1, open: false, whole: None });
         }
     }
 }
