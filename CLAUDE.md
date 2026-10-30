@@ -93,7 +93,6 @@ Ideas that span files:
 
 ## Conventions
 
-- Changes reach `main` through pull requests, one topic each.
 - Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/):
   `<type>(<scope>): <summary>`, e.g. `feat(mcp): records group_by`, `fix(tui): keep the
   selection on undo`, `docs(spec): enum radix`. Types: `feat`, `fix`, `docs`, `test`,

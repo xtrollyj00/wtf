@@ -1,0 +1,153 @@
+$date
+	Fri Oct 30 18:58:46 2026
+
+$end
+$version
+	nvc 1.23.0
+$end
+$timescale
+	1fs
+$end
+$attrbegin misc 03 /home/ogurka/wtf/tests/data/types.vhd 1 $end
+$attrbegin misc 04 1 9 $end
+$scope vhdl_architecture types $end
+$attrbegin misc 02 STD_LOGIC 1030 $end
+$var logic 1 ! clk $end
+$scope vhdl_record pkt $end
+$attrbegin misc 02 STD_LOGIC 1030 $end
+$var logic 1 " valid $end
+$attrbegin misc 02 STATE_T 1024 $end
+$var string 0 # state $end
+$scope vhdl_record pair $end
+$attrbegin misc 02 STD_LOGIC_VECTOR 1029 $end
+$var logic 4 $ hi[3:0] $end
+$attrbegin misc 02 STD_LOGIC_VECTOR 1029 $end
+$var logic 4 % lo[3:0] $end
+$upscope $end
+$upscope $end
+$scope vhdl_record pkts[0] $end
+$attrbegin misc 02 STD_LOGIC 1030 $end
+$var logic 1 & valid $end
+$attrbegin misc 02 STATE_T 1024 $end
+$var string 0 ' state $end
+$scope vhdl_record pair $end
+$attrbegin misc 02 STD_LOGIC_VECTOR 1029 $end
+$var logic 4 ( hi[3:0] $end
+$attrbegin misc 02 STD_LOGIC_VECTOR 1029 $end
+$var logic 4 ) lo[3:0] $end
+$upscope $end
+$upscope $end
+$scope vhdl_record pkts[1] $end
+$attrbegin misc 02 STD_LOGIC 1030 $end
+$var logic 1 * valid $end
+$attrbegin misc 02 STATE_T 1024 $end
+$var string 0 + state $end
+$scope vhdl_record pair $end
+$attrbegin misc 02 STD_LOGIC_VECTOR 1029 $end
+$var logic 4 , hi[3:0] $end
+$attrbegin misc 02 STD_LOGIC_VECTOR 1029 $end
+$var logic 4 - lo[3:0] $end
+$upscope $end
+$upscope $end
+$attrbegin misc 02 STD_LOGIC_VECTOR 1029 $end
+$var logic 4 . rows[0][0][3:0] $end
+$attrbegin misc 02 STD_LOGIC_VECTOR 1029 $end
+$var logic 4 / rows[0][1][3:0] $end
+$attrbegin misc 02 STD_LOGIC_VECTOR 1029 $end
+$var logic 4 0 rows[0][2][3:0] $end
+$attrbegin misc 02 STD_LOGIC_VECTOR 1029 $end
+$var logic 4 1 rows[1][0][3:0] $end
+$attrbegin misc 02 STD_LOGIC_VECTOR 1029 $end
+$var logic 4 2 rows[1][1][3:0] $end
+$attrbegin misc 02 STD_LOGIC_VECTOR 1029 $end
+$var logic 4 3 rows[1][2][3:0] $end
+$attrend $end
+$scope vhdl_record link $end
+$attrbegin misc 02 STD_LOGIC_VECTOR 1029 $end
+$var logic 8 4 addr[7:0] $end
+$attrbegin misc 02 STD_LOGIC_VECTOR 1029 $end
+$var logic 4 5 data[0][3:0] $end
+$attrbegin misc 02 STD_LOGIC_VECTOR 1029 $end
+$var logic 4 6 data[1][3:0] $end
+$attrbegin misc 02 STD_LOGIC_VECTOR 1029 $end
+$var logic 4 7 data[2][3:0] $end
+$attrend $end
+$upscope $end
+$attrbegin misc 04 1 46 $end
+$scope vhdl_for_generate gen(0) $end
+$scope vhdl_record p $end
+$attrbegin misc 02 STD_LOGIC_VECTOR 1029 $end
+$var logic 4 8 hi[3:0] $end
+$attrbegin misc 02 STD_LOGIC_VECTOR 1029 $end
+$var logic 4 9 lo[3:0] $end
+$upscope $end
+$upscope $end
+$attrbegin misc 04 1 46 $end
+$scope vhdl_for_generate gen(1) $end
+$scope vhdl_record p $end
+$attrbegin misc 02 STD_LOGIC_VECTOR 1029 $end
+$var logic 4 : hi[3:0] $end
+$attrbegin misc 02 STD_LOGIC_VECTOR 1029 $end
+$var logic 4 ; lo[3:0] $end
+$upscope $end
+$upscope $end
+$upscope $end
+$enddefinitions $end
+#0
+$dumpvars
+b0000 ;
+b0000 :
+b0000 9
+b0000 8
+b0000 7
+b0000 6
+b0000 5
+b00000000 4
+b0000 3
+b0000 2
+b0000 1
+b0000 0
+b0000 /
+b0000 .
+b0000 -
+b0000 ,
+sidle +
+0*
+b0000 )
+b0000 (
+sidle '
+0&
+b0000 %
+b0000 $
+sidle #
+0"
+0!
+$end
+#5000000
+1!
+#10000000
+0!
+1"
+sbusy #
+b1010 $
+b0101 %
+b0111 -
+b0001 /
+b0010 0
+b0011 1
+b0100 2
+b0101 3
+b00111100 4
+b0001 5
+b0010 6
+b0011 7
+b1001 :
+b0110 ;
+#15000000
+1!
+#20000000
+0!
+#25000000
+1!
+#30000000
+0!
