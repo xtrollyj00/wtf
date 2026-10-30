@@ -51,15 +51,18 @@ Shortcuts taken so far, to fix when they get in the way.
   every computed signal named.
 - Composite types are shown as the simulator dumps them (fixtures `types-*`, made by
   `tests/data/types.sh`; pinned in `core/tests/types.rs`):
-  - a struct, record, union or packed array dumped as a scope has no whole value (`pkt`,
-    `pkts(1)`, `word`), so no slice of it either, and a partial array (`grid[1]`) isn't a signal;
+  - a struct, record, union or array dumped as a scope is one row with a whole value (section
+    6, "Composite rows"), worked out over the whole trace the first time it is shown, from all
+    the signals in it; with a text field its value is text, so it compares only whole (`==`);
   - a packed struct dumped as one var (Verilator without `--trace-structs`) has no field names
     (`pkt.state`) and no enum names, and `x[1]` of a flat packed 2-D vector is bit 1, not
     element 1;
   - a VCD from Verilator writes a struct as a module scope, so its fields are shown by their leaf
     (`hi`, not `pkt.pair.hi`), listed scopes first, and adding it takes only its direct fields;
-  - a struct or scope named as a signal (`value_at pkt`) is an error listing its signals; finding
-    the scopes a name ends with goes through every path, O(signals), only on such an error;
+    it is no composite row, nor is a packed struct dumped as one var;
+  - a module or instance named as a signal (`value_at top.cpu`) is an error listing its signals;
+    finding the scopes a name ends with goes through every path, O(signals), only on such an
+    error;
   - wellen 0.25.7 can't read a GHW file (GHDL) with a multidimensional array ("not yet
     implemented"): opening it is an error, though the panic's message still goes to stderr (the
     panic hook is process-wide, so it isn't swapped around the read); GHDL's VCD has no records

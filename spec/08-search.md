@@ -49,7 +49,9 @@ clk      ▁▁▁▁▔▔▔▔▁▁▁▁▔▔▔▔
   (`axi_tdata(6)`). Paths have one form whatever the simulator or format wrote: every index is
   `[i]`, joined to its array or generate without a dot (`axi_tdata[6]`, `pkts[1].pair.lo`,
   `gen[0].x`, where nvc writes `axi_tdata.[6]` and `gen(0)`, GHDL's FST `axi_tdata.6`); globs and
-  the panel split a path at its indices as at its dots. A search is an expression
+  the panel split a path at its indices as at its dots. A struct, record or array, or part of
+  one (`pkt`, `pkts[1]`, `grid[1]`), is a signal of its whole value (section 6, "Composite
+  rows"): `/pkt == 0x5A5`, `pkts[1] != 0`, `pkt[10]`. A search is an expression
   when it contains a name or an operator; a bare value searches the selected signal as above.
 - A match of an expression is where it **becomes true**. With a clock, `/@aclk wvalid && wready`,
   a match is **every clock cycle** whose ending rising edge of `aclk` samples the expression true
