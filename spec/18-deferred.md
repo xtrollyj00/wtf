@@ -51,15 +51,19 @@ Shortcuts taken so far, to fix when they get in the way.
   every computed signal named.
 - Composite types are shown as the simulator dumps them (fixtures `types-*`, made by
   `tests/data/types.sh`; pinned in `core/tests/types.rs`):
-  - a struct, record, union or packed array dumped as a scope has no whole value (`pkt`,
-    `pkts(1)`, `word`), so no slice of it either, and a partial array (`grid[1]`) isn't a signal;
+  - a struct, record, union or array dumped as a scope is one row with a whole value (section
+    6, "Composite rows"), worked out from its signals at each lookup, O(signals in it); with a
+    text field its value is text, so it compares only whole (`==`); a union's value joins its
+    members, each the same bits (`word` is `0xC3C3`);
   - a packed struct dumped as one var (Verilator without `--trace-structs`) has no field names
     (`pkt.state`) and no enum names, and `x[1]` of a flat packed 2-D vector is bit 1, not
     element 1;
   - a VCD from Verilator writes a struct as a module scope, so its fields are shown by their leaf
     (`hi`, not `pkt.pair.hi`), listed scopes first, and adding it takes only its direct fields;
-  - a struct or scope named as a signal (`value_at pkt`) is an error listing its signals; finding
-    the scopes a name ends with goes through every path, O(signals), only on such an error;
+    it is no composite row, nor is a packed struct dumped as one var;
+  - a module or instance named as a signal (`value_at top.cpu`) is an error listing its signals;
+    finding the scopes a name ends with goes through every path, O(signals), only on such an
+    error;
   - wellen 0.25.7 can't read a GHW file (GHDL) with a multidimensional array ("not yet
     implemented"): opening it is an error, though the panic's message still goes to stderr (the
     panic hook is process-wide, so it isn't swapped around the read); GHDL's VCD has no records
@@ -143,6 +147,23 @@ What they say:
 - With 500k signals the window took 8.9 s while the core opened in 0.1 s: building the signal
   panel's tree looked each scope up among its siblings one by one, quadratic in a scope's children
   (26,300 modules under `top`). Looked up by name now, it takes 0.2 s.
+
+#### Composite rows
+
+`gen --size 1G --format fst --mem 1024` adds `top.mem[0..1023]`, 32 bits each, one element written
+a cycle (12.0M cycles), shown as one row (section 6). `wtf-bench run` on the same machine
+(2026-10-30):
+
+| | 1 GiB FST | target |
+|---|---|---|
+| `add top.mem` (loads its 1024 signals) | 0.75 s | 1 s |
+| its value at the end (32 Kbit) | 0.5 ms | |
+| `top.mem` folded, whole trace, `wtf --snapshot` | 0.98 s | the first screen (1.18 s here) + 50 ms |
+| `top.mem` open one level, the same | 0.98 s | as above |
+
+A composite's value is never stored: each value, change and changes-in-a-column is worked out
+from its signals when asked (O(signals in it) a lookup), so the cost is loading its signals, as
+for any rows.
 
 #### The MCP server
 

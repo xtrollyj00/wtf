@@ -18,8 +18,9 @@ pub struct Sig {
     pub frac: u32,
     /// Belongs to the group whose header is above it.
     pub grouped: bool,
-    /// A bus expanded into its bits shows this many bit lines under it (MSB first); 0 when folded.
-    pub bits: u32,
+    /// The vars opened under this row, the row's own among them: a bus shows its bits, a stream
+    /// its fields, a composite its children (`Workspace::subs`); empty when folded.
+    pub open: Vec<usize>,
     /// Its own colour, an index into `COLORS`; the theme's when None (spec §14 "Colours").
     pub color: Option<usize>,
 }
@@ -79,18 +80,6 @@ pub fn visible(rows: &[Row]) -> Vec<usize> {
             Row::Signal(_) => {}
         }
         out.push(i);
-    }
-    out
-}
-
-/// Screen lines: each visible row, followed by the bit lines of an expanded bus.
-pub fn lines(rows: &[Row]) -> Vec<(usize, Option<u32>)> {
-    let mut out = Vec::new();
-    for i in visible(rows) {
-        out.push((i, None));
-        if let Row::Signal(s) = &rows[i] {
-            out.extend((0..s.bits).rev().map(|b| (i, Some(b))));
-        }
     }
     out
 }
@@ -213,9 +202,17 @@ pub fn group(rows: &mut Vec<Row>, r: std::ops::Range<usize>, name: &str) -> Resu
 pub fn same_layout(a: &[Row], b: &[Row]) -> bool {
     let norm = |r: &Row| match r {
         Row::Group { name, .. } => Row::Group { name: name.clone(), collapsed: false },
-        Row::Signal(s) => Row::Signal(Sig { bits: 0, ..s.clone() }),
+        Row::Signal(s) => Row::Signal(Sig { open: Vec::new(), ..s.clone() }),
     };
     a.iter().map(norm).eq(b.iter().map(norm))
+}
+
+/// A composite's child as its line names it (spec §6 "Composite rows"): its field (`valid`), or
+/// its array and index (`pkts[0]`, `grid[1][2]`).
+pub fn child_name(path: &str) -> String {
+    let p = crate::trace::parts(path);
+    let start = p.iter().rposition(|x| !x.starts_with('[')).unwrap_or(0);
+    crate::trace::join(p[start..].iter().copied())
 }
 
 /// Row names: leaf names with enough scope added to tell equal leaves apart, group signals
@@ -241,7 +238,7 @@ fn unique_leaves(trace: &Trace, vars: &[usize]) -> Vec<String> {
     let parts: Vec<Vec<&str>> = vars
         .iter()
         .map(|&v| (v, trace.vars[v].path.as_str()))
-        .map(|(v, p)| if whole(p) { vec![p] } else if trace.is_computed(v) { p.split('.').collect() } else { crate::trace::parts(p) })
+        .map(|(v, p)| if whole(p) { vec![p] } else if trace.is_computed(v) && !trace.is_composite(v) { p.split('.').collect() } else { crate::trace::parts(p) })
         .collect();
     let mut depth: Vec<usize> = vars.iter().zip(&parts).map(|(&v, p)| trace.vars[v].decl.min(p.len())).collect();
     // a name never starts at an index: `gen[0].p.hi`, not `[0].p.hi`
@@ -286,7 +283,7 @@ mod tests {
     use super::*;
 
     fn sig(var: usize, grouped: bool) -> Row {
-        Row::Signal(Sig { var, radix: 0, frac: 0, grouped, bits: 0, color: None })
+        Row::Signal(Sig { var, radix: 0, frac: 0, grouped, open: Vec::new(), color: None })
     }
 
     #[test]
@@ -298,10 +295,6 @@ mod tests {
         assert_eq!(header_of(&rows, 4), None);
         assert_eq!(members(&rows, 1), [1, 2]);
         assert_eq!(visible(&rows), [0, 1, 4, 5]);
-        if let Row::Signal(s) = &mut rows[4] {
-            s.bits = 2;
-        }
-        assert_eq!(lines(&rows), [(0, None), (1, None), (4, None), (4, Some(1)), (4, Some(0)), (5, None)]);
         tidy(&mut rows);
         assert_eq!(rows.len(), 5);
     }

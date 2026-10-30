@@ -68,7 +68,7 @@ const VERILATOR_PLAIN: &[(&str, &str)] = &[
     ("grid[1][2]", "types.grid[1][2] = 0101"),
     ("grid(1)(2)", "types.grid[1][2] = 0101"),
     ("grid(1, 2)", "types.grid[1][2] = 0101"),
-    ("grid[1]", "unknown"),
+    ("grid[1]", "types.grid[1] = 001101000101"), // a composite: its elements joined
     ("pkts(1)", "types.pkts[1] = 00000000111"),
     ("pkts[1].pair.lo", "unknown"), // shortcut: as pkt.pair.hi
     ("word", "types.word = 11000011"),
@@ -105,23 +105,19 @@ fn icarus() {
 }
 
 /// With --trace-structs a struct or union is a scope of its fields, a packed array a scope of
-/// elements; the FST gives an enum field its names, the VCD can't.
+/// elements; the FST gives an enum field its names, the VCD can't. A packed array is a
+/// composite, its elements joined, so it slices.
 const VERILATOR_STRUCTS: &[(&str, &str)] = &[
-    // shortcut: a struct is a scope, so it has no whole value or slice, fixed by a later piece
-    ("pkt", "unknown"),
-    ("pkt.pair", "unknown"),
     ("pkt.valid", "types.pkt.valid = 1"),
     ("pkt.pair.hi", "types.pkt.pair.hi = 1010"),
     ("loose.a", "types.loose.a = 00111100"),
     ("packed2[1]", "types.packed2[1] = 00100010"),
-    ("packed2[15:8]", "unknown"), // shortcut: as pkt
+    ("packed2[15:8]", "types.packed2[15:8] = 00100010"),
     ("mem(2)", "types.mem[2] = 00010010"),
     ("grid(1)(2)", "types.grid[1][2] = 0101"),
-    ("pkts[1]", "unknown"), // shortcut: as pkt
-    ("word", "unknown"),    // shortcut: as pkt
+    ("grid[1]", "types.grid[1] = 001101000101"),
     ("word.byte_", "types.word.byte_ = 11000011"),
     ("word.pair.hi", "types.word.pair.hi = 1100"),
-    ("gen(1).p", "unknown"), // shortcut: as pkt
     ("gen[1].p.hi", "types.gen[1].p.hi = 1001"),
     ("gen(1).p.hi", "types.gen[1].p.hi = 1001"),
 ];
@@ -130,6 +126,20 @@ const VERILATOR_STRUCTS: &[(&str, &str)] = &[
 fn verilator_structs() {
     check("types-verilator-structs.vcd", VERILATOR_STRUCTS);
     check("types-verilator-structs.fst", VERILATOR_STRUCTS);
+    // a struct is a composite with its whole value in the FST
+    check(
+        "types-verilator-structs.fst",
+        &[
+            ("pkt", "types.pkt = 10110100101"),
+            ("pkt.pair", "types.pkt.pair = 10100101"),
+            ("pkts[1]", "types.pkts[1] = 00000000111"),
+            // shortcut: a union joins its members, each the same bits, fixed when it gets in the way
+            ("word", "types.word = 1100001111000011"),
+            ("gen(1).p", "types.gen[1].p = 10010110"),
+        ],
+    );
+    // shortcut: the VCD writes a struct as a module scope, so it is none (spec §18)
+    check("types-verilator-structs.vcd", &[("pkt", "unknown"), ("pkt.pair", "unknown"), ("pkts[1]", "unknown"), ("gen(1).p", "unknown")]);
     // the VCD writes an array of structs' scopes pkts[1], the FST pkts / [1]
     check(
         "types-verilator-structs.vcd",
@@ -155,12 +165,13 @@ fn verilator_fst_grid() {
 
 /// nvc writes records as scopes of their fields, an enum as its names (a string var).
 const NVC_COMMON: &[(&str, &str)] = &[
-    ("pkt", "unknown"), // shortcut: a record is a scope, no whole value, fixed by a later piece
+    // an enum is text, so the record's value is text
+    ("pkt", "types.pkt = '{valid:1, state:busy, pair:'{hi:A, lo:5}}"),
     ("pkt.valid", "types.pkt.valid = 1"),
     ("pkt.state", "types.pkt.state = busy"),
     ("PKT.PAIR.HI", "types.pkt.pair.hi = 1010"),
     ("link.addr", "types.link.addr = 00111100"),
-    ("gen(1).p", "unknown"), // shortcut: as pkt
+    ("gen(1).p", "types.gen[1].p = 10010110"),
     ("gen[1].p.hi", "types.gen[1].p.hi = 1001"),
     // nvc drops a 2-D array, in VCD as in FST
     ("grid(1, 2)", "unknown"),
@@ -172,10 +183,10 @@ fn nvc() {
     let arrays: &[(&str, &str)] = &[
         ("pkts(1).pair.lo", "types.pkts[1].pair.lo = 0111"),
         ("pkts[1].pair.lo", "types.pkts[1].pair.lo = 0111"),
-        ("pkts(1)", "unknown"), // shortcut: as pkt
+        ("pkts(1)", "types.pkts[1] = '{valid:0, state:idle, pair:'{hi:0, lo:7}}"),
         ("rows(1)(2)", "types.rows[1][2] = 0101"),
         ("rows[1][2]", "types.rows[1][2] = 0101"),
-        ("rows(1)", "unknown"),
+        ("rows(1)", "types.rows[1] = 001101000101"),
         ("link.data(1)", "types.link.data[1] = 0010"),
     ];
     for file in ["types-nvc.fst", "types-nvc.vcd"] {
@@ -227,8 +238,7 @@ fn row_names_keep_the_composite() {
     }
 }
 
-/// `:add` of a struct, record or array: a group of all of it; of a plain scope, an error that
-/// says how.
+/// `:add` of a struct, record or array: one row; of a plain scope, an error that says how.
 fn added(file: &str, cmd: &str) -> String {
     let mut ws = fixture(file);
     match wtf_core::command::run(&mut ws, cmd) {
@@ -239,44 +249,104 @@ fn added(file: &str, cmd: &str) -> String {
 
 #[test]
 fn add_a_composite() {
-    let pkt = "▾ pkt pkt.valid pkt.state pkt.pair.hi pkt.pair.lo";
-    let pkts = "▾ pkts pkts[0].valid pkts[0].state pkts[0].pair.hi pkts[0].pair.lo pkts[1].valid pkts[1].state pkts[1].pair.hi pkts[1].pair.lo";
     for file in ["types-verilator-structs.fst", "types-nvc.fst"] {
         for (cmd, want) in [
-            ("add types.pkt", pkt),
-            ("add PKT", pkt),
-            ("add pkt.pair", "▾ pkt.pair pkt.pair.hi pkt.pair.lo"),
-            ("add types.pkts", pkts),
-            // shortcut: the group and rows lose the generate scope (p, p.hi for gen(1).p), fixed
-            // by a later piece
-            ("add gen(1).p", "▾ p p.hi p.lo"),
+            ("add types.pkt", "pkt"),
+            ("add PKT", "pkt"),
+            ("add TYPES.PKT", "pkt"),
+            ("add pkt.pair", "pkt.pair"),
+            ("add types.pkts", "pkts"),
+            ("add pkts(1)", "pkts[1]"),
+            // shortcut: the row loses the generate scope (p for gen(1).p), fixed by a later piece
+            ("add gen(1).p", "p"),
         ] {
             assert_eq!(added(file, cmd), want, "{file}: {cmd}");
         }
     }
     let structs = "types-verilator-structs.fst";
-    assert_eq!(added(structs, "add types.mem"), "▾ mem mem[0] mem[1] mem[2] mem[3]");
-    assert_eq!(added(structs, "add word"), "▾ word word.byte_ word.pair.hi word.pair.lo");
-    // shortcut: wellen's grid diagonal (verilator_fst_grid)
-    assert_eq!(added(structs, "add types.grid[1]"), "▾ grid[1] grid[1][0] grid[1].grid[1]. grid[1][2]");
+    assert_eq!(added(structs, "add types.mem types.grid[1] word"), "mem grid[1] word");
+    // a module's direct signals: its composites are signals in it
+    assert_eq!(added(structs, "add types.gen[1]"), "▾ gen[1] p");
     assert_eq!(
         added(structs, "add types.gen"),
         "no signals directly in types.gen: add types.gen.** for all of it, or one of its scopes: types.gen[0], types.gen[1]"
-    );
-    // shortcut: the error mixes forms (types.gen(1), types.gen[1].p), fixed by a later piece
-    assert_eq!(
-        added("types-nvc.fst", "add types.gen[1]"),
-        "no signals directly in types.gen[1]: add types.gen[1].** for all of it, or one of its scopes: types.gen[1].p"
     );
     // shortcut: a Verilator VCD writes struct scopes as modules, so :add takes only the fields
     // directly in it (not pkt.pair) and pkts is a plain scope, fixed by a later piece
     let vcd = "types-verilator-structs.vcd";
     assert_eq!(added(vcd, "add types.pkt"), "▾ pkt valid state");
     assert!(added(vcd, "add types.pkts").starts_with("no signals directly in types.pkts"));
-    assert_eq!(added(vcd, "add types.grid[1]"), "▾ grid[1] grid[1][0] grid[1][1] grid[1][2]");
-    let mut ws = fixture(structs);
+    assert_eq!(added(vcd, "add types.grid[1]"), "grid[1]");
+    let mut ws = fixture(vcd);
     let e = ws.resolve("pkt").unwrap_err();
     assert!(e.starts_with("unknown signal: pkt is a scope of 4 signals (types.pkt.valid"), "{e}");
+}
+
+/// The lines under a composite row as the window lists them, each a level deeper indented.
+fn lines(ws: &Workspace) -> Vec<String> {
+    let Some(wtf_core::rows::Row::Signal(s)) = ws.rows.first() else { return Vec::new() };
+    ws.subs(s).iter().map(|l| format!("{}{}", "  ".repeat(l.depth), wtf_core::rows::child_name(&ws.trace.vars[l.var].path) + &l.bit.map(|b| format!("[{b}]")).unwrap_or_default())).collect()
+}
+
+/// Space on line `sub` of the first row (counted from the bottom, as `Workspace::bit`), or on the
+/// row itself.
+fn space(ws: &mut Workspace, sub: Option<u32>) {
+    (ws.sel, ws.bit) = (0, sub);
+    ws.toggle_group();
+}
+
+#[test]
+fn open_a_composite() {
+    for file in ["types-verilator-structs.fst", "types-nvc.fst"] {
+        let mut ws = fixture(file);
+        ws.undoable(|ws| wtf_core::command::run(ws, "add types.pkts")).unwrap();
+        assert_eq!(ws.rows.len(), 1, "{file}");
+        space(&mut ws, None);
+        assert_eq!(lines(&ws), ["pkts[0]", "pkts[1]"], "{file}");
+        // pkts[0], two lines up from the bottom, opens one level; the selection stays on it
+        space(&mut ws, Some(1));
+        assert_eq!(lines(&ws), ["pkts[0]", "  valid", "  state", "  pair", "pkts[1]"], "{file}");
+        assert_eq!(ws.bit, Some(4));
+        // pair opens into its fields; valid, a 1-bit field, folds the level it is in
+        space(&mut ws, Some(1));
+        assert_eq!(lines(&ws), ["pkts[0]", "  valid", "  state", "  pair", "    hi", "    lo", "pkts[1]"], "{file}");
+        space(&mut ws, Some(5));
+        assert_eq!(lines(&ws), ["pkts[0]", "pkts[1]"], "{file}");
+        assert_eq!(ws.bit, Some(1));
+        // folding the row folds every level under it
+        space(&mut ws, Some(1));
+        space(&mut ws, None);
+        assert_eq!(lines(&ws), Vec::<String>::new());
+        space(&mut ws, None);
+        assert_eq!(lines(&ws), ["pkts[0]", "pkts[1]"], "{file}");
+        // the values of a level are there once the row is shown
+        let t = (10_000_000 / ws.trace.fs_per_tick.unwrap()) as Tick;
+        let lo = ws.trace.by_path["types.pkts[1].pair.lo"];
+        assert_eq!(ws.trace.value_at(lo, t), Some(Val::Bits("0111".into())), "{file}");
+        // opening and folding are no undo steps; dd on a line removes its row
+        wtf_core::command::run(&mut ws, "undo").unwrap();
+        assert!(ws.rows.is_empty(), "{file}");
+        wtf_core::command::run(&mut ws, "add types.pkts").unwrap();
+        space(&mut ws, None);
+        ws.bit = Some(0);
+        ws.delete().unwrap();
+        assert!(ws.rows.is_empty(), "{file}");
+        wtf_core::command::run(&mut ws, "add types.pkts").unwrap();
+        wtf_core::command::run(&mut ws, "rm pkts").unwrap();
+        assert!(ws.rows.is_empty(), "{file}");
+        // :e keeps the open levels
+        wtf_core::command::run(&mut ws, "add types.pkts").unwrap();
+        space(&mut ws, None);
+        ws.reload().unwrap();
+        assert_eq!(lines(&ws), ["pkts[0]", "pkts[1]"], "{file}");
+    }
+    // grid opens one index at a time; an element of 4 bits opens into its bits
+    let mut ws = fixture("types-verilator-structs.vcd");
+    wtf_core::command::run(&mut ws, "add types.grid").unwrap();
+    space(&mut ws, None);
+    space(&mut ws, Some(0));
+    space(&mut ws, Some(0));
+    assert_eq!(lines(&ws), ["grid[0]", "grid[1]", "  grid[1][0]", "  grid[1][1]", "  grid[1][2]", "    grid[1][2][3]", "    grid[1][2][2]", "    grid[1][2][1]", "    grid[1][2][0]"]);
 }
 
 /// GHDL's VCD has only scalars and vectors (records and arrays are comments); its FST keeps the 2-D
@@ -287,7 +357,7 @@ fn ghdl() {
         ("pkt.valid", "types.pkt.valid = 1"),
         ("pkt.state", "types.pkt.state = busy"),
         ("pkt.pair.hi", "types.pkt.pair.hi = 1010"),
-        ("pkt", "unknown"), // shortcut: a record is a scope, no whole value, fixed by a later piece
+        ("pkt", "types.pkt = 10110100101"), // the enum is bits with names in a GHW
         ("pkts(1).pair.lo", "types.pkts[1].pair.lo = 0111"),
         ("rows(1)(2)", "types.rows[1][2] = 0101"),
         ("link.data(1)", "types.link.data[1] = 0010"),

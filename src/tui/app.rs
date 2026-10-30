@@ -307,7 +307,7 @@ impl App {
                 let (x, y) = (m.column as usize, m.row as usize);
                 // the time axis, the cursor ruler, then two lines a row
                 let head = 1 + (self.ws.cursor_list().len() > 1) as usize;
-                let lines = wtf_core::rows::lines(&self.ws.rows);
+                let lines = self.ws.lines();
                 let hit = y.checked_sub(head).and_then(|l| lines.get(self.top + l / crate::draw::ROW_LINES)).copied();
                 if let Some((sel, bit)) = hit {
                     (self.ws.sel, self.ws.bit) = (sel, bit);
@@ -354,9 +354,9 @@ impl App {
             Mode::Command | Mode::Search => self.command_key(k),
         }
         self.ws.record(mark);
-        // a bit line stays selected only while its bus shows it
+        // a line under a row stays selected only while the row shows it
         if let Some(b) = self.ws.bit
-            && !matches!(self.ws.rows.get(self.ws.sel), Some(Row::Signal(s)) if b < s.bits)
+            && !matches!(self.ws.rows.get(self.ws.sel), Some(Row::Signal(s)) if (b as usize) < self.ws.subs(s).len())
         {
             self.ws.bit = None;
         }
@@ -443,7 +443,7 @@ impl App {
                     let fields: Vec<String> = st.fields_text(i, fpt).into_iter().map(|(n, v)| format!("{n}={v}")).collect();
                     format!("{} #{i} {}{}{} {}", st.name, time::format(r.start, fpt), gl().dash, time::format(r.end, fpt), fields.join(" "))
                 } else {
-                    let (var, bit) = self.ws.probe(s.var, self.ws.bit);
+                    let (var, bit) = self.ws.probe(s, self.ws.bit);
                     match self.ws.trace.value_of(var, bit, self.ws.view.cursor) {
                         Some(v) if self.ws.stream_of(var).is_none() => rows::label(&self.ws.trace.vars[s.var], s, &v),
                         _ => return Err("no value here".into()),
@@ -476,15 +476,44 @@ impl App {
             }
             return self.examine = Some((format!("{} {}", st.name, st.label(i, fpt)), lines));
         }
-        let (var, bit) = self.ws.probe(s.var, self.ws.bit);
+        let (var, bit) = self.ws.probe(s, self.ws.bit);
         let path = &self.ws.trace.vars[var].path;
         let name = bit.map_or(path.clone(), |b| format!("{path}[{b}]"));
-        let value = match self.ws.trace.value_of(var, bit, self.ws.view.cursor) {
+        let line = crate::draw::line_sig(&self.ws, s, var);
+        let mut value = match self.ws.trace.value_of(var, bit, self.ws.view.cursor) {
             Some(_) if self.ws.stream_of(var).is_some() => vec!["no record here".into()],
-            Some(v) => wrap(&rows::label(&self.ws.trace.vars[s.var], s, &v)),
+            Some(v) => wrap(&rows::label(&self.ws.trace.vars[var], &line, &v)),
             None => vec!["no value here".into()],
         };
+        if bit.is_none() && self.ws.trace.is_composite(var) {
+            value.push(String::new());
+            value.extend(self.fields(var));
+        }
         self.examine = Some((format!("{name} @ {}", time::format(self.ws.view.cursor, fpt)), value));
+    }
+
+    /// A struct's or array's fields at the cursor, a line each, nested ones indented under their
+    /// struct, an array's elements by index (spec §2 `e`).
+    fn fields(&self, var: usize) -> Vec<String> {
+        fn walk(app: &App, var: usize, depth: usize, out: &mut Vec<(String, Option<String>)>) {
+            let t = &app.ws.trace;
+            for &c in &t.vars[var].children {
+                let name = format!("{}{}", "  ".repeat(depth), wtf_core::trace::parts(&t.vars[c].path).last().copied().unwrap_or_default());
+                if t.is_composite(c) {
+                    out.push((name, None));
+                    walk(app, c, depth + 1, out);
+                } else {
+                    let v = &t.vars[c];
+                    let sig = rows::Sig { var: c, radix: wtf_core::radix::default_for(v.names.is_some(), v.signed), frac: 0, grouped: false, open: Vec::new(), color: None };
+                    let value = t.value_at(c, app.ws.view.cursor).map_or("-".into(), |x| rows::label(v, &sig, &x));
+                    out.push((name, Some(value)));
+                }
+            }
+        }
+        let mut lines = Vec::new();
+        walk(self, var, 0, &mut lines);
+        let nw = lines.iter().filter(|l| l.1.is_some()).map(|l| l.0.chars().count()).max().unwrap_or(0);
+        lines.into_iter().map(|(n, v)| v.map_or(n.clone(), |v| format!("{n:<nw$}  {v}"))).collect()
     }
 
     /// A value search (spec §8) that says where the match is: `match 3 of 157`.
@@ -507,7 +536,7 @@ impl App {
 
     /// Move the selection by `d` screen lines (bit lines of expanded buses included).
     fn move_sel(&mut self, d: isize) {
-        let lines = rows::lines(&self.ws.rows);
+        let lines = self.ws.lines();
         let Some(p) = lines.iter().position(|&l| l == (self.ws.sel, self.ws.bit)) else { return };
         (self.ws.sel, self.ws.bit) = lines[p.saturating_add_signed(d).min(lines.len() - 1)];
     }

@@ -19,9 +19,9 @@ match the highlight is on (`2/5`).
 | `j` / `k` | move |
 | `gg` / `G` | first / last line |
 | `l` / `h` | expand / collapse a scope; `h` on a signal or a collapsed scope goes to the parent scope |
-| `Space` | mark / unmark the signal, or all signals directly in a scope (all of a struct or array); with a `V` range, its signals |
+| `Space` | mark / unmark the signal (a struct, record or array is one), or all signals directly in a scope; with a `V` range, its signals |
 | `V`, then `j` / `k` / `n` / `N` | select a range of lines, as in vim; a closed scope in it brings the signals directly in it |
-| `Enter` | add the marked signals and the `V` range as rows; without marks, the highlighted item: a signal as a row, a scope as a group named after it |
+| `Enter` | add the marked signals and the `V` range as rows; without marks, the highlighted item: a signal (a struct, record or array too) as a row, a scope as a group named after it |
 | `Ctrl-g` | add the marked signals and the `V` range (or the highlighted signal or scope) as a new group, then name it |
 | `/` | search; while typing, `Enter` ends it and `Esc` (or `Backspace` on an empty search) cancels it |
 | `n` / `N` | next / previous match of the last search |
@@ -46,9 +46,10 @@ The panel stays open after adding.
   go below the whole group, outside it.
 - A signal that is already shown is never added twice: `Enter` on a `●` signal does nothing,
   and it can't be marked; adding a scope, `Space` on a scope and `Ctrl-a` skip shown signals. Removing is done on the rows side with `dd`.
-- Adding a scope takes only the signals directly in it; subscopes are skipped until subgroups
-  exist. A struct, record or array is one signal in the HDL, so adding it (and `Space` on it) takes
-  all of its signals, in one group. Its fields are listed as declared, not subscopes first.
+- Adding a scope (a module, an instance) takes only the signals directly in it; subscopes are
+  skipped until subgroups exist. A struct, record or array is one signal in the HDL, so it is
+  added as one row (section 6, "Composite rows"), marked `●` when shown; a signal in it can
+  still be added as a row of its own. Its fields are listed as declared, not subscopes first.
   A scope without direct signals, or whose signals are all shown already, adds nothing and says so
   on the status line.
 
@@ -63,7 +64,7 @@ The panel stays open after adding.
 | `J` / `K` | move the selected row down / up |
 | `r` | cycle the radix of the selected row, or of all signals in a group (section 10) |
 | `u` / `Ctrl-r` | undo / redo |
-| `Space` | collapse / expand the selected group, or expand / fold a bus or a stream |
+| `Space` | collapse / expand the selected group, or open / fold a bus, a stream or a composite (one level) |
 | `e` | examine the selected signal, as in View mode |
 | `Esc` | clear a `V` selection if there is one, otherwise back to View mode |
 
@@ -98,6 +99,8 @@ A group is a named set of rows with a header row. Groups have one level (no nest
   selected (`j` / `k`, `w` / `b` jump between that bit's changes, the value column shows the bit),
   but they move and are removed with their bus. Like collapsing, expanding is not an undo step.
   Combining bits or signals into new ones is done by computed signals (`:signal`, section 16).
+- **Composite rows**: a struct, record, union or array the trace dumps as a scope is one row,
+  named as in the HDL (`grid`, `pkts`, `pkt`). See "Composite rows" below.
 - **Activity**: a collapsed group draws one row in place of its signals. A column is marked active
   when any signal in the group has a transition in it (filled between the two lines, `▄` over `▀`),
   and drawn as a dim idle line on the lower line otherwise.
@@ -119,3 +122,44 @@ In Edit mode, on the rows side:
 
 - `J` / `K` on a signal next to a group boundary moves it into or out of the group.
 - `:group` on a selection that includes a header shows an error, since groups don't nest yet.
+
+### Composite rows
+
+A struct, record or array is one signal in the HDL, so it is one row. `Space` opens it one level,
+the way a bus opens into its bits and a stream into its fields: **every index and every field is
+a level**. `pkts` opens into `pkts[0]`, `pkts[1]`; `pkts[0]` into `valid`, `state`, `pair`;
+`pair` into `hi`, `lo`. `grid` opens into `grid[0]`, `grid[1]`, and `grid[1]` into `grid[1][0]`
+.. `grid[1][2]`.
+
+```
+▌▸ pkt         0x5A5     ── 0x0 ──🮦──── 0x5A5 ─────
+ ▾ pkts        0x000007  ── 0x0 ──🮦─── 0x000007 ───
+   ▸ pkts[0]   0x000     ───────── 0x000 ──────────
+   ▾ pkts[1]   0x007     ── 0x0 ──🮦──── 0x007 ─────
+       valid   0         ───────────────────────────
+       state   IDLE      ───────── IDLE ───────────
+     ▸ pair    0x07      ── 0x00 ─🮦──── 0x07 ──────
+```
+
+(Each row is two lines on screen; one is drawn here. The values are `tests/data/types.sv`'s at
+10ns.)
+
+- **Value**: a composite is a signal whose value is its fields' values joined in declaration
+  order (an array's elements in the order the trace lists them), the first the most significant
+  (`pkt` is `{valid, state, pair}`: `0x5A5`; `pkts` is `{pkts[0], pkts[1]}`), drawn as a bus.
+  When a field is text (nvc's enum is a string), the value is text instead, written as an SV
+  aggregate: `'{valid:1, state:busy, pair:'{hi:A, lo:5}}`, bits fields in hex without `0x`, an
+  array's elements without names (`'{8, 7}`). It changes whenever a field changes.
+- **Lines**: each open level shows its direct children under it, indented two columns a
+  level; a child is a composite (folded or open, `▸` / `▾`) or a signal (drawn as any signal, a
+  bus may open into its bits). A child is named by its field (`valid`, `pair`) or by its array
+  and index as the HDL writes it (`pkts[0]`, `grid[1][2]`); the status line shows its full path.
+- **Like bit lines**: child lines are selected with `j` / `k` (`w` / `b` jump between that
+  child's changes, the value column shows it, `e` examines it), but they move and are removed
+  with their row: `dd` on one removes the whole row. Opening and folding is not an undo step.
+  `Space` on an open level folds it and every level under it.
+- A composite row's radix applies to its whole value; a child takes the default radix for its
+  signal (an enum its names).
+- **Groups are not composites**: a group is the user's collection of rows; a composite is the
+  trace's structure. Modules and instances stay groups (`:add top.cpu`), and a group can hold
+  composite rows.

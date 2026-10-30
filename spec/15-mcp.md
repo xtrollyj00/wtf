@@ -10,9 +10,9 @@ reuse wtf's own pieces:
 | `open(trace)` | open a trace in a new workspace of the agent's, which becomes the current one |
 | `use(session)` | make another of this server's workspaces the current one |
 | `info` | file, time range, timescale, number of signals, and the interfaces a built-in protocol decodes, each with its `decode` line (`open` answers with it too) |
-| `signals(pattern)` | signals with their widths; `*` / `**` globs, or any path containing the text; array elements and generate instances of one width are one line, the indices as ranges (`mux_in[0..15] (8 bits, 16 signals)`, `gen[0..4].x`) |
+| `signals(pattern)` | signals with their widths; `*` / `**` globs, or any path containing the text; array elements and generate instances of one width are one line, the indices as ranges (`mux_in[0..15] (8 bits, 16 signals)`, `gen[0..4].x`); a struct, record or array is one line, `types.grid (array, 24 bits, 6 signals)`, its signals listed when the pattern names inside it (`types.grid.**`) |
 | `values(signals, from, to, radix, unit)` | the value at `from`, then each change up to `to`, as `time value` lines |
-| `value_at(signals, time, radix, unit)` | values at one time |
+| `value_at(signals, time, radix, unit)` | values at one time; a struct, record or array its whole value, then a line per signal in it (`pkt.valid = 1`, `pkt.pair.hi = 0xA`) |
 | `find(expr, from, to, backward, count, show, count_only, unit)` | match times of a search expression (section 8), `@clk` included, as a table |
 | `render(signals, from, to, width, unit)` | the signals drawn as text, as on the screen (`--snapshot`); without signals, the workspace |
 | `workspace(scope, signals, protocols, decode, rows, cursors, range)` | set up the whole workspace in one call |
@@ -105,7 +105,9 @@ reuse wtf's own pieces:
   writes the state it wants instead of editing toward it:
   `{"scope": "dut", "rows": ["s_axi_aclk", {"group": "write", "rows": ["s_axi_awaddr:hex",
   "s_axi_awvalid"]}], "cursors": {"1": "80ns", "2": "390ns"}, "range": ["60ns",
-  "480ns"]}`. It is the session (section 11) in another shape, and goes through the same checks.
+  "480ns"]}`. A struct, record or array is a row as any signal (`"pkt"`, folded); `{"signal":
+  "grid", "open": ["grid", "grid[1]"]}` opens levels of it, as a session's `open`. It is the
+  session (section 11) in another shape, and goes through the same checks.
   Every unknown or ambiguous name, bad radix and bad time is reported at once and nothing
   changes, so one retry fixes them. It answers as `view` does.
 - `command` answers with the rows it added and removed, so a pattern that caught too much shows.

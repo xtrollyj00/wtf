@@ -169,7 +169,14 @@ fn rows_of(app: &mut Workspace, rows: Value, grouped: bool, out: &mut Vec<Row>, 
                     None
                 })
             });
-            let expanded = row.remove("expanded").and_then(|e| e.as_bool()).unwrap_or(false);
+            let levels: Vec<String> = match row.remove("open") {
+                Some(Value::Array(a)) => a.iter().filter_map(|n| n.as_str().map(str::to_string)).collect(),
+                Some(_) => {
+                    warn.push(format!("open of {path}: must be a list of names"));
+                    Vec::new()
+                }
+                None => Vec::new(),
+            };
             let color = row.remove("color").and_then(|c| rows::color_named(c.as_str().unwrap_or("")).map_err(|e| warn.push(e)).ok());
             match app.var_named(&path) {
                 Some(var) if !out.iter().any(|r| r.sig().is_some_and(|s| s.var == var)) => {
@@ -183,8 +190,15 @@ fn rows_of(app: &mut Workspace, rows: Value, grouped: bool, out: &mut Vec<Row>, 
                         }
                         None => (radix::default_for(named, app.trace.vars[var].signed), 0),
                     };
-                    let bits = if expanded { app.sub_lines(var) } else { 0 };
-                    out.push(Row::Signal(Sig { var, radix, frac, grouped, bits, color }));
+                    let mut open: Vec<usize> = Vec::new();
+                    for name in levels {
+                        match open_var(app, var, &name) {
+                            Some(v) if !open.contains(&v) => open.push(v),
+                            Some(_) => {}
+                            None => warn.push(format!("{path} has no {name} to open")),
+                        }
+                    }
+                    out.push(Row::Signal(Sig { var, radix, frac, grouped, open, color }));
                 }
                 Some(_) => {}
                 None => missing.push(path),
@@ -225,10 +239,27 @@ fn signal_keys(app: &Workspace, s: &Sig) -> Vec<String> {
     if let Some(c) = s.color {
         keys.push(format!("color = {}", quote(rows::COLORS[c])));
     }
-    if s.bits > 0 {
-        keys.push("expanded = true".into());
+    if !s.open.is_empty() {
+        keys.push(format!("open = [{}]", s.open.iter().map(|&v| quote(&open_name(app, s.var, v))).collect::<Vec<_>>().join(", ")));
     }
     keys
+}
+
+/// A level open under a row, named from the row's name on (`pkts`, `pkts[1]`, `pkts[1].pair`; a
+/// bus or stream opened is its own name, spec §11).
+pub fn open_name(app: &Workspace, row: usize, var: usize) -> String {
+    let base = &app.trace.vars[row].path;
+    rows::child_name(base) + &app.trace.vars[var].path[base.len()..]
+}
+
+/// The var a level's name in a row's `open` names: the row's own or one inside it.
+pub fn open_var(app: &Workspace, row: usize, name: &str) -> Option<usize> {
+    let base = &app.trace.vars[row].path;
+    let rest = name.strip_prefix(&rows::child_name(base))?;
+    if !(rest.is_empty() || rest.starts_with(['.', '['])) {
+        return None;
+    }
+    app.trace.by_path.get(&format!("{base}{rest}")).copied()
 }
 
 /// The layout part of a session. `[+]` compares it with the one last saved or loaded; it names

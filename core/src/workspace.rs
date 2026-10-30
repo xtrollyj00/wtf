@@ -20,6 +20,14 @@ mod decoding;
 /// A message for the user: the text, and whether it is an error or a warning.
 pub type Msg = (String, bool);
 
+/// A line under a row (`Workspace::subs`): a var, or a bit of a bus, and how deep it is nested.
+#[derive(Clone, PartialEq, Debug)]
+pub struct Sub {
+    pub var: usize,
+    pub bit: Option<u32>,
+    pub depth: usize,
+}
+
 pub struct Workspace {
     pub trace: Trace,
     pub file_name: String,
@@ -144,7 +152,7 @@ impl Workspace {
     pub fn search(&mut self, text: &str, forward: bool, n: u64) -> Result<search::Query, String> {
         let text = text.trim();
         let selected = match self.rows.get(self.sel) {
-            Some(Row::Signal(s)) => Some(self.probe(s.var, self.bit)),
+            Some(Row::Signal(s)) => Some(self.probe(s, self.bit)),
             _ => None,
         };
         // the names the file gives the selected signal's values
@@ -256,20 +264,29 @@ impl Workspace {
         if let Some(form) = computed::form(name) {
             return self.compute(form).map(|v| (v, None));
         }
-        // a bit of a bus; a base that is no signal may be an array (`axi_tdata[6]`), named below
+        // a bit of a bus; a base that is no signal may be an array (`axi_tdata[6]`), named below,
+        // and an array's index is its element (`mem[2]`), a struct's a bit (`pkt[10]`)
         if let Some((base, rest)) = name.rsplit_once('[')
             && !base.is_empty()
             && let Some(b) = rest.strip_suffix(']').and_then(|n| n.parse::<u32>().ok())
             && let Ok((v, None)) = self.resolve(base)
         {
+            if self.trace.is_composite(v) {
+                let array = self.trace.vars[v].children.iter().any(|&c| self.trace.vars[c].path.ends_with(']'));
+                match self.by_end(name) {
+                    Ok(e) => return Ok((e, None)),
+                    Err(e) if array => return Err(e),
+                    Err(_) => {}
+                }
+            }
             let w = self.trace.vars[v].width.unwrap_or(1);
             return if b < w { Ok((v, Some(b))) } else { Err(format!("{base} has no bit {b}")) };
         }
         self.by_end(name).map(|v| (v, None))
     }
 
-    /// `unknown signal`, naming the signals in it when `name` is a scope: a struct, record or array
-    /// has no value of its own (spec §18), its fields do.
+    /// `unknown signal`, naming the signals in it when `name` is a scope: a module has no value of
+    /// its own (spec §18), its signals do.
     fn not_a_signal(&self, name: &str) -> String {
         let key = crate::trace::parts(&crate::trace::canon(name)).into_iter().map(str::to_string).collect::<Vec<_>>();
         let inside: Vec<&str> = self
@@ -572,7 +589,11 @@ impl Workspace {
                 Row::Signal(s) => {
                     let path = &old.vars[s.var].path;
                     match self.var_named(path) {
-                        Some(var) => rows.push(Row::Signal(Sig { var, ..s })),
+                        Some(var) => {
+                            // the open levels by path too: indices may differ in the new trace
+                            let open = s.open.iter().filter_map(|&o| self.var_named(&old.vars[o].path)).collect();
+                            rows.push(Row::Signal(Sig { var, open, ..s }))
+                        }
                         None => missing.push(path.clone()),
                     }
                 }
@@ -630,31 +651,65 @@ impl Workspace {
         Some((s, i))
     }
 
-    /// How many lines an expanded row shows under it: a bus's bits, a stream's fields.
-    pub fn sub_lines(&self, var: usize) -> u32 {
-        match self.stream_of(var) {
-            Some(s) => s.schema.len() as u32,
-            None => self.trace.vars[var].width.filter(|&w| w > 1).unwrap_or(0),
+    /// What opening a var shows under it: a composite its fields or elements, a stream its field
+    /// vars, a bus its bits (MSB first); nothing for a 1-bit or text signal.
+    pub fn children(&self, var: usize) -> Vec<(usize, Option<u32>)> {
+        if let Some(s) = self.stream_of(var) {
+            return s.schema.iter().filter_map(|f| self.trace.by_path.get(&format!("{}.{}", s.name, f.name)).map(|&v| (v, None))).collect();
         }
+        let v = &self.trace.vars[var];
+        if !v.children.is_empty() {
+            return v.children.iter().map(|&c| (c, None)).collect();
+        }
+        (0..v.width.filter(|&w| w > 1).unwrap_or(0)).rev().map(|b| (var, Some(b))).collect()
     }
 
-    /// What line `sub` under a row shows (`rows::lines`): bit `sub` of a bus, or for a stream its
-    /// field var, the first field on top.
-    pub fn probe(&self, var: usize, sub: Option<u32>) -> (usize, Option<u32>) {
-        let field = |s: &Stream, b: u32| {
-            let f = s.schema.get((s.schema.len() as u32).checked_sub(b + 1)? as usize)?;
-            self.trace.by_path.get(&format!("{}.{}", s.name, f.name)).copied()
-        };
-        match (sub, self.stream_of(var)) {
-            (Some(b), Some(s)) => field(s, b).map_or((var, None), |v| (v, None)),
-            _ => (var, sub),
+    /// The lines under a row, top to bottom: the children of each open var, nested (spec §6).
+    pub fn subs(&self, s: &Sig) -> Vec<Sub> {
+        fn walk(ws: &Workspace, open: &[usize], var: usize, depth: usize, out: &mut Vec<Sub>) {
+            if !open.contains(&var) {
+                return;
+            }
+            for (v, bit) in ws.children(var) {
+                out.push(Sub { var: v, bit, depth });
+                if bit.is_none() {
+                    walk(ws, open, v, depth + 1, out);
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(self, &s.open, s.var, 0, &mut out);
+        out
+    }
+
+    /// Screen lines: each visible row, followed by the lines open under it, each as its row and
+    /// how many of the row's lines are below it (`sub`, which `probe` reads).
+    pub fn lines(&self) -> Vec<(usize, Option<u32>)> {
+        let mut out = Vec::new();
+        for i in rows::visible(&self.rows) {
+            out.push((i, None));
+            if let Row::Signal(s) = &self.rows[i] {
+                let n = self.subs(s).len() as u32;
+                out.extend((0..n).rev().map(|b| (i, Some(b))));
+            }
+        }
+        out
+    }
+
+    /// What line `sub` under a row shows (`lines`): the var, or the bit of a bus.
+    pub fn probe(&self, s: &Sig, sub: Option<u32>) -> (usize, Option<u32>) {
+        let Some(b) = sub else { return (s.var, None) };
+        let subs = self.subs(s);
+        match subs.len().checked_sub(b as usize + 1) {
+            Some(k) => (subs[k].var, subs[k].bit),
+            None => (s.var, None),
         }
     }
 
     /// The selected signal (or bit), or all signals of the selected group.
     pub fn sel_vars(&self) -> Vec<(usize, Option<u32>)> {
         match self.rows.get(self.sel) {
-            Some(Row::Signal(s)) => vec![self.probe(s.var, self.bit)],
+            Some(Row::Signal(s)) => vec![self.probe(s, self.bit)],
             Some(Row::Group { .. }) => rows::members(&self.rows, self.sel).into_iter().map(|v| (v, None)).collect(),
             None => Vec::new(),
         }
@@ -673,20 +728,45 @@ impl Workspace {
     }
 
 
-    /// Space: collapse / expand a group, or expand a bus into its bits or a stream into its fields
-    /// / fold them (also from a bit).
+    /// Space: collapse / expand a group, or open a bus into its bits, a stream into its fields, a
+    /// composite one level / fold it with every level under it. On a line that opens nothing (a
+    /// bit, a 1-bit field) it folds the level the line is in. The selection stays on the line
+    /// opened or folded.
     pub fn toggle_group(&mut self) {
-        let bits = match self.rows.get(self.sel) {
-            Some(Row::Signal(s)) if s.bits > 0 => 0,
-            Some(Row::Signal(s)) => self.sub_lines(s.var),
-            _ => 0,
+        let s = match self.rows.get_mut(self.sel) {
+            Some(Row::Group { collapsed, .. }) => {
+                *collapsed = !*collapsed;
+                self.bit = None;
+                return;
+            }
+            Some(Row::Signal(s)) => s.clone(),
+            None => return,
         };
-        match self.rows.get_mut(self.sel) {
-            Some(Row::Group { collapsed, .. }) => *collapsed = !*collapsed,
-            Some(Row::Signal(s)) => s.bits = bits,
-            None => {}
+        let subs = self.subs(&s);
+        let line = self.bit.and_then(|b| subs.len().checked_sub(b as usize + 1));
+        // the line's var if it opens, else the level it is in
+        let mut target = s.var;
+        if let Some(k) = line {
+            let l = &subs[k];
+            if l.bit.is_none() && !self.children(l.var).is_empty() {
+                target = l.var;
+            } else if let Some(p) = subs[..k].iter().rposition(|p| p.depth + 1 == l.depth) {
+                target = subs[p].var;
+            }
         }
-        self.bit = None;
+        let mut open = s.open.clone();
+        if open.contains(&target) {
+            open.retain(|&v| v != target);
+        } else if !self.children(target).is_empty() {
+            open.push(target);
+        }
+        // levels under a folded one are folded with it
+        let mut row = Sig { open, ..s };
+        let reach: Vec<usize> = std::iter::once(row.var).chain(self.subs(&row).iter().filter(|l| l.bit.is_none()).map(|l| l.var)).collect();
+        row.open.retain(|v| reach.contains(v));
+        let subs = self.subs(&row);
+        self.bit = (target != row.var).then(|| subs.iter().position(|l| l.var == target && l.bit.is_none()).map(|k| (subs.len() - 1 - k) as u32)).flatten();
+        self.rows[self.sel] = Row::Signal(row);
     }
 
 
@@ -849,7 +929,7 @@ impl Workspace {
 
     /// A row for a var in its default radix. Its values must be loaded (`Trace::load`).
     pub fn sig(&self, var: usize, grouped: bool) -> Row {
-        Row::Signal(Sig { var, radix: radix::default_for(self.trace.vars[var].names.is_some(), self.trace.vars[var].signed), frac: 0, grouped, bits: 0, color: None })
+        Row::Signal(Sig { var, radix: radix::default_for(self.trace.vars[var].names.is_some(), self.trace.vars[var].signed), frac: 0, grouped, open: Vec::new(), color: None })
     }
 
     /// New rows go below the selected row and join its group, if it is in one; with a group's

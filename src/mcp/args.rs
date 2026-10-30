@@ -117,7 +117,7 @@ pub struct WorkspaceArgs {
     /// Decodes, as `decode` makes them (`help decode`).
     #[serde(default)]
     pub decode: Vec<DecodeSpec>,
-    /// The rows, top to bottom: `"name:radix:colour"` or a group (`help workspace`).
+    /// The rows, top to bottom: `"name:radix:colour"`, a group or a struct's open levels (`help workspace`).
     pub rows: Vec<RowSpec>,
     /// Cursors by number, `{"1": "80ns", "2": "390ns"}`: 1 the cursor, 2 - 9 marks.
     #[serde(default)]
@@ -195,6 +195,11 @@ pub enum RowSpec {
         rows: Vec<String>,
         #[serde(default)]
         collapsed: bool,
+    },
+    /// A struct, record or array with levels open: `{"signal": "grid", "open": ["grid", "grid[1]"]}`.
+    Open {
+        signal: String,
+        open: Vec<String>,
     },
 }
 

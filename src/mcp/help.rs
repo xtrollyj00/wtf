@@ -17,7 +17,11 @@ signal ends that way (`s_axi_awaddr`); an ambiguous name is an error listing the
   first in every tool: `s_axi_awvalid` is `top.dut.s_axi_awvalid`. `scope` with no path: none.
 - A radix goes with a name wherever tools take signals: `awaddr:dec` (`help radix`).
 - A decoded stream is a signal (`bus.wr`, its value the record's number `#n`), and so is each
-  of its fields (`bus.wr.addr`, `z` between records), for `find`, `values` and rows alike.",
+  of its fields (`bus.wr.addr`, `z` between records), for `find`, `values` and rows alike.
+- A struct, record or array, or part of one (`pkt`, `pkts[1]`, `grid[1]`), is a signal of its
+  whole value: its fields joined, the first the most significant (`pkt == 0x5A5`, `pkt[10]`);
+  with a text field (an nvc enum) text, `'{valid:1, state:busy, pair:'{hi:A, lo:5}}`. `value_at`
+  adds a line per field; `signals` lists it as one line, its fields with `pkt.**`.",
     ),
     (
         "times",
@@ -136,7 +140,8 @@ it into the user's wtf window (they can undo with u). `workspace` replaces every
 one undo step:
 - `rows`, top to bottom: `\"name\"`, `\"name:radix\"`, `\"name:radix:colour\"` (`help radix`), or a
   group `{\"group\": \"write\", \"rows\": [\"awaddr\", \"awvalid\"], \"collapsed\": false}`. Groups
-  hold signals only.
+  hold signals only. A struct or array is one row (`\"pkts\"`); `{\"signal\": \"pkts\", \"open\":
+  [\"pkts\", \"pkts[1]\"]}` opens levels of it, each named from the row's name.
 - `cursors` by number, `{\"1\": \"80ns\", \"2\": \"390ns\"}`: 1 is the cursor, where values are
   read; 2 - 9 are marks on the events to show. The user jumps to a mark with 'N.
 - `range`: the visible range, `[\"60ns\", \"480ns\"]`; default the whole trace.
@@ -153,7 +158,7 @@ edits the workspace step by step instead (`help commands`).",
         "\
 `command` runs one of wtf's `:` commands, without the colon, on the workspace.
 - Rows: `add <path|pattern>...` (below the selected row, joining its group; a scope becomes a
-  group), `rm <path|pattern>...` (`rm **` clears), `select <row> [<last row>]` (the rows the next
+  group of its direct signals, a struct or array one row), `rm <path|pattern>...` (`rm **` clears), `select <row> [<last row>]` (the rows the next
   commands act on), `group <name>`, `rename <name>`, `ungroup`, `radix <radix>`, `color
   <colour|off>` (`help radix`), `names <signal> <value>=<name>...` (names for its values, as an
   FST enum table gives them; `off` removes them), `undo`, `redo`. The answer lists the rows added and removed.

@@ -169,7 +169,8 @@ fn reading_tools() {
     assert_eq!(s.ok("signals", json!({"pattern": "nope"})), "no match: nope");
     // array elements and generate instances of one width are one line, the indices as ranges
     s.ok("open", json!({"trace": std::fs::canonicalize("tests/data/vhdl.fst").unwrap()}));
-    assert_eq!(s.ok("signals", json!({"pattern": "vhdl"})), "vhdl.clk (1 bit)\nvhdl.arr[0..1] (4 bits, 2 signals)\nvhdl.gen[0..1].x (1 bit, 2 signals)");
+    assert_eq!(s.ok("signals", json!({"pattern": "vhdl"})), "vhdl.clk (1 bit)\nvhdl.arr (array, 8 bits, 2 signals)\nvhdl.gen[0..1].x (1 bit, 2 signals)");
+    assert_eq!(s.ok("signals", json!({"pattern": "vhdl.**"})), "vhdl.clk (1 bit)\nvhdl.arr[0..1] (4 bits, 2 signals)\nvhdl.gen[0..1].x (1 bit, 2 signals)");
     // a file wellen can't read is an error, not a crash or a hang
     let ghw = std::fs::canonicalize("tests/data/types-ghdl.ghw").unwrap();
     assert!(s.tool("open", json!({"trace": ghw})).unwrap_err().ends_with("wellen can't read it: not yet implemented: support multi-dimensional arrays!"));
@@ -192,15 +193,28 @@ fn reading_tools() {
 }
 
 /// Composite types (tests/data/types-verilator-structs.fst, as in core/tests/types.rs): a struct's
-/// fields are signals under its name, an enum field shows its names.
+/// fields are signals under its name, an enum field shows its names; the struct is a signal of
+/// its whole value, one row in the workspace.
 #[test]
 fn struct_fields() {
     let dir = Dir::new("structs");
     let mut s = Server::start(&dir.0);
     s.ok("open", json!({"trace": std::fs::canonicalize("tests/data/types-verilator-structs.fst").unwrap()}));
     assert_eq!(s.ok("signals", json!({"pattern": "types.pkt.**"})), "types.pkt.valid (1 bit)\ntypes.pkt.state (2 bits)\ntypes.pkt.pair.hi (4 bits)\ntypes.pkt.pair.lo (4 bits)");
-    assert_eq!(s.ok("signals", json!({"pattern": "pkts"})), "types.pkts[0..1].valid (1 bit, 2 signals)\ntypes.pkts[0..1].state (2 bits, 2 signals)\ntypes.pkts[0..1].pair.hi (4 bits, 2 signals)\ntypes.pkts[0..1].pair.lo (4 bits, 2 signals)");
+    assert_eq!(s.ok("signals", json!({"pattern": "pkts"})), "types.pkts (array, 22 bits, 8 signals)");
+    assert_eq!(s.ok("signals", json!({"pattern": "types.pkts.**"})), "types.pkts[0..1].valid (1 bit, 2 signals)\ntypes.pkts[0..1].state (2 bits, 2 signals)\ntypes.pkts[0..1].pair.hi (4 bits, 2 signals)\ntypes.pkts[0..1].pair.lo (4 bits, 2 signals)");
     assert_eq!(s.ok("value_at", json!({"signals": ["pkt.state", "pkts(1).pair.lo"], "time": "10ns"})), "at 10ns:\npkt.state = BUSY\npkts(1).pair.lo = 0x7");
+    assert_eq!(
+        s.ok("value_at", json!({"signals": ["pkt"], "time": "10ns"})),
+        "at 10ns:\npkt = 0x5A5\npkt.valid = 1\npkt.state = BUSY\npkt.pair.hi = 0xA\npkt.pair.lo = 0x5"
+    );
+    assert_eq!(s.ok("find", json!({"expr": "pkt == 0x5A5"})), "time\n10ns");
+    // one row each, folded or with levels open, drawn as the window draws them
+    let bad = s.tool("workspace", json!({"rows": [{"signal": "grid", "open": ["grid", "mem[1]"]}]})).unwrap_err();
+    assert_eq!(bad, "grid has no mem[1] to open; its levels are named from grid on");
+    let view = s.ok("workspace", json!({"rows": ["pkt", {"signal": "pkts", "open": ["pkts", "pkts[1]"]}], "range": ["0ns", "20ns"]}));
+    assert!(view.contains("pkts  types.pkts  hex  (open: pkts, pkts[1])"), "{view}");
+    insta::assert_snapshot!("render_composites", s.ok("render", json!({"width": 60})));
 }
 
 /// Enum names from the file (spec §10): tests/data/enum.fst, as in core/tests/enums.rs.

@@ -104,6 +104,13 @@ also say when and where things went wrong, in fewer simulation runs, and mostly 
   <img alt="Claude Haiku fixing four failing RTL testbenches, 5 runs each with and without wtf. Every run fixed its bug. Every answer right, with wtf / without: eth-parser-headers 5 / 2, eth-parser-stall 5 / 5, head-trimmer-boundary 5 / 3, axil2mi-stale-addr 2 / 1. Median time: 134 / 270 s, 76 / 136 s, 85 / 203 s, 62 / 57 s. Median cost: $0.029 / $0.058, $0.014 / $0.024, $0.012 / $0.024, $0.015 / $0.015." src="docs/agents.svg">
 </picture>
 
+## Before 1.0.0
+
+wtf is young and changes fast. Until 1.0.0 nothing is kept backward compatible: session files,
+the MCP tools' arguments, keys and commands change whenever a better design turns up, and the
+old form stops working. A commit that breaks something says so (`feat(core)!: ...`, with a
+`BREAKING CHANGE:` note on what to do instead).
+
 ## Documentation
 
 Start with the [user guide](docs/guide.md): a 5-minute tour of `docs/demo.vcd`, a cheat sheet,

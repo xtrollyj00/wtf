@@ -490,11 +490,60 @@ mod tests {
         assert!(!app.adding);
     }
 
+    /// Structs and arrays as one row each, opened a level at a time (spec §6 "Composite rows"):
+    /// tests/data/types-ghdl.fst, as in core/tests/types.rs.
+    #[test]
+    fn composite_rows() {
+        let t = trace::Trace::open("tests/data/types-ghdl.fst".as_ref()).unwrap();
+        let mut app = App::new(workspace::Workspace::new(t, "types".into()));
+        keys(&mut app, ":add types.grid types.pkt types.pkts\n:10ns\n");
+        assert_eq!(app.ws.rows.len(), 3);
+        // a name after a marker keeps its leaf in the name column when not selected
+        // (gen[0].p and gen[1].p both shown keep their scope; gen[1].p is selected)
+        keys(&mut app, ":add gen(0).p gen(1).p\n");
+        let screen = snapshot(&mut app, 80, None);
+        let line = screen.lines().find(|l| l.starts_with("▸ gen[0]")).unwrap_or_else(|| panic!("{screen}"));
+        assert!(line.starts_with("▸ gen[0].p  0x0 "), "{line}");
+        keys(&mut app, ":rm gen(0).p gen(1).p\n");
+        insta::assert_snapshot!("composite_folded", snapshot(&mut app, 80, None));
+        // grid opens into its rows, grid[1] into its elements; the selection stays on grid[1]
+        keys(&mut app, "kk jj ");
+        assert_eq!((app.ws.sel, app.ws.bit), (0, Some(3)));
+        insta::assert_snapshot!("composite_grid_1", snapshot(&mut app, 80, None));
+        // an element of 4 bits opens into its bits; Space on a bit folds the level it is in; on
+        // the row, the row and all under it
+        keys(&mut app, "j ");
+        assert_eq!((app.ws.sel, app.ws.bit), (0, Some(6)));
+        keys(&mut app, "j ");
+        assert_eq!((app.ws.sel, app.ws.bit), (0, Some(2)));
+        keys(&mut app, "kkk ");
+        assert_eq!((app.ws.sel, app.ws.bit), (0, None));
+        assert!(matches!(&app.ws.rows[0], rows::Row::Signal(s) if s.open.is_empty()));
+        // pkt > pair
+        keys(&mut app, "j jjj ");
+        insta::assert_snapshot!("composite_pkt_pair", snapshot(&mut app, 80, None));
+        keys(&mut app, "j");
+        assert_eq!(app.ws.trace.vars[app.ws.probe(app.ws.rows[1].sig().unwrap(), app.ws.bit).0].path, "types.pkt.pair.hi");
+        // e on a folded struct and array: the fields, nested, without opening it
+        keys(&mut app, "k kkke");
+        assert_eq!(
+            app.examine.clone(),
+            Some(("types.pkt @ 10ns".to_string(), ["0x101A5", "", "valid  1", "state  busy", "pair", "  hi   0xA", "  lo   0x5"].map(String::from).to_vec()))
+        );
+        keys(&mut app, "e je");
+        insta::assert_snapshot!("composite_examine_pkts", snapshot(&mut app, 80, Some(24)));
+        // dd on a line under a row removes the row; u brings it back
+        keys(&mut app, "e ijdd");
+        assert_eq!(app.ws.rows.len(), 2);
+        keys(&mut app, "u");
+        assert_eq!(app.ws.rows.len(), 3);
+    }
+
     #[test]
     fn expand_bus() {
         let mut app = open("vcd", Some(SESSION));
         keys(&mut app, "jjj ");
-        assert!(matches!(&app.ws.rows[3], rows::Row::Signal(s) if s.bits == 8));
+        assert!(matches!(&app.ws.rows[3], rows::Row::Signal(s) if app.ws.subs(s).len() == 8));
         keys(&mut app, "8j");
         assert_eq!(app.ws.bit, Some(0)); // data[0], the last bit line
         insta::assert_snapshot!(snapshot(&mut app, 80, Some(30)));
@@ -505,12 +554,12 @@ mod tests {
         assert_eq!(app.ws.view.cursor, 40); // data[4] changes at 30 (0x96 -> 0xE1) and 40 (-> 0x3A)
         // the bits move with their bus, and expanding is not an undo step
         keys(&mut app, "iK");
-        assert!(matches!(&app.ws.rows[2], rows::Row::Signal(s) if s.bits == 8));
+        assert!(matches!(&app.ws.rows[2], rows::Row::Signal(s) if app.ws.subs(s).len() == 8));
         assert_eq!(app.ws.bit, Some(4));
         keys(&mut app, "u");
-        assert!(matches!(&app.ws.rows[3], rows::Row::Signal(s) if s.bits == 8));
+        assert!(matches!(&app.ws.rows[3], rows::Row::Signal(s) if app.ws.subs(s).len() == 8));
         keys(&mut app, " ");
-        assert!(matches!(&app.ws.rows[3], rows::Row::Signal(s) if s.bits == 0) && app.ws.bit.is_none());
+        assert!(matches!(&app.ws.rows[3], rows::Row::Signal(s) if s.open.is_empty()) && app.ws.bit.is_none());
         keys(&mut app, "u");
         assert_eq!(app.msg.as_ref().unwrap().0, "already at oldest change");
     }
@@ -622,7 +671,7 @@ mod tests {
         assert_eq!(app.msg.as_ref().unwrap().0, format!("written: {}", file.display()));
         assert!(!app.ws.modified() && app.ws.session_path == file);
         let text = std::fs::read_to_string(&file).unwrap();
-        assert!(text.contains("radix = \"bin\"") && text.contains("expanded = true") && text.contains("collapsed = true"), "{text}");
+        assert!(text.contains("radix = \"bin\"") && text.contains("open = [\"state\"]") && text.contains("collapsed = true"), "{text}");
         // the file reads back to the same session
         let mut back = open("fst", Some(file.to_str().unwrap()));
         assert_eq!(session::to_toml(&back.ws), session::to_toml(&app.ws));
@@ -1107,7 +1156,7 @@ mod tests {
         assert_eq!(app.examine.clone(), Some(("top.tdata @ 65ns".to_string(), vec!["0xC0".to_string()])));
         keys(&mut app, "e:rm top.tdata\n:select rx.frame\n");
         keys(&mut app, " ");
-        assert!(matches!(&app.ws.rows[0], rows::Row::Signal(s) if s.bits == 0) && app.ws.bit.is_none());
+        assert!(matches!(&app.ws.rows[0], rows::Row::Signal(s) if s.open.is_empty()) && app.ws.bit.is_none());
         // a rule's value runs to the next key, spaces and all
         keys(&mut app, ":decode stall check clock=clk bad=tvalid && !tready\n");
         assert_eq!(app.msg, Some(("stall: violations stall 4".into(), false)));

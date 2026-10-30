@@ -1,7 +1,9 @@
 //! Writes `<dir>/bench.vcd` or `.fst`: a clock, a reset, `top.hot` (a 32-bit count of the cycles,
 //! so it has as many transitions as the trace has cycles) and `top.u<i>` modules, each an
-//! AXI4-Lite slave port with random transactions, a count of them and its state. The same
-//! arguments write the same trace. It runs until the file reaches the size asked for.
+//! AXI4-Lite slave port with random transactions, a count of them and its state. With `--mem N`,
+//! also `top.mem[0..N-1]`, a 32-bit array one element of which is written each cycle (a composite
+//! row, spec §6). The same arguments write the same trace. It runs until the file reaches the size
+//! asked for.
 
 use fst_writer::{FstBodyWriter, FstFileType, FstInfo, FstScopeType, FstSignalId, FstSignalType, FstVarDirection, FstVarType};
 use std::fs::File;
@@ -44,24 +46,25 @@ const STATE: usize = 18;
 const TOP: [(&str, u32); 3] = [("clk", 1), ("rst_n", 1), ("hot", 32)];
 
 pub fn main(args: &[String]) -> Result<(), String> {
-    let (opts, dir) = super::options(args, &["size", "format", "modules"])?;
-    let (mut size, mut format, mut modules) = (1u64 << 30, "fst".to_string(), 200usize);
+    let (opts, dir) = super::options(args, &["size", "format", "modules", "mem"])?;
+    let (mut size, mut format, mut modules, mut mem) = (1u64 << 30, "fst".to_string(), 200usize, 0usize);
     for (n, v) in opts {
         match n.as_str() {
             "size" => size = parse_size(&v)?,
             "format" => format = v,
+            "mem" => mem = v.parse().map_err(|_| format!("--mem {v}: not a number"))?,
             _ => modules = v.parse().map_err(|_| format!("--modules {v}: not a number"))?,
         }
     }
     let path = PathBuf::from(dir).join(format!("bench.{format}"));
-    let widths: Vec<u32> = TOP.iter().map(|s| s.1).chain((0..modules).flat_map(|_| PORT.iter().map(|s| s.1))).collect();
+    let widths: Vec<u32> = hierarchy(modules, mem).map(|s| s.2).collect();
     let mut sink: Box<dyn Sink> = match format.as_str() {
-        "vcd" => Box::new(Vcd::create(&path, modules)?),
-        "fst" => Box::new(Fst::create(&path, modules)?),
+        "vcd" => Box::new(Vcd::create(&path, modules, mem)?),
+        "fst" => Box::new(Fst::create(&path, modules, mem)?),
         _ => return Err(format!("--format {format}: vcd or fst")),
     };
     let start = std::time::Instant::now();
-    let cycles = simulate(sink.as_mut(), &widths, modules, size).map_err(|e| format!("{}: {e}", path.display()))?;
+    let cycles = simulate(sink.as_mut(), &widths, modules, mem, size).map_err(|e| format!("{}: {e}", path.display()))?;
     sink.finish().map_err(|e| format!("{}: {e}", path.display()))?;
     let bytes = std::fs::metadata(&path).map_err(|e| e.to_string())?.len();
     println!(
@@ -96,7 +99,7 @@ trait Sink {
 }
 
 /// Runs the design until the sink holds `size` bytes; returns the cycles written.
-fn simulate(sink: &mut dyn Sink, widths: &[u32], modules: usize, size: u64) -> std::io::Result<u64> {
+fn simulate(sink: &mut dyn Sink, widths: &[u32], modules: usize, mem: usize, size: u64) -> std::io::Result<u64> {
     let mut values: Vec<u64> = vec![0; widths.len()];
     let mut ms: Vec<Module> = (0..modules).map(|i| Module { phase: 0, wait: 0, count: 0, rng: 0x9E37_79B9_7F4A_7C15 ^ (i as u64 + 1) }).collect();
     sink.time(0)?;
@@ -120,6 +123,11 @@ fn simulate(sink: &mut dyn Sink, widths: &[u32], modules: usize, size: u64) -> s
         set(sink, &mut values, 0, 1)?;
         set(sink, &mut values, 1, (cycle >= RESET_CYCLES) as u64)?;
         set(sink, &mut values, 2, cycle & 0xFFFF_FFFF)?;
+        if mem > 0 {
+            // one element a cycle, in an order that visits them all
+            let base = TOP.len() + modules * PORT.len();
+            set(sink, &mut values, base + (cycle as usize * 7919) % mem, cycle & 0xFFFF_FFFF)?;
+        }
         if cycle >= RESET_CYCLES {
             for (m, module) in ms.iter_mut().enumerate() {
                 let base = TOP.len() + m * PORT.len();
@@ -203,9 +211,12 @@ impl Module {
     }
 }
 
-/// The hierarchy, in signal order: scope `top` with TOP, then `top.u<i>` with PORT.
-fn hierarchy(modules: usize) -> impl Iterator<Item = (Option<usize>, &'static str, u32)> {
-    TOP.iter().map(|&(n, w)| (None, n, w)).chain((0..modules).flat_map(|m| PORT.iter().map(move |&(n, w)| (Some(m), n, w))))
+/// The hierarchy, in signal order: scope `top` with TOP, then `top.u<i>` with PORT, then
+/// `top.mem[i]`.
+fn hierarchy(modules: usize, mem: usize) -> impl Iterator<Item = (Option<usize>, String, u32)> {
+    let top = TOP.iter().map(|&(n, w)| (None, n.to_string(), w));
+    let ports = (0..modules).flat_map(|m| PORT.iter().map(move |&(n, w)| (Some(m), n.to_string(), w)));
+    top.chain(ports).chain((0..mem).map(|i| (None, format!("mem[{i}]"), 32)))
 }
 
 struct Vcd {
@@ -216,17 +227,19 @@ struct Vcd {
 }
 
 impl Vcd {
-    fn create(path: &Path, modules: usize) -> Result<Self, String> {
+    fn create(path: &Path, modules: usize, mem: usize) -> Result<Self, String> {
         let file = File::create(path).map_err(|e| format!("{}: {e}", path.display()))?;
         let mut v = Vcd { out: BufWriter::with_capacity(1 << 20, file), written: 0, ids: vec![], line: vec![] };
         let mut head = String::from("$timescale 1ns $end\n$scope module top $end\n");
         let mut scope = None;
-        for (i, (m, name, w)) in hierarchy(modules).enumerate() {
+        for (i, (m, name, w)) in hierarchy(modules, mem).enumerate() {
             if m != scope {
                 if scope.is_some() {
                     head += "$upscope $end\n";
                 }
-                head += &format!("$scope module u{} $end\n", m.unwrap());
+                if let Some(m) = m {
+                    head += &format!("$scope module u{m} $end\n");
+                }
                 scope = m;
             }
             // identifiers from the printable characters, base 94
@@ -297,18 +310,20 @@ fn fst_err(e: fst_writer::FstWriteError) -> std::io::Error {
 }
 
 impl Fst {
-    fn create(path: &Path, modules: usize) -> Result<Self, String> {
+    fn create(path: &Path, modules: usize, mem: usize) -> Result<Self, String> {
         let err = |e: fst_writer::FstWriteError| format!("{}: {e}", path.display());
         let info = FstInfo { start_time: 0, timescale_exponent: -9, version: "wtf-bench".into(), date: String::new(), file_type: FstFileType::Verilog };
         let mut h = fst_writer::open_fst(path, &info).map_err(err)?;
         h.scope("top", "", FstScopeType::Module).map_err(err)?;
         let (mut ids, mut scope) = (vec![], None);
-        for (m, name, w) in hierarchy(modules) {
+        for (m, name, w) in hierarchy(modules, mem) {
             if m != scope {
                 if scope.is_some() {
                     h.up_scope().map_err(err)?;
                 }
-                h.scope(format!("u{}", m.unwrap()), "", FstScopeType::Module).map_err(err)?;
+                if let Some(m) = m {
+                    h.scope(format!("u{m}"), "", FstScopeType::Module).map_err(err)?;
+                }
                 scope = m;
             }
             ids.push(h.var(name, FstSignalType::bit_vec(w), FstVarType::Wire, FstVarDirection::Implicit, None).map_err(err)?);

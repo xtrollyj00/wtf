@@ -1,0 +1,28 @@
+---
+source: src/main.rs
+expression: "snapshot(&mut app, 80, Some(24))"
+---
+                 0fs          5ns          10ns          15ns         20ns
+                 ──────────────────────────┃────────────────────────────────────
+▸ grid  0x12345  ────────── 0x0 ───────────┃───────────── 0x12345 ──────────────
+                 ──    types.pkts @ 10ns     Esc e close    ────────────────────
+▸ pkt   0x101A5  ──    0x7                                  101A5 ──────────────
+                 ──                                         ────────────────────
+▸ pkts  0x7      ──    [0]                                  0x7 ────────────────
+                         valid  0
+                         state  idle
+                         pair
+                           hi   0x0
+                           lo   0x0
+                       [1]
+                         valid  0
+                         state  idle
+                         pair
+                           hi   0x0
+                           lo   0x7
+
+
+
+
+
+ VIEW  types.pkts                              10ns  ·  375ps/col  ·  types [+]

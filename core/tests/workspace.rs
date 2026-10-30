@@ -242,7 +242,7 @@ fn groups_and_selection() {
     // a bus expands into its bits
     ws.sel = 2;
     ws.toggle_group();
-    assert!(matches!(&ws.rows[2], wtf_core::rows::Row::Signal(s) if s.bits == 8));
+    assert!(matches!(&ws.rows[2], wtf_core::rows::Row::Signal(s) if ws.subs(s).len() == 8));
     ws.sel = 1;
     ws.delete().unwrap();
     assert_eq!(names(&ws), ["clk", "rst"]);

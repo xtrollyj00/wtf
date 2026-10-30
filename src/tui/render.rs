@@ -133,11 +133,17 @@ fn panel(app: &mut App, buf: &mut Buffer, pw: usize, body: usize) -> Option<(u16
             Some(v) if app.panel.marked.contains(&v) => '+',
             Some(_) => ' ',
         };
-        let text = format!("{}{mark} {}", " ".repeat(2 * n.depth), n.name);
+        // a struct or array shown or marked as one signal says so after its name
+        let whole = match n.whole {
+            Some(v) if app.ws.shown(v) => format!(" {}", gl().shown),
+            Some(v) if app.panel.marked.contains(&v) => " +".into(),
+            _ => String::new(),
+        };
+        let text = format!("{}{mark} {}{whole}", " ".repeat(2 * n.depth), n.name);
         // too long: keep the end, where the leaf name is
         let len = text.chars().count();
         let text = if len > inner - 1 { format!("{}{}", gl().cut, text.chars().skip(len + 2 - inner).collect::<String>()) } else { text };
-        let marked = n.var.is_some_and(|v| app.panel.marked.contains(&v));
+        let marked = n.var.or(n.whole).is_some_and(|v| app.panel.marked.contains(&v));
         let st = match (Some(i) == cur, marked) {
             (true, _) => Style::new().bg(pal().selected).fg(pal().cursor).add_modifier(Modifier::BOLD | pal().accent()),
             (false, true) => Style::new().fg(pal().cursor),
@@ -455,7 +461,7 @@ fn status(app: &App, buf: &mut Buffer, w: usize, y: usize) {
             }
             Some(Row::Signal(r)) => {
                 // a bit as `data[3]`, a stream's field by its own path
-                let (var, bit) = app.ws.probe(r.var, app.ws.bit);
+                let (var, bit) = app.ws.probe(r, app.ws.bit);
                 let bit = bit.map_or(String::new(), |b| format!("[{b}]"));
                 (format!("{}{bit}", app.ws.trace.vars[var].path), Style::new())
             }
