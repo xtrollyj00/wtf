@@ -12,6 +12,8 @@ pub struct Node {
     /// End (exclusive) of this node's subtree in `nodes`.
     pub end: usize,
     pub open: bool,
+    /// A struct, record or array: one signal in the HDL, so its signals go together.
+    pub composite: bool,
 }
 
 pub struct Panel {
@@ -42,6 +44,11 @@ struct Scope<'a> {
     /// Where each subscope is in `scopes`: a scope can have tens of thousands.
     index: HashMap<&'a str, usize>,
     vars: Vec<(&'a str, usize)>,
+    /// Part of a signal's HDL name (a struct, record or array): listed in the file's order, its
+    /// fields as declared, not subscopes first.
+    composite: bool,
+    /// Subscopes (true) and signals in the file's order, as indices into `scopes` / `vars`.
+    order: Vec<(bool, usize)>,
 }
 
 impl Panel {
@@ -57,14 +64,19 @@ impl Panel {
                 _ => wtf_core::trace::parts(&v.path),
             };
             let leaf = parts.pop().unwrap_or_default();
+            // the scopes from here on are inside the signal's HDL name
+            let inside = (parts.len() + 1).saturating_sub(v.decl);
             let mut s = &mut root;
-            for p in parts {
+            for (depth, p) in parts.into_iter().enumerate() {
                 let k = *s.index.entry(p).or_insert_with(|| {
                     s.scopes.push((p, Scope::default()));
+                    s.order.push((true, s.scopes.len() - 1));
                     s.scopes.len() - 1
                 });
                 s = &mut s.scopes[k].1;
+                s.composite |= depth >= inside;
             }
+            s.order.push((false, s.vars.len()));
             s.vars.push((leaf, i));
         }
         let mut nodes = Vec::new();
@@ -177,12 +189,12 @@ impl Panel {
         vis[pa.min(ps)..=pa.max(ps)].to_vec()
     }
 
-    /// The signals of a node: itself, or those directly in a scope.
+    /// The signals of a node: itself, those directly in a scope, or all of a struct or array.
     pub fn vars_of(&self, i: usize) -> Vec<usize> {
         let n = &self.nodes[i];
         match n.var {
             Some(v) => vec![v],
-            None => self.nodes[i + 1..n.end].iter().filter(|c| c.depth == n.depth + 1).filter_map(|c| c.var).collect(),
+            None => self.nodes[i + 1..n.end].iter().filter(|c| n.composite || c.depth == n.depth + 1).filter_map(|c| c.var).collect(),
         }
     }
 
@@ -207,17 +219,24 @@ impl Panel {
 }
 
 fn flatten(s: &Scope, prefix: &str, depth: usize, out: &mut Vec<Node>) {
-    for (name, sub) in &s.scopes {
-        let path = wtf_core::trace::join([prefix, name].into_iter().filter(|p| !p.is_empty()));
-        let at = out.len();
-        // top-level scopes start open, so the panel doesn't open on a single closed line
-        out.push(Node { name: name.to_string(), path: path.clone(), depth, var: None, end: 0, open: depth == 0 });
-        flatten(sub, &path, depth + 1, out);
-        out[at].end = out.len();
-    }
-    for &(name, var) in &s.vars {
-        let path = wtf_core::trace::join([prefix, name].into_iter().filter(|p| !p.is_empty()));
-        out.push(Node { name: name.to_string(), path, depth, var: Some(var), end: out.len() + 1, open: false });
+    let order: Vec<(bool, usize)> = match s.composite {
+        true => s.order.clone(),
+        false => (0..s.scopes.len()).map(|k| (true, k)).chain((0..s.vars.len()).map(|k| (false, k))).collect(),
+    };
+    for (scope, k) in order {
+        if scope {
+            let (name, sub) = &s.scopes[k];
+            let path = wtf_core::trace::join([prefix, name].into_iter().filter(|p| !p.is_empty()));
+            let at = out.len();
+            // top-level scopes start open, so the panel doesn't open on a single closed line
+            out.push(Node { name: name.to_string(), path: path.clone(), depth, var: None, end: 0, open: depth == 0, composite: sub.composite });
+            flatten(sub, &path, depth + 1, out);
+            out[at].end = out.len();
+        } else {
+            let (name, var) = s.vars[k];
+            let path = wtf_core::trace::join([prefix, name].into_iter().filter(|p| !p.is_empty()));
+            out.push(Node { name: name.to_string(), path, depth, var: Some(var), end: out.len() + 1, open: false, composite: false });
+        }
     }
 }
 
@@ -231,6 +250,34 @@ mod tests {
 
     fn tree(p: &Panel) -> Vec<String> {
         p.visible().iter().map(|&i| format!("{}{}", "  ".repeat(p.nodes[i].depth), p.nodes[i].name)).collect()
+    }
+
+    /// An array's elements nest under it, element by element (`grid` > `[1]` > `[2]`); fields
+    /// under their struct (tests/data/types-*, core/tests/types.rs).
+    #[test]
+    fn composites_nest() {
+        let open = |file: &str| {
+            let mut p = Panel::new(&Trace::open(format!("tests/data/{file}").as_ref()).unwrap());
+            p.nodes.iter_mut().for_each(|n| n.open = true);
+            tree(&p).join("|")
+        };
+        // shortcut: wellen names grid's diagonal grid[i].grid[i]., so they nest as grid > [i] > grid
+        // > [i] > an empty leaf, fixed by a later piece
+        assert_eq!(
+            open("types-verilator-structs.fst"),
+            "types|  pkt|    valid|    state|    pair|      hi|      lo|  loose|    a|    b|  packed2|    [3]|    [2]|    [1]|    [0]|\
+             \x20 mem|    [0]|    [1]|    [2]|    [3]|  grid|    [0]|      grid|        [0]|          |      [1]|      [2]|\
+             \x20   [1]|      [0]|      grid|        [1]|          |      [2]|  pkts|    [0]|      valid|      state|      pair|\
+             \x20       hi|        lo|    [1]|      valid|      state|      pair|        hi|        lo|  word|    byte_|    pair|\
+             \x20     hi|      lo|  gen|    [0]|      p|        hi|        lo|    [1]|      p|        hi|        lo|  clk"
+        );
+        assert_eq!(
+            open("types-nvc.fst"),
+            "types|  pkt|    valid|    state|    pair|      hi|      lo|  pkts|    [0]|      valid|      state|      pair|        hi|\
+             \x20       lo|    [1]|      valid|      state|      pair|        hi|        lo|  rows|    [0]|      [0]|      [1]|      [2]|\
+             \x20   [1]|      [0]|      [1]|      [2]|  link|    addr|    data|      [0]|      [1]|      [2]|  gen(0)|    p|      hi|\
+             \x20     lo|  gen(1)|    p|      hi|      lo|  clk"
+        );
     }
 
     #[test]

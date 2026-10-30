@@ -185,3 +185,43 @@ fn nvc() {
     check("types-nvc-noarrays.fst", NVC_COMMON);
     check("types-nvc-noarrays.fst", &[("pkts(1).pair.lo", "unknown"), ("rows(1)(2)", "unknown"), ("link.data(1)", "unknown")]);
 }
+
+/// The rows `:add types.**` makes, as wtf names them: each keeps its composite's name.
+fn row_names(file: &str) -> String {
+    let mut ws = fixture(file);
+    wtf_core::command::run(&mut ws, "add types.**").unwrap();
+    wtf_core::rows::display_names(&ws.trace, &ws.rows).join(" ")
+}
+
+#[test]
+fn row_names_keep_the_composite() {
+    let pkts = "pkts[0].valid pkts[0].state pkts[0].pair.hi pkts[0].pair.lo pkts[1].valid pkts[1].state pkts[1].pair.hi pkts[1].pair.lo";
+    let grid = "grid[0][0] grid[0][1] grid[0][2] grid[1][0] grid[1][1] grid[1][2]";
+    // shortcut: wellen's names for grid's diagonal (verilator_fst_grid); generate scopes lose
+    // their name ([0].p for gen[0].p), fixed by a later piece
+    let fst_grid = "grid[0].grid[0]. grid[0][1] grid[0][2] grid[1][0] grid[1].grid[1]. grid[1][2]";
+    let generate = "[0].p.hi [0].p.lo [1].p.hi [1].p.lo";
+    assert_eq!(
+        row_names("types-verilator-structs.fst"),
+        format!("clk pkt.valid pkt.state pkt.pair.hi pkt.pair.lo loose.a loose.b packed2[3] packed2[2] packed2[1] packed2[0] mem[0] mem[1] mem[2] mem[3] {fst_grid} {pkts} word.byte_ word.pair.hi word.pair.lo {generate}")
+    );
+    // shortcut: a Verilator VCD writes struct scopes as modules, so a one-deep field shows bare
+    // (a, byte_, [0].valid for loose.a, word.byte_, pkts[0].valid), fixed by a later piece
+    assert_eq!(
+        row_names("types-verilator-structs.vcd"),
+        format!("clk pkt.valid pkt.state pkt.pair.hi pkt.pair.lo a b packed2[3] packed2[2] packed2[1] packed2[0] mem[0] mem[1] mem[2] mem[3] {grid} [0].valid [0].state [0].pair.hi [0].pair.lo [1].valid [1].state [1].pair.hi [1].pair.lo byte_ word.pair.hi word.pair.lo {generate}")
+    );
+    assert_eq!(row_names("types-verilator.vcd"), format!("clk pkt a b packed2 mem[0] mem[1] mem[2] mem[3] {grid} pkts[0] pkts[1] word [0].p [1].p"));
+    // shortcut: Icarus's foreach loop variables are rows too, fixed by a later piece
+    assert_eq!(
+        row_names("types-icarus.fst"),
+        "clk packed2 pkt word [0].g [0].p [1].g [1].p $ivl_foreach0.i $ivl_foreach1.i $ivl_foreach1.j $ivl_foreach2.i $ivl_foreach3.i $ivl_foreach4.i $ivl_foreach4.j"
+    );
+    for file in ["types-nvc.fst", "types-nvc.vcd"] {
+        assert_eq!(
+            row_names(file),
+            format!("clk pkt.valid pkt.state pkt.pair.hi pkt.pair.lo {pkts} rows[0][0] rows[0][1] rows[0][2] rows[1][0] rows[1][1] rows[1][2] link.addr link.data[0] link.data[1] link.data[2] gen(0).p.hi gen(0).p.lo gen(1).p.hi gen(1).p.lo"),
+            "{file}"
+        );
+    }
+}

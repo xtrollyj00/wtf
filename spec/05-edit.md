@@ -19,7 +19,7 @@ match the highlight is on (`2/5`).
 | `j` / `k` | move |
 | `gg` / `G` | first / last line |
 | `l` / `h` | expand / collapse a scope; `h` on a signal or a collapsed scope goes to the parent scope |
-| `Space` | mark / unmark the signal, or all signals directly in a scope; with a `V` range, its signals |
+| `Space` | mark / unmark the signal, or all signals directly in a scope (all of a struct or array); with a `V` range, its signals |
 | `V`, then `j` / `k` / `n` / `N` | select a range of lines, as in vim; a closed scope in it brings the signals directly in it |
 | `Enter` | add the marked signals and the `V` range as rows; without marks, the highlighted item: a signal as a row, a scope as a group named after it |
 | `Ctrl-g` | add the marked signals and the `V` range (or the highlighted signal or scope) as a new group, then name it |
@@ -46,7 +46,9 @@ The panel stays open after adding.
   go below the whole group, outside it.
 - A signal that is already shown is never added twice: `Enter` on a `●` signal does nothing,
   and it can't be marked; adding a scope, `Space` on a scope and `Ctrl-a` skip shown signals. Removing is done on the rows side with `dd`.
-- Adding a scope takes only the signals directly in it. Subscopes are skipped until subgroups exist.
+- Adding a scope takes only the signals directly in it; subscopes are skipped until subgroups
+  exist. A struct, record or array is one signal in the HDL, so adding it (and `Space` on it) takes
+  all of its signals, in one group. Its fields are listed as declared, not subscopes first.
   A scope without direct signals, or whose signals are all shown already, adds nothing and says so
   on the status line.
 

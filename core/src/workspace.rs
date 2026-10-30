@@ -268,6 +268,31 @@ impl Workspace {
         self.by_end(name).map(|v| (v, None))
     }
 
+    /// `unknown signal`, naming the signals in it when `name` is a scope: a struct, record or array
+    /// has no value of its own (spec §18), its fields do.
+    fn not_a_signal(&self, name: &str) -> String {
+        let key = crate::trace::parts(&crate::trace::canon(name)).into_iter().map(str::to_string).collect::<Vec<_>>();
+        let inside: Vec<&str> = self
+            .trace
+            .vars
+            .iter()
+            .map(|v| v.path.as_str())
+            .filter(|p| {
+                let c = crate::trace::canon(p);
+                let parts = crate::trace::parts(&c);
+                parts.len() > key.len() && parts.windows(key.len()).take(parts.len() - key.len()).any(|w| w == key)
+            })
+            .collect();
+        match inside.len() {
+            0 => format!("unknown signal: {name}"),
+            n => format!(
+                "unknown signal: {name} is a scope of {n} signals ({}{}); name one, or `add` the scope to show them all",
+                inside.iter().take(4).copied().collect::<Vec<_>>().join(", "),
+                if n > 4 { ", ..." } else { "" }
+            ),
+        }
+    }
+
     /// The signal a path ends with, as written or else in either HDL's form; of several, the one
     /// in the rows, in the scope, of the file, or the shallowest.
     fn by_end(&self, name: &str) -> Result<usize, String> {
@@ -288,7 +313,7 @@ impl Workspace {
         }
         match found[..] {
             [v] => Ok(v),
-            [] => Err(format!("unknown signal: {name}")),
+            [] => Err(self.not_a_signal(name)),
             _ => {
                 // the only one of them in the rows is the one meant; else the only one of the file
                 // (decoding `tdata` makes `rx.beat.tdata`, which mustn't make `tdata` ambiguous)

@@ -4,7 +4,7 @@
 |---|---|
 | `:<time>` | move the time cursor to that time, e.g. `:2000ns`, `:1.5us` |
 | `:zoom <time>` | set the time per column, e.g. `:zoom 1ns` |
-| `:add <path\|pattern>...` | add signals below the selected row; a scope becomes a group, e.g. `:add top.cpu.*`; several are added in order, and those that match nothing are reported; an expression in parentheses or braces is one, `:add (pc + 4) {a, b}` |
+| `:add <path\|pattern>...` | add signals below the selected row; a scope becomes a group of the signals directly in it, a struct, record or array of all of its signals (`:add top.pkt`), and a scope may be named by the end of its path as a signal is (`:add pkt`), e.g. `:add top.cpu.*`; several are added in order, and those that match nothing are reported; an expression in parentheses or braces is one, `:add (pc + 4) {a, b}` |
 | `:rm [path\|pattern]...` | remove matching rows, or the selected rows if no argument; `:rm **` removes all |
 | `:signal <name> = <signal>` | name a computed signal (section 16), e.g. `:signal op = cmd[7:0]`, `:signal hdr = {tuser, tdata[63:32]}`, `:signal next = pc + 4` (any expression of section 8 without `past` and the like); it is saved in the session and made again on `:e`; defining a name again replaces it |
 | `:protocol <name> clock=<clk> when=<expr> <field>=<signal>...` | a stateless protocol (section 16), as `[[protocol]]`: a stream sampled where `when` holds, with its fields in order; `roles=a,b,c` makes it a type for `:decode`. Values run to the next `key=`, as in `:decode` |
