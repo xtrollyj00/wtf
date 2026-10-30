@@ -56,7 +56,6 @@ Shortcuts taken so far, to fix when they get in the way.
   - a packed struct dumped as one var (Verilator without `--trace-structs`) has no field names
     (`pkt.state`) and no enum names, and `x[1]` of a flat packed 2-D vector is bit 1, not
     element 1;
-  - VHDL's multi-index `grid(1, 2)` isn't a name (nvc doesn't dump 2-D arrays anyway);
   - a VCD from Verilator writes a struct as a module scope, so its fields are shown by their leaf
     (`hi`, not `pkt.pair.hi`), listed scopes first, and adding it takes only its direct fields;
   - a struct or scope named as a signal (`value_at pkt`) is an error listing its signals; finding

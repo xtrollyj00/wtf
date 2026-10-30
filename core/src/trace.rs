@@ -69,7 +69,7 @@ pub fn join<'a>(parts: impl IntoIterator<Item = &'a str>) -> String {
     out
 }
 
-/// A name with VHDL's indexing as Verilog's (spec §8): `(…)` as `[…]`, `downto` in them as `:`,
+/// A name with VHDL's indexing as Verilog's (spec §8): `(…)` as `[…]`, `(1, 2)` as `[1][2]`, `downto` in them as `:`,
 /// without the spaces in them and the dots before them (nvc names an array element
 /// `axi_tdata.[6]`). Case is kept.
 pub fn brackets(name: &str) -> String {
@@ -95,6 +95,8 @@ pub fn brackets(name: &str) -> String {
                 depth -= 1;
                 out.push(']');
             }
+            // VHDL's multi-index `grid(1, 2)` is `grid[1][2]`
+            ',' if depth > 0 => out.push_str("]["),
             c if depth > 0 && c.is_whitespace() => {}
             c => out.push(c),
         }

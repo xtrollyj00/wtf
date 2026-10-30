@@ -66,6 +66,7 @@ const VERILATOR_PLAIN: &[(&str, &str)] = &[
     ("mem(2)", "types.mem[2] = 00010010"),
     ("grid[1][2]", "types.grid[1][2] = 0101"),
     ("grid(1)(2)", "types.grid[1][2] = 0101"),
+    ("grid(1, 2)", "types.grid[1][2] = 0101"),
     ("grid[1]", "unknown"),
     ("pkts(1)", "types.pkts[1] = 00000000111"),
     ("pkts[1].pair.lo", "unknown"), // shortcut: as pkt.pair.hi
@@ -224,4 +225,56 @@ fn row_names_keep_the_composite() {
             "{file}"
         );
     }
+}
+
+/// `:add` of a struct, record or array: a group of all of it; of a plain scope, an error that
+/// says how.
+fn added(file: &str, cmd: &str) -> String {
+    let mut ws = fixture(file);
+    match wtf_core::command::run(&mut ws, cmd) {
+        Ok(_) => wtf_core::rows::display_names(&ws.trace, &ws.rows).iter().map(|n| n.trim()).collect::<Vec<_>>().join(" "),
+        Err(e) => e,
+    }
+}
+
+#[test]
+fn add_a_composite() {
+    let pkt = "▾ pkt pkt.valid pkt.state pkt.pair.hi pkt.pair.lo";
+    let pkts = "▾ pkts pkts[0].valid pkts[0].state pkts[0].pair.hi pkts[0].pair.lo pkts[1].valid pkts[1].state pkts[1].pair.hi pkts[1].pair.lo";
+    for file in ["types-verilator-structs.fst", "types-nvc.fst"] {
+        for (cmd, want) in [
+            ("add types.pkt", pkt),
+            ("add PKT", pkt),
+            ("add pkt.pair", "▾ pkt.pair pkt.pair.hi pkt.pair.lo"),
+            ("add types.pkts", pkts),
+            // shortcut: the group and rows lose the generate scope (p, p.hi for gen(1).p), fixed
+            // by a later piece
+            ("add gen(1).p", "▾ p p.hi p.lo"),
+        ] {
+            assert_eq!(added(file, cmd), want, "{file}: {cmd}");
+        }
+    }
+    let structs = "types-verilator-structs.fst";
+    assert_eq!(added(structs, "add types.mem"), "▾ mem mem[0] mem[1] mem[2] mem[3]");
+    assert_eq!(added(structs, "add word"), "▾ word word.byte_ word.pair.hi word.pair.lo");
+    // shortcut: wellen's grid diagonal (verilator_fst_grid)
+    assert_eq!(added(structs, "add types.grid[1]"), "▾ grid[1] grid[1][0] grid[1].grid[1]. grid[1][2]");
+    assert_eq!(
+        added(structs, "add types.gen"),
+        "no signals directly in types.gen: add types.gen.** for all of it, or one of its scopes: types.gen[0], types.gen[1]"
+    );
+    // shortcut: the error mixes forms (types.gen(1), types.gen[1].p), fixed by a later piece
+    assert_eq!(
+        added("types-nvc.fst", "add types.gen[1]"),
+        "no signals directly in types.gen(1): add types.gen(1).** for all of it, or one of its scopes: types.gen[1].p"
+    );
+    // shortcut: a Verilator VCD writes struct scopes as modules, so :add takes only the fields
+    // directly in it (not pkt.pair) and pkts is a plain scope, fixed by a later piece
+    let vcd = "types-verilator-structs.vcd";
+    assert_eq!(added(vcd, "add types.pkt"), "▾ pkt valid state");
+    assert!(added(vcd, "add types.pkts").starts_with("no signals directly in types.pkts"));
+    assert_eq!(added(vcd, "add types.grid[1]"), "▾ grid[1] grid[1][0] grid[1][1] grid[1][2]");
+    let mut ws = fixture(structs);
+    let e = ws.resolve("pkt").unwrap_err();
+    assert!(e.starts_with("unknown signal: pkt is a scope of 4 signals (types.pkt.valid"), "{e}");
 }

@@ -91,6 +91,7 @@ fn bracket_forms() {
     assert_eq!(brackets("top.axi_tdata.[6]"), "top.axi_tdata[6]");
     assert_eq!(brackets("arr..[0]"), "arr[0]");
     assert_eq!(brackets("x(7 DownTo 4)"), "x[7:4]");
+    assert_eq!(brackets("grid(1, 2)"), "grid[1][2]");
     assert_eq!(brackets("{a(1), gen(2).b}"), "{a[1], gen[2].b}");
     assert_eq!(brackets("countdownto"), "countdownto");
 }
