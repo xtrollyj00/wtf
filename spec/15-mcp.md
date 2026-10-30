@@ -59,7 +59,7 @@ reuse wtf's own pieces:
   A time given as text in an MCP call stands for a span: every tick that prints as it (`2595ns`
   is 2594.9995ns to 2595.0005ns; a finer time, `2595.0004ns`, is narrower; `fs` or a plain tick
   count is one tick). `value_at` reads the span's end, after everything that printed as the
-  time, and says when a signal changes inside the span (`0x5 (0x4 earlier in 2595ns)`). `from`
+  time, answers `at` the time as asked (before there is a unit, in the asked time's), and says when a signal changes inside the span (`0x5 (0x4 earlier in 2595ns)`). `from`
   in `records`, `values` and `render` takes the span's start, `to` its end; `find` searches after
   the span's end (before its start, backward), and `find` `to` takes the whole span. `workspace`
   `range` takes spans, its cursors keep the time written. The TUI's times are points.

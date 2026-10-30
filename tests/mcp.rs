@@ -170,6 +170,8 @@ fn reading_tools() {
     // array elements and generate instances of one width are one line, the indices as ranges
     s.ok("open", json!({"trace": std::fs::canonicalize("tests/data/vhdl.fst").unwrap()}));
     assert_eq!(s.ok("signals", json!({"pattern": "vhdl"})), "vhdl.clk (1 bit)\nvhdl.arr.[0..1] (4 bits, 2 signals)\nvhdl.gen(0..1).x (1 bit, 2 signals)");
+    // 1 fs ticks: the time as asked, not the span's end (20.000499ns)
+    assert_eq!(s.ok("value_at", json!({"signals": ["clk"], "time": "20ns"})), "at 20ns:\nclk = 0 (1 earlier in 20ns)");
     s.ok("open", json!({"trace": simple()}));
     assert_eq!(s.ok("signals", json!({"pattern": "**sta*"})), "no match: **sta* (a pattern matches the whole path: **.*sta* for sta anywhere)");
     assert_eq!(s.ok("signals", json!({"pattern": "**.*sta*"})), "top.cpu.state (3 bits)\ntop.dma.state (3 bits)");
