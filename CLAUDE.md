@@ -97,7 +97,9 @@ Ideas that span files:
   where tests use them; changing one means updating every test that reads it.
 - TUI tests live in `src/main.rs` (`keys(&mut app, "jj'2")` drives keys, insta snapshots in
   `src/snapshots/`). MCP tests in `tests/mcp.rs` run the real binary over stdio, each with its
-  own `XDG_RUNTIME_DIR` (`Dir::new`). Core tests in `core/tests/` use `common::{open, with}`.
+  own `XDG_RUNTIME_DIR` (`Dir::new`). Terminal tests in `tests/terminal.rs` run the real binary in
+  a pseudo-terminal, read its screen with `vt100`, and send the mouse as the SGR escape sequences
+  a terminal does (`Term::drag`). Core tests in `core/tests/` use `common::{open, with}`.
 
 ## Conventions
 

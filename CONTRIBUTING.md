@@ -33,7 +33,8 @@ for coding agents and people alike, so a pull request made with an agent's help 
   titled with the spec section it falls short of (`§8: ...`), and a `shortcut (#N):` comment in
   the code.
 - **One topic per pull request**, with tests: TUI tests in `src/main.rs` (insta snapshots),
-  MCP tests in `tests/mcp.rs`, core tests in `core/tests/`. `cargo test` and
+  MCP tests in `tests/mcp.rs`, terminal tests (the window in a pseudo-terminal, the mouse as
+  escape sequences) in `tests/terminal.rs`, core tests in `core/tests/`. `cargo test` and
   `cargo clippy --all-targets` pass; CI runs both on Linux and macOS.
 - **Commit messages** follow [Conventional Commits](https://www.conventionalcommits.org/):
   `feat(tui): ...`, `fix(core): ...`, `docs(spec): ...`. The body says why.
