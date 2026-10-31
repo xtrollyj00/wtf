@@ -9,7 +9,7 @@ use wtf_core::workspace::{Msg, Workspace};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 mod mouse;
-pub use mouse::{Drag, Hit, Item, Menu, Target};
+pub use mouse::{Drag, Held, Hit, Item, Menu, Target};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Mode {
@@ -69,6 +69,8 @@ pub struct App {
     pub hit: Hit,
     /// The left button held in the signal panel (spec §5).
     pub drag: Option<Drag>,
+    /// The left button held on the rows: moving a row, zooming, or moving a mark (spec §2 "Drags").
+    pub held: Option<Held>,
     /// The last click, for a double click: what it was on and when.
     click: Option<(Target, std::time::Instant)>,
     /// The right click's menu (spec §2 "Menu").
@@ -150,6 +152,7 @@ impl App {
             changed: None,
             hit: Hit::default(),
             drag: None,
+            held: None,
             click: None,
             menu: None,
         }
@@ -289,7 +292,6 @@ impl App {
     /// `<Space>`, `<lt>` and `<C-x>`; raw control characters work too (`\n`, `\x1b`, `\x01` is
     /// Ctrl-a). Another `<name>` is an error, as it would be typed letter by letter; a `<` that
     /// starts no name is itself (spec §12 `--keys`).
-    #[cfg(test)]
     pub fn keys(&mut self, s: &str) -> Result<(), String> {
         parse_keys(s)?.into_iter().for_each(|k| self.key(k));
         Ok(())
@@ -304,6 +306,9 @@ impl App {
         }
         if self.drag.is_some() && k.code == KeyCode::Esc {
             return self.cancel_drag();
+        }
+        if self.held.is_some() && k.code == KeyCode::Esc {
+            return self.cancel_held();
         }
         // the help and e boxes take no other keys: they scroll and close
         if self.help || self.examine.is_some() {
@@ -524,6 +529,14 @@ impl App {
     }
 
 
+    /// Select the rows `b` as a `V` range, ending on its last row on screen (a collapsed group's
+    /// rows are not).
+    pub fn select_block(&mut self, b: std::ops::Range<usize>) {
+        let last = rows::visible(&self.ws.rows).into_iter().rfind(|v| b.contains(v)).unwrap_or(b.start);
+        (self.ws.anchor, self.ws.sel, self.ws.bit) = (Some(b.start), last, None);
+    }
+
+
     /// The signal panel is shown, the command line open over it or not (spec §2: it is no mode).
     pub fn panel_shown(&self) -> bool {
         self.adding
@@ -633,8 +646,17 @@ impl App {
             _ if ctrl => {}
             // the keys that change the rows need a row
             'J' | 'K' | 'd' | 'V' | 'r' if self.ws.rows.is_empty() => {}
+            // a `V` range moves whole, past the next row on screen (spec §3)
+            'J' | 'K' if self.ws.anchor.is_some() => {
+                let r = self.ws.selection();
+                let mut b = rows::block(&self.ws.rows, r.start, r.end - 1);
+                for _ in 0..n_i {
+                    let Some(n) = rows::step(&mut self.ws.rows, b.clone(), c == 'J') else { break };
+                    b = n;
+                }
+                self.select_block(b);
+            }
             'J' | 'K' => {
-                self.ws.anchor = None;
                 for _ in 0..n_i {
                     self.ws.sel = rows::move_row(&mut self.ws.rows, self.ws.sel, c == 'J');
                 }

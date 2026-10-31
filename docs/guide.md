@@ -260,7 +260,10 @@ the theme.
 **Mouse.** Everything works from the keys, and the mouse does the common moves. Click a row to
 select it, and on its waveform also to put the cursor there; click the time axis to put the
 cursor there; the wheel moves the selection; `Ctrl` + wheel zooms; `Shift` + wheel scrolls the
-time (§3).
+time. Drag a row by its name to move it, `Ctrl` + click to select a range of rows, drag across
+the waveforms to zoom to that range. With marks, click a number in the ruler to jump to it, drag
+it to move the mark. A right click opens a menu of what can be done there, each with its key
+(§2).
 
 ## Working with an AI agent
 

@@ -77,6 +77,19 @@ pub struct Drag {
     scrolled: Instant,
 }
 
+/// The left button held on the rows (spec §2 "Drags"), with what to put back on a cancel. A
+/// press is a click until the pointer leaves its row line or column (`moved`).
+pub enum Held {
+    /// Pressed on a row's name: the rows `row..row + len` follow the pointer, a group whole, the
+    /// `V` range when pressed in it (`range`). `toggle`: the press was on the selected row's name,
+    /// which opens / folds it if released unmoved.
+    Move { row: usize, len: usize, range: bool, line: (usize, Option<u32>), toggle: bool, moved: bool, mark: wtf_core::workspace::Mark, rows: Vec<Row>, sel: (usize, Option<u32>), at: (usize, usize), scrolled: Instant },
+    /// Pressed on a waveform or the time axis: from column `from` to `to`; the view before.
+    Zoom { from: u64, to: u64, moved: bool, view: wtf_core::view::View },
+    /// Pressed on cursor `i`'s number in the ruler, at column `from`; the time it had.
+    Mark { i: usize, from: u64, moved: bool, was: Tick },
+}
+
 /// A right click's menu (spec §2 "Menu"): drawn with its corner at `at`, moved to fit.
 pub struct Menu {
     pub at: (usize, usize),
@@ -109,7 +122,10 @@ enum Act {
     MarkAt(Tick),
     CopyTime(Tick),
     Line(String),
-    Ungroup,
+    /// A `:` command, run.
+    Run(String),
+    /// Keys, pressed as typed (`'2`, `3M`, `w`).
+    Keys(String),
     AddSignals,
     Undo,
     Redo,
@@ -172,6 +188,10 @@ impl App {
             self.panel_mouse(m, at, now);
             return self.ws.record(mark);
         }
+        // a row being moved is one undo step, recorded when it is let go
+        if matches!(self.held, Some(Held::Move { .. })) {
+            return self.rows_mouse(m, at);
+        }
         if self.mode == Mode::Normal {
             let mark = self.ws.mark();
             self.rows_mouse(m, at);
@@ -208,20 +228,57 @@ impl App {
                     self.open_panel();
                 }
             }
+            // Ctrl (or Shift) + click: a range of rows from the selected one
+            MouseEventKind::Down(MouseButton::Left) if ctrl || shift => {
+                if let Some(((row, _), _)) = hit {
+                    self.ws.anchor.get_or_insert(self.ws.sel);
+                    (self.ws.sel, self.ws.bit) = (row, None);
+                }
+            }
             MouseEventKind::Down(MouseButton::Left) => {
+                self.held = None;
+                if let Some(i) = self.ruler_at(x, y) {
+                    let from = (x - self.wave_x) as u64;
+                    let was = if i == 0 { self.ws.view.cursor } else { self.ws.marks[i].unwrap_or(0) };
+                    self.held = Some(Held::Mark { i, from, moved: false, was });
+                    return;
+                }
+                let name = x >= self.hit.x0 && x < self.hit.x0 + self.hit.name_w;
                 if let Some((line, marker)) = hit {
                     let was = (self.ws.sel, self.ws.bit) == line;
-                    (self.ws.sel, self.ws.bit) = line;
-                    let name = x >= self.hit.x0 && x < self.hit.x0 + self.hit.name_w;
-                    if marker.is_some_and(|c| x == self.hit.x0 + c) || (name && was) {
+                    let sel = (self.ws.sel, self.ws.bit);
+                    // inside the `V` range the press keeps it, to drag it whole
+                    let range = self.ws.anchor.is_some() && self.ws.selection().contains(&line.0) && !marker.is_some_and(|c| x == self.hit.x0 + c);
+                    if !range {
+                        self.ws.anchor = None;
+                        (self.ws.sel, self.ws.bit) = line;
+                    }
+                    if marker.is_some_and(|c| x == self.hit.x0 + c) {
                         self.ws.toggle_group();
+                    } else if name {
+                        let r = if range { self.ws.selection() } else { line.0..line.0 + 1 };
+                        let block = rows::block(&self.ws.rows, r.start, r.end - 1);
+                        let (mark, rows) = (self.ws.mark(), self.ws.rows.clone());
+                        self.held = Some(Held::Move { row: block.start, len: block.len(), range, line, toggle: was, moved: false, mark, rows, sel, at: (x, y), scrolled: Instant::now() });
                     }
                 }
                 // on a row's waveform or on the time axis, not below the rows
                 if x >= self.wave_x && (hit.is_some() || y < self.hit.head) {
+                    let view = self.ws.view.clone();
+                    let from = (x - self.wave_x) as u64;
                     let v = &mut self.ws.view;
-                    v.set_cursor(v.col_start((x - self.wave_x) as u64).min(v.end));
+                    v.set_cursor(v.col_start(from).min(v.end));
+                    self.held = Some(Held::Zoom { from, to: from, moved: false, view });
                 }
+            }
+            MouseEventKind::Drag(MouseButton::Left) => self.held_to(x, y),
+            MouseEventKind::Up(MouseButton::Left) => self.let_go(),
+            MouseEventKind::Down(MouseButton::Right) if y < self.hit.head && x >= self.wave_x => {
+                let items = match self.ruler_at(x, y).filter(|&i| i > 0) {
+                    Some(i) => vec![item("Jump to", &format!("'{}", i + 1), Act::Keys(format!("'{}", i + 1))), item("Remove mark", &format!("{}M", i + 1), Act::Keys(format!("{}M", i + 1)))],
+                    None => vec![item("Zoom to fit", ":fit", Act::Run("fit".into())), item("Zoom in", "z", Act::Keys("z".into())), item("Zoom out", "x", Act::Keys("x".into()))],
+                };
+                self.menu = Some(Menu::new((x, y), items));
             }
             MouseEventKind::Down(MouseButton::Right) => {
                 if let Some((line, _)) = hit {
@@ -247,6 +304,140 @@ impl App {
             }
             _ => {}
         }
+    }
+
+    /// The cursor whose number in the ruler is at (or next to) `x` on line `y`, the nearest; a
+    /// mark before cursor 1 where they share a column, so it can still be dragged.
+    fn ruler_at(&self, x: usize, y: usize) -> Option<usize> {
+        let ruler = self.hit.head > 1 && self.ws.cursor_list().len() > 1;
+        if !ruler || y != 1 || x < self.wave_x {
+            return None;
+        }
+        let v = &self.ws.view;
+        let ww = v.width as usize;
+        // where `draw::ruler` puts each number: off screen at the edge (`◂1`, `3▸`)
+        let col = |t: Tick| match v.col_of(t) {
+            Some(c) => c as usize,
+            None if t < v.start => 1,
+            None => ww.saturating_sub(2),
+        };
+        let x = x - self.wave_x;
+        self.ws.cursor_list().into_iter().map(|(i, t)| (col(t).abs_diff(x), i == 0, i)).filter(|&(d, ..)| d <= 1).min().map(|(.., i)| i)
+    }
+
+    /// The pointer moved with the button held on the rows.
+    fn held_to(&mut self, x: usize, y: usize) {
+        // the waveform column under the pointer, kept on the waveforms
+        let c = (x.max(self.wave_x) - self.wave_x).min((self.ws.view.width as usize).saturating_sub(1)) as u64;
+        let fpt = self.ws.trace.fs_per_tick;
+        let dot = gl().dot;
+        match &mut self.held {
+            Some(Held::Move { at, .. }) => {
+                *at = (x, y);
+                self.move_to(y);
+            }
+            Some(Held::Zoom { from, to, moved, .. }) => {
+                (*to, *moved) = (c, *moved || c != *from);
+                if *moved {
+                    let v = &self.ws.view;
+                    let (a, b) = ((*from).min(c), (*from).max(c));
+                    let text = format!("zoom to {}{}{} {dot} Esc cancels", time::format(v.col_start(a), fpt), gl().dash, time::format(v.col_start(b + 1).min(v.end), fpt));
+                    self.msg = Some((text, false));
+                }
+            }
+            Some(Held::Mark { i, from, moved, .. }) if *i > 0 => {
+                *moved |= c != *from;
+                if *moved {
+                    let (i, t) = (*i, self.ws.view.col_start(c).min(self.ws.view.end));
+                    self.ws.marks[i] = Some(t);
+                    self.msg = Some((format!("mark {} at {} {dot} Esc cancels", i + 1, time::format(t, fpt)), false));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// A row being moved follows the pointer to screen line `y` (spec §2 "Drags").
+    fn move_to(&mut self, y: usize) {
+        let Some(Held::Move { line, moved, .. }) = &mut self.held else { return };
+        let Some(&(ly, (r, bit), _)) = self.hit.lines.iter().find(|(ly, ..)| (*ly..ly + crate::draw::ROW_LINES).contains(&y)).filter(|_| y < self.hit.body) else { return };
+        *moved |= (r, bit) != *line;
+        if *moved {
+            self.move_next_to(r, bit.is_some() || y > ly);
+        }
+    }
+
+    /// Move the rows being moved above or `below` row `r` (`rows::next_to`), and say so.
+    fn move_next_to(&mut self, r: usize, below: bool) {
+        let Some(Held::Move { row, len, .. }) = &self.held else { return };
+        if let Some(b) = rows::next_to(&mut self.ws.rows, *row..*row + *len, r, below) {
+            self.moved(b);
+        }
+    }
+
+    /// The rows being moved are at `b` now: select them and say so.
+    fn moved(&mut self, b: std::ops::Range<usize>) {
+        let Some(Held::Move { row, len, range, .. }) = &mut self.held else { return };
+        *row = b.start;
+        // the range stays selected; otherwise the row
+        let (range, len) = (*range, *len);
+        match range {
+            true => self.select_block(b.clone()),
+            false => (self.ws.sel, self.ws.bit) = (b.start, None),
+        }
+        let what = match range {
+            true => format!("{len} rows"),
+            false => rows::display_names(&self.ws.trace, &self.ws.rows).get(b.start).map(|n| n.trim().trim_start_matches(['▾', '▸', ' ']).to_string()).unwrap_or_default(),
+        };
+        self.msg = Some((format!("moving {what} {} Esc cancels", gl().dot), false));
+    }
+
+    /// The button let go on the rows: a click, or the end of a drag.
+    fn let_go(&mut self) {
+        let Some(held) = self.held.take() else { return };
+        match held {
+            Held::Move { moved: false, toggle, range, line, .. } => {
+                // a click in the `V` range selects the row, ending the range
+                if range {
+                    self.ws.anchor = None;
+                    (self.ws.sel, self.ws.bit) = line;
+                } else if toggle {
+                    self.ws.toggle_group();
+                }
+            }
+            Held::Move { mark, .. } => {
+                self.msg = None;
+                self.ws.record(mark);
+            }
+            Held::Zoom { from, to, moved: true, .. } => {
+                self.msg = None;
+                let v = &mut self.ws.view;
+                let (a, b) = (from.min(to), from.max(to));
+                let (start, until) = (v.col_start(a), v.col_start(b + 1).min(v.end.max(1)));
+                v.start = start;
+                v.show_until(until);
+            }
+            Held::Zoom { .. } => {}
+            Held::Mark { i, moved: false, .. } => {
+                let r = self.ws.goto_mark(i);
+                self.report(r);
+            }
+            Held::Mark { .. } => self.msg = None,
+        }
+    }
+
+    /// Esc while the button is held on the rows: everything as before the press.
+    pub fn cancel_held(&mut self) {
+        match self.held.take() {
+            Some(Held::Move { rows, sel, .. }) => {
+                self.ws.rows = rows;
+                (self.ws.sel, self.ws.bit) = sel;
+            }
+            Some(Held::Zoom { view, .. }) => self.ws.view = view,
+            Some(Held::Mark { i, was, .. }) if i > 0 => self.ws.marks[i] = Some(was),
+            _ => {}
+        }
+        self.msg = None;
     }
 
     /// The signal panel opened over the mode there is, as `a` opens it.
@@ -480,31 +671,47 @@ impl App {
         }
     }
 
-    /// A drag resting at the rows' edge scrolls them (spec §5); called on the event loop's tick.
-    /// Returns true when it scrolled.
+    /// A drag resting at the rows' edge scrolls them (spec §5, §2 "Drags"); called on the event
+    /// loop's tick. A row being moved moves on with them, as `J` / `K`. Returns true when it scrolled.
     pub fn tick(&mut self, now: Instant) -> bool {
+        if let Some(Held::Move { moved: true, at: (_, y), scrolled, .. }) = &self.held {
+            if now.duration_since(*scrolled) < SCROLL {
+                return false;
+            }
+            let Some(step) = self.edge_step(*y) else { return false };
+            let Some(Held::Move { scrolled, .. }) = &mut self.held else { return false };
+            *scrolled = now;
+            // past the next row on screen, one at a time
+            for _ in 0..step.unsigned_abs() {
+                let Some(Held::Move { row, len, .. }) = &self.held else { break };
+                let Some(b) = rows::step(&mut self.ws.rows, *row..*row + *len, step > 0) else { break };
+                self.moved(b);
+            }
+            return true;
+        }
         let Some(d) = &self.drag else { return false };
-        if !d.moved || now.duration_since(d.scrolled) < SCROLL {
+        if !d.moved || now.duration_since(d.scrolled) < SCROLL || d.at.0 < self.hit.x0 {
             return false;
         }
-        let (x, y) = d.at;
-        // lines past the edge: one at the edge, four from two past it
-        let speed = |past: usize| if past >= 2 { 4 } else { 1 };
-        if x < self.hit.x0 {
-            return false;
-        }
-        let (Some(&(first, ..)), Some(&(last, ..))) = (self.hit.lines.first(), self.hit.lines.last()) else { return false };
-        let last_end = last + crate::draw::ROW_LINES - 1;
-        let step = match y {
-            _ if y <= first + 1 => -(speed(first.saturating_sub(y)) as isize),
-            _ if y >= last => speed(y.saturating_sub(last_end)) as isize,
-            _ => return false,
-        };
+        let Some(step) = self.edge_step(d.at.1) else { return false };
         self.drag.as_mut().expect("checked above").scrolled = now;
         self.move_sel(step);
         self.ws.bit = None;
         self.drag_msg();
         true
+    }
+
+    /// Lines to scroll the rows with the pointer on screen line `y`: at the first or last row
+    /// one, from two lines past the edge four; None away from the edges.
+    fn edge_step(&self, y: usize) -> Option<isize> {
+        let speed = |past: usize| if past >= 2 { 4 } else { 1 };
+        let (&(first, ..), &(last, ..)) = (self.hit.lines.first()?, self.hit.lines.last()?);
+        let last_end = last + crate::draw::ROW_LINES - 1;
+        match y {
+            _ if y <= first + 1 => Some(-(speed(first.saturating_sub(y)) as isize)),
+            _ if y >= last => Some(speed(y.saturating_sub(last_end)) as isize),
+            _ => None,
+        }
     }
 
     /// The menu has the mouse: the pointer highlights, a click runs an item or opens its second
@@ -600,7 +807,8 @@ impl App {
                 self.yank = Some(text);
             }
             Act::Line(l) => self.prefill(&l),
-            Act::Ungroup => return self.run("ungroup"),
+            Act::Run(c) => return self.run(&c),
+            Act::Keys(k) => return self.keys(&k),
             Act::AddSignals => self.open_panel(),
             Act::Undo => return self.ws.undo(),
             Act::Redo => return self.ws.redo(),
@@ -642,7 +850,7 @@ impl App {
                 radix(&mut items);
                 colour(&mut items);
                 items.push(item("Rename…", ":rename", Act::Line(format!("rename {name}"))));
-                items.push(item("Ungroup", ":ungroup", Act::Ungroup));
+                items.push(item("Ungroup", ":ungroup", Act::Run("ungroup".into())));
                 items.push(item("Remove", "dd", Act::Remove));
             }
             Some(Row::Signal(s)) => {
@@ -661,6 +869,11 @@ impl App {
         if let Some(t) = t.filter(|_| !range) {
             items.push(item("Mark here", "m", Act::MarkAt(t)));
             items.push(item("Copy time", "yt", Act::CopyTime(t)));
+            let keys = |label: &str, k: &str| item(label, k, Act::Keys(k.into()));
+            items.extend([keys("Next change", "w"), keys("Previous change", "b"), item("Search value…", "/", Act::Keys("/".into()))]);
+            if self.last_search.is_some() {
+                items.extend([keys("Next match", "n"), keys("Previous match", "N")]);
+            }
         }
         items
     }

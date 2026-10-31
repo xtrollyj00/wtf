@@ -10,17 +10,17 @@ clk          0     ─────┘    └─┃──┘    └────�
                    ──────────🮦─┃───────🮦───────────────────🮦───────────────────🮦────────────────────
   cpu.state  0x1   ── 0x0 ───🮧─┃ 0x1 ──🮧─────── 0x2 ───────🮧─────── 0x4 ───────🮧─────── 0x5 ────────
                    ━━━━━━━━━━🮦─┃───────🮦─────────🮦─────────╳╳╳╳🮣─────🮦┄┄┄┄┄┄┄┄┄🮦────────────────────
-  data       0x43  ━━ 0xXX ━━🮧─┃0x43 ──🮧─ 0x96 ──🮧─ 0xE1 ──╳                    ─────── 0x40 ───────
-                               ┃       ┌───────────────────┐  Open        Space
-  busy       0     ────────────┃───────┘                   └  Examine         e
-                   ────────────┃───────────────────────────🮦 ▌Radix           ▸   hex             ●
-dma.state    0x0   ────────────┃──── 0x0 ──────────────────🮧  Colour          ▸   bin
-                                                              Copy value     yy   dec
-                                                              Remove         dd   sdec
-                                                              Mark here       m   oct
-                                                              Copy time      yt   ascii
-                                                                                  q<m>.<n>…  :radix
-
-
+  data       0x43  ━━ 0xXX ━━🮧─┃0x43 ──🮧─ 0x96 ──🮧─ 0xE1 ──╳                         ── 0x40 ───────
+                               ┃       ┌───────────────────┐  Open             Space
+  busy       0     ────────────┃───────┘                      Examine              e ───────────────
+                   ────────────┃────────  hex             ●  ▌Radix                ▸ ───────────────
+dma.state    0x0   ────────────┃──── 0x0  bin                 Colour               ▸ ───────────────
+                                          dec                 Copy value          yy
+                                          sdec                Remove              dd
+                                          oct                 Mark here            m
+                                          ascii               Copy time           yt
+                                          q<m>.<n>…  :radix   Next change          w
+                                                              Previous change      b
+                                                              Search value…        /
 
  signals ▸  top.cpu.data                                                12ns  ·  1ns/col  ·  simple

@@ -30,8 +30,7 @@ match the highlight is on (`2/5`).
 | `a` | close the panel, as the button does: a `V` range ends, the marks stay for when it opens again |
 | `Esc` | end a `V` range, then clear the marks, then close the panel |
 
-The mouse, in the panel (a click outside it closes the panel, as `Esc`; a drag from the panel drops
-there instead):
+The mouse, in the panel (a click outside it closes the panel, as `Esc`):
 
 | Mouse | Action |
 |---|---|
@@ -40,24 +39,21 @@ there instead):
 | double click on a signal (a struct, record or array too) | add it as a row, as `Enter` on it without marks; the marks stay |
 | `Ctrl` + click | highlight the line and mark / unmark it, as `Space` (on a scope, the signals directly in it) |
 | `Shift` + click | mark the lines from the highlight to the clicked one, as `V` there then `Space`; the highlight moves to it |
-| drag into the rows | add the pressed line below the row it is dropped on, or all the marks when pressed on a marked line |
+| drag into the rows | add the pressed line, or all the marks when pressed on a marked line, below the row it is dropped on |
 | right click | highlight the line and open its menu (section 2, "Menu") |
 | wheel | move the highlight, as `j` / `k` |
 
-A click acts when the button is released on the line it was pressed on; released on another line
-of the panel, nothing happens. A drag never marks: the lines it passes over are not taken, so a
-slanted drag out of the panel adds only what was pressed. To add several with the mouse, mark
-them with `Ctrl` + click, then drag one of them. While a drag is over the rows, the insertion line
-(`▸ new signals go here`) follows the pointer; a drop selects the row under it and adds as `Enter`
-does (a scope as a group, into a group if the row is in one). Dropped anywhere else (the status
-line, the panel), nothing is added. A double click is a second click on the same line within
-500 ms; on a scope it opens or closes it once, not twice. A plain click keeps the marks (`Esc` clears them, as
-with the keys).
+A click acts when the button is released on the line it was pressed on; a plain click keeps the
+marks. A double click on a scope opens or closes it once. To add several signals with the mouse,
+mark them with `Ctrl` + click and drag one of them into the rows; a drag takes the pressed line
+or the marks, never the lines it passes over.
 
-While dragging, a label at the pointer says what a drop adds (`+ state`, `+ 3`), and the status
-line what the drop does (`drop to add 3 below clk · Esc cancels`, or `release to cancel` where
-nothing can be dropped). `Esc` cancels a drag: nothing is added. The pointer's shape stays the
-terminal's (OSC 22 isn't in every terminal).
+While a drag is over the rows, the insertion line (`▸ new signals go here`) follows the pointer,
+a label at the pointer says what a drop adds (`+ state`, `+ 3`), and the status line what the
+drop does (`drop to add 3 below clk · Esc cancels`). A drop selects the row under it and adds as
+`Enter` does (a scope as a group, into a group if the row is in one). Elsewhere (the panel, the
+status line) the status line says `release to cancel`, and letting go adds nothing. `Esc` cancels
+a drag. The pointer's shape stays the terminal's (OSC 22 isn't in every terminal).
 
 ```
 ┌ signals ───────────┐                ┌───┐   ┌───┐   ┌───
@@ -73,8 +69,9 @@ terminal's (OSC 22 isn't in every terminal).
 ```
 
 A drag scrolls the rows while the pointer rests at their edge, so it reaches rows off screen: on
-the rows' first or last row, the rows scroll a row every 50 ms; with the pointer two or more lines
-past the edge, four at a time. The wheel scrolls during a drag as well. Scrolling stops at the ends, and when the pointer leaves the edge or the button is released.
+the rows' first or last row, the rows scroll a row every 50 ms; with the pointer two or more
+lines past the edge, four at a time. The wheel scrolls during a drag as well. Scrolling stops at
+the ends, and when the pointer leaves the edge or the button is released.
 
 The tree lists each scope's subscopes first, then its signals. Top-level scopes start expanded.
 An array's elements nest under it, one level per index (`grid` > `[1]` > `[2]`).

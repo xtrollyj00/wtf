@@ -52,7 +52,7 @@ Shortcuts taken so far, to fix when they get in the way.
   `Ctrl`. Most terminals keep `Shift` + click for their own text selection while an application
   has the mouse (xterm, VTE, kitty, Alacritty, WezTerm by default), so a `Shift` + click marks a
   range only where the terminal passes it on (kitty `terminal_select_modifiers`, WezTerm
-  `bypass_mouse_reporting_modifiers`); `Ctrl` + click, `V` and `Space` always do. A drag doesn't
+  `bypass_mouse_reporting_modifiers`); `Ctrl` + click, `V` and `Space` always do (on the rows, `Ctrl` + click and `V`). A drag doesn't
   mark a range (section 5): it took unwanted signals when dragged out at a slant.
 - A slice or concatenation SPI reads its pins through (`{cs, sclk, mosi, miso}`) stays a var, as
   every computed signal named.

@@ -1,7 +1,7 @@
 //! The terminal UI's screen (spec §4, §14): the workspace's rows (`draw`), with the signal panel,
 //! the `?` box, the launch guide, the status line and the command line around them.
 
-use crate::tui::app::{App, Mode};
+use crate::tui::app::{App, Held, Mode};
 use crate::draw::{self, gl, pal, put, red, ROW_LINES};
 use wtf_core::rows::Row;
 use wtf_core::time;
@@ -39,6 +39,27 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
     }
     right.area.x = area.x + pw as u16;
     buf.merge(&right);
+    // a row being moved, lifted: its name in the accent, its lines tinted (spec §2 "Drags")
+    if let Some(Held::Move { row, len, moved: true, .. }) = app.held {
+        let name = if pal().mono { Style::new().add_modifier(Modifier::REVERSED) } else { Style::new().bg(pal().cursor).fg(pal().cursor_text).add_modifier(Modifier::BOLD) };
+        for &(ly, _, _) in app.hit.lines.iter().filter(|(_, (r, _), _)| (row..row + len).contains(r)) {
+            for y in (ly..ly + ROW_LINES).filter(|&y| y < body) {
+                for x in pw..w {
+                    let cell = &mut buf[(x as u16, y as u16)];
+                    match x < pw + app.hit.name_w {
+                        true => _ = cell.set_style(name),
+                        false => _ = cell.set_bg(pal().cursor_dim),
+                    }
+                }
+            }
+        }
+    }
+    // a zoom being dragged: its columns tinted as the marks are (spec §2 "Drags")
+    if let Some(Held::Zoom { from, to, moved: true, .. }) = &app.held {
+        for x in (app.wave_x + *from.min(to) as usize..=app.wave_x + *from.max(to) as usize).filter(|&x| x < w) {
+            (0..body).for_each(|y| _ = buf[(x as u16, y as u16)].set_bg(pal().cursor_dim));
+        }
+    }
     let search = if pw > 0 { panel(app, buf, pw, body) } else { None };
     if let (label, Some((x, y))) = app.drag_label() {
         // what a drop adds, beside the pointer

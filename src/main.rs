@@ -327,6 +327,28 @@ mod tests {
     }
 
     #[test]
+    fn move_range() {
+        // J / K move a `V` range whole, past the next row on screen, and keep it selected
+        let mut app = open("vcd", Some(SESSION));
+        keys(&mut app, "jjjVjJ");
+        assert_eq!(names(&app), "clk,▾ cpu,  cpu.state,dma.state,data,busy");
+        assert_eq!(app.ws.selection(), 4..6);
+        keys(&mut app, "2K");
+        assert_eq!(names(&app), "clk,▾ cpu,  data,  busy,  cpu.state,dma.state");
+        assert_eq!(app.ws.selection(), 2..4);
+        keys(&mut app, "uu");
+        assert_eq!(names(&app), "clk,▾ cpu,  cpu.state,  data,  busy,dma.state");
+        // with a header in it, the whole group goes past the next row; at the end it stays
+        keys(&mut app, "<Esc>");
+        app.ws.sel = 1;
+        keys(&mut app, "VJ");
+        assert_eq!(names(&app), "clk,dma.state,▾ cpu,  cpu.state,  data,  busy");
+        assert_eq!(app.ws.selection(), 2..6);
+        keys(&mut app, "9J");
+        assert_eq!(app.ws.selection(), 2..6);
+    }
+
+    #[test]
     fn edit_panel() {
         let mut app = open("vcd", None);
         keys(&mut app, "ajl\n");
@@ -1084,6 +1106,164 @@ mod tests {
     }
 
     #[test]
+    fn mouse_row_drags() {
+        // simple's session at 100 x 22: rows clk, cpu, cpu.state, data, busy, dma.state from line
+        // 1, two lines each, the name on the lower; a drag by the name moves, live
+        let mut app = open("vcd", Some(SESSION));
+        let t0 = Instant::now();
+        let ev = |app: &mut App, kind, x, y, t| app.mouse_at(at(kind, x, y, NONE), t0 + Duration::from_millis(t));
+        let (down, drag, up) = (MouseEventKind::Down(MouseButton::Left), MouseEventKind::Drag(MouseButton::Left), MouseEventKind::Up(MouseButton::Left));
+        let start = names(&app);
+        screen(&mut app, 100, Some(22));
+        // clk onto busy's lower line: below busy, in cpu; one undo step
+        ev(&mut app, down, 3, 2, 0);
+        ev(&mut app, drag, 3, 10, 10);
+        assert_eq!(names(&app), "▾ cpu,  cpu.state,  data,  busy,  clk,dma.state");
+        assert_eq!(app.msg.as_ref().unwrap().0, "moving clk · Esc cancels");
+        // drawn lifted: the name in the accent, the waveform tinted; clk is now on lines 9 and 10
+        let buf = screen(&mut app, 100, Some(22));
+        assert!(buf[(2, 10)].bg == draw::pal().cursor && buf[(60, 9)].bg == draw::pal().cursor_dim);
+        assert!(buf[(2, 8)].bg != draw::pal().cursor, "busy isn't");
+        ev(&mut app, drag, 3, 10, 20);
+        ev(&mut app, up, 3, 10, 30);
+        assert_eq!((names(&app).as_str(), app.msg.is_none(), app.ws.sel), ("▾ cpu,  cpu.state,  data,  busy,  clk,dma.state", true, 4));
+        keys(&mut app, "u");
+        assert_eq!(names(&app), start);
+        // on a row's upper line: above it, and in its group; Esc puts it back
+        screen(&mut app, 100, Some(22));
+        ev(&mut app, down, 3, 2, 100);
+        ev(&mut app, drag, 3, 5, 110);
+        assert_eq!(names(&app), "▾ cpu,  clk,  cpu.state,  data,  busy,dma.state");
+        keys(&mut app, "<Esc>");
+        assert_eq!((names(&app), app.held.is_none(), app.ws.sel), (start.clone(), true, 0));
+        ev(&mut app, up, 3, 5, 120);
+        assert_eq!(names(&app), start);
+        // a header moves its group whole, and never into one
+        screen(&mut app, 100, Some(22));
+        ev(&mut app, down, 3, 4, 200);
+        ev(&mut app, drag, 3, 12, 210);
+        ev(&mut app, up, 3, 12, 220);
+        assert_eq!(names(&app), "clk,dma.state,▾ cpu,  cpu.state,  data,  busy");
+        keys(&mut app, "u");
+        // a click on the selected row's name folds it when let go, so a press can start a drag
+        screen(&mut app, 100, Some(22));
+        click(&mut app, 3, 2, NONE, t0, 250);
+        click(&mut app, 3, 4, NONE, t0, 300);
+        ev(&mut app, down, 3, 4, 1000);
+        assert!(matches!(app.ws.rows[1], rows::Row::Group { collapsed: false, .. }));
+        ev(&mut app, up, 3, 4, 1000);
+        assert!(matches!(app.ws.rows[1], rows::Row::Group { collapsed: true, .. }));
+        click(&mut app, 3, 4, NONE, t0, 2000);
+        // Ctrl + click: a range from the selected row
+        screen(&mut app, 100, Some(22));
+        click(&mut app, 3, 6, NONE, t0, 3000);
+        click(&mut app, 3, 10, KeyModifiers::CONTROL, t0, 4000);
+        assert_eq!(app.ws.selection(), 2..5);
+        keys(&mut app, "<Esc>");
+        // pressed inside a `V` range, the whole range moves, lifted, and stays selected
+        click(&mut app, 3, 8, NONE, t0, 4100);
+        click(&mut app, 3, 10, KeyModifiers::CONTROL, t0, 4200);
+        ev(&mut app, down, 3, 8, 4300);
+        ev(&mut app, drag, 3, 1, 4310);
+        assert_eq!(names(&app), "data,busy,clk,▾ cpu,  cpu.state,dma.state");
+        assert_eq!((app.ws.selection(), app.msg.as_ref().unwrap().0.as_str()), (0..2, "moving 2 rows · Esc cancels"));
+        let buf = screen(&mut app, 100, Some(22));
+        assert!(buf[(2, 2)].bg == draw::pal().cursor && buf[(2, 4)].bg == draw::pal().cursor && buf[(2, 6)].bg != draw::pal().cursor);
+        ev(&mut app, up, 3, 1, 4320);
+        keys(&mut app, "u");
+        assert_eq!(names(&app), start);
+        // a click in the range, not dragged, selects that row and ends the range
+        screen(&mut app, 100, Some(22));
+        click(&mut app, 3, 8, NONE, t0, 4400);
+        click(&mut app, 3, 10, KeyModifiers::CONTROL, t0, 4500);
+        click(&mut app, 3, 10, NONE, t0, 4600);
+        assert_eq!((app.ws.anchor, app.ws.sel), (None, 4));
+        // the rows scroll at their edge, the row moving on with them
+        screen(&mut app, 100, Some(9));
+        let last = app.hit.lines.last().unwrap().0 as u16;
+        ev(&mut app, down, 3, 2, 5000);
+        ev(&mut app, drag, 3, last + 1, 5010);
+        let before = names(&app);
+        assert!(app.tick(t0 + Duration::from_millis(5100)));
+        assert_ne!(names(&app), before, "moved on, as J");
+        ev(&mut app, up, 3, last + 1, 5110);
+        keys(&mut app, "u");
+        assert_eq!(names(&app), start);
+    }
+
+    #[test]
+    fn mouse_zoom_and_marks() {
+        let mut app = open("vcd", Some(SESSION));
+        let t0 = Instant::now();
+        let ev = |app: &mut App, kind, x, y, t| app.mouse_at(at(kind, x, y, NONE), t0 + Duration::from_millis(t));
+        let (down, drag, up) = (MouseEventKind::Down(MouseButton::Left), MouseEventKind::Drag(MouseButton::Left), MouseEventKind::Up(MouseButton::Left));
+        screen(&mut app, 100, Some(22));
+        // a drag across the time axis zooms to it, the columns tinted meanwhile
+        let wx = app.wave_x as u64;
+        let v = app.ws.view.clone();
+        let (a, b) = (v.col_start(30 - wx), v.col_start(50 + 1 - wx));
+        ev(&mut app, down, 30, 0, 0);
+        ev(&mut app, drag, 50, 0, 10);
+        assert!(app.msg.as_ref().unwrap().0.starts_with("zoom to "), "{:?}", app.msg);
+        let buf = screen(&mut app, 100, Some(22));
+        assert!(buf[(40, 6)].bg == draw::pal().cursor_dim && buf[(60, 6)].bg != draw::pal().cursor_dim);
+        ev(&mut app, up, 50, 0, 20);
+        assert!(app.ws.view.start == a && app.ws.view.last_visible() + 1 >= b && app.ws.view.cursor == a);
+        assert!(app.ws.view.ticks * app.ws.view.width / app.ws.view.cols < v.ticks * v.width / v.cols, "zoomed in");
+        // Esc puts the view back, the cursor too
+        screen(&mut app, 100, Some(22));
+        let v = app.ws.view.clone();
+        ev(&mut app, down, 30, 8, 100);
+        ev(&mut app, drag, 60, 8, 110);
+        keys(&mut app, "<Esc>");
+        assert!((app.ws.view.start, app.ws.view.cursor, app.ws.view.ticks, app.ws.view.cols) == (v.start, v.cursor, v.ticks, v.cols) && app.msg.is_none());
+        ev(&mut app, up, 60, 8, 120);
+        // the time axis' menu
+        app.run("fit").unwrap();
+        screen(&mut app, 100, Some(22));
+        right(&mut app, 50, 0);
+        let labels = |app: &App| app.menu.as_ref().unwrap().items.iter().map(|i| i.label.clone()).collect::<Vec<_>>();
+        assert_eq!(labels(&app), ["Zoom to fit", "Zoom in", "Zoom out"]);
+        keys(&mut app, "jj<CR>");
+        assert!(app.ws.view.ticks < v.ticks || app.ws.view.cols > 1, "zoomed in");
+        app.run("fit").unwrap();
+        // the ruler: a click on a mark's number jumps to it, a drag moves it, its menu removes it
+        keys(&mut app, "m:30ns<CR>");
+        screen(&mut app, 100, Some(22));
+        let x = |app: &App| (app.wave_x as u64 + app.ws.view.col_of(app.ws.marks[1].unwrap()).unwrap()) as u16;
+        let x1 = x(&app);
+        let m2 = app.ws.marks[1].unwrap();
+        click(&mut app, x1, 1, NONE, t0, 200);
+        assert_eq!(app.ws.view.cursor, m2);
+        screen(&mut app, 100, Some(22));
+        let x2 = x(&app);
+        ev(&mut app, down, x2, 1, 300);
+        ev(&mut app, drag, x2 + 10, 1, 310);
+        let t = app.ws.view.col_start(x2 as u64 + 10 - app.wave_x as u64);
+        assert_eq!((app.ws.marks[1], app.msg.as_ref().unwrap().0.starts_with("mark 2 at ")), (Some(t), true));
+        ev(&mut app, up, x2 + 10, 1, 320);
+        assert_eq!((app.ws.marks[1], app.ws.view.cursor), (Some(t), m2));
+        screen(&mut app, 100, Some(22));
+        let x3 = x(&app);
+        ev(&mut app, down, x3, 1, 400);
+        ev(&mut app, drag, 90, 1, 410);
+        keys(&mut app, "<Esc>");
+        assert_eq!(app.ws.marks[1], Some(t));
+        ev(&mut app, up, 90, 1, 420);
+        let x4 = x(&app);
+        right(&mut app, x4, 1);
+        assert_eq!(labels(&app), ["Jump to", "Remove mark"]);
+        keys(&mut app, "jj<CR>");
+        assert_eq!(app.ws.marks[1], None);
+        // a waveform's menu has the time keys: Next change is w
+        screen(&mut app, 100, Some(22));
+        right(&mut app, 60, 8);
+        let k = labels(&app).iter().position(|l| l == "Next change").unwrap();
+        keys(&mut app, &format!("{}<CR>", "j".repeat(k + 1)));
+        assert_eq!(app.ws.view.cursor, 20, "data changes at 20");
+    }
+
+    #[test]
     fn mouse_drag_autoscroll() {
         // more lines than fit: rst added, data's bits open
         let mut app = panel_app();
@@ -1186,7 +1366,7 @@ mod tests {
         assert_eq!(app.ws.sel, 3);
         insta::assert_snapshot!("mouse_menu", snapshot(&mut app, 100, Some(22)));
         let labels = |app: &App| app.menu.as_ref().unwrap().items.iter().map(|i| i.label.clone()).collect::<Vec<_>>();
-        assert_eq!(labels(&app), ["Open", "Examine", "Radix", "Colour", "Copy value", "Remove", "Mark here", "Copy time"]);
+        assert_eq!(labels(&app), ["Open", "Examine", "Radix", "Colour", "Copy value", "Remove", "Mark here", "Copy time", "Next change", "Previous change", "Search value…"]);
         // the pointer highlights; Radix opens its second menu; dec sets it
         let r = app.hit.menus[0];
         app.mouse(at(MouseEventKind::Moved, r.x + 2, r.y + 3, NONE));
