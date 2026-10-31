@@ -1,6 +1,16 @@
 # wtf
 
+<div align="center">
+
 [![ci](https://github.com/xtrollyj00/wtf/actions/workflows/ci.yml/badge.svg)](https://github.com/xtrollyj00/wtf/actions/workflows/ci.yml)
+[![coverage](https://codecov.io/gh/xtrollyj00/wtf/graph/badge.svg)](https://codecov.io/gh/xtrollyj00/wtf)
+[![release](https://img.shields.io/github/v/release/xtrollyj00/wtf)](https://github.com/xtrollyj00/wtf/releases/latest)
+[![license](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
+![platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS-lightgrey)
+[![MCP server](https://img.shields.io/badge/MCP-server-8A2BE2)](#with-an-ai-agent)
+![Rust 2024](https://img.shields.io/badge/Rust-2024-orange?logo=rust)
+
+</div>
 
 **W**aveform **T**erminal **F**rontend: a Vim-like terminal viewer for VCD and FST waveforms,
 with an MCP server so AI agents can debug a trace with you. Also what you say when the bus goes
