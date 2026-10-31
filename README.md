@@ -27,8 +27,8 @@ list of reads to the one answered with SLVERR, unfolded into its fields. Try it:
 
 - **Vim-like.** Time is the line axis: `h` / `l` move the cursor, `w` / `b` jump between
   transitions, `gg` / `G` go to the start / end, `:2000ns` goes to a time, `z` / `x` zoom.
-  Viewing is the default; changing what is shown is a separate Edit mode (`i`). The mouse works
-  too: click to place the cursor, Ctrl+wheel to zoom.
+  One mode for keys: `dd`, `J` / `K`, `r` change the rows next to the time keys, and `u` takes
+  any change back. The mouse works too: click to place the cursor, Ctrl+wheel to zoom.
 - **Signals.** A searchable signal tree, groups, buses expanded into bits, radixes (hex, binary,
   decimal, signed, octal, ASCII, float, fixed point, and enum names from FST files), computed
   signals (`data[7:4]`, `{a, b}`).
@@ -77,9 +77,10 @@ wtf shows what the file holds. A VCD keeps less than an FST: no enum names and n
 so a struct or union is a plain scope.
 
 The first start asks which glyphs your terminal draws well and whether you want dark or light
-(`wtf --setup` asks again). Then the screen is empty: press `i` to add signals (`/` searches,
-`Space` marks, `Enter` adds), `Esc` to go back to viewing, `?` for the keys of the mode you are
-in, `:` for commands, `:w` to save the session, `q` to quit.
+(`wtf --setup` asks again). Then the screen is empty: press `a` (or click `signals ▸`) to add
+signals (`/` searches, `Space` marks, `Enter` adds), `Esc` to close the panel, `?` for the keys,
+`:` for commands, `:w` to save the session, `q` to quit. The mouse works too: click, drag
+signals into the rows, right click for a menu.
 
 ## With an AI agent
 

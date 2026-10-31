@@ -1,9 +1,9 @@
-## 5. Edit mode
+## 5. Editing rows
 
-Edit mode works on the **rows** (the signals being shown). Adding happens in the **signal panel**
-(all signals in the file), which opens on the left with `a`, or with `/` already searching, and has
-the keys while it is open. `Esc` closes it and the keys go back to the rows. With no rows yet,
-`i` opens the panel straight away. The selected row is the same in View and Edit mode.
+The **rows** (the signals being shown) are changed with Normal mode keys (section 3): `dd`,
+`J` / `K`, `r`, `V`, `u`. Adding happens in the **signal panel** (all signals in the file), which
+`a` or a click on the status line's `signals ▸` opens on the left, and `a`, the button or `Esc`
+closes. It has the keys while it is open; when it closes, they go back to the rows.
 
 ### Signal panel
 
@@ -27,7 +27,8 @@ match the highlight is on (`2/5`).
 | `n` / `N` | next / previous match of the last search |
 | `Ctrl-a` | mark every signal the search matches (also while typing) |
 | `u` / `Ctrl-r` | undo / redo |
-| `Esc` | end a `V` range, then clear the marks, then close the panel and go back to the rows |
+| `a` | close the panel, as the button does: a `V` range ends, the marks stay for when it opens again |
+| `Esc` | end a `V` range, then clear the marks, then close the panel |
 
 The mouse, in the panel (a click outside it closes the panel, as `Esc`; a drag from the panel drops
 there instead):
@@ -39,24 +40,23 @@ there instead):
 | double click on a signal (a struct, record or array too) | add it as a row, as `Enter` on it without marks; the marks stay |
 | `Ctrl` + click | highlight the line and mark / unmark it, as `Space` (on a scope, the signals directly in it) |
 | `Shift` + click | mark the lines from the highlight to the clicked one, as `V` there then `Space`; the highlight moves to it |
-| drag from one line to another | mark the lines between, as `V` then `Space`, shown as a `V` range while dragging; the highlight ends on the last |
-| drag into the rows | add what is dragged below the row it is dropped on: the lines dragged over (just the pressed one when dragged straight out), or all the marks when pressed on a marked line |
+| drag into the rows | add the pressed line below the row it is dropped on, or all the marks when pressed on a marked line |
 | right click | highlight the line and open its menu (section 2, "Menu") |
 | wheel | move the highlight, as `j` / `k` |
 
-A click acts when the button is released on the line it was pressed on; released on another line, it
-is a drag. While a drag is over the rows, the insertion line (`▸ new signals go here`) follows the
-pointer; a drop selects the row under it and adds as `Enter` does (a scope as a group, into a group
-if the row is in one). Dropped anywhere else (the status line, the panel's border), nothing is
-added. The drag inside the panel is the mouse-only range: `Shift` + click often never reaches wtf
-(section 18, "Known limits"). A double click is a second click on the same line within 500 ms; on a
-scope it opens or closes it once, not twice. A plain click keeps the marks (`Esc` clears them, as
+A click acts when the button is released on the line it was pressed on; released on another line
+of the panel, nothing happens. A drag never marks: the lines it passes over are not taken, so a
+slanted drag out of the panel adds only what was pressed. To add several with the mouse, mark
+them with `Ctrl` + click, then drag one of them. While a drag is over the rows, the insertion line
+(`▸ new signals go here`) follows the pointer; a drop selects the row under it and adds as `Enter`
+does (a scope as a group, into a group if the row is in one). Dropped anywhere else (the status
+line, the panel), nothing is added. A double click is a second click on the same line within
+500 ms; on a scope it opens or closes it once, not twice. A plain click keeps the marks (`Esc` clears them, as
 with the keys).
 
-While dragging, the lines dragged over show as a `V` range, a label at the pointer says what a
-drop adds (`+ state`, `+ 3`), and the status line what the drop does (`mark 3 · drag out to add ·
-Esc cancels`, `drop to add 3 below clk · Esc cancels`, or `release to cancel` where nothing can be
-dropped). `Esc` cancels a drag: nothing is marked or added. The pointer's shape stays the
+While dragging, a label at the pointer says what a drop adds (`+ state`, `+ 3`), and the status
+line what the drop does (`drop to add 3 below clk · Esc cancels`, or `release to cancel` where
+nothing can be dropped). `Esc` cancels a drag: nothing is added. The pointer's shape stays the
 terminal's (OSC 22 isn't in every terminal).
 
 ```
@@ -69,14 +69,12 @@ terminal's (OSC 22 isn't in every terminal).
 │       busy         │
 │       irq          │
 └────────────────────┘
- EDIT  drop to add 3 below clk · Esc cancels
+ signals ◂  drop to add 3 below clk · Esc cancels
 ```
 
-A drag scrolls what it is over while the pointer rests at an edge, so it reaches signals and rows
-off screen: on the panel's first or last line (or past it, on the border), the tree scrolls a line
-every 50 ms; on the rows' first or last row, the rows scroll a row every 50 ms; with the pointer two
-or more lines past the edge, four at a time. The wheel scrolls during a drag as well. Scrolling
-stops at the ends, and when the pointer leaves the edge or the button is released.
+A drag scrolls the rows while the pointer rests at their edge, so it reaches rows off screen: on
+the rows' first or last row, the rows scroll a row every 50 ms; with the pointer two or more lines
+past the edge, four at a time. The wheel scrolls during a drag as well. Scrolling stops at the ends, and when the pointer leaves the edge or the button is released.
 
 The tree lists each scope's subscopes first, then its signals. Top-level scopes start expanded.
 An array's elements nest under it, one level per index (`grid` > `[1]` > `[2]`).
@@ -104,25 +102,17 @@ The panel stays open after adding.
 
 ### Rows
 
-| Keys | Action |
-|---|---|
-| `j` / `k` | select the next / previous row |
-| `a` | open the signal panel to add signals below the selected row |
-| `/` | open the signal panel, searching |
-| `dd` | remove the selected row |
-| `J` / `K` | move the selected row down / up |
-| `r` | cycle the radix of the selected line (a row, or a field under it), or of all signals in a group or `V` range (section 10) |
-| `u` / `Ctrl-r` | undo / redo |
-| `Space` | collapse / expand the selected group, or open / fold a bus, a stream or a composite (one level) |
-| `e` | examine the selected signal, as in View mode |
-| `Esc` | clear a `V` selection if there is one, otherwise back to View mode |
+The keys that change the rows are in section 3 with the others: `dd` removes, `J` / `K` move, `r`
+cycles the radix, `V` selects a range of rows for them and for `:group`, `u` / `Ctrl-r` undo and
+redo. In the panel, `/` searches the signals; on the rows it searches values (section 8), so
+adding by name is `a` then `/`.
 
 ### Undo
 
 `u` / `:undo` undo and `Ctrl-r` / `:redo` redo changes to the rows: adding, removing, moving, grouping
-and radix. The keys work in Edit mode, also while the panel is open (not while typing a search), the commands from
-any mode. The history covers the whole session.
-View-mode actions, such as moving the cursor or zooming, are not part of the undo history.
+and radix. The keys work on the rows and in the panel (not while typing a search), the commands
+from the command line. The history covers the whole session.
+Moving the cursor, zooming and other time keys are not part of the undo history.
 Undo and redo return the selection to the row the change was made on.
 Undoing back to the last saved state
 clears `[+]`.
@@ -142,7 +132,7 @@ A group is a named set of rows with a header row. Groups have one level (no nest
  ▸ stream (4)       ───▀▀──▀▀▀▀───▀───     ← collapsed: shows activity
 ```
 
-- **Collapse / expand**: `Space` on a group header, in View and Edit mode.
+- **Collapse / expand**: `Space` on a group header.
 - **Bus bits**: `Space` on a bus shows one line per bit under it, MSB first (`data[7]` … `data[0]`),
   drawn as 1-bit signals; `Space` on the bus or one of its bits folds them again. Bit lines can be
   selected (`j` / `k`, `w` / `b` jump between that bit's changes, the value column shows the bit),
@@ -160,16 +150,10 @@ A group is a named set of rows with a header row. Groups have one level (no nest
 - A collapsed header shows the number of signals in it: `▸ stream (4)`.
 - With a header selected, the status line shows the group's name and `/` shows an error.
 
-In Edit mode, on the rows side:
+On the rows (section 3): `V` then `j` / `k` select rows and `:group <name>` groups them; `dd` on
+a header removes the group and its signals; `J` / `K` on a header move the whole group, and on a
+signal next to a group's edge move it into or out of the group.
 
-| Keys | Action |
-|---|---|
-| `V`, then `j` / `k` | select a range of rows, then `:group <name>` groups them |
-| `dd` on a header | remove the group and its signals |
-| `dd` with rows selected | remove all selected rows |
-| `J` / `K` on a header | move the whole group down / up |
-
-- `J` / `K` on a signal next to a group boundary moves it into or out of the group.
 - `:group` on a selection that includes a header shows an error, since groups don't nest yet.
 
 ### Composite rows

@@ -23,4 +23,4 @@ expression: "snapshot(&mut app, 100, Some(22))"
 
 
 
- EDIT  drop to add rst below dma.state · Esc cancels                    12ns  ·  1ns/col  ·  simple
+ signals ◂  drop to add rst below dma.state · Esc cancels               12ns  ·  1ns/col  ·  simple

@@ -11,9 +11,9 @@ One file per section; code cites them as `spec §N`. Read only the sections a ch
 | § | File | Covers |
 |---|---|---|
 | 1 | this file | philosophy, architecture |
-| 2, 3 | [02-modes.md](02-modes.md) | modes, View mode keys |
+| 2, 3 | [02-modes.md](02-modes.md) | modes, Normal mode keys, mouse |
 | 4 | [04-screen.md](04-screen.md) | screen layout, command line |
-| 5, 6 | [05-edit.md](05-edit.md) | Edit mode, signal panel, undo, groups |
+| 5, 6 | [05-edit.md](05-edit.md) | editing rows, signal panel, undo, groups |
 | 7 | [07-commands.md](07-commands.md) | `:` commands |
 | 8 | [08-search.md](08-search.md) | value search, expressions |
 | 9 | [09-cursors.md](09-cursors.md) | cursor, marks, ruler |

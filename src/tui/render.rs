@@ -89,7 +89,7 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
     let at = if matches!(app.mode, Mode::Command | Mode::Search) {
         command_line(app, buf, w, h)
     } else {
-        status(app, buf, w, h - 1);
+        app.hit.button = Some(status(app, buf, w, h - 1));
         search
     };
     draw::fill_screen(buf);
@@ -177,31 +177,16 @@ fn panel(app: &mut App, buf: &mut Buffer, pw: usize, body: usize) -> Option<(u16
 type Keys = &'static [(&'static str, &'static [(&'static str, &'static str)])];
 type Examples = &'static [(&'static str, &'static str)];
 
-/// The keys of each mode for the `?` box: its title, the keys under section headings, and a few
+/// The keys for the `?` box, the panel's while it is open: its title, the keys under section headings, and a few
 /// things to type, each with what it does.
 fn help_text(app: &App) -> (&'static str, Keys, &'static str, Examples) {
     if app.panel_shown() {
         let keys: Keys = &[
             ("Move", &[("j k", "move"), ("l h", "open / close a scope"), ("gg G", "first / last line"), ("/", "search paths"), ("n N", "next / previous match")]),
             ("Mark", &[("Space", "mark a signal or scope"), ("V", "mark a range"), ("Ctrl-a", "mark all matches")]),
-            ("Add", &[("Enter", "add as rows"), ("Ctrl-g", "add as a group"), ("u Ctrl-r", "undo / redo"), ("Esc", "clear marks / close")]),
+            ("Add", &[("Enter", "add as rows"), ("Ctrl-g", "add as a group"), ("u Ctrl-r", "undo / redo"), ("a", "close"), ("Esc", "clear marks / close")]),
         ];
         return ("signal panel", keys, "", &[("", "New signals go below the selected row, at the accent line.")]);
-    }
-    if app.editing_rows() {
-        let keys: Keys = &[
-            ("Rows", &[("j k", "select a row"), ("J K", "move down / up"), ("V", "select a range"), ("Space", "fold a group, bus or stream"), ("e", "examine: the whole value")]),
-            ("Change", &[("a", "add signals"), ("/", "add signals, searching"), ("dd", "remove"), ("r", "next radix"), ("u Ctrl-r", "undo / redo")]),
-            ("Other", &[(":", "command"), ("Esc", "back to View")]),
-        ];
-        let commands: Examples = &[
-            (":group <name>", "group the selected rows"),
-            (":rename <name>", "rename the group"),
-            (":radix q4.12", "a radix: hex bin dec ascii, fixed point"),
-            (":color cyan", "colour the row"),
-            (":w", "save the session"),
-        ];
-        return ("EDIT", keys, "Commands", commands);
     }
     let keys: Keys = &[
         (
@@ -224,7 +209,17 @@ fn help_text(app: &App) -> (&'static str, Keys, &'static str, Examples) {
                 ("Space", "fold a group or bus"),
                 ("e", "the whole value"),
                 ("yy yt", "copy value / time"),
-                ("i", "edit rows"),
+            ],
+        ),
+        (
+            "Change",
+            &[
+                ("a", "add signals"),
+                ("dd", "remove"),
+                ("J K", "move down / up"),
+                ("V", "select rows; Esc ends"),
+                ("r", "next radix"),
+                ("u Ctrl-r", "undo / redo"),
             ],
         ),
         ("Search", &[("/", "search"), ("n N", "next / previous match")]),
@@ -237,7 +232,7 @@ fn help_text(app: &App) -> (&'static str, Keys, &'static str, Examples) {
         ("/valid && ready && data == 0x40", "several signals at once"),
         ("/@clk fell(valid) && !past(ready)", "sampled at clk; also rose() stable()"),
     ];
-    ("VIEW", keys, "Search expressions", search)
+    ("keys", keys, "Search expressions", search)
 }
 
 /// A line of text in parts, each in its own style.
@@ -455,7 +450,7 @@ fn guide(app: &App, buf: &mut Buffer, w: usize, body: usize) {
         // the panel is open: how to add from it
         &[("/", "search"), ("Space", "mark"), ("Enter", "add"), ("Ctrl-g", "add as a group"), ("Esc", "close")]
     } else {
-        &[("i", "add signals"), (":", "commands"), ("?", "help"), ("q", "quit")]
+        &[("a", "add signals"), (":", "commands"), ("?", "help"), ("q", "quit")]
     };
     let t = &app.ws.trace;
     let fpt = t.fs_per_tick;
@@ -497,17 +492,17 @@ fn zoom_text(v: &View, fpt: Option<u128>) -> String {
     }
 }
 
-/// Mode and the selected signal (or a message) on the left; cursor time, zoom and file on the right.
-fn status(app: &App, buf: &mut Buffer, w: usize, y: usize) {
+/// The panel's button and the selected signal (or a message) on the left; cursor time, zoom and file on the right.
+/// Returns where the signal panel's button was drawn.
+fn status(app: &App, buf: &mut Buffer, w: usize, y: usize) -> Rect {
     let fpt = app.ws.trace.fs_per_tick;
-    let mode = if app.mode == Mode::Edit { " EDIT " } else { " VIEW " };
-    // pills: EDIT in the accent, as the keys change the layout; VIEW quiet
-    let st = match (app.mode == Mode::Edit, pal().mono) {
-        (_, true) => Style::new().add_modifier(Modifier::REVERSED),
-        (true, false) => Style::new().bg(pal().cursor).fg(pal().cursor_text).add_modifier(Modifier::BOLD),
-        (false, false) => Style::new().bg(pal().selected).add_modifier(Modifier::BOLD),
-    };
-    put(buf, 0, y, mode, st);
+    // the panel's button
+    let button = format!(" signals {} ", if app.adding { gl().left } else { gl().right });
+    let bst = if pal().mono { Style::new().add_modifier(Modifier::BOLD) } else { Style::new().bg(pal().panel).fg(Color::Reset).add_modifier(Modifier::BOLD) };
+    put(buf, 0, y, &button, bst);
+    let bw = button.chars().count();
+    let lead = bw + 1;
+    let at = Rect::new(0, y as u16, bw as u16, 1);
     // the cursor's time first, the rest dim, a dot between; the agents' time unit when one set it
     let dim = Style::new().fg(pal().dim);
     let sep = format!("  {}  ", gl().dot);
@@ -536,7 +531,7 @@ fn status(app: &App, buf: &mut Buffer, w: usize, y: usize) {
                 let fields: Vec<String> = s.fields_text(i, fpt).into_iter().map(|(n, v)| format!("{n}={v}")).collect();
                 let times = format!("{}{}{}", time::format(rec.start, fpt), gl().dash, time::format(rec.end, fpt));
                 let text = format!("{} #{i}  {times}  {}", s.name, fields.join(" "));
-                let room = w.saturating_sub(mode.len() + 1 + right.chars().count() + 2);
+                let room = w.saturating_sub(lead + right.chars().count() + 2);
                 let text = if text.chars().count() > room { text.chars().take(room.saturating_sub(1)).chain([gl().cut]).collect() } else { text };
                 (text, Style::new())
             }
@@ -550,13 +545,13 @@ fn status(app: &App, buf: &mut Buffer, w: usize, y: usize) {
             None => (String::new(), Style::new()),
         },
     };
-    let x = mode.len() + 1;
+    let x = lead;
     let room = w.saturating_sub(x + right.chars().count() + 2);
     let len = left.chars().count();
     if app.msg.is_some() && len > room {
         // a long message wins over the times
         put(buf, x, y, &left, st);
-        return;
+        return at;
     }
     // a long path keeps its end, where the signal name is
     let left = if len > room { format!("{}{}", gl().cut, left.chars().skip(len + 1 - room).collect::<String>()) } else { left };
@@ -569,6 +564,7 @@ fn status(app: &App, buf: &mut Buffer, w: usize, y: usize) {
         put(buf, x, y, &t, s);
         x += t.chars().count();
     }
+    at
 }
 
 fn command_line(app: &mut App, buf: &mut Buffer, w: usize, h: usize) -> Option<(u16, u16)> {

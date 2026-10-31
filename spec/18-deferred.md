@@ -52,7 +52,8 @@ Shortcuts taken so far, to fix when they get in the way.
   `Ctrl`. Most terminals keep `Shift` + click for their own text selection while an application
   has the mouse (xterm, VTE, kitty, Alacritty, WezTerm by default), so a `Shift` + click marks a
   range only where the terminal passes it on (kitty `terminal_select_modifiers`, WezTerm
-  `bypass_mouse_reporting_modifiers`); a drag (section 5) and `V` and `Space` always do.
+  `bypass_mouse_reporting_modifiers`); `Ctrl` + click, `V` and `Space` always do. A drag doesn't
+  mark a range (section 5): it took unwanted signals when dragged out at a slant.
 - A slice or concatenation SPI reads its pins through (`{cs, sclk, mosi, miso}`) stays a var, as
   every computed signal named.
 - Composite types are shown as the simulator dumps them (fixtures `types-*`, made by
@@ -96,7 +97,7 @@ wtf must stay comfortable with traces up to **10 GB** and hierarchies of
 | open an FST trace, first screen shown | under 1 s |
 | open a VCD trace, first screen shown | under 2 s; values become available while the file is indexed in the background |
 | add a signal, its waveform shown (FST) | under 1 s |
-| any key in View or Edit mode, screen redrawn | under 50 ms, at any zoom |
+| any key, screen redrawn | under 50 ms, at any zoom |
 | signal panel search, per typed character | under 50 ms with 500k signals |
 | value search (`/`) on a signal with 10M transitions | under 1 s |
 | memory after opening, before adding signals | proportional to the hierarchy, never to the file size |

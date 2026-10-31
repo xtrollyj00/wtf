@@ -17,8 +17,8 @@ expression: text
                             busy       1     ------------:-------:         |
                                              ------------:-------:---------|----
                           dma.state    0x0   ------------:-- 0x0 :---------|----
- EDIT  top.cpu.data                                 30ns  -  1ns/col  -  simple
+ signals <  top.cpu.data                            30ns  -  1ns/col  -  simple
            0         20ns      40ns      60ns      80ns      100ns     120ns     140ns     160ns
            |      +-------------------+----+---------+                        +----+
 > frame    |      +----- #0 10B ------+----+- #2 8B -+                        +----+
- VIEW  rx.frame                                                          0  -  2ns/col  -  axis [+]
+ signals >  rx.frame                                                     0  -  2ns/col  -  axis [+]

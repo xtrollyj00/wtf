@@ -15,4 +15,4 @@ expression: "snapshot(&mut app, 100, None)"
   frame.complete    ┃    ╵                      ╵                ╵  ╵
                     ┃                                  🮣──🮢  🮣───🮢
 ▸ errors            ┃                                  🮡──🮠  🮡───🮠
- VIEW  rx.frame                                                          0  ·  3ns/col  ·  axis [+]
+ signals ▸  rx.frame                                                     0  ·  3ns/col  ·  axis [+]

@@ -24,7 +24,7 @@ pub struct Palette {
     pub fill: Color,
     pub unknown: Color,
     pub highz: Color,
-    /// The accent: the cursor's head on the time axis, the selected name, EDIT.
+    /// The accent: the cursor's head on the time axis, the selected name.
     pub cursor: Color,
     pub cursor_text: Color,
     /// Behind the cursor's column: a tint, so the waveform under it stays as it is.
@@ -136,7 +136,7 @@ pub struct Glyphs {
     pub group_open: char,
     pub group_closed: char,
     pub shown: char,
-    /// The highlighted completion, and the insertion point in Edit mode.
+    /// The highlighted completion, and the insertion point while the signal panel is open.
     pub hl: char,
     pub insert: char,
     /// Borders: top-left, top-right, bottom-left, bottom-right, horizontal, vertical.
@@ -295,7 +295,7 @@ pub fn text(buf: &Buffer) -> String {
             .map(|x| {
                 let cell = &buf[(x, y)];
                 match cell.symbol() {
-                    // the column, and its head on the time axis (the EDIT badge shares the head's colour, but is bold)
+                    // the column, and its head on the time axis
                     s if (cell.bg == pal().column || cell.bg == pal().cursor && !cell.modifier.contains(Modifier::BOLD)) && !s.chars().all(char::is_alphanumeric) => cursor.as_str(),
                     s if cell.bg == pal().cursor_dim && !s.chars().all(char::is_alphanumeric) => mark.as_str(),
                     s => s,

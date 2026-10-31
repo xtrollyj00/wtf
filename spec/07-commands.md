@@ -33,9 +33,9 @@ The command line shows the description column of this table next to each matchin
 
 Times accept `fs`, `ps`, `ns`, `us`, `ms`, `s`. A number without a unit means file ticks.
 
-- Layout commands (`:add`, `:rm`, `:group`, `:rename`, `:ungroup`, `:radix`, `:color`) work from View and
-  Edit mode and are undoable: each command that changes the rows is one undo step.
-  "Selected rows" means the `V` selection in Edit mode, otherwise the selected row.
+- Layout commands (`:add`, `:rm`, `:group`, `:rename`, `:ungroup`, `:radix`, `:color`) are
+  undoable: each command that changes the rows is one undo step.
+  "Selected rows" means the `V` range, otherwise the selected row.
 - Patterns match full signal paths: `*` matches within one scope level, `**` across levels.
 
 - `:zoom` and `:fit` keep the cursor on its time, like `z` / `x`. A zoom finer than one tick per

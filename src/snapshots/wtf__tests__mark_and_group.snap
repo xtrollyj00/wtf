@@ -13,4 +13,4 @@ expression: "snapshot(&mut app, 80, Some(12))"
       clk                                 Enter   add
                                           Ctrl-g  add as a group
    2 marked                               Esc     close
- EDIT                                                  0  ·  2ns/col  ·  simple
+ signals ◂                                             0  ·  2ns/col  ·  simple

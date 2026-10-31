@@ -27,8 +27,8 @@ Every step can be reproduced as text, without a terminal:
 
 ### 1. Add signals
 
-The screen starts empty. `i` enters Edit mode and opens the signal panel, a tree of the file's
-signals. In it:
+The screen starts empty. `a` (or a click on `signals ▸` at the bottom left) opens the signal
+panel, a tree of the file's signals. In it:
 
 | Keys | Does |
 |---|---|
@@ -40,9 +40,9 @@ signals. In it:
 
 Add `aclk` first. Then mark three: `/s_axi_aw` `Enter`, `Space`, `n`, `Space`, `n`, `Space`, and
 `Enter` adds `s_axi_awvalid`, `s_axi_awready` and `s_axi_awaddr`. A wrong add is taken back with
-`u`. `Esc` closes the panel, `Esc` again goes back to View mode.
+`u`. `Esc` (or `a` again) closes the panel.
 
-Keys: `i/aclk<CR><CR>/s_axi_aw<CR><Space>n<Space>n<Space><CR><Esc><Esc>`
+Keys: `a/aclk<CR><CR>/s_axi_aw<CR><Space>n<Space>n<Space><CR><Esc>`
 
 ### 2. Move and zoom
 
@@ -69,7 +69,7 @@ s_axi_awready  0     ───────────────┃───�
                      ───────────────┃───────────────────────────────────────────────────────────────
 s_axi_awaddr   0x10  ───── 0x0 ─────┃──────────────────────────── 0x10 ─────────────────────────────
 
- VIEW  match 1 of 1                                               45ns  ·  3ns/col  ·  tour.vcd [+]
+ signals ▸  match 1 of 1                                          45ns  ·  3ns/col  ·  tour.vcd [+]
 ```
 
 Keys: the keys of step 1, then `/0x10<CR>`.
@@ -126,7 +126,7 @@ decoders: §16.
 and again folds it. `Space` on a bus expands it into bits; on a group it collapses it. `e` shows
 the whole value at the cursor in a box (on a stream, the whole record); `Esc` closes it.
 
-Radix: `i` for Edit mode, select a row, `r` cycles it (`s_axi_awaddr`: hex, bin, dec, ...).
+Radix: select a row, `r` cycles it (`s_axi_awaddr`: hex, bin, dec, ...).
 `:radix dec` sets one directly. `:radix q4.12` is fixed point (§10). `V` selects a range of rows,
 `:group <name>` groups them.
 
@@ -142,10 +142,10 @@ signals the new trace lacks are dropped and listed. `:q` quits (it refuses with 
 
 ## Cheat sheet
 
-`?` in the window shows the keys of the current mode. `:help` shows the same; `:help <topic>`
+`?` in the window shows the keys (the signal panel's while it is open). `:help` shows the same; `:help <topic>`
 shows the agents' reference (`records`, `decode`, ...). A count before a key repeats it.
 
-### View mode (§3, §9)
+### Normal mode (§3, §9)
 
 | Keys | Does |
 |---|---|
@@ -167,26 +167,15 @@ shows the agents' reference (`records`, `decode`, ...). A count before a key rep
 | `Tab` `Shift-Tab` | next / previous mark |
 | `'2`...`'9`, `'1` | jump to a mark / center the cursor |
 | `''` | back to before the last jump |
-| `i` | Edit mode |
+| `a` | add signals: open / close the signal panel |
+| `J` `K` | move the row down / up |
+| `V` | select a range of rows; `Esc` ends it |
+| `dd` | remove the row (or all selected) |
+| `r` | next radix |
+| `u` `Ctrl-r` | undo / redo |
 | `:` | command |
 | `?` | help |
 | `q` | quit |
-
-### Edit mode, rows (§5, §6)
-
-| Keys | Does |
-|---|---|
-| `j` `k` | select a row |
-| `J` `K` | move the row down / up |
-| `V` | select a range |
-| `a` | open the signal panel |
-| `/` | open the signal panel, searching |
-| `dd` | remove the row (or all selected) |
-| `r` | next radix |
-| `Space` | fold / unfold |
-| `e` | the whole value |
-| `u` `Ctrl-r` | undo / redo |
-| `Esc` | back to View |
 
 ### Signal panel (§5)
 
@@ -201,6 +190,7 @@ shows the agents' reference (`records`, `decode`, ...). A count before a key rep
 | `Enter` | add the marked signals, or the highlighted one |
 | `Ctrl-g` | add as a group, then name it |
 | `u` `Ctrl-r` | undo / redo |
+| `a` | close the panel, keeping the marks |
 | `Esc` | clear the range, clear the marks, close the panel |
 
 New rows go below the selected row.

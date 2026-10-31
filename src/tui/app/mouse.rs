@@ -31,6 +31,8 @@ pub struct Hit {
     pub panel: Vec<(usize, usize)>,
     /// The `e`, `?` or `:records` box.
     pub boxed: Option<Rect>,
+    /// The status line's `signals ▸` button.
+    pub button: Option<Rect>,
     /// The records box's items on screen: screen line and item.
     pub records: Vec<(usize, usize)>,
     /// The command completions on screen: screen line and item.
@@ -158,12 +160,19 @@ impl App {
         if self.records.is_some() {
             return self.records_mouse(m, at, now);
         }
+        // the status line's button opens and closes the panel
+        if m.kind == MouseEventKind::Down(MouseButton::Left) && inside(self.hit.button, at.0, at.1) {
+            self.drag = None;
+            self.panel.anchor = None;
+            self.adding = !self.adding;
+            return;
+        }
         if self.panel_shown() {
             let mark = self.ws.mark();
             self.panel_mouse(m, at, now);
             return self.ws.record(mark);
         }
-        if matches!(self.mode, Mode::View | Mode::Edit) {
+        if self.mode == Mode::Normal {
             let mark = self.ws.mark();
             self.rows_mouse(m, at);
             self.ws.record(mark);
@@ -240,9 +249,8 @@ impl App {
         }
     }
 
-    /// Edit mode with the signal panel open, as `a` opens it.
+    /// The signal panel opened over the mode there is, as `a` opens it.
     fn open_panel(&mut self) {
-        self.mode = Mode::Edit;
         self.adding = true;
         self.ws.anchor = None;
     }
@@ -292,15 +300,15 @@ impl App {
                     self.hl = k;
                     self.command_key(key(KeyCode::Tab, KeyModifiers::NONE));
                 }
-                None if y != self.hit.body => self.mode = self.ret,
+                None if y != self.hit.body => self.mode = Mode::Normal,
                 None => {}
             },
             _ => {}
         }
     }
 
-    /// The signal panel (spec §5): clicks act on release on the line pressed; a drag marks the
-    /// lines it covers, or drops what it carries on the rows.
+    /// The signal panel (spec §5): clicks act on release on the line pressed; a drag drops what
+    /// it carries on the rows, and marks nothing.
     fn panel_mouse(&mut self, m: MouseEvent, (x, y): (usize, usize), now: Instant) {
         let in_panel = x < self.hit.x0;
         match m.kind {
@@ -335,8 +343,7 @@ impl App {
         }
     }
 
-    /// The pointer moved with the button held: the range in the panel grows, over the rows the
-    /// insertion line follows.
+    /// The pointer moved with the button held: over the rows the insertion line follows.
     fn drag_to(&mut self, x: usize, y: usize) {
         let Some(d) = &mut self.drag else { return };
         d.at = (x, y);
@@ -345,10 +352,6 @@ impl App {
         d.moved |= node != Some(d.from);
         if x < self.hit.x0 {
             (self.ws.sel, self.ws.bit) = d.rows_sel;
-            if let Some(n) = node.filter(|_| d.moved) {
-                self.panel.anchor = Some(d.from);
-                self.panel.sel = n;
-            }
         } else if y < self.hit.body {
             // a row's line: below it; below the rows: below the last
             let line = self.hit.line(y).map(|(l, _)| l).or_else(|| self.hit.lines.last().filter(|(ly, ..)| y > *ly).map(|&(_, l, _)| l));
@@ -359,17 +362,14 @@ impl App {
         self.drag_msg();
     }
 
-    /// What a drop would add: the marks when pressed on a marked line, the lines dragged over,
-    /// or the line pressed. As `(vars, the line's node)`; a node alone adds as `Enter` does.
+    /// What a drop would add: the marks when pressed on a marked line, or the line pressed; the
+    /// lines dragged over never (spec §5: a slanted drag took unwanted signals). As `(vars, the line's node)`; a node alone adds as `Enter` does.
     fn carried(&mut self) -> (Vec<usize>, Option<usize>) {
         let Some(d) = &self.drag else { return (Vec::new(), None) };
         let from = d.from;
         let marked = self.panel.vars_of(from).iter().any(|v| self.panel.marked.contains(v));
         if marked {
             return (self.panel.marked.iter().copied().filter(|&v| !self.ws.shown(v)).collect(), None);
-        }
-        if self.panel.anchor.is_some() && self.panel.range().len() > 1 {
-            return (self.panel.range_vars().into_iter().filter(|&v| !self.ws.shown(v)).collect(), None);
         }
         (Vec::new(), Some(from))
     }
@@ -380,8 +380,6 @@ impl App {
         let dot = gl().dot;
         let text = if !moved {
             String::new()
-        } else if x < self.hit.x0 && self.hit.node(y).is_some() {
-            format!("mark {} {dot} drag out to add {dot} Esc cancels", self.panel.range().len())
         } else if x >= self.hit.x0 && y < self.hit.body && y >= self.hit.head {
             let (what, _) = self.drag_label();
             // the row by the name it shows
@@ -409,8 +407,8 @@ impl App {
         (what, over.then_some((x, y)))
     }
 
-    /// The button released: a click on the line pressed, a range marked in the panel, signals
-    /// dropped on the rows, or nothing (a drag let go elsewhere).
+    /// The button released: a click on the line pressed, signals dropped on the rows, or nothing
+    /// (a drag let go elsewhere).
     fn drop_at(&mut self, x: usize, y: usize, now: Instant) {
         let Some(d) = self.drag.as_ref() else { return };
         let (from, moved, mods) = (d.from, d.moved, d.mods);
@@ -422,11 +420,7 @@ impl App {
             return;
         }
         let over_rows = x >= self.hit.x0 && y >= self.hit.head && y < self.hit.body && !self.ws.rows.is_empty() || (x >= self.hit.x0 && self.ws.rows.is_empty() && y < self.hit.body);
-        if x < self.hit.x0 && self.hit.node(y).is_some() {
-            self.drag = None;
-            self.msg = None;
-            self.toggle_mark();
-        } else if over_rows {
+        if over_rows {
             let (vars, node) = self.carried();
             self.drag = None;
             self.msg = None;
@@ -486,8 +480,8 @@ impl App {
         }
     }
 
-    /// A drag resting at an edge scrolls what it is over (spec §5); called on the event loop's
-    /// tick. Returns true when it scrolled.
+    /// A drag resting at the rows' edge scrolls them (spec §5); called on the event loop's tick.
+    /// Returns true when it scrolled.
     pub fn tick(&mut self, now: Instant) -> bool {
         let Some(d) = &self.drag else { return false };
         if !d.moved || now.duration_since(d.scrolled) < SCROLL {
@@ -496,31 +490,19 @@ impl App {
         let (x, y) = d.at;
         // lines past the edge: one at the edge, four from two past it
         let speed = |past: usize| if past >= 2 { 4 } else { 1 };
-        let step = if x < self.hit.x0 {
-            let (Some(&(first, _)), Some(&(last, _))) = (self.hit.panel.first(), self.hit.panel.last()) else { return false };
-            match y {
-                _ if y <= first => -(speed(first - y) as isize),
-                _ if y >= last => speed(y - last) as isize,
-                _ => return false,
-            }
-        } else {
-            let (Some(&(first, ..)), Some(&(last, ..))) = (self.hit.lines.first(), self.hit.lines.last()) else { return false };
-            let last_end = last + crate::draw::ROW_LINES - 1;
-            match y {
-                _ if y <= first + 1 => -(speed(first.saturating_sub(y)) as isize),
-                _ if y >= last => speed(y.saturating_sub(last_end)) as isize,
-                _ => return false,
-            }
-        };
-        let d = self.drag.as_mut().expect("checked above");
-        d.scrolled = now;
         if x < self.hit.x0 {
-            self.panel.anchor.get_or_insert(d.from);
-            self.panel.step(step);
-        } else {
-            self.move_sel(step);
-            self.ws.bit = None;
+            return false;
         }
+        let (Some(&(first, ..)), Some(&(last, ..))) = (self.hit.lines.first(), self.hit.lines.last()) else { return false };
+        let last_end = last + crate::draw::ROW_LINES - 1;
+        let step = match y {
+            _ if y <= first + 1 => -(speed(first.saturating_sub(y)) as isize),
+            _ if y >= last => speed(y.saturating_sub(last_end)) as isize,
+            _ => return false,
+        };
+        self.drag.as_mut().expect("checked above").scrolled = now;
+        self.move_sel(step);
+        self.ws.bit = None;
         self.drag_msg();
         true
     }

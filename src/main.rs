@@ -304,12 +304,12 @@ mod tests {
     #[test]
     fn edit_rows() {
         let mut app = open("vcd", Some(SESSION));
-        keys(&mut app, "iJ");
+        keys(&mut app, "J");
         assert_eq!(names(&app), "▾ cpu,  clk,  cpu.state,  data,  busy,dma.state");
         keys(&mut app, "jVjj:group g\n");
         assert_eq!(app.msg.as_ref().unwrap().0, "groups can't be nested yet");
         keys(&mut app, "\x1bjjj:group g\n");
-        assert!(app.mode == app::Mode::Edit);
+        assert!(app.mode == app::Mode::Normal);
         assert_eq!(names(&app), "▾ cpu,  clk,  cpu.state,  data,  busy,▾ g,  dma.state");
         keys(&mut app, "kkr");
         assert_eq!(app.msg, None);
@@ -323,13 +323,13 @@ mod tests {
         assert_eq!(names(&app), "▾ cpu,  clk,  state,  data,  busy");
         assert!(matches!(&app.ws.rows[3], rows::Row::Signal(s) if radix::RADIXES[s.look.radix].name == "bin"));
         keys(&mut app, "\x1b");
-        assert!(app.mode == app::Mode::View);
+        assert!(app.mode == app::Mode::Normal);
     }
 
     #[test]
     fn edit_panel() {
         let mut app = open("vcd", None);
-        keys(&mut app, "ijl\n");
+        keys(&mut app, "ajl\n");
         assert_eq!(names(&app), "▾ cpu,  state,  data,  busy");
         keys(&mut app, "\n");
         assert_eq!(app.msg.as_ref().unwrap().0, "already shown: top.cpu");
@@ -348,10 +348,10 @@ mod tests {
         assert_eq!(app.panel.nodes[app.panel.sel].path, "top.cpu.state");
         assert_eq!(app.msg.as_ref().unwrap().0, "not found: nope");
         keys(&mut app, "\x1b");
-        assert!(!app.adding && app.mode == app::Mode::Edit);
+        assert!(!app.adding && app.mode == app::Mode::Normal);
         keys(&mut app, "u\x12\x1b");
         assert_eq!(names(&app), "▾ cpu,  cpu.state,  data,  busy,  dma.state,  clk,  rst");
-        assert!(app.mode == app::Mode::View);
+        assert!(app.mode == app::Mode::Normal);
     }
 
     #[test]
@@ -377,12 +377,12 @@ mod tests {
     #[test]
     fn mark_and_group() {
         let mut app = open("vcd", None);
-        keys(&mut app, "ijl  j j ");
+        keys(&mut app, "ajl  j j ");
         assert_eq!(app.panel.marked.len(), 2); // Space on cpu marked and unmarked its three signals
         insta::assert_snapshot!(snapshot(&mut app, 80, Some(12)));
         keys(&mut app, "\x07\x08\x08\x08pair\n");
         assert_eq!(names(&app), "▾ pair,  state,  data");
-        assert!(app.mode == app::Mode::Edit && app.adding);
+        assert!(app.mode == app::Mode::Normal && app.adding);
         assert!(app.panel.marked.is_empty());
         keys(&mut app, "jj j \n");
         assert_eq!(names(&app), "▾ pair,  cpu.state,  data,  dma.state,  clk"); // Enter: rows, joining the group
@@ -442,7 +442,7 @@ mod tests {
         keys(&mut app, "e je");
         insta::assert_snapshot!("composite_examine_pkts", snapshot(&mut app, 80, Some(24)));
         // dd on a line under a row removes the row; u brings it back
-        keys(&mut app, "e ijdd");
+        keys(&mut app, "e jdd");
         assert_eq!(app.ws.rows.len(), 2);
         keys(&mut app, "u");
         assert_eq!(app.ws.rows.len(), 3);
@@ -462,7 +462,7 @@ mod tests {
         assert_eq!(app.ws.bit, Some(4));
         assert_eq!(app.ws.view.cursor, 40); // data[4] changes at 30 (0x96 -> 0xE1) and 40 (-> 0x3A)
         // the bits move with their bus, and expanding is not an undo step
-        keys(&mut app, "iK");
+        keys(&mut app, "K");
         assert!(matches!(&app.ws.rows[2], rows::Row::Signal(s) if app.ws.subs(s).len() == 8));
         assert_eq!(app.ws.bit, Some(4));
         keys(&mut app, "u");
@@ -485,7 +485,8 @@ mod tests {
         let first = session::to_toml(&agent.ws);
         app.present(&first).unwrap();
         app.follow = Some(tui::app::Follow::new("4123-1", &first));
-        assert!(snapshot(&mut app, 100, None).contains("following 4123-1"));
+        let screen = snapshot(&mut app, 110, None);
+        assert!(screen.contains("following 4123-1"), "{screen}");
         assert!(!app.agent_changed(Ok(first.clone()))); // no change, nothing to do
         keys(&mut app, "5l");
         assert_eq!(app.ws.view.cursor, 35); // the user's moves stay until the agent's next change
@@ -571,11 +572,11 @@ mod tests {
         app.ws.trace_path = "tests/data/simple.fst".into();
         assert!(!app.ws.modified());
         // layout changes mark the session modified; undoing them clears it again
-        keys(&mut app, "jjjir\x1b");
+        keys(&mut app, "jjjr");
         assert!(app.ws.modified());
-        keys(&mut app, "iu\x1b");
+        keys(&mut app, "u");
         assert!(!app.ws.modified());
-        keys(&mut app, "ir\x1bk k 3z:30ns\n");
+        keys(&mut app, "rk k 3z:30ns\n");
         keys(&mut app, &format!(":w {}\n", file.display()));
         assert_eq!(app.msg.as_ref().unwrap().0, format!("written: {}", file.display()));
         assert!(!app.ws.modified() && app.ws.session_path == file);
@@ -597,7 +598,7 @@ mod tests {
         assert!(app.msg.as_ref().unwrap().1);
         assert_eq!(session::to_toml(&back.ws), session::to_toml(&app.ws));
         // a failed save leaves no file behind and keeps [+]
-        keys(&mut app, "idd\x1b");
+        keys(&mut app, "dd");
         keys(&mut app, &format!(":w {}\n", dir.join("no/such/dir.toml").display()));
         assert!(app.msg.as_ref().unwrap().1 && app.ws.modified());
         keys(&mut app, ":wq\n");
@@ -672,7 +673,7 @@ mod tests {
         app.key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
         assert_eq!(app.line, "rst || nope");
         keys(&mut app, "\x1b");
-        assert!(app.mode == app::Mode::View);
+        assert!(app.mode == app::Mode::Normal);
     }
 
     #[test]
@@ -809,7 +810,7 @@ mod tests {
         // r goes on from ascii through what fits 8 bits (no float, no fixed point) back to hex
         let mut seen = Vec::new();
         for _ in 0..6 {
-            keys(&mut app, "ir\x1b");
+            keys(&mut app, "r");
             seen.push(value(&app));
         }
         assert_eq!(seen, ["0x43", "0b1000011", "67", "67", "0o103", "C"]);
@@ -827,9 +828,9 @@ mod tests {
     fn snapshot_keys_and_ansi() {
         // Vim's names and raw control characters press the same keys; an unknown <name> is text
         let (mut a, mut b) = (open("vcd", Some(SESSION)), open("vcd", Some(SESSION)));
-        keys(&mut a, ":<lt>x<CR>l<C-d>?<Esc>i<Tab><esc>");
+        keys(&mut a, ":<lt>x<CR>l<C-d>?<Esc><Tab><esc>");
         assert!(open("vcd", None).keys("<Space>a<Foo>").unwrap_err().starts_with("unknown key <Foo> (keys: "));
-        keys(&mut b, ":<x\nl\x04?\x1bi\t\x1b");
+        keys(&mut b, ":<x\nl\x04?\x1b\t\x1b");
         assert_eq!(snapshot(&mut a, 80, None), snapshot(&mut b, 80, None));
         assert_eq!(a.ws.view.cursor, b.ws.view.cursor);
         // the colours as SGR codes: the theme's cursor as a background, one reset per line
@@ -926,12 +927,40 @@ mod tests {
         screen(&mut app, 80, Some(20));
         click(&mut app, 10, 3, NONE, Instant::now(), 0);
         assert!(app.panel_shown());
+        assert_eq!(app.mode, app::Mode::Normal, "the mouse changes no mode");
+    }
+
+    #[test]
+    fn signals_button() {
+        // the panel is no mode (spec §2): the button and `a` open and close it, Esc closes it
+        let mut app = open("vcd", Some(SESSION));
+        let t0 = Instant::now();
+        let shot = snapshot(&mut app, 100, Some(22));
+        assert!(shot.lines().last().unwrap().starts_with(" signals ▸  top.clk "), "{shot}");
+        let b = app.hit.button.unwrap();
+        click(&mut app, b.x + 2, b.y, NONE, t0, 0);
+        assert!(app.panel_shown());
+        let shot = snapshot(&mut app, 100, Some(22));
+        assert!(shot.lines().last().unwrap().starts_with(" signals ◂ "), "{shot}");
+        click(&mut app, b.x + 2, b.y, NONE, t0, 1000);
+        assert!(!app.panel_shown());
+        assert_eq!(app.mode, app::Mode::Normal);
+        // `a` adds below the selection; Esc closes
+        keys(&mut app, "ja");
+        assert!(app.panel_shown());
+        // `a` closes it as the button does: the marks stay for when it opens again
+        keys(&mut app, "/rst<CR><Space>a");
+        assert!(!app.panel_shown() && app.panel.marked.len() == 1);
+        keys(&mut app, "a<CR><Esc>");
+        assert!(!app.panel_shown());
+        assert_eq!((app.mode, app.ws.rows.len()), (app::Mode::Normal, 7));
+        assert!(app.ws.shown(app.ws.trace.by_path["top.rst"]));
     }
 
     /// The panel open over simple's session (100 x 22): the rows start at column 33.
     fn panel_app() -> App {
         let mut app = open("vcd", Some(SESSION));
-        keys(&mut app, "ia");
+        keys(&mut app, "a");
         screen(&mut app, 100, Some(22));
         app
     }
@@ -982,7 +1011,7 @@ mod tests {
         assert_eq!(highlighted(&app), "top.clk");
         click(&mut app, 60, 15, NONE, t0, 8000);
         assert!(!app.panel_shown());
-        assert_eq!(app.mode, app::Mode::Edit);
+        assert_eq!(app.mode, app::Mode::Normal);
     }
 
     #[test]
@@ -1020,16 +1049,22 @@ mod tests {
         assert_eq!(app.msg.as_ref().unwrap().0, "release to cancel");
         ev(&mut app, up, 50, 21, 220);
         assert!(!app.ws.shown(rst) && app.msg.is_none());
-        // a drag inside the panel marks the lines it covers, a closed scope its signals
+        // a drag inside the panel marks nothing; out at a slant, it takes only the line pressed
         let ly = line(&app, "top.cpu");
         ev(&mut app, down, 6, ly, 300);
         ev(&mut app, drag, 6, y, 310);
-        assert_eq!(app.msg.as_ref().unwrap().0, "mark 4 · drag out to add · Esc cancels");
+        assert_eq!(app.msg.as_ref().unwrap().0, "release to cancel");
         ev(&mut app, up, 6, y, 320);
-        assert_eq!(app.panel.marked, [rst], "the rest is shown");
+        assert!(app.panel.marked.is_empty() && app.panel.anchor.is_none() && app.panel_shown());
+        ev(&mut app, down, 6, y, 330);
+        ev(&mut app, drag, 6, ly, 335);
+        ev(&mut app, drag, 50, 13, 340);
+        assert_eq!(app.drag_label().0, "rst");
+        ev(&mut app, up, 50, 13, 345);
+        assert_eq!(app.ws.rows.len(), 7);
+        keys(&mut app, "u");
         // pressed on a marked line, a drag carries all the marks
         let busy = app.ws.trace.by_path["top.cpu.busy"];
-        keys(&mut app, "<Esc>");
         let ly = line(&app, "top.cpu");
         click(&mut app, 5, ly, NONE, t0, 400);
         screen(&mut app, 100, Some(22));
@@ -1078,15 +1113,9 @@ mod tests {
         let p = pos(&app);
         assert!(app.tick(ms(140)));
         assert_eq!(pos(&app), p - 1);
-        // in the panel: on its title, two lines past its first line, four a tick
+        // the panel doesn't scroll: a drag takes only the line pressed
         ev(&mut app, drag, 6, 3, 150);
-        screen(&mut app, 100, Some(14));
-        let first = app.hit.panel[0].0 as u16;
-        ev(&mut app, drag, 6, first + 3, 160);
-        let hl = app.panel.visible().iter().position(|&i| i == app.panel.sel).unwrap();
-        ev(&mut app, drag, 6, first - 2, 170);
-        assert!(app.tick(ms(230)));
-        assert_eq!(app.panel.visible().iter().position(|&i| i == app.panel.sel).unwrap(), hl.saturating_sub(4));
+        assert!(!app.tick(ms(230)));
         ev(&mut app, up, 6, 13, 240);
         assert!(!app.tick(ms(300)), "no drag, no scrolling");
     }
@@ -1114,13 +1143,13 @@ mod tests {
         click(&mut app, 5, y as u16, NONE, t0, 2000);
         assert_eq!(app.line, "fit ");
         click(&mut app, 5, y as u16, NONE, t0, 2100);
-        assert_eq!(app.mode, app::Mode::View);
+        assert_eq!(app.mode, app::Mode::Normal);
         assert_ne!((app.ws.view.ticks, app.ws.view.cols), zoom, "fit ran");
         // a click outside closes the command line
         keys(&mut app, ":");
         screen(&mut app, 100, Some(22));
         click(&mut app, 50, 2, NONE, t0, 3000);
-        assert_eq!(app.mode, app::Mode::View);
+        assert_eq!(app.mode, app::Mode::Normal);
     }
 
     #[test]
@@ -1240,7 +1269,7 @@ mod tests {
         let s = app.ws.rows[0].sig().unwrap();
         assert_eq!((radix::RADIXES[app.ws.look(s, hi).radix].name, s.look.radix), ("dec", radix::DEFAULT));
         // `r` on the field cycles the field's
-        keys(&mut app, "ir");
+        keys(&mut app, "r");
         assert_eq!(radix::RADIXES[app.ws.look(app.ws.rows[0].sig().unwrap(), hi).radix].name, "sdec");
     }
 
@@ -1262,12 +1291,10 @@ mod tests {
         keys(&mut app, "q?");
         assert_eq!(app.scroll, 0);
         keys(&mut app, "q");
-        keys(&mut app, "i?");
-        assert!(snapshot(&mut app, 100, Some(20)).contains("help · EDIT"));
         keys(&mut app, "\x1ba?");
         assert!(snapshot(&mut app, 100, Some(20)).contains("help · signal panel"));
         keys(&mut app, "?\x1b:help\n");
-        assert!(app.help && app.mode == app::Mode::Edit && snapshot(&mut app, 100, Some(20)).contains("help · EDIT"));
+        assert!(app.help && app.mode == app::Mode::Normal && snapshot(&mut app, 100, Some(20)).contains("help · keys"));
         // a topic: the agents' reference, scrolled by the line
         keys(&mut app, "?\x1b:help Decode\n");
         let screen = snapshot(&mut app, 100, Some(12));
@@ -1301,7 +1328,7 @@ mod tests {
         }
         assert!(buf[(0, 18)].bg != draw::pal().panel);
         keys(&mut app, "\x1b");
-        assert!(app.mode == app::Mode::View);
+        assert!(app.mode == app::Mode::Normal);
     }
 
     #[test]
@@ -1309,7 +1336,7 @@ mod tests {
         // buses with crossings, X and Z, a busy column, a group, marks; the panel's borders and tree;
         // a stream's segments opening and closing
         let mut app = open("vcd", Some(SESSION));
-        keys(&mut app, "jjjmw3mwia");
+        keys(&mut app, "jjjmw3mwa");
         let t = trace::Trace::open("tests/data/axis.vcd".as_ref()).unwrap();
         let mut axis = App::new(workspace::Workspace::new(t, "axis".into()));
         keys(&mut axis, ":decode rx axis clock=clk tvalid=tvalid tready=tready tdata=tdata tlast=tlast tkeep=tkeep\n:add rx.frame\n:fit\n");
@@ -1435,7 +1462,7 @@ mod tests {
         // on the stream, the status line shows the record at the cursor; `e` all of it
         keys(&mut app, ":select rx.frame\n");
         let screen = snapshot(&mut app, 120, None);
-        assert!(screen.contains(" VIEW  rx.frame #2  65ns–85ns  beats=0x2 len=0x8 data=c0 00 00 00 c1 00 00 00 complete=1"), "{screen}");
+        assert!(screen.contains(" signals ▸  rx.frame #2  65ns–85ns  beats=0x2 len=0x8 data=c0 00 00 00 c1 00 00 00 comp…"), "{screen}");
         keys(&mut app, "e");
         insta::assert_snapshot!(snapshot(&mut app, 100, Some(16)));
         keys(&mut app, "jl\x1b");
@@ -1542,13 +1569,12 @@ mod fuzz {
             let mut app = App::new(workspace::Workspace::new(t, "s".into()));
             session::apply(&mut app.ws, &std::fs::read_to_string("tests/data/simple.session.toml").unwrap()).unwrap();
             let start = app.ws.rows.clone();
-            app.key(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE));
             let mut log = String::new();
             for _ in 0..30 {
                 seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
                 let k = set[(seed >> 33) as usize % set.len()];
                 log.push_str(&format!("{:?}{} ", k.code, if k.modifiers.is_empty() { "" } else { "^" }));
-                app.mode = app::Mode::Edit;
+                app.mode = app::Mode::Normal;
                 app.adding = false;
                 app.key(k);
                 assert!(app.ws.rows.is_empty() || rows::visible(&app.ws.rows).contains(&app.ws.sel), "round {round}: sel hidden after {log}");

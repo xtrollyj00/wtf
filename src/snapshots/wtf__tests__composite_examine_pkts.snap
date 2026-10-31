@@ -25,4 +25,4 @@ expression: "snapshot(&mut app, 80, Some(24))"
 
 
 
- VIEW  types.pkts                              10ns  ·  375ps/col  ·  types [+]
+ signals ▸  types.pkts                         10ns  ·  375ps/col  ·  types [+]

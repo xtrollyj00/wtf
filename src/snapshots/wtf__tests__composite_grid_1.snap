@@ -19,4 +19,4 @@ expression: "snapshot(&mut app, 80, None)"
 ▸ pkt           0x101A5  ────────── 0x0 ───────────┃───────── 0x101A5 ──────────
                          ──────────────────────────┃────────────────────────────
 ▸ pkts          0x7      ────────── 0x0 ───────────┃─────────── 0x7 ────────────
- VIEW  types.grid[1]                           10ns  ·  375ps/col  ·  types [+]
+ signals ▸  types.grid[1]                      10ns  ·  375ps/col  ·  types [+]

@@ -16,7 +16,7 @@ its values.
 | `uq<m>.<n>` | `1.25` | unsigned fixed point |
 | `enum` | `READ` | the name the file gives the value (an FST enum table, as Verilator writes SystemVerilog enums; enums written as strings, as nvc writes VHDL ones, are text already), or one given with `:names` (section 7); a value without a name in hex; only for signals with names |
 
-- **Changing**: `r` on the rows side of Edit mode cycles the selected line through the list above,
+- **Changing**: `r` on the rows cycles the selected line through the list above,
   skipping the ones that don't fit its width (`enum`: a signal without names) and fixed point, which needs its numbers. The line is
   a row, or a field, element or stream field under it (each has its own radix, section 6); a bit
   line is its bus's. On a group header or a `V` range it sets every signal in it that the radix

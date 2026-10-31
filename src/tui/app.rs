@@ -13,10 +13,10 @@ pub use mouse::{Drag, Hit, Item, Menu, Target};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Mode {
-    View,
-    Edit,
+    /// The keys for time and rows, and the keys that change the rows (spec §2).
+    Normal,
     Command,
-    /// Typing a value search (`/` in View mode); shares the line with Command.
+    /// Typing a value search (`/`); shares the line with Command.
     Search,
 }
 
@@ -32,10 +32,8 @@ pub struct App {
     /// The first line the help or `e` box shows, when it is longer than the screen.
     pub scroll: usize,
     pub mode: Mode,
-    /// The mode the command line returns to.
-    ret: Mode,
     pub panel: Panel,
-    /// The signal panel is open in Edit mode (`a`, `/`) and has the keys.
+    /// The signal panel is open (`a`) and has the keys.
     pub adding: bool,
     pub line: String,
     /// Cursor in `line`, in characters; past the end means at the end.
@@ -128,8 +126,7 @@ impl App {
             page: 1,
             wave_x: 0,
             scroll: 0,
-            mode: Mode::View,
-            ret: Mode::View,
+            mode: Mode::Normal,
             panel,
             adding: false,
             line: String::new(),
@@ -161,7 +158,7 @@ impl App {
     /// Show a session the agent prepared (`Workspace::present`) and say so.
     pub fn present(&mut self, text: &str) -> Result<String, String> {
         let msg = self.ws.present(text)?;
-        self.mode = Mode::View;
+        self.mode = Mode::Normal;
         self.msg = Some(msg.clone());
         Ok(msg.0)
     }
@@ -299,7 +296,7 @@ impl App {
     }
 
     /// Every key that changes the rows records an undo step, except collapsing and expanding
-    /// groups (a View-mode action) and undo / redo themselves.
+    /// groups (not a change to the layout) and undo / redo themselves.
     pub fn key(&mut self, k: KeyEvent) {
         // a menu takes the keys while open; Esc cancels a drag
         if self.menu.is_some() {
@@ -331,9 +328,8 @@ impl App {
         }
         let mark = self.ws.mark();
         match self.mode {
-            Mode::View => self.view_key(k),
-            Mode::Edit if self.adding => self.panel_key(k),
-            Mode::Edit => self.edit_key(k),
+            Mode::Normal if self.adding => self.panel_key(k),
+            Mode::Normal => self.normal_key(k),
             Mode::Command | Mode::Search => self.command_key(k),
         }
         self.ws.record(mark);
@@ -528,15 +524,9 @@ impl App {
     }
 
 
-    /// Edit mode on the rows side, or the command line opened from it.
-    pub fn editing_rows(&self) -> bool {
-        !self.adding && (self.mode == Mode::Edit || (self.mode == Mode::Command && self.ret == Mode::Edit))
-    }
-
-
-    /// The signal panel is shown: open in Edit mode, or the command line was opened from it.
+    /// The signal panel is shown, the command line open over it or not (spec §2: it is no mode).
     pub fn panel_shown(&self) -> bool {
-        self.adding && (self.mode == Mode::Edit || (self.mode == Mode::Command && self.ret == Mode::Edit))
+        self.adding
     }
 
 
@@ -569,7 +559,6 @@ impl App {
 
 
     fn open_line(&mut self, mode: Mode) {
-        self.ret = self.mode;
         self.mode = mode;
         self.line.clear();
         self.hl = 0;
@@ -584,14 +573,20 @@ impl App {
     }
 
 
-    fn view_key(&mut self, k: KeyEvent) {
+    /// Normal mode: time, rows and the keys that change the rows, all at once (spec §2, §3).
+    fn normal_key(&mut self, k: KeyEvent) {
         if matches!(k.code, KeyCode::Tab | KeyCode::BackTab) {
             self.cancel();
             self.msg = None;
             let r = self.ws.next_mark(k.code == KeyCode::Tab);
             return self.report(r);
         }
-        let KeyCode::Char(c) = k.code else { return self.cancel() };
+        let KeyCode::Char(c) = k.code else {
+            if k.code == KeyCode::Esc {
+                self.ws.anchor = None;
+            }
+            return self.cancel();
+        };
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
         // `3m`: the count names the mark; `m` alone takes a free one
         let given = self.count.map(|n| n.saturating_sub(1) as usize);
@@ -599,6 +594,10 @@ impl App {
         if let Some(p) = pending {
             if (p, c) == ('g', 'g') {
                 self.ws.view.set_cursor(self.ws.trace.start());
+            }
+            if (p, c) == ('d', 'd') && !ctrl {
+                let r = self.ws.delete();
+                self.report(r);
             }
             if p == 'y' {
                 let r = self.copy(c);
@@ -627,7 +626,29 @@ impl App {
             }
             'f' if ctrl => self.move_sel(n_i.saturating_mul(self.page as i64) as isize),
             'b' if ctrl => self.move_sel(-(n_i.saturating_mul(self.page as i64) as isize)),
+            'r' if ctrl => {
+                let r = self.ws.redo();
+                self.report(r);
+            }
             _ if ctrl => {}
+            // the keys that change the rows need a row
+            'J' | 'K' | 'd' | 'V' | 'r' if self.ws.rows.is_empty() => {}
+            'J' | 'K' => {
+                self.ws.anchor = None;
+                for _ in 0..n_i {
+                    self.ws.sel = rows::move_row(&mut self.ws.rows, self.ws.sel, c == 'J');
+                }
+            }
+            'd' => self.pending = Some('d'),
+            'V' => self.ws.anchor = if self.ws.anchor.is_some() { None } else { Some(self.ws.sel) },
+            'r' => {
+                let r = self.ws.set_radix(None);
+                self.report(r);
+            }
+            'u' => {
+                let r = self.ws.undo();
+                self.report(r);
+            }
             // the screen alone; the cursor keeps its time
             'H' => v.scroll(-half * n_i),
             'L' => v.scroll(half * n_i),
@@ -674,10 +695,9 @@ impl App {
                 };
                 self.report(r);
             }
-            'i' => {
-                // with nothing to edit yet, straight to adding
-                self.mode = Mode::Edit;
-                self.adding = self.ws.rows.is_empty();
+            'a' => {
+                self.ws.anchor = None;
+                self.adding = true;
             }
             ':' => self.open_command(),
             '?' => self.help = true,
@@ -691,74 +711,7 @@ impl App {
     }
 
 
-    /// Edit mode, rows side (spec §5 "Rows", §6).
-    fn edit_key(&mut self, k: KeyEvent) {
-        let c = match k.code {
-            KeyCode::Esc => {
-                self.cancel();
-                if self.ws.anchor.take().is_none() {
-                    self.mode = Mode::View;
-                }
-                return;
-            }
-            KeyCode::Char('r') if k.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.cancel();
-                let r = self.ws.redo();
-                return self.report(r);
-            }
-            KeyCode::Char(c) if !k.modifiers.contains(KeyModifiers::CONTROL) => c,
-            _ => return self.cancel(),
-        };
-        let Some((pending, n)) = self.counted(c) else { return };
-        let n = n.min(u32::MAX as u64) as isize;
-        if let Some(p) = pending {
-            if (p, c) == ('d', 'd') {
-                let r = self.ws.delete();
-                self.report(r);
-            }
-            return;
-        }
-        if self.ws.rows.is_empty() && !matches!(c, 'u' | ':' | 'a' | '/') {
-            return;
-        }
-        match c {
-            'j' => self.move_sel(n),
-            'k' => self.move_sel(-n),
-            'J' | 'K' => {
-                self.ws.anchor = None;
-                for _ in 0..n {
-                    self.ws.sel = rows::move_row(&mut self.ws.rows, self.ws.sel, c == 'J');
-                }
-            }
-            'd' => self.pending = Some('d'),
-            'a' => {
-                self.ws.anchor = None;
-                self.adding = true;
-            }
-            '/' => {
-                self.ws.anchor = None;
-                self.adding = true;
-                self.panel.start_search();
-            }
-            'V' => self.ws.anchor = if self.ws.anchor.is_some() { None } else { Some(self.ws.sel) },
-            'r' => {
-                let r = self.ws.set_radix(None);
-                self.report(r);
-            }
-            'u' => {
-                let r = self.ws.undo();
-                self.report(r);
-            }
-            ' ' => self.ws.toggle_group(),
-            ':' => self.open_command(),
-            '?' => self.help = true,
-            'e' => self.examine(),
-            _ => {}
-        }
-    }
-
-
-    /// Edit mode, signal panel side (spec §5 "Signal panel").
+    /// The signal panel, open (spec §5 "Signal panel").
     fn panel_key(&mut self, k: KeyEvent) {
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
         if let Some(q) = &mut self.panel.query {
@@ -849,6 +802,10 @@ impl App {
             }
             'g' => self.pending = Some('g'),
             'G' => self.panel.step(isize::MAX / 2),
+            'a' => {
+                self.panel.anchor = None;
+                self.adding = false;
+            }
             'n' => self.panel.next(true, n as usize),
             'N' => self.panel.next(false, n as usize),
             '/' => self.panel.start_search(),
@@ -954,9 +911,9 @@ impl App {
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
         let search = self.mode == Mode::Search;
         match k.code {
-            KeyCode::Esc => self.mode = self.ret,
+            KeyCode::Esc => self.mode = Mode::Normal,
             KeyCode::Enter => {
-                self.mode = self.ret;
+                self.mode = Mode::Normal;
                 let line = std::mem::take(&mut self.line);
                 let hist = if search { &mut self.searches } else { &mut self.history };
                 if !line.trim().is_empty() {
@@ -972,7 +929,7 @@ impl App {
                 };
                 self.report(r);
             }
-            KeyCode::Backspace if self.line.is_empty() => self.mode = self.ret,
+            KeyCode::Backspace if self.line.is_empty() => self.mode = Mode::Normal,
             // editing at the cursor, with the keys of vim's command line
             KeyCode::Left => self.col = self.cursor().saturating_sub(1),
             KeyCode::Right => self.col = self.cursor() + 1,

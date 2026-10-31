@@ -23,4 +23,4 @@ dma.state    0x0   ────────────┃──── 0x0 ─�
 
 
 
- VIEW  top.cpu.data                                                     12ns  ·  1ns/col  ·  simple
+ signals ▸  top.cpu.data                                                12ns  ·  1ns/col  ·  simple

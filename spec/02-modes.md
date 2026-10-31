@@ -2,20 +2,22 @@
 
 | Mode | Purpose | Entered by | Left by |
 |---|---|---|---|
-| View | browse time and signals; the default | start, `Esc` | — |
-| Edit | change what is shown: add/remove signals, groups, configuration | `i` | `Esc` |
-| Command | type a `:` command | `:` from View or Edit | `Enter` (runs), `Esc` (cancels) |
-| Search | type a value to search for | `/` from View | `Enter` (jumps), `Esc` (cancels) |
+| Normal | browse time and signals, and arrange the rows; the default | start | — |
+| Command | type a `:` command | `:` | `Enter` (runs), `Esc` (cancels) |
+| Search | type a value to search for | `/` | `Enter` (jumps), `Esc` (cancels) |
 
-- Command and Search return to the mode they were opened from.
-- Everything Edit mode changes is session state, so every Edit action is also a `:` command
-  (section 7). The Edit-mode keys are shortcuts for those commands.
-- Searching in the signal panel (`/` in Edit mode, section 5) is a filter inside Edit mode,
-  not Search mode.
-- Time navigation (`h` / `l`, `w` / `b`, `gg` / `G`, `z` / `x`, value search) works in View mode only.
-- The current mode is always shown on screen.
+- Command and Search return to Normal mode.
+- There is one mode for keys: time keys, row keys and the keys that change the rows (`dd`,
+  `J` / `K`, `r`, `V`, `u`) all work at once. Their keys don't overlap, and `u` takes back any
+  change to the rows, so a mode to guard them would only cost round trips.
+- Every key that changes the rows is also a `:` command (section 7); the keys are shortcuts.
+- The signal panel (section 5) is no mode: `a` or the status line's `signals ▸` opens and closes
+  it. It has the keys while open; `Esc` also closes it. Searching in it is a filter inside the
+  panel, not Search mode.
+- The mouse (below) needs no mode and changes none.
+- The current mode is always shown on screen: the command or search line; Normal mode by nothing.
 
-## 3. View mode keys
+## 3. Normal mode keys
 
 | Keys | Action |
 |---|---|
@@ -30,7 +32,13 @@
 | `c` | center the screen on the cursor |
 | `Ctrl-f` / `Ctrl-b` | select the signal a screen of rows down / up |
 | `z` / `x` | zoom in / out by a factor of 2 around the cursor |
-| `i` | enter Edit mode |
+| `a` | open / close the signal panel, to add signals below the selected row (section 5) |
+| `dd` | remove the selected row; on a group header the group and its signals; with a `V` range, its rows |
+| `J` / `K` | move the selected row (on a header, the whole group) down / up; next to a group's edge, into or out of it |
+| `V` | start / end a range of rows: `j` / `k` extend it, then `dd`, `r`, `:group <name>`, `:radix`, `:color` take it |
+| `r` | cycle the radix of the selected line (a row, or a field under it), or of all signals in a group or `V` range (section 10) |
+| `u` / `Ctrl-r` | undo / redo a change to the rows (section 5, "Undo") |
+| `Esc` | end a `V` range |
 | `yy` | copy the selected signal's value at the cursor, as the value column shows it in its radix; on a stream's row, its record there. Copied to the terminal's clipboard with OSC 52 (a terminal that doesn't support it ignores it; over ssh it reaches the local clipboard); the status line shows `copied: 0x96` |
 | `yt` | copy the cursor's time, e.g. `25ns` |
 | `/` | search for a value on the selected signal (section 8) |
@@ -41,13 +49,13 @@
 | `''` | back to where the cursor was before the last jump |
 | `M` / `NM` | remove the mark under the cursor, or mark `N` |
 | `:` | command |
-| `?` | help: a box with the keys of the current mode (View, Edit, or the signal panel), in the accent colour under dim headings (Move, Rows, Marks...), in as many columns as fit, and below them a few things to type (searches, commands), each with what it does; `Esc`, `q` or `?` closes it; it scrolls as the `e` box does |
+| `?` | help: a box with the keys (of the signal panel while it is open), in the accent colour under dim headings (Move, Rows, Marks...), in as many columns as fit, and below them a few things to type (searches, commands), each with what it does; `Esc`, `q` or `?` closes it; it scrolls as the `e` box does |
 | `q` | quit, same as `:q` |
 
 A count before a key repeats it, as in Vim: `5l`, `3w`, `3x`. Counts apply to `h` `l` `w` `b`
-`j` `k` `z` `x` `n` `N` `Ctrl-d` `Ctrl-u` `H` `L` `Ctrl-f` `Ctrl-b`, and in Edit mode to `j` `k` `J` `K`.
+`j` `k` `J` `K` `z` `x` `n` `N` `Ctrl-d` `Ctrl-u` `H` `L` `Ctrl-f` `Ctrl-b`.
 Other keys ignore a count.
-A bare `0` does nothing, and so do other `Ctrl` keys in View mode.
+A bare `0` does nothing, and so do other `Ctrl` keys.
 
 Multi-key sequences (`gg`, `dd`, `'1`) wait for their second key without a timeout.
 `Esc` or an invalid second key cancels them.
@@ -57,8 +65,7 @@ Multi-key sequences (`gg`, `dd`, `'1`) wait for their second key without a timeo
 ### Mouse
 
 The keys do everything; the mouse is for what GTKWave and Surfer users reach for first, and
-enough on its own to open a trace, add signals and look at them. On the rows, in View and Edit
-mode:
+enough on its own to open a trace, add signals and look at them. On the rows:
 
 | Mouse | Action |
 |---|---|
@@ -71,6 +78,7 @@ mode:
 | `Shift` + wheel, or sideways | scroll the time by an eighth of the screen, the cursor staying |
 | right click on a row | select it (inside a `V` range, keep the range) and open its menu at the pointer |
 | click below the rows, with no rows yet | open the signal panel, as `a` |
+| click on the status line's `signals ▸` / `signals ◂` | open / close the signal panel, as `a` |
 | right click below the rows | a menu: `Add signals… a`, `Undo u`, `Redo Ctrl-r` |
 
 Over the rows, what is on top takes the mouse, and a click outside it closes it, as `Esc` does:
@@ -114,7 +122,7 @@ item with its key or command, so the menu teaches the keys. It runs the same act
   - on a row's waveform also `Mark here` (`m`) and `Copy time` (`yt`), for the column clicked;
   - a group header: `Open` / `Fold`, `Radix` ▸, `Colour` ▸, `Rename…` (opens `:rename <name>`),
     `Ungroup` (`:ungroup`), `Remove` (`dd`);
-  - a `V` range (Edit mode): `Group…` (opens `:group `), `Radix` ▸, `Colour` ▸, `Remove` (`dd`);
+  - a `V` range: `Group…` (opens `:group `), `Radix` ▸, `Colour` ▸, `Remove` (`dd`);
   - below the rows: `Add signals…` (`a`), `Undo` (`u`) and `Redo` (`Ctrl-r`) when there is one;
   - a panel line (section 5): `Add` (`Enter`), `Add as group` (`Ctrl-g`), `Mark` / `Unmark`
     (`Space`); a scope also `Expand` / `Collapse` (`l` / `h`). With marks, `Add` and `Add as group`
