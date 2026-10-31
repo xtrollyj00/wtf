@@ -47,6 +47,12 @@ Shortcuts taken so far, to fix when they get in the way.
   quick on huge traces; past that the total isn't known.
 - A name that matches only in the other HDL's form (`HEADERS_VLD`, `gen(4)` for `gen[4]`, section
   8) is looked up by putting every path in that form, each time: O(signals) per such name.
+- The terminal decides which clicks reach wtf. The mouse protocol (SGR, mode 1006) carries
+  Shift, Alt and Ctrl only, so `Cmd` on macOS can't be told from a plain click: Mac users press
+  `Ctrl`. Most terminals keep `Shift` + click for their own text selection while an application
+  has the mouse (xterm, VTE, kitty, Alacritty, WezTerm by default), so a `Shift` + click marks a
+  range only where the terminal passes it on (kitty `terminal_select_modifiers`, WezTerm
+  `bypass_mouse_reporting_modifiers`); a drag (section 5) and `V` and `Space` always do.
 - A slice or concatenation SPI reads its pins through (`{cs, sclk, mosi, miso}`) stays a var, as
   every computed signal named.
 - Composite types are shown as the simulator dumps them (fixtures `types-*`, made by

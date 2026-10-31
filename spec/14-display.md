@@ -72,7 +72,8 @@ Each set keeps every distinction the others make, so a drawing reads the same in
 | cursor, marks (where there is no colour) | `┃`, `╎` | as `unicode` | `\|`, `:` |
 | cursor off screen | `◂2`, `2▸` | as `unicode` | `<2`, `2>` |
 | group open / closed, signal shown (panel) | `▾`, `▸`, `●` | as `unicode` | `v`, `>`, `*` |
-| highlighted completion, insertion point | `▌`, `▸` | as `unicode` | `>`, `>` |
+| highlighted completion or menu item, insertion point, second menu | `▌`, `▸`, `▸` | as `unicode` | `>`, `>`, `>` |
+| what a drag adds (section 5) | `+ 3` | as `unicode` | `+ 3` |
 | panel and help borders (without colour) | `┌─┐│└┘` | as `unicode` | `+-+\|++` |
 | in text (`help · keys`, `65ns–85ns`) | `·`, `–` | as `unicode` | `-`, `-` |
 

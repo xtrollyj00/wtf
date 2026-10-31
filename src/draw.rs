@@ -348,11 +348,31 @@ fn rail(v: &Val) -> char {
 /// Terminal lines per signal: two, so 1-bit edges and bus outlines connect.
 pub const ROW_LINES: usize = 2;
 
+/// What `rows` drew: how many lines of rows fit, the column the waveforms start at, the name
+/// column's width, and each line on screen with its first screen line, the line it shows
+/// (`Workspace::lines`) and the column of its `▸` / `▾` if it opens.
+pub struct Drawn {
+    pub fit: usize,
+    pub wave_x: usize,
+    /// The first screen line of rows, under the time axis and the ruler.
+    pub head: usize,
+    pub name_w: usize,
+    pub lines: Vec<RowLine>,
+}
+
+/// A row line on screen: its first screen line, the line it shows (`Workspace::lines`) and the
+/// column of its `▸` / `▾` if it opens.
+pub type RowLine = (usize, (usize, Option<u32>), Option<usize>);
+
+/// The column of a line's `▸` / `▾`, with the line (`Workspace::lines`).
+pub type Marked = ((usize, Option<u32>), Option<usize>);
+
 /// The rows (names, values at the cursor, waveforms) under the time axis and the cursor ruler,
 /// scrolled so the selection shows: `top` is the first row on screen, kept up to date. With
 /// `adding`, a line marks where new signals go and the selection isn't accented (the keys are
-/// elsewhere). Returns how many lines of rows fit, and the column the waveforms start at.
-pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer, w: usize, body: usize) -> (usize, usize) {
+/// elsewhere). Returns how many lines of rows fit, where the waveforms start and where each line
+/// was drawn, for the mouse.
+pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer, w: usize, body: usize) -> Drawn {
     // line 0 is the time axis
     // while adding, one more line marks where new signals go
     // line 1 is the cursor ruler when there is more than one cursor
@@ -391,32 +411,35 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
             list.get(list.len().checked_sub(b as usize + 1)?).cloned()
         })
         .collect();
-    let names: Vec<String> = lines
+    // each line's name, and the column of its `▸` / `▾` if it opens
+    let (names, markers): (Vec<String>, Vec<Option<usize>>) = lines
         .iter()
         .zip(&shows)
         .map(|(&(i, line), l)| {
-            let (Some(s), Some(l)) = (ws.rows[i].sig(), l) else { return row_names[i].clone() };
+            let (Some(s), Some(l)) = (ws.rows[i].sig(), l) else { return (row_names[i].clone(), ws.rows[i].is_group().then_some(0)) };
             let n = &row_names[i];
             let indent = &n[..n.len() - n.trim_start().len()];
-            let marked = |var: usize, name: &str| match ws.stream_of(var).is_some() || ws.trace.is_composite(var) {
+            let opens = |var: usize| ws.stream_of(var).is_some() || ws.trace.is_composite(var);
+            let marked = |var: usize, name: &str| match opens(var) {
                 true => format!("{} {name}", if s.open.contains(&var) { gl().group_open } else { gl().group_closed }),
                 false => name.to_string(),
             };
+            let at = indent.chars().count();
             if line.is_none() {
-                return format!("{indent}{}", marked(s.var, n.trim_start()));
+                return (format!("{indent}{}", marked(s.var, n.trim_start())), opens(s.var).then_some(at));
             }
             let own = |v: usize| match v == s.var {
                 true => n.trim_start().to_string(),
                 false if ws.stream_of(s.var).is_some() => format!("{}{}", n.trim_start(), &ws.trace.vars[v].path[ws.trace.vars[s.var].path.len()..]),
                 false => rows::child_name(&ws.trace.vars[v].path),
             };
-            let name = match l.bit {
-                Some(bit) => format!("{}[{bit}]", own(l.var)),
-                None => marked(l.var, &own(l.var)),
+            let (name, opens) = match l.bit {
+                Some(bit) => (format!("{}[{bit}]", own(l.var)), false),
+                None => (marked(l.var, &own(l.var)), opens(l.var)),
             };
-            format!("{indent}{}{name}", "  ".repeat(l.depth + 1))
+            (format!("{indent}{}{name}", "  ".repeat(l.depth + 1)), opens.then_some(at + 2 * (l.depth + 1)))
         })
-        .collect();
+        .unzip();
     // a stream's field between records has no value to show
     let is_field = |var: usize| ws.streams.iter().any(|s| ws.trace.vars[var].path.strip_prefix(s.name.as_str()).is_some_and(|f| f.starts_with('.')));
     let (values, value_styles): (Vec<String>, Vec<Style>) = lines
@@ -467,7 +490,9 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
     // bit lines of an expanded bus share one pass over the bus (var, [bit][column])
     let mut bit_changes: Option<(usize, Vec<Vec<Changes>>)> = None;
     let mut y = head;
+    let mut drawn = Drawn { fit, wave_x: wx, head, name_w: nw, lines: Vec::new() };
     for (l, &(i, bit)) in lines.iter().enumerate().skip(*top).take(fit) {
+        drawn.lines.push((y, (i, bit), markers[l].filter(|&m| m < nw)));
         // name and value sit on the bottom line, level with a low signal
         let yb = (y + 1).min(body - 1);
         let name: String = names[l].chars().take(nw).collect();
@@ -557,7 +582,7 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
     if let Some((x, t)) = pill {
         put(buf, wx + x, 0, &t, Style::new().bg(pal().cursor).fg(pal().cursor_text).add_modifier(Modifier::BOLD | pal().accent()));
     }
-    (fit, wx)
+    drawn
 }
 
 /// The cursor ruler (spec §9): the cursor's and each mark's number at its column, the cursor highlighted, and

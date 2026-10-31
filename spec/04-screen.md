@@ -111,4 +111,6 @@ clk      ▁▁▁▁▔▔▔▔▁▁▁▁▔▔▔▔
   go to the start / end, `Backspace` / `Delete` remove the character before / under the cursor,
   `Ctrl-w` the word before it and `Ctrl-u` everything before it. The value search line (`/`) edits the same way.
 - `Enter` runs what is typed. `Esc` closes the command line.
+- The mouse: a click on a command puts it on the line as `Tab`, a double click runs it (section 2,
+  "Mouse").
 - An unknown command or a bad argument shows an error on the status line.

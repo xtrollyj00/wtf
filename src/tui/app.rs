@@ -6,7 +6,10 @@ use crate::tui::panel::Panel;
 use wtf_core::rows::{self, Row};
 use wtf_core::time;
 use wtf_core::workspace::{Msg, Workspace};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+mod mouse;
+pub use mouse::{Drag, Hit, Item, Menu, Target};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Mode {
@@ -64,6 +67,14 @@ pub struct App {
     /// The trace file as last loaded, and a change to it seen since, with when it was first seen.
     seen: Stamp,
     changed: Option<(Stamp, std::time::Instant)>,
+    /// Where the last screen drew what the mouse can hit.
+    pub hit: Hit,
+    /// The left button held in the signal panel (spec §5).
+    pub drag: Option<Drag>,
+    /// The last click, for a double click: what it was on and when.
+    click: Option<(Target, std::time::Instant)>,
+    /// The right click's menu (spec §2 "Menu").
+    pub menu: Option<Menu>,
 }
 
 /// A window opened with `wtf --attach <id>` follows that session: each change the agent makes
@@ -140,6 +151,10 @@ impl App {
             follow: None,
             seen,
             changed: None,
+            hit: Hit::default(),
+            drag: None,
+            click: None,
+            menu: None,
         }
     }
 
@@ -283,48 +298,16 @@ impl App {
         Ok(())
     }
 
-    /// The mouse (spec §2 "Mouse"), in View and Edit mode with nothing over the rows: a click on
-    /// a row selects it, on the waveforms also puts the cursor there; the wheel moves the
-    /// selection, with Ctrl zooms, with Shift (or sideways) scrolls the time.
-    pub fn mouse(&mut self, m: MouseEvent) {
-        if self.help || self.examine.is_some() || self.records.is_some() || self.panel_shown() || !matches!(self.mode, Mode::View | Mode::Edit) {
-            return;
-        }
-        let v = &mut self.ws.view;
-        let eighth = (v.width / 8).max(1) as i64;
-        let ctrl = m.modifiers.contains(KeyModifiers::CONTROL);
-        let shift = m.modifiers.contains(KeyModifiers::SHIFT);
-        match m.kind {
-            MouseEventKind::ScrollUp if ctrl => v.zoom_in(),
-            MouseEventKind::ScrollDown if ctrl => v.zoom_out(),
-            MouseEventKind::ScrollLeft => v.scroll(-eighth),
-            MouseEventKind::ScrollRight => v.scroll(eighth),
-            MouseEventKind::ScrollUp if shift => v.scroll(-eighth),
-            MouseEventKind::ScrollDown if shift => v.scroll(eighth),
-            MouseEventKind::ScrollUp => self.move_sel(-1),
-            MouseEventKind::ScrollDown => self.move_sel(1),
-            MouseEventKind::Down(MouseButton::Left) => {
-                let (x, y) = (m.column as usize, m.row as usize);
-                // the time axis, the cursor ruler, then two lines a row
-                let head = 1 + (self.ws.cursor_list().len() > 1) as usize;
-                let lines = self.ws.lines();
-                let hit = y.checked_sub(head).and_then(|l| lines.get(self.top + l / crate::draw::ROW_LINES)).copied();
-                if let Some((sel, bit)) = hit {
-                    (self.ws.sel, self.ws.bit) = (sel, bit);
-                }
-                // on a row or on the time axis, not below the rows
-                if x >= self.wave_x && (hit.is_some() || y < head) && !self.ws.rows.is_empty() {
-                    let v = &mut self.ws.view;
-                    v.set_cursor(v.col_start((x - self.wave_x) as u64).min(v.end));
-                }
-            }
-            _ => {}
-        }
-    }
-
     /// Every key that changes the rows records an undo step, except collapsing and expanding
     /// groups (a View-mode action) and undo / redo themselves.
     pub fn key(&mut self, k: KeyEvent) {
+        // a menu takes the keys while open; Esc cancels a drag
+        if self.menu.is_some() {
+            return self.menu_key(k);
+        }
+        if self.drag.is_some() && k.code == KeyCode::Esc {
+            return self.cancel_drag();
+        }
         // the help and e boxes take no other keys: they scroll and close
         if self.help || self.examine.is_some() {
             let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);

@@ -864,6 +864,363 @@ mod tests {
         assert_eq!((app.ws.view.ticks, app.ws.view.cols), zoom);
     }
 
+    use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    use std::time::{Duration, Instant};
+
+    const NONE: KeyModifiers = KeyModifiers::NONE;
+
+    /// A mouse event at a column and line, with modifiers.
+    fn at(kind: MouseEventKind, x: u16, y: u16, mods: KeyModifiers) -> MouseEvent {
+        MouseEvent { kind, column: x, row: y, modifiers: mods }
+    }
+
+    /// A left click (press and release), `t` ms after `t0`.
+    fn click(app: &mut App, x: u16, y: u16, mods: KeyModifiers, t0: Instant, t: u64) {
+        let now = t0 + Duration::from_millis(t);
+        app.mouse_at(at(MouseEventKind::Down(MouseButton::Left), x, y, mods), now);
+        app.mouse_at(at(MouseEventKind::Up(MouseButton::Left), x, y, mods), now);
+    }
+
+    fn right(app: &mut App, x: u16, y: u16) {
+        app.mouse(at(MouseEventKind::Down(MouseButton::Right), x, y, NONE));
+    }
+
+    /// The screen line of a panel node, by path, as last drawn.
+    fn line(app: &App, path: &str) -> u16 {
+        app.hit.panel.iter().find(|&&(_, n)| app.panel.nodes[n].path == path).map(|&(y, _)| y as u16).unwrap_or_else(|| panic!("{path} not on screen"))
+    }
+
+    fn highlighted(app: &App) -> &str {
+        &app.panel.nodes[app.panel.sel].path
+    }
+
+    #[test]
+    fn mouse_opens_and_folds() {
+        let mut app = open("vcd", Some(SESSION));
+        let t0 = Instant::now();
+        screen(&mut app, 100, Some(22));
+        // cpu's `▾`, on its header's lower line: folds it, and selects it
+        click(&mut app, 0, 4, NONE, t0, 0);
+        assert_eq!(app.ws.sel, 1);
+        assert!(matches!(app.ws.rows[1], rows::Row::Group { collapsed: true, .. }));
+        screen(&mut app, 100, Some(22));
+        click(&mut app, 0, 4, NONE, t0, 1000);
+        assert!(matches!(app.ws.rows[1], rows::Row::Group { collapsed: false, .. }));
+        // data's name selects it; clicked again, opens its bits, and again folds them
+        screen(&mut app, 100, Some(22));
+        let lines = app.ws.lines().len();
+        click(&mut app, 4, 8, NONE, t0, 2000);
+        assert_eq!((app.ws.sel, app.ws.lines().len()), (3, lines));
+        click(&mut app, 4, 8, NONE, t0, 3000);
+        assert_eq!(app.ws.lines().len(), lines + 8);
+        screen(&mut app, 100, Some(30));
+        click(&mut app, 4, 8, NONE, t0, 4000);
+        assert_eq!(app.ws.lines().len(), lines);
+        // opening and folding are no undo steps
+        assert_eq!(app.ws.can_undo(), (false, false));
+    }
+
+    #[test]
+    fn mouse_no_rows_opens_the_panel() {
+        let mut app = open("vcd", None);
+        screen(&mut app, 80, Some(20));
+        click(&mut app, 10, 3, NONE, Instant::now(), 0);
+        assert!(app.panel_shown());
+    }
+
+    /// The panel open over simple's session (100 x 22): the rows start at column 33.
+    fn panel_app() -> App {
+        let mut app = open("vcd", Some(SESSION));
+        keys(&mut app, "ia");
+        screen(&mut app, 100, Some(22));
+        app
+    }
+
+    #[test]
+    fn mouse_panel_clicks() {
+        let mut app = panel_app();
+        let t0 = Instant::now();
+        let rst = app.ws.trace.by_path["top.rst"];
+        // a scope opens and closes, and is highlighted
+        let ly = line(&app, "top.cpu");
+        click(&mut app, 5, ly, NONE, t0, 0);
+        assert_eq!(highlighted(&app), "top.cpu");
+        assert!(app.panel.nodes[app.panel.sel].open);
+        screen(&mut app, 100, Some(22));
+        line(&app, "top.cpu.busy");
+        // a double click on a scope opens it once, not twice
+        let dma = line(&app, "top.dma");
+        click(&mut app, 5, dma, NONE, t0, 1000);
+        click(&mut app, 5, dma, NONE, t0, 1100);
+        assert_eq!(highlighted(&app), "top.dma");
+        assert!(app.panel.nodes[app.panel.sel].open);
+        // a signal is highlighted; a double click adds it below the selected row
+        screen(&mut app, 100, Some(22));
+        let y = line(&app, "top.rst");
+        click(&mut app, 5, y, NONE, t0, 2000);
+        assert_eq!(highlighted(&app), "top.rst");
+        click(&mut app, 5, y, NONE, t0, 2600);
+        assert!(!app.ws.shown(rst), "too slow for a double click");
+        click(&mut app, 5, y, NONE, t0, 2700);
+        assert!(app.ws.shown(rst));
+        assert_eq!(app.ws.sel, 1);
+        keys(&mut app, "u");
+        assert!(!app.ws.shown(rst));
+        // Ctrl marks one, and unmarks it
+        click(&mut app, 5, y, KeyModifiers::CONTROL, t0, 4000);
+        assert_eq!(app.panel.marked, [rst]);
+        click(&mut app, 5, y, KeyModifiers::CONTROL, t0, 5000);
+        assert!(app.panel.marked.is_empty());
+        // Shift marks from the highlight to the clicked line; the shown ones can't be marked
+        let ly = line(&app, "top.clk");
+        click(&mut app, 5, ly, NONE, t0, 6000);
+        click(&mut app, 5, y, KeyModifiers::SHIFT, t0, 7000);
+        assert_eq!(app.panel.marked, [rst]);
+        assert_eq!(highlighted(&app), "top.rst");
+        // the wheel moves the highlight; a click on the rows closes the panel
+        app.mouse(at(MouseEventKind::ScrollUp, 5, 5, NONE));
+        assert_eq!(highlighted(&app), "top.clk");
+        click(&mut app, 60, 15, NONE, t0, 8000);
+        assert!(!app.panel_shown());
+        assert_eq!(app.mode, app::Mode::Edit);
+    }
+
+    #[test]
+    fn mouse_panel_drags() {
+        let mut app = panel_app();
+        let t0 = Instant::now();
+        let ms = |t| t0 + Duration::from_millis(t);
+        let ev = |app: &mut App, kind, x, y, t| app.mouse_at(at(kind, x, y, NONE), ms(t));
+        let (down, drag, up) = (MouseEventKind::Down(MouseButton::Left), MouseEventKind::Drag(MouseButton::Left), MouseEventKind::Up(MouseButton::Left));
+        let rst = app.ws.trace.by_path["top.rst"];
+        let y = line(&app, "top.rst");
+        // straight out onto dma.state's row (lines 12 and 13): rst below it
+        ev(&mut app, down, 6, y, 0);
+        ev(&mut app, drag, 50, 13, 10);
+        assert_eq!(app.ws.sel, 5);
+        assert_eq!(app.msg.as_ref().unwrap().0, "drop to add rst below dma.state · Esc cancels");
+        insta::assert_snapshot!("mouse_drag_out", snapshot(&mut app, 100, Some(22)));
+        ev(&mut app, up, 50, 13, 20);
+        assert!(app.ws.shown(rst));
+        assert_eq!((app.ws.rows.len(), app.ws.sel), (7, 6));
+        keys(&mut app, "u");
+        // Esc cancels: nothing added, the selection back
+        screen(&mut app, 100, Some(22));
+        let sel = app.ws.sel;
+        ev(&mut app, down, 6, y, 100);
+        ev(&mut app, drag, 50, 13, 110);
+        keys(&mut app, "<Esc>");
+        assert!(app.drag.is_none() && app.msg.is_none() && app.panel_shown());
+        assert_eq!(app.ws.sel, sel);
+        ev(&mut app, up, 50, 13, 120);
+        assert!(!app.ws.shown(rst));
+        // dropped on the status line: nothing
+        ev(&mut app, down, 6, y, 200);
+        ev(&mut app, drag, 50, 21, 210);
+        assert_eq!(app.msg.as_ref().unwrap().0, "release to cancel");
+        ev(&mut app, up, 50, 21, 220);
+        assert!(!app.ws.shown(rst) && app.msg.is_none());
+        // a drag inside the panel marks the lines it covers, a closed scope its signals
+        let ly = line(&app, "top.cpu");
+        ev(&mut app, down, 6, ly, 300);
+        ev(&mut app, drag, 6, y, 310);
+        assert_eq!(app.msg.as_ref().unwrap().0, "mark 4 · drag out to add · Esc cancels");
+        ev(&mut app, up, 6, y, 320);
+        assert_eq!(app.panel.marked, [rst], "the rest is shown");
+        // pressed on a marked line, a drag carries all the marks
+        let busy = app.ws.trace.by_path["top.cpu.busy"];
+        keys(&mut app, "<Esc>");
+        let ly = line(&app, "top.cpu");
+        click(&mut app, 5, ly, NONE, t0, 400);
+        screen(&mut app, 100, Some(22));
+        app.ws.rows.retain(|r| r.sig().is_none_or(|s| s.var != busy));
+        app.ws.fix_sel();
+        screen(&mut app, 100, Some(22));
+        let ly = line(&app, "top.cpu.busy");
+        click(&mut app, 5, ly, KeyModifiers::CONTROL, t0, 500);
+        let ly = line(&app, "top.rst");
+        click(&mut app, 5, ly, KeyModifiers::CONTROL, t0, 600);
+        let ly = line(&app, "top.rst");
+        ev(&mut app, down, 6, ly, 700);
+        ev(&mut app, drag, 50, 2, 710);
+        assert_eq!(app.drag_label().0, "2");
+        ev(&mut app, up, 50, 2, 720);
+        assert!(app.ws.shown(busy) && app.ws.shown(rst) && app.panel.marked.is_empty());
+    }
+
+    #[test]
+    fn mouse_drag_autoscroll() {
+        // more lines than fit: rst added, data's bits open
+        let mut app = panel_app();
+        keys(&mut app, "<Esc>jjj<Space>");
+        app.run("add top.rst").unwrap();
+        keys(&mut app, "a");
+        screen(&mut app, 100, Some(14));
+        let t0 = Instant::now();
+        let ms = |t| t0 + Duration::from_millis(t);
+        let pos = |app: &App| app.ws.lines().iter().position(|&l| l == (app.ws.sel, app.ws.bit)).unwrap();
+        let ev = |app: &mut App, kind, x, y, t| app.mouse_at(at(kind, x, y, NONE), ms(t));
+        let (down, drag, up) = (MouseEventKind::Down(MouseButton::Left), MouseEventKind::Drag(MouseButton::Left), MouseEventKind::Up(MouseButton::Left));
+        let last = app.hit.lines.last().unwrap().0 as u16;
+        let top = app.top;
+        let ly = line(&app, "top.rst");
+        ev(&mut app, down, 6, ly, 0);
+        ev(&mut app, drag, 50, last + 1, 10);
+        let p = pos(&app);
+        // too soon, then a line a tick at the edge
+        assert!(!app.tick(ms(40)));
+        assert!(app.tick(ms(70)));
+        assert_eq!(pos(&app), p + 1);
+        screen(&mut app, 100, Some(14));
+        assert!(app.top > top);
+        // on the time axis, a line past the first row: up
+        ev(&mut app, drag, 50, 0, 80);
+        let p = pos(&app);
+        assert!(app.tick(ms(140)));
+        assert_eq!(pos(&app), p - 1);
+        // in the panel: on its title, two lines past its first line, four a tick
+        ev(&mut app, drag, 6, 3, 150);
+        screen(&mut app, 100, Some(14));
+        let first = app.hit.panel[0].0 as u16;
+        ev(&mut app, drag, 6, first + 3, 160);
+        let hl = app.panel.visible().iter().position(|&i| i == app.panel.sel).unwrap();
+        ev(&mut app, drag, 6, first - 2, 170);
+        assert!(app.tick(ms(230)));
+        assert_eq!(app.panel.visible().iter().position(|&i| i == app.panel.sel).unwrap(), hl.saturating_sub(4));
+        ev(&mut app, up, 6, 13, 240);
+        assert!(!app.tick(ms(300)), "no drag, no scrolling");
+    }
+
+    #[test]
+    fn mouse_boxes_and_command_line() {
+        let mut app = open("vcd", Some(SESSION));
+        let t0 = Instant::now();
+        // the help box scrolls with the wheel and closes on a click outside
+        keys(&mut app, "?");
+        screen(&mut app, 60, Some(12));
+        app.mouse(at(MouseEventKind::ScrollDown, 30, 5, NONE));
+        assert_eq!(app.scroll, 1);
+        let b = app.hit.boxed.unwrap();
+        click(&mut app, b.x + 1, b.y + 1, NONE, t0, 0);
+        assert!(app.help);
+        click(&mut app, 0, 11, NONE, t0, 1000);
+        assert!(!app.help);
+        // a completion: a click completes it, a second soon after runs it
+        keys(&mut app, "zzzz");
+        let zoom = (app.ws.view.ticks, app.ws.view.cols);
+        keys(&mut app, ":fi");
+        screen(&mut app, 100, Some(22));
+        let &(y, _) = app.hit.completions.iter().find(|&&(_, k)| commands::completions("fi")[k].name == "fit").unwrap();
+        click(&mut app, 5, y as u16, NONE, t0, 2000);
+        assert_eq!(app.line, "fit ");
+        click(&mut app, 5, y as u16, NONE, t0, 2100);
+        assert_eq!(app.mode, app::Mode::View);
+        assert_ne!((app.ws.view.ticks, app.ws.view.cols), zoom, "fit ran");
+        // a click outside closes the command line
+        keys(&mut app, ":");
+        screen(&mut app, 100, Some(22));
+        click(&mut app, 50, 2, NONE, t0, 3000);
+        assert_eq!(app.mode, app::Mode::View);
+    }
+
+    #[test]
+    fn mouse_records() {
+        let mut app = open("vcd", Some(SESSION));
+        let t0 = Instant::now();
+        app.run("protocol beat clock=top.clk when=top.cpu.busy").unwrap();
+        app.run("add beat").unwrap();
+        app.run("records beat").unwrap();
+        screen(&mut app, 100, Some(22));
+        let &(y, k) = app.hit.records.last().unwrap();
+        click(&mut app, 30, y as u16, NONE, t0, 0);
+        assert_eq!(app.records.as_ref().unwrap().hl, k);
+        app.mouse(at(MouseEventKind::ScrollUp, 30, 5, NONE));
+        assert_eq!(app.records.as_ref().unwrap().hl, k - 1);
+        // a double click jumps to the record's start
+        let start = app.records.as_ref().unwrap().items[k].0.unwrap();
+        click(&mut app, 30, y as u16, NONE, t0, 1000);
+        click(&mut app, 30, y as u16, NONE, t0, 1100);
+        assert!(app.records.is_none());
+        assert_eq!(app.ws.view.cursor, start);
+        app.run("records beat").unwrap();
+        screen(&mut app, 100, Some(22));
+        click(&mut app, 0, 0, NONE, t0, 2000);
+        assert!(app.records.is_none());
+    }
+
+    #[test]
+    fn mouse_menu() {
+        let mut app = open("vcd", Some(SESSION));
+        screen(&mut app, 100, Some(22));
+        // data's row, on its waveform: the row's items and the clicked time's
+        right(&mut app, 60, 8);
+        assert_eq!(app.ws.sel, 3);
+        insta::assert_snapshot!("mouse_menu", snapshot(&mut app, 100, Some(22)));
+        let labels = |app: &App| app.menu.as_ref().unwrap().items.iter().map(|i| i.label.clone()).collect::<Vec<_>>();
+        assert_eq!(labels(&app), ["Open", "Examine", "Radix", "Colour", "Copy value", "Remove", "Mark here", "Copy time"]);
+        // the pointer highlights; Radix opens its second menu; dec sets it
+        let r = app.hit.menus[0];
+        app.mouse(at(MouseEventKind::Moved, r.x + 2, r.y + 3, NONE));
+        assert_eq!(app.menu.as_ref().unwrap().hl, Some(2));
+        click(&mut app, r.x + 2, r.y + 3, NONE, Instant::now(), 0);
+        insta::assert_snapshot!("mouse_menu_radix", snapshot(&mut app, 100, Some(22)));
+        let s = app.hit.menus[1];
+        click(&mut app, s.x + 2, s.y + 3, NONE, Instant::now(), 1000);
+        assert!(app.menu.is_none());
+        assert!(matches!(&app.ws.rows[3], rows::Row::Signal(s) if radix::RADIXES[s.radix].name == "dec"));
+        // the keys: j k move, l opens the second menu, h closes it, Enter runs, Esc closes
+        screen(&mut app, 100, Some(22));
+        right(&mut app, 60, 8);
+        keys(&mut app, "jjjjl");
+        assert!(app.menu.as_ref().unwrap().sub.is_some(), "Colour");
+        keys(&mut app, "h");
+        assert!(app.menu.as_ref().unwrap().sub.is_none());
+        keys(&mut app, "lj<CR>");
+        assert!(matches!(&app.ws.rows[3], rows::Row::Signal(s) if s.color == Some(0)));
+        keys(&mut app, "u");
+        right(&mut app, 60, 8);
+        keys(&mut app, "x<Esc>");
+        assert!(app.menu.is_none());
+        assert_eq!(app.ws.view.cols, app.ws.view.cols, "x went to the menu, not zoom");
+        // Mark here puts a mark at the column clicked, the cursor staying
+        let (cursor, t) = (app.ws.view.cursor, app.ws.view.col_start(60 - app.wave_x as u64));
+        right(&mut app, 60, 8);
+        keys(&mut app, "jjjjjjj<CR>");
+        assert_eq!((app.ws.marks[1], app.ws.view.cursor), (Some(t), cursor));
+        // a group header; below the rows: add signals, undo
+        right(&mut app, 3, 4);
+        assert_eq!(labels(&app), ["Fold", "Radix", "Colour", "Rename…", "Ungroup", "Remove"]);
+        keys(&mut app, "jjjjjj<CR>");
+        assert_eq!(app.ws.rows.len(), 2, "the group and its signals");
+        screen(&mut app, 100, Some(22));
+        right(&mut app, 50, 15);
+        assert_eq!(labels(&app), ["Add signals…", "Undo"]);
+        keys(&mut app, "jj<CR>");
+        assert_eq!(app.ws.rows.len(), 6);
+        screen(&mut app, 100, Some(22));
+        right(&mut app, 50, 15);
+        click(&mut app, 50, 0, NONE, Instant::now(), 2000);
+        assert!(app.menu.is_none() && app.ws.view.cursor == cursor, "a click outside only closes");
+        right(&mut app, 50, 15);
+        keys(&mut app, "<CR>");
+        assert!(app.menu.is_some() && app.ws.rows.len() == 6, "nothing highlighted yet");
+        keys(&mut app, "q");
+        assert!(app.menu.is_none());
+        // the panel's lines: their keys
+        right(&mut app, 50, 15);
+        keys(&mut app, "j<CR>");
+        assert!(app.panel_shown());
+        screen(&mut app, 100, Some(22));
+        let ly = line(&app, "top.rst");
+        right(&mut app, 5, ly);
+        assert_eq!(labels(&app), ["Add", "Add as group", "Mark"]);
+        keys(&mut app, "jjj<CR>");
+        assert_eq!(app.panel.marked, [app.ws.trace.by_path["top.rst"]]);
+        let ly = line(&app, "top.cpu");
+        right(&mut app, 5, ly);
+        assert_eq!(labels(&app), ["Add", "Add as group", "Expand"]);
+    }
+
     #[test]
     fn help() {
         let mut app = open("vcd", Some(SESSION));

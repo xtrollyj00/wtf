@@ -66,6 +66,10 @@ pub fn run(app: &mut App) -> Result<(), String> {
                 if app.watch(app::stamp(&app.ws.trace_path), std::time::Instant::now()) {
                     break;
                 }
+                // a drag resting at an edge scrolls
+                if app.tick(std::time::Instant::now()) {
+                    break;
+                }
                 if let Some(now) = agent.as_ref().and_then(|rx| rx.try_recv().ok())
                     && app.agent_changed(now)
                 {

@@ -137,6 +137,11 @@ impl Workspace {
         }
     }
 
+    /// Whether there is a step to undo, and one to redo.
+    pub fn can_undo(&self) -> (bool, bool) {
+        (!self.undo.is_empty(), !self.redo.is_empty())
+    }
+
     /// Run `f` as one undo step.
     pub fn undoable<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> R {
         let m = self.mark();

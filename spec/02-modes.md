@@ -56,13 +56,66 @@ Multi-key sequences (`gg`, `dd`, `'1`) wait for their second key without a timeo
 
 ### Mouse
 
-The keys do everything; the mouse is for what GTKWave and Surfer users reach for first, in View
-and Edit mode while nothing is over the rows (no panel, box or command line):
+The keys do everything; the mouse is for what GTKWave and Surfer users reach for first, and
+enough on its own to open a trace, add signals and look at them. On the rows, in View and Edit
+mode:
 
 | Mouse | Action |
 |---|---|
 | click on a row | select it; on its waveform, also put the cursor at that column's time |
+| click on a `▸` / `▾` marker | select the row and open / fold it, as `Space` (a group, a stream, a struct, record or array, each level) |
+| click on the selected row's name | open / fold it, as `Space`: also a bus into its bits, and a bit line folds its bus |
 | click on the time axis | put the cursor there |
 | wheel | move the selection down / up, as `j` / `k` |
 | `Ctrl` + wheel | zoom out / in, as `x` / `z` |
 | `Shift` + wheel, or sideways | scroll the time by an eighth of the screen, the cursor staying |
+| right click on a row | select it (inside a `V` range, keep the range) and open its menu at the pointer |
+| click below the rows, with no rows yet | open the signal panel, as `a` |
+| right click below the rows | a menu: `Add signals… a`, `Undo u`, `Redo Ctrl-r` |
+
+Over the rows, what is on top takes the mouse, and a click outside it closes it, as `Esc` does:
+
+| Over the rows | Mouse |
+|---|---|
+| the signal panel | as section 5, "Signal panel"; a click on the rows side closes the panel (a drag from the panel drops there instead) |
+| the `e` and `?` boxes | the wheel scrolls, as `j` / `k` |
+| the `:records` box (section 7) | a click highlights a record, a double click jumps to it as `Enter`, the wheel moves the highlight |
+| the command completions (section 4) | a click puts the command on the command line as `Tab`, a double click runs it as `Enter`, the wheel moves the highlight; a click outside closes the command line |
+| a menu | as "Menu" below |
+
+#### Menu
+
+A right click opens a menu of what can be done to the row (or panel line) under the pointer, each
+item with its key or command, so the menu teaches the keys. It runs the same action as the key.
+
+```
+ pkt          ▸ 0x5A5     ──┌─────────────────────┐
+                            │▌Open           Space│
+ pkts[0]      ▸ 0x000     ──│ Examine            e│
+                            │ Radix              ▸│┌─────────┐
+                            │ Colour             ▸││ hex    ●│
+                            │ Copy value        yy││ bin     │
+                            │ Remove            dd││ dec     │
+                            └─────────────────────┘└─────────┘
+```
+
+- It opens with its corner at the pointer, moved left or up to fit the screen. It is a card, as the
+  other boxes (section 14). No item is highlighted until the pointer is over one or `j` / `k`
+  moves.
+- Pointer over an item highlights it; a click runs it and closes the menu. `j` / `k` move, `Enter`
+  runs. `Esc`, a click outside or `q` closes it; a right click outside opens the menu there
+  instead. Other keys do nothing while it is open.
+- An item ending in `▸` opens a second menu beside it (left if there is no room on the right), by a
+  click, `Enter` or `l`; `h` or `Esc` closes only the second menu. Its current choice is marked `●`.
+- Only items that apply are listed:
+  - a row: `Open` / `Fold` (`Space`, where it opens), `Examine` (`e`), `Radix` ▸ (the radixes the
+    signal can take, section 10; `q<m>.<n>` opens the command line with `:radix q`), `Colour` ▸
+    (the eight colours each drawn in it, and `off`), `Copy value` (`yy`), `Remove` (`dd`);
+  - on a row's waveform also `Mark here` (`m`) and `Copy time` (`yt`), for the column clicked;
+  - a group header: `Open` / `Fold`, `Radix` ▸, `Colour` ▸, `Rename…` (opens `:rename <name>`),
+    `Ungroup` (`:ungroup`), `Remove` (`dd`);
+  - a `V` range (Edit mode): `Group…` (opens `:group `), `Radix` ▸, `Colour` ▸, `Remove` (`dd`);
+  - below the rows: `Add signals…` (`a`), `Undo` (`u`) and `Redo` (`Ctrl-r`) when there is one;
+  - a panel line (section 5): `Add` (`Enter`), `Add as group` (`Ctrl-g`), `Mark` / `Unmark`
+    (`Space`); a scope also `Expand` / `Collapse` (`l` / `h`). With marks, `Add` and `Add as group`
+    take the marks, as the keys do.

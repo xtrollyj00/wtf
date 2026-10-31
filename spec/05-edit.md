@@ -29,6 +29,55 @@ match the highlight is on (`2/5`).
 | `u` / `Ctrl-r` | undo / redo |
 | `Esc` | end a `V` range, then clear the marks, then close the panel and go back to the rows |
 
+The mouse, in the panel (a click outside it closes the panel, as `Esc`; a drag from the panel drops
+there instead):
+
+| Mouse | Action |
+|---|---|
+| click on a scope (or a struct, record or array) | highlight it and expand / collapse it, as `l` / `h` |
+| click on a signal | highlight it |
+| double click on a signal (a struct, record or array too) | add it as a row, as `Enter` on it without marks; the marks stay |
+| `Ctrl` + click | highlight the line and mark / unmark it, as `Space` (on a scope, the signals directly in it) |
+| `Shift` + click | mark the lines from the highlight to the clicked one, as `V` there then `Space`; the highlight moves to it |
+| drag from one line to another | mark the lines between, as `V` then `Space`, shown as a `V` range while dragging; the highlight ends on the last |
+| drag into the rows | add what is dragged below the row it is dropped on: the lines dragged over (just the pressed one when dragged straight out), or all the marks when pressed on a marked line |
+| right click | highlight the line and open its menu (section 2, "Menu") |
+| wheel | move the highlight, as `j` / `k` |
+
+A click acts when the button is released on the line it was pressed on; released on another line, it
+is a drag. While a drag is over the rows, the insertion line (`▸ new signals go here`) follows the
+pointer; a drop selects the row under it and adds as `Enter` does (a scope as a group, into a group
+if the row is in one). Dropped anywhere else (the status line, the panel's border), nothing is
+added. The drag inside the panel is the mouse-only range: `Shift` + click often never reaches wtf
+(section 18, "Known limits"). A double click is a second click on the same line within 500 ms; on a
+scope it opens or closes it once, not twice. A plain click keeps the marks (`Esc` clears them, as
+with the keys).
+
+While dragging, the lines dragged over show as a `V` range, a label at the pointer says what a
+drop adds (`+ state`, `+ 3`), and the status line what the drop does (`mark 3 · drag out to add ·
+Esc cancels`, `drop to add 3 below clk · Esc cancels`, or `release to cancel` where nothing can be
+dropped). `Esc` cancels a drag: nothing is marked or added. The pointer's shape stays the
+terminal's (OSC 22 isn't in every terminal).
+
+```
+┌ signals ───────────┐                ┌───┐   ┌───┐   ┌───
+│ / _                │clk    0     ───┘   └───┘   └───┘
+│ ▾ top              │▸ new signals go here ── + 3 ────────
+│   ▾ cpu            │state  0x1   ─ 0x1 ─🮧─── 0x2 ──────
+│     ● clk          │
+│       state        │
+│       busy         │
+│       irq          │
+└────────────────────┘
+ EDIT  drop to add 3 below clk · Esc cancels
+```
+
+A drag scrolls what it is over while the pointer rests at an edge, so it reaches signals and rows
+off screen: on the panel's first or last line (or past it, on the border), the tree scrolls a line
+every 50 ms; on the rows' first or last row, the rows scroll a row every 50 ms; with the pointer two
+or more lines past the edge, four at a time. The wheel scrolls during a drag as well. Scrolling
+stops at the ends, and when the pointer leaves the edge or the button is released.
+
 The tree lists each scope's subscopes first, then its signals. Top-level scopes start expanded.
 An array's elements nest under it, one level per index (`grid` > `[1]` > `[2]`).
 Adding several signals: mark them (`/state`, `Enter`, `Space`, `n`, `Space`), then `Enter` or `Ctrl-g`.
