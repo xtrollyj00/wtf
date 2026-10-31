@@ -196,10 +196,15 @@ pub enum RowSpec {
         #[serde(default)]
         collapsed: bool,
     },
-    /// A struct, record or array with levels open: `{"signal": "grid", "open": ["grid", "grid[1]"]}`.
+    /// A struct, record, array, stream or bus with levels open, and lines under it with a radix
+    /// or colour of their own, written as a row's: `{"signal": "pkt", "open": ["pkt", "pkt.pair"],
+    /// "fields": ["pkt.pair.hi:dec:red"]}`.
     Open {
         signal: String,
+        #[serde(default)]
         open: Vec<String>,
+        #[serde(default)]
+        fields: Vec<String>,
     },
 }
 

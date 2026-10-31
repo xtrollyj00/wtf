@@ -4,7 +4,7 @@ use crate::workspace::Workspace;
 use crate::time;
 use std::path::Path;
 use crate::radix;
-use crate::rows::{self, Row, Sig};
+use crate::rows::{self, Look, Row, Sig};
 use toml::{Table, Value};
 
 pub const VERSION: i64 = 1;
@@ -160,13 +160,6 @@ fn rows_of(app: &mut Workspace, rows: Value, grouped: bool, out: &mut Vec<Row>, 
     for row in rows {
         let Value::Table(mut row) = row else { continue };
         if let Some(Value::String(path)) = row.remove("signal") {
-            let radix = row.remove("radix").and_then(|r| {
-                let name = r.as_str().unwrap_or("");
-                radix::parse_name(name).or_else(|| {
-                    warn.push(format!("unknown radix: {name}"));
-                    None
-                })
-            });
             let levels: Vec<String> = match row.remove("open") {
                 Some(Value::Array(a)) => a.iter().filter_map(|n| n.as_str().map(str::to_string)).collect(),
                 Some(_) => {
@@ -175,19 +168,10 @@ fn rows_of(app: &mut Workspace, rows: Value, grouped: bool, out: &mut Vec<Row>, 
                 }
                 None => Vec::new(),
             };
-            let color = row.remove("color").and_then(|c| rows::color_named(c.as_str().unwrap_or("")).map_err(|e| warn.push(e)).ok());
+            let fields = row.remove("fields");
             match app.var_named(&path) {
                 Some(var) if !out.iter().any(|r| r.sig().is_some_and(|s| s.var == var)) => {
-                    let width = app.trace.vars[var].width.unwrap_or(0);
-                    let named = app.trace.vars[var].names.is_some();
-                    let (radix, frac) = match radix {
-                        Some((r, frac, need)) if radix::fits(r, need, width, named) => (r, frac),
-                        Some((r, frac, need)) => {
-                            warn.push(format!("radix {} doesn't fit {path}", radix::name(r, frac, need.unwrap_or(width))));
-                            (radix::default_for(named, app.trace.vars[var].signed), 0)
-                        }
-                        None => (radix::default_for(named, app.trace.vars[var].signed), 0),
-                    };
+                    let look = look_keys(app, &mut row, var, &path, Look::of(&app.trace.vars[var]), warn);
                     let mut open: Vec<usize> = Vec::new();
                     for name in levels {
                         match open_var(app, var, &name) {
@@ -196,14 +180,24 @@ fn rows_of(app: &mut Workspace, rows: Value, grouped: bool, out: &mut Vec<Row>, 
                             None => warn.push(format!("{path} has no {name} to open")),
                         }
                     }
-                    out.push(Row::Signal(Sig { var, radix, frac, grouped, open, color }));
+                    let mut sig = Sig { var, look, grouped, open, looks: Vec::new() };
+                    if let Some(f) = fields {
+                        fields_of(app, &mut sig, f, &path, warn);
+                    }
+                    out.push(Row::Signal(sig));
                 }
-                Some(_) => {}
-                None => missing.push(path),
+                found => {
+                    // shown already, or missing: its keys go with it
+                    row.remove("radix");
+                    row.remove("color");
+                    if found.is_none() {
+                        missing.push(path);
+                    }
+                }
             }
         } else if let Some(Value::String(name)) = row.remove("group") {
             let collapsed = row.remove("collapsed").and_then(|c| c.as_bool()).unwrap_or(false);
-            // shortcut: groups have one level until subgroups exist (spec §18); nested ones are flattened.
+            // shortcut: groups have one level until subgroups exist (ROADMAP.md "Later"); nested ones are flattened.
             if grouped {
                 warn.push(format!("nested group flattened: {name}"));
             } else {
@@ -219,6 +213,59 @@ fn rows_of(app: &mut Workspace, rows: Value, grouped: bool, out: &mut Vec<Row>, 
     }
 }
 
+/// A line's `radix` and `color` keys (a row's or a field's), checked against its signal: `base`
+/// where one is missing or wrong.
+fn look_keys(app: &Workspace, t: &mut Table, var: usize, path: &str, base: Look, warn: &mut Vec<String>) -> Look {
+    let mut l = base;
+    if let Some(r) = t.remove("radix") {
+        let name = r.as_str().unwrap_or("");
+        let v = &app.trace.vars[var];
+        let (width, named) = (v.width.unwrap_or(0), v.names.is_some());
+        match radix::parse_name(name) {
+            None => warn.push(format!("unknown radix: {name}")),
+            Some((r, frac, need)) if radix::fits(r, need, width, named) => (l.radix, l.frac) = (r, frac),
+            Some((r, frac, need)) => warn.push(format!("radix {} doesn't fit {path}", radix::name(r, frac, need.unwrap_or(width)))),
+        }
+    }
+    if let Some(c) = t.remove("color") {
+        match rows::color_named(c.as_str().unwrap_or("")) {
+            Ok(c) => l.color = Some(c),
+            Err(e) => warn.push(e),
+        }
+    }
+    l
+}
+
+/// A row's `fields`: the lines under it with a look of their own, each named as `open` names them
+/// (`pkt.pair.hi`), with `radix` and `color` keys as a row has.
+fn fields_of(app: &Workspace, sig: &mut Sig, fields: Value, path: &str, warn: &mut Vec<String>) {
+    let Value::Array(fields) = fields else {
+        warn.push(format!("fields of {path}: must be a list"));
+        return;
+    };
+    for f in fields {
+        let Value::Table(mut f) = f else { continue };
+        let Some(Value::String(name)) = f.remove("field") else {
+            warn.push(format!("fields of {path}: entry without field"));
+            continue;
+        };
+        match open_var(app, sig.var, &name).filter(|&v| v != sig.var) {
+            Some(v) if !sig.looks.iter().any(|(x, _)| *x == v) => {
+                let base = app.line_default(sig, v);
+                let l = look_keys(app, &mut f, v, &name, base, warn);
+                if l != base {
+                    sig.looks.push((v, l));
+                }
+            }
+            Some(_) => {}
+            None => warn.push(format!("{path} has no field {name}")),
+        }
+        f.remove("radix");
+        f.remove("color");
+        unknown("rows.fields.", &f, warn);
+    }
+}
+
 fn unknown(prefix: &str, t: &Table, warn: &mut Vec<String>) {
     warn.extend(t.keys().map(|k| format!("unknown key: {prefix}{k}")));
 }
@@ -231,14 +278,33 @@ fn quote(s: &str) -> String {
 fn signal_keys(app: &Workspace, s: &Sig) -> Vec<String> {
     let var = &app.trace.vars[s.var];
     let mut keys = vec![format!("signal = {}", quote(&var.path))];
-    if var.width != Some(1) && s.radix != radix::default_for(var.names.is_some(), var.signed) {
-        keys.push(format!("radix = {}", quote(&radix::name(s.radix, s.frac, var.width.unwrap_or(0)))));
-    }
-    if let Some(c) = s.color {
-        keys.push(format!("color = {}", quote(rows::COLORS[c])));
-    }
+    keys.extend(look_toml(app, s.var, &s.look, &Look::of(var)));
     if !s.open.is_empty() {
         keys.push(format!("open = [{}]", s.open.iter().map(|&v| quote(&open_name(app, s.var, v))).collect::<Vec<_>>().join(", ")));
+    }
+    if !s.looks.is_empty() {
+        let fields: Vec<String> = s
+            .looks
+            .iter()
+            .map(|(v, l)| {
+                let keys = [format!("field = {}", quote(&open_name(app, s.var, *v)))].into_iter().chain(look_toml(app, *v, l, &app.line_default(s, *v)));
+                format!("{{ {} }}", keys.collect::<Vec<_>>().join(", "))
+            })
+            .collect();
+        keys.push(format!("fields = [{}]", fields.join(", ")));
+    }
+    keys
+}
+
+/// A line's `radix` and `color` keys where its look differs from `base`.
+fn look_toml(app: &Workspace, var: usize, l: &Look, base: &Look) -> Vec<String> {
+    let v = &app.trace.vars[var];
+    let mut keys = Vec::new();
+    if v.width != Some(1) && (l.radix, l.frac) != (base.radix, base.frac) {
+        keys.push(format!("radix = {}", quote(&radix::name(l.radix, l.frac, v.width.unwrap_or(0)))));
+    }
+    if let Some(c) = l.color {
+        keys.push(format!("color = {}", quote(rows::COLORS[c])));
     }
     keys
 }

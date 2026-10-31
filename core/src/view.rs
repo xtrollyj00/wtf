@@ -44,7 +44,7 @@ impl View {
     }
 
     /// Ticks one column moves the cursor.
-    // shortcut: below one tick per column the cursor still moves a whole tick (no sub-tick events exist).
+    // shortcut (#20): below one tick per column the cursor still moves a whole tick (no sub-tick events exist).
     pub fn step(&self) -> u64 {
         self.ticks
     }

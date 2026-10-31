@@ -1,7 +1,7 @@
 //! The terminal UI's screen (spec §4, §14): the workspace's rows (`draw`), with the signal panel,
 //! the `?` box, the launch guide, the status line and the command line around them.
 
-use crate::tui::app::{App, Mode};
+use crate::tui::app::{App, Held, Mode};
 use crate::draw::{self, gl, pal, put, red, ROW_LINES};
 use wtf_core::rows::Row;
 use wtf_core::time;
@@ -17,6 +17,7 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
         return None;
     }
     let body = h - 1;
+    app.hit = crate::tui::app::Hit { body, ..Default::default() };
     // computed signals made since (`:signal`, a slice named in a search)
     if app.panel.vars != app.ws.trace.vars.len() {
         app.panel = crate::tui::panel::Panel::new(&app.ws.trace);
@@ -24,6 +25,7 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
     // the signal panel takes the left of the screen; the rows are drawn beside it
     // (not on screens too small to hold it)
     let pw = if app.panel_shown() && w >= 30 && body >= 4 { (w / 3).clamp(24, 48).min(w / 2) } else { 0 };
+    app.hit.x0 = pw;
     let mut right = Buffer::empty(Rect::new(0, 0, (w - pw) as u16, h as u16));
     if app.ws.rows.is_empty() {
         app.ws.view.set_width((w - pw) as u64);
@@ -31,19 +33,47 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
     } else if body > ROW_LINES {
         // the time axis and at least one row
         let adding = app.panel_shown();
-        let (page, wx) = draw::rows(&mut app.ws, &mut app.top, adding, &mut right, w - pw, body);
-        (app.page, app.wave_x) = (page, pw + wx);
+        let d = draw::rows(&mut app.ws, &mut app.top, adding, &mut right, w - pw, body);
+        (app.page, app.wave_x) = (d.fit, pw + d.wave_x);
+        (app.hit.head, app.hit.name_w, app.hit.lines) = (d.head, d.name_w, d.lines);
     }
     right.area.x = area.x + pw as u16;
     buf.merge(&right);
+    // a row being moved, lifted: its name in the accent, its lines tinted (spec §2 "Drags")
+    if let Some(Held::Move { row, len, moved: true, .. }) = app.held {
+        let name = if pal().mono { Style::new().add_modifier(Modifier::REVERSED) } else { Style::new().bg(pal().cursor).fg(pal().cursor_text).add_modifier(Modifier::BOLD) };
+        for &(ly, _, _) in app.hit.lines.iter().filter(|(_, (r, _), _)| (row..row + len).contains(r)) {
+            for y in (ly..ly + ROW_LINES).filter(|&y| y < body) {
+                for x in pw..w {
+                    let cell = &mut buf[(x as u16, y as u16)];
+                    match x < pw + app.hit.name_w {
+                        true => _ = cell.set_style(name),
+                        false => _ = cell.set_bg(pal().cursor_dim),
+                    }
+                }
+            }
+        }
+    }
+    // a zoom being dragged: its columns tinted as the marks are (spec §2 "Drags")
+    if let Some(Held::Zoom { from, to, moved: true, .. }) = &app.held {
+        for x in (app.wave_x + *from.min(to) as usize..=app.wave_x + *from.max(to) as usize).filter(|&x| x < w) {
+            (0..body).for_each(|y| _ = buf[(x as u16, y as u16)].set_bg(pal().cursor_dim));
+        }
+    }
     let search = if pw > 0 { panel(app, buf, pw, body) } else { None };
+    if let (label, Some((x, y))) = app.drag_label() {
+        // what a drop adds, beside the pointer
+        let text = format!(" + {label} ");
+        let x = (x + 1).min(w.saturating_sub(text.chars().count()));
+        put(buf, x, y, &text, Style::new().bg(pal().cursor).fg(pal().cursor_text).add_modifier(Modifier::BOLD));
+    }
     if app.help {
         let mut scroll = app.scroll;
-        help(app, buf, w, body, &mut scroll);
+        app.hit.boxed = help(app, buf, w, body, &mut scroll);
         app.scroll = scroll;
     }
     if let Some((title, lines)) = &app.examine {
-        boxed(buf, w, body, title, &plain(lines), " Esc e close ", &mut app.scroll);
+        app.hit.boxed = boxed(buf, w, body, title, &plain(lines), " Esc e close ", &mut app.scroll);
     }
     if let Some(r) = &mut app.records {
         // the title line and a blank, then as many lines as fit; records scroll to show the
@@ -67,12 +97,20 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
                 false => format!("{}{l}", if k == r.hl { format!("{} ", gl().hl) } else { "  ".into() }),
             });
         }
-        boxed(buf, w, body, &r.name, &plain(&lines), if text { " j k scroll  Esc close " } else { " Enter jump  Esc close " }, &mut 0);
+        let shown = (r.top..r.items.len()).take(r.page);
+        app.hit.boxed = boxed(buf, w, body, &r.name, &plain(&lines), if text { " j k scroll  Esc close " } else { " Enter jump  Esc close " }, &mut 0);
+        if let Some(b) = app.hit.boxed.filter(|_| !text) {
+            // under the title line
+            app.hit.records = shown.enumerate().map(|(k, i)| (b.y as usize + 2 + k, i)).collect();
+        }
+    }
+    if app.menu.is_some() {
+        menu(app, buf, w, body);
     }
     let at = if matches!(app.mode, Mode::Command | Mode::Search) {
         command_line(app, buf, w, h)
     } else {
-        status(app, buf, w, h - 1);
+        app.hit.button = Some(status(app, buf, w, h - 1));
         search
     };
     draw::fill_screen(buf);
@@ -126,6 +164,7 @@ fn panel(app: &mut App, buf: &mut Buffer, pw: usize, body: usize) -> Option<(u16
     for (k, &i) in items[p.top.min(items.len())..].iter().take(fit).enumerate() {
         let n = &app.panel.nodes[i];
         let y = 2 + k;
+        app.hit.panel.push((y, i));
         let mark = match n.var {
             None if n.open => gl().group_open,
             None => gl().group_closed,
@@ -159,31 +198,16 @@ fn panel(app: &mut App, buf: &mut Buffer, pw: usize, body: usize) -> Option<(u16
 type Keys = &'static [(&'static str, &'static [(&'static str, &'static str)])];
 type Examples = &'static [(&'static str, &'static str)];
 
-/// The keys of each mode for the `?` box: its title, the keys under section headings, and a few
+/// The keys for the `?` box, the panel's while it is open: its title, the keys under section headings, and a few
 /// things to type, each with what it does.
 fn help_text(app: &App) -> (&'static str, Keys, &'static str, Examples) {
     if app.panel_shown() {
         let keys: Keys = &[
             ("Move", &[("j k", "move"), ("l h", "open / close a scope"), ("gg G", "first / last line"), ("/", "search paths"), ("n N", "next / previous match")]),
             ("Mark", &[("Space", "mark a signal or scope"), ("V", "mark a range"), ("Ctrl-a", "mark all matches")]),
-            ("Add", &[("Enter", "add as rows"), ("Ctrl-g", "add as a group"), ("u Ctrl-r", "undo / redo"), ("Esc", "clear marks / close")]),
+            ("Add", &[("Enter", "add as rows"), ("Ctrl-g", "add as a group"), ("u Ctrl-r", "undo / redo"), ("a", "close"), ("Esc", "clear marks / close")]),
         ];
         return ("signal panel", keys, "", &[("", "New signals go below the selected row, at the accent line.")]);
-    }
-    if app.editing_rows() {
-        let keys: Keys = &[
-            ("Rows", &[("j k", "select a row"), ("J K", "move down / up"), ("V", "select a range"), ("Space", "fold a group, bus or stream"), ("e", "examine: the whole value")]),
-            ("Change", &[("a", "add signals"), ("/", "add signals, searching"), ("dd", "remove"), ("r", "next radix"), ("u Ctrl-r", "undo / redo")]),
-            ("Other", &[(":", "command"), ("Esc", "back to View")]),
-        ];
-        let commands: Examples = &[
-            (":group <name>", "group the selected rows"),
-            (":rename <name>", "rename the group"),
-            (":radix q4.12", "a radix: hex bin dec ascii, fixed point"),
-            (":color cyan", "colour the row"),
-            (":w", "save the session"),
-        ];
-        return ("EDIT", keys, "Commands", commands);
     }
     let keys: Keys = &[
         (
@@ -206,7 +230,17 @@ fn help_text(app: &App) -> (&'static str, Keys, &'static str, Examples) {
                 ("Space", "fold a group or bus"),
                 ("e", "the whole value"),
                 ("yy yt", "copy value / time"),
-                ("i", "edit rows"),
+            ],
+        ),
+        (
+            "Change",
+            &[
+                ("a", "add signals"),
+                ("dd", "remove"),
+                ("J K", "move down / up"),
+                ("V", "select rows; Esc ends"),
+                ("r", "next radix"),
+                ("u Ctrl-r", "undo / redo"),
             ],
         ),
         ("Search", &[("/", "search"), ("n N", "next / previous match")]),
@@ -219,7 +253,7 @@ fn help_text(app: &App) -> (&'static str, Keys, &'static str, Examples) {
         ("/valid && ready && data == 0x40", "several signals at once"),
         ("/@clk fell(valid) && !past(ready)", "sampled at clk; also rose() stable()"),
     ];
-    ("VIEW", keys, "Search expressions", search)
+    ("keys", keys, "Search expressions", search)
 }
 
 /// A line of text in parts, each in its own style.
@@ -227,7 +261,7 @@ type Line = Vec<(String, Style)>;
 
 /// The `?` box: the current mode's keys in the accent, under dim headings, in as many columns as
 /// fit; the things to type below them.
-fn help(app: &App, buf: &mut Buffer, w: usize, body: usize, scroll: &mut usize) {
+fn help(app: &App, buf: &mut Buffer, w: usize, body: usize, scroll: &mut usize) -> Option<Rect> {
     let (title, sections, heading, examples) = help_text(app);
     let key = Style::new().fg(pal().cursor).add_modifier(Modifier::BOLD);
     let dim = Style::new().fg(pal().dim);
@@ -296,12 +330,12 @@ fn help(app: &App, buf: &mut Buffer, w: usize, body: usize, scroll: &mut usize) 
             }
         }
     }
-    boxed(buf, w, body, &format!("help {} {title}", gl().dot), &lines, " Esc ? close ", scroll);
+    boxed(buf, w, body, &format!("help {} {title}", gl().dot), &lines, " Esc ? close ", scroll)
 }
 
 /// A box over the middle of the screen: a title, lines, and how to close it. Lines it can't hold
-/// end in `… n more lines`.
-fn boxed(buf: &mut Buffer, w: usize, body: usize, title: &str, lines: &[Line], close: &str, top: &mut usize) {
+/// end in `… n more lines`. Returns where it was drawn.
+fn boxed(buf: &mut Buffer, w: usize, body: usize, title: &str, lines: &[Line], close: &str, top: &mut usize) -> Option<Rect> {
     let all = lines.len();
     let room = body.saturating_sub(2);
     // too long for the screen: the lines from `top`, and where they are on the last line
@@ -323,7 +357,7 @@ fn boxed(buf: &mut Buffer, w: usize, body: usize, title: &str, lines: &[Line], c
     let inner = if widest + 4 + 12 > w || full { w.saturating_sub(4) } else { widest };
     let (bw, bh) = (inner + 4, lines.len() + 2);
     if bw > w || bh > body || bw < close.chars().count() + 3 {
-        return;
+        return None;
     }
     let (x0, y0) = ((w - bw) / 2, (body - bh) / 2);
     // opaque: the waveforms and cursor columns must not show through
@@ -361,6 +395,69 @@ fn boxed(buf: &mut Buffer, w: usize, body: usize, title: &str, lines: &[Line], c
             x += text.chars().count();
         }
     }
+    Some(Rect::new(x0 as u16, y0 as u16, bw as u16, bh as u16))
+}
+
+/// The right click's menu (spec §2 "Menu"), with its corner at the pointer moved to fit, and
+/// its second menu beside the item that opened it.
+fn menu(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
+    let Some(m) = &app.menu else { return };
+    let main = card(buf, w, body, m.at, &m.items, m.hl, true);
+    app.hit.menus = main.into_iter().collect();
+    if let (Some(r), Some((p, sub))) = (main, &m.sub) {
+        let sw = card_width(&sub.items);
+        // right of the menu, or left where there is no room
+        let x = if r.right() as usize + sw <= w { r.right() as usize } else { (r.x as usize).saturating_sub(sw) };
+        if let Some(r) = card(buf, w, body, (x, r.y as usize + p), &sub.items, sub.hl, false) {
+            app.hit.menus.push(r);
+        }
+    }
+}
+
+/// A menu card's width: a column for the highlight, the labels, two spaces, the keys, and a
+/// column of margin on each side.
+fn card_width(items: &[crate::tui::app::Item]) -> usize {
+    let lw = items.iter().map(|i| i.label.chars().count()).max().unwrap_or(0);
+    let kw = items.iter().map(|i| i.key.chars().count()).max().unwrap_or(0);
+    1 + lw + 2 + kw + 2
+}
+
+/// A menu card at `at` (moved left and up to fit with `fit`, else placed as given). Returns
+/// where it was drawn.
+fn card(buf: &mut Buffer, w: usize, body: usize, at: (usize, usize), items: &[crate::tui::app::Item], hl: Option<usize>, fit: bool) -> Option<Rect> {
+    let lw = items.iter().map(|i| i.label.chars().count()).max().unwrap_or(0);
+    let kw = items.iter().map(|i| i.key.chars().count()).max().unwrap_or(0);
+    let (bw, bh) = (card_width(items), items.len() + 2);
+    if bw > w || bh > body || items.is_empty() {
+        return None;
+    }
+    let x0 = at.0.min(w - bw);
+    let y0 = if fit || at.1 + bh > body { at.1.min(body - bh) } else { at.1 };
+    let st = Style::new().bg(pal().panel).fg(Color::Reset);
+    let dim = st.fg(pal().dim);
+    let b = gl().border;
+    for y in 0..bh {
+        let line = match (pal().mono, y) {
+            (true, 0) => format!("{}{}{}", b[0], b[4].to_string().repeat(bw - 2), b[1]),
+            (true, _) if y == bh - 1 => format!("{}{}{}", b[2], b[4].to_string().repeat(bw - 2), b[3]),
+            (true, _) => format!("{}{}{}", b[5], " ".repeat(bw - 2), b[5]),
+            (false, _) => " ".repeat(bw),
+        };
+        put(buf, x0, y0 + y, &line, if pal().mono { dim } else { st });
+    }
+    for (k, i) in items.iter().enumerate() {
+        let on = hl == Some(k);
+        let row = if on { st.bg(pal().selected).add_modifier(Modifier::BOLD) } else { st };
+        let label = match i.hue {
+            Some(h) => row.fg(pal().hues[h]),
+            None => row,
+        };
+        let y = y0 + 1 + k;
+        put(buf, x0 + 1, y, &format!("{}{:<lw$}  ", if on { gl().hl } else { ' ' }, i.label), row);
+        put(buf, x0 + 2, y, &i.label, label);
+        put(buf, x0 + 1 + 1 + lw + 2, y, &format!("{:>kw$}", i.key), if on { row } else { dim });
+    }
+    Some(Rect::new(x0 as u16, y0 as u16, bw as u16, bh as u16))
 }
 
 /// Lines in one style.
@@ -374,7 +471,7 @@ fn guide(app: &App, buf: &mut Buffer, w: usize, body: usize) {
         // the panel is open: how to add from it
         &[("/", "search"), ("Space", "mark"), ("Enter", "add"), ("Ctrl-g", "add as a group"), ("Esc", "close")]
     } else {
-        &[("i", "add signals"), (":", "commands"), ("?", "help"), ("q", "quit")]
+        &[("a", "add signals"), (":", "commands"), ("?", "help"), ("q", "quit")]
     };
     let t = &app.ws.trace;
     let fpt = t.fs_per_tick;
@@ -416,17 +513,17 @@ fn zoom_text(v: &View, fpt: Option<u128>) -> String {
     }
 }
 
-/// Mode and the selected signal (or a message) on the left; cursor time, zoom and file on the right.
-fn status(app: &App, buf: &mut Buffer, w: usize, y: usize) {
+/// The panel's button and the selected signal (or a message) on the left; cursor time, zoom and file on the right.
+/// Returns where the signal panel's button was drawn.
+fn status(app: &App, buf: &mut Buffer, w: usize, y: usize) -> Rect {
     let fpt = app.ws.trace.fs_per_tick;
-    let mode = if app.mode == Mode::Edit { " EDIT " } else { " VIEW " };
-    // pills: EDIT in the accent, as the keys change the layout; VIEW quiet
-    let st = match (app.mode == Mode::Edit, pal().mono) {
-        (_, true) => Style::new().add_modifier(Modifier::REVERSED),
-        (true, false) => Style::new().bg(pal().cursor).fg(pal().cursor_text).add_modifier(Modifier::BOLD),
-        (false, false) => Style::new().bg(pal().selected).add_modifier(Modifier::BOLD),
-    };
-    put(buf, 0, y, mode, st);
+    // the panel's button
+    let button = format!(" signals {} ", if app.adding { gl().left } else { gl().right });
+    let bst = if pal().mono { Style::new().add_modifier(Modifier::BOLD) } else { Style::new().bg(pal().panel).fg(Color::Reset).add_modifier(Modifier::BOLD) };
+    put(buf, 0, y, &button, bst);
+    let bw = button.chars().count();
+    let lead = bw + 1;
+    let at = Rect::new(0, y as u16, bw as u16, 1);
     // the cursor's time first, the rest dim, a dot between; the agents' time unit when one set it
     let dim = Style::new().fg(pal().dim);
     let sep = format!("  {}  ", gl().dot);
@@ -455,7 +552,7 @@ fn status(app: &App, buf: &mut Buffer, w: usize, y: usize) {
                 let fields: Vec<String> = s.fields_text(i, fpt).into_iter().map(|(n, v)| format!("{n}={v}")).collect();
                 let times = format!("{}{}{}", time::format(rec.start, fpt), gl().dash, time::format(rec.end, fpt));
                 let text = format!("{} #{i}  {times}  {}", s.name, fields.join(" "));
-                let room = w.saturating_sub(mode.len() + 1 + right.chars().count() + 2);
+                let room = w.saturating_sub(lead + right.chars().count() + 2);
                 let text = if text.chars().count() > room { text.chars().take(room.saturating_sub(1)).chain([gl().cut]).collect() } else { text };
                 (text, Style::new())
             }
@@ -469,13 +566,13 @@ fn status(app: &App, buf: &mut Buffer, w: usize, y: usize) {
             None => (String::new(), Style::new()),
         },
     };
-    let x = mode.len() + 1;
+    let x = lead;
     let room = w.saturating_sub(x + right.chars().count() + 2);
     let len = left.chars().count();
     if app.msg.is_some() && len > room {
         // a long message wins over the times
         put(buf, x, y, &left, st);
-        return;
+        return at;
     }
     // a long path keeps its end, where the signal name is
     let left = if len > room { format!("{}{}", gl().cut, left.chars().skip(len + 1 - room).collect::<String>()) } else { left };
@@ -488,9 +585,10 @@ fn status(app: &App, buf: &mut Buffer, w: usize, y: usize) {
         put(buf, x, y, &t, s);
         x += t.chars().count();
     }
+    at
 }
 
-fn command_line(app: &App, buf: &mut Buffer, w: usize, h: usize) -> Option<(u16, u16)> {
+fn command_line(app: &mut App, buf: &mut Buffer, w: usize, h: usize) -> Option<(u16, u16)> {
     let y = h - 1;
     let search = app.mode == Mode::Search;
     let line = format!("{}{}", if search { '/' } else { ':' }, app.line);
@@ -504,6 +602,7 @@ fn command_line(app: &App, buf: &mut Buffer, w: usize, h: usize) -> Option<(u16,
     let cut = |s: &str, n: usize| if s.chars().count() > n { s.chars().take(n.saturating_sub(1)).chain([gl().cut]).collect() } else { s.to_string() };
     for (k, c) in items.iter().enumerate().skip(first).take(shown) {
         let ly = y - 1 - (k - first);
+        app.hit.completions.push((ly, k));
         // opaque: the cursor column and the selection must not show through
         let st = Style::new().bg(if k == app.hl { pal().selected } else { pal().panel }).fg(Color::Reset);
         let mark = if k == app.hl { format!(" {} ", gl().hl) } else { "   ".to_string() };

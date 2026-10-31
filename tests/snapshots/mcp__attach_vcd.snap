@@ -6,4 +6,4 @@ expression: "shot(format!(\"{pid}-1\"))"
             1──── 30ns ────2
             ┃━━━━🮦────🮦────╎────╳╳🮣──🮦┄┄┄┄🮦──────────
 data  0xXX  ┃━━━━🮧────🮧────╎────╳╳🮡──🮧┄┄┄┄🮧── 0x40 ──
- VIEW  agent: presented 1 signals, 2 cursors
+ signals ▸  agent: presented 1 signals, 2 cursors

@@ -70,7 +70,9 @@ reuse wtf's own pieces:
   (`bus.wr.delay`) shows as a time too, in a row and in `values`, in the unit that fits it.
 - A signal's radix can be given with its name, `awaddr:dec`, wherever tools take signals.
 - Rows in `workspace` can also take a colour (section 14), after the radix or alone:
-  `awaddr:hex:red`, `wvalid:red`, to point the user at the guilty signal when presented.
+  `awaddr:hex:red`, `wvalid:red`, to point the user at the guilty signal when presented. A row's
+  `fields` give lines under it theirs the same way (`{"signal": "pkt", "fields":
+  ["pkt.pair.hi:dec:red"]}`), named as `open` names levels; `view` lists them.
 - `find` answers as a tab-separated table with a header. With a clock, consecutive matching
   cycles are one row: `from`, `last`, `cycles`. `show` adds a column per signal with its value on
   each match, as the clock edge samples it (one row per cycle), so `@clk awvalid && awready` with
@@ -154,7 +156,7 @@ reuse wtf's own pieces:
   `:cursor <n> off`). `render` without signals draws the workspace, so the agent can check what it
   prepared; `view` describes it (rows, cursors with Δt, visible range).
 - **Present**: `present` shows the workspace in the user's wtf window for the same trace, if one
-  is open: its layout and cursors replace the window's, as one undo step (`:undo`, or `u` in Edit mode, restores the
+  is open: its layout and cursors replace the window's, as one undo step (`:undo`, or `u`, restores the
   user's view), and the status line says `agent: presented …`. Without a window it writes a
   session file and says how to open it (`wtf -S <file> <trace>`), so headless work still ends
   in something to look at.

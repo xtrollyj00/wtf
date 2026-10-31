@@ -50,6 +50,53 @@ fn composite_rows() {
     assert_eq!(warn, ["types.pkts has no pkts[7] to open", "types.pkts has no pkt.pair to open"]);
 }
 
+/// A field's radix and colour are its own (spec §6): set on its line, kept in `fields`, a
+/// colour taken from the row where it has none.
+#[test]
+fn field_looks() {
+    use wtf_core::{command, radix};
+    let types = || wtf_core::workspace::Workspace::open(&std::path::PathBuf::from(format!("{}/../tests/data/types-verilator-structs.fst", env!("CARGO_MANIFEST_DIR")))).unwrap();
+    let mut ws = types();
+    wtf_core::command::run(&mut ws, "add types.pkt").unwrap();
+    // select a line by its signal's path
+    let to = |ws: &mut wtf_core::workspace::Workspace, path: &str| {
+        let s = ws.rows[0].sig().unwrap().clone();
+        let at = ws.lines().into_iter().find(|&(_, b)| ws.trace.vars[ws.probe(&s, b).0].path == path).unwrap_or_else(|| panic!("{path} not open"));
+        (ws.sel, ws.bit) = at;
+    };
+    ws.toggle_group(); // pkt
+    to(&mut ws, "types.pkt.pair");
+    ws.toggle_group();
+    to(&mut ws, "types.pkt.pair.hi");
+    let var = |ws: &wtf_core::workspace::Workspace, p: &str| ws.trace.by_path[p];
+    let (pkt, hi, lo) = (var(&ws, "types.pkt"), var(&ws, "types.pkt.pair.hi"), var(&ws, "types.pkt.pair.lo"));
+    let look = |ws: &wtf_core::workspace::Workspace, v| ws.look(ws.rows[0].sig().unwrap(), v);
+    // the field's radix, not the row's
+    command::run(&mut ws, "radix dec").unwrap();
+    assert_eq!((look(&ws, hi).radix, look(&ws, lo).radix, look(&ws, pkt).radix), (2, radix::DEFAULT, radix::DEFAULT));
+    // the row's colour reaches the fields without one of their own
+    to(&mut ws, "types.pkt");
+    command::run(&mut ws, "color red").unwrap();
+    to(&mut ws, "types.pkt.pair.hi");
+    command::run(&mut ws, "color blue").unwrap();
+    assert_eq!((look(&ws, hi).color, look(&ws, lo).color), (Some(5), Some(0)));
+    let text = session::to_toml(&ws);
+    assert!(text.contains(r#"color = "red"
+open = ["pkt", "pkt.pair"]
+fields = [{ field = "pkt.pair.hi", radix = "dec", color = "blue" }]"#), "{text}");
+    let mut back = types();
+    assert_eq!(session::apply(&mut back, &text), Ok(vec![]));
+    assert_eq!(back.rows, ws.rows);
+    // back to the defaults, the field keeps no look of its own
+    command::run(&mut ws, "color off").unwrap();
+    command::run(&mut ws, "radix hex").unwrap();
+    assert!(ws.rows[0].sig().unwrap().looks.is_empty());
+    // a field the row doesn't have is skipped with a warning
+    let mut back = types();
+    let warn = session::apply(&mut back, &text.replace("pkt.pair.hi", "pkt.pair.mid")).unwrap();
+    assert_eq!(warn, ["types.pkt has no field pkt.pair.mid"]);
+}
+
 #[test]
 fn warns_and_keeps_going() {
     let mut ws = open();
@@ -83,8 +130,8 @@ fn warns_and_keeps_going() {
     assert_eq!(warn, [
         "bad time unit: furlong (s, ms, us, ns, ps, fs)",
         "unknown radix: roman",
-        "unknown colour: pink (colours: red, orange, yellow, green, cyan, blue, magenta, gray)",
         "radix q4.4 doesn't fit top.clk",
+        "unknown colour: pink (colours: red, orange, yellow, green, cyan, blue, magenta, gray)",
         "nested group flattened: inner",
         "rows: entry without signal or group",
         "unknown key: rows.label",

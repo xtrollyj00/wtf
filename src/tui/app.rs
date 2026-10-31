@@ -6,14 +6,17 @@ use crate::tui::panel::Panel;
 use wtf_core::rows::{self, Row};
 use wtf_core::time;
 use wtf_core::workspace::{Msg, Workspace};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+mod mouse;
+pub use mouse::{Drag, Held, Hit, Item, Menu, Target};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Mode {
-    View,
-    Edit,
+    /// The keys for time and rows, and the keys that change the rows (spec §2).
+    Normal,
     Command,
-    /// Typing a value search (`/` in View mode); shares the line with Command.
+    /// Typing a value search (`/`); shares the line with Command.
     Search,
 }
 
@@ -29,10 +32,8 @@ pub struct App {
     /// The first line the help or `e` box shows, when it is longer than the screen.
     pub scroll: usize,
     pub mode: Mode,
-    /// The mode the command line returns to.
-    ret: Mode,
     pub panel: Panel,
-    /// The signal panel is open in Edit mode (`a`, `/`) and has the keys.
+    /// The signal panel is open (`a`) and has the keys.
     pub adding: bool,
     pub line: String,
     /// Cursor in `line`, in characters; past the end means at the end.
@@ -64,6 +65,16 @@ pub struct App {
     /// The trace file as last loaded, and a change to it seen since, with when it was first seen.
     seen: Stamp,
     changed: Option<(Stamp, std::time::Instant)>,
+    /// Where the last screen drew what the mouse can hit.
+    pub hit: Hit,
+    /// The left button held in the signal panel (spec §5).
+    pub drag: Option<Drag>,
+    /// The left button held on the rows: moving a row, zooming, or moving a mark (spec §2 "Drags").
+    pub held: Option<Held>,
+    /// The last click, for a double click: what it was on and when.
+    click: Option<(Target, std::time::Instant)>,
+    /// The right click's menu (spec §2 "Menu").
+    pub menu: Option<Menu>,
 }
 
 /// A window opened with `wtf --attach <id>` follows that session: each change the agent makes
@@ -117,8 +128,7 @@ impl App {
             page: 1,
             wave_x: 0,
             scroll: 0,
-            mode: Mode::View,
-            ret: Mode::View,
+            mode: Mode::Normal,
             panel,
             adding: false,
             line: String::new(),
@@ -140,13 +150,18 @@ impl App {
             follow: None,
             seen,
             changed: None,
+            hit: Hit::default(),
+            drag: None,
+            held: None,
+            click: None,
+            menu: None,
         }
     }
 
     /// Show a session the agent prepared (`Workspace::present`) and say so.
     pub fn present(&mut self, text: &str) -> Result<String, String> {
         let msg = self.ws.present(text)?;
-        self.mode = Mode::View;
+        self.mode = Mode::Normal;
         self.msg = Some(msg.clone());
         Ok(msg.0)
     }
@@ -277,54 +292,24 @@ impl App {
     /// `<Space>`, `<lt>` and `<C-x>`; raw control characters work too (`\n`, `\x1b`, `\x01` is
     /// Ctrl-a). Another `<name>` is an error, as it would be typed letter by letter; a `<` that
     /// starts no name is itself (spec §12 `--keys`).
-    #[cfg(test)]
     pub fn keys(&mut self, s: &str) -> Result<(), String> {
         parse_keys(s)?.into_iter().for_each(|k| self.key(k));
         Ok(())
     }
 
-    /// The mouse (spec §2 "Mouse"), in View and Edit mode with nothing over the rows: a click on
-    /// a row selects it, on the waveforms also puts the cursor there; the wheel moves the
-    /// selection, with Ctrl zooms, with Shift (or sideways) scrolls the time.
-    pub fn mouse(&mut self, m: MouseEvent) {
-        if self.help || self.examine.is_some() || self.records.is_some() || self.panel_shown() || !matches!(self.mode, Mode::View | Mode::Edit) {
-            return;
-        }
-        let v = &mut self.ws.view;
-        let eighth = (v.width / 8).max(1) as i64;
-        let ctrl = m.modifiers.contains(KeyModifiers::CONTROL);
-        let shift = m.modifiers.contains(KeyModifiers::SHIFT);
-        match m.kind {
-            MouseEventKind::ScrollUp if ctrl => v.zoom_in(),
-            MouseEventKind::ScrollDown if ctrl => v.zoom_out(),
-            MouseEventKind::ScrollLeft => v.scroll(-eighth),
-            MouseEventKind::ScrollRight => v.scroll(eighth),
-            MouseEventKind::ScrollUp if shift => v.scroll(-eighth),
-            MouseEventKind::ScrollDown if shift => v.scroll(eighth),
-            MouseEventKind::ScrollUp => self.move_sel(-1),
-            MouseEventKind::ScrollDown => self.move_sel(1),
-            MouseEventKind::Down(MouseButton::Left) => {
-                let (x, y) = (m.column as usize, m.row as usize);
-                // the time axis, the cursor ruler, then two lines a row
-                let head = 1 + (self.ws.cursor_list().len() > 1) as usize;
-                let lines = self.ws.lines();
-                let hit = y.checked_sub(head).and_then(|l| lines.get(self.top + l / crate::draw::ROW_LINES)).copied();
-                if let Some((sel, bit)) = hit {
-                    (self.ws.sel, self.ws.bit) = (sel, bit);
-                }
-                // on a row or on the time axis, not below the rows
-                if x >= self.wave_x && (hit.is_some() || y < head) && !self.ws.rows.is_empty() {
-                    let v = &mut self.ws.view;
-                    v.set_cursor(v.col_start((x - self.wave_x) as u64).min(v.end));
-                }
-            }
-            _ => {}
-        }
-    }
-
     /// Every key that changes the rows records an undo step, except collapsing and expanding
-    /// groups (a View-mode action) and undo / redo themselves.
+    /// groups (not a change to the layout) and undo / redo themselves.
     pub fn key(&mut self, k: KeyEvent) {
+        // a menu takes the keys while open; Esc cancels a drag
+        if self.menu.is_some() {
+            return self.menu_key(k);
+        }
+        if self.drag.is_some() && k.code == KeyCode::Esc {
+            return self.cancel_drag();
+        }
+        if self.held.is_some() && k.code == KeyCode::Esc {
+            return self.cancel_held();
+        }
         // the help and e boxes take no other keys: they scroll and close
         if self.help || self.examine.is_some() {
             let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
@@ -348,9 +333,8 @@ impl App {
         }
         let mark = self.ws.mark();
         match self.mode {
-            Mode::View => self.view_key(k),
-            Mode::Edit if self.adding => self.panel_key(k),
-            Mode::Edit => self.edit_key(k),
+            Mode::Normal if self.adding => self.panel_key(k),
+            Mode::Normal => self.normal_key(k),
             Mode::Command | Mode::Search => self.command_key(k),
         }
         self.ws.record(mark);
@@ -445,7 +429,7 @@ impl App {
                 } else {
                     let (var, bit) = self.ws.probe(s, self.ws.bit);
                     match self.ws.trace.value_of(var, bit, self.ws.view.cursor) {
-                        Some(v) if self.ws.stream_of(var).is_none() => rows::label(&self.ws.trace.vars[s.var], s, &v),
+                        Some(v) if self.ws.stream_of(var).is_none() => rows::label(&self.ws.trace.vars[var], &self.ws.look(s, var), &v),
                         _ => return Err("no value here".into()),
                     }
                 }
@@ -481,7 +465,7 @@ impl App {
         let line = crate::draw::line_sig(&self.ws, s, var);
         let mut value = match self.ws.trace.value_of(var, bit, self.ws.view.cursor) {
             Some(_) if self.ws.stream_of(var).is_some() => vec!["no record here".into()],
-            Some(v) => wrap(&rows::label(&self.ws.trace.vars[var], &line, &v)),
+            Some(v) => wrap(&rows::label(&self.ws.trace.vars[var], &line.look, &v)),
             None => vec!["no value here".into()],
         };
         if bit.is_none() && self.ws.trace.is_composite(var) {
@@ -502,9 +486,13 @@ impl App {
                     out.push((name, None));
                     walk(app, c, depth + 1, out);
                 } else {
+                    // in the look its line has under the selected row
                     let v = &t.vars[c];
-                    let sig = rows::Sig::of(c, v);
-                    let value = t.value_at(c, app.ws.view.cursor).map_or("-".into(), |x| rows::label(v, &sig, &x));
+                    let look = match app.ws.rows.get(app.ws.sel) {
+                        Some(Row::Signal(s)) => app.ws.look(s, c),
+                        _ => rows::Look::of(v),
+                    };
+                    let value = t.value_at(c, app.ws.view.cursor).map_or("-".into(), |x| rows::label(v, &look, &x));
                     out.push((name, Some(value)));
                 }
             }
@@ -517,7 +505,7 @@ impl App {
 
     /// A value search (spec §8) that says where the match is: `match 3 of 157`.
     fn search(&mut self, text: &str, forward: bool, n: u64) -> Result<(), String> {
-        // shortcut: counting stops at MAX matches, so `n` stays quick on huge traces
+        // shortcut (#13): counting stops at MAX matches, so `n` stays quick on huge traces
         const MAX: u64 = 100_000;
         let q = self.ws.search(text, forward, n)?;
         let count = |to| query::find(&self.ws.trace, &q, &query::Search { from: 0, to, forward: true, merge: false, runs: usize::MAX, matches: MAX });
@@ -541,15 +529,17 @@ impl App {
     }
 
 
-    /// Edit mode on the rows side, or the command line opened from it.
-    pub fn editing_rows(&self) -> bool {
-        !self.adding && (self.mode == Mode::Edit || (self.mode == Mode::Command && self.ret == Mode::Edit))
+    /// Select the rows `b` as a `V` range, ending on its last row on screen (a collapsed group's
+    /// rows are not).
+    pub fn select_block(&mut self, b: std::ops::Range<usize>) {
+        let last = rows::visible(&self.ws.rows).into_iter().rfind(|v| b.contains(v)).unwrap_or(b.start);
+        (self.ws.anchor, self.ws.sel, self.ws.bit) = (Some(b.start), last, None);
     }
 
 
-    /// The signal panel is shown: open in Edit mode, or the command line was opened from it.
+    /// The signal panel is shown, the command line open over it or not (spec §2: it is no mode).
     pub fn panel_shown(&self) -> bool {
-        self.adding && (self.mode == Mode::Edit || (self.mode == Mode::Command && self.ret == Mode::Edit))
+        self.adding
     }
 
 
@@ -582,7 +572,6 @@ impl App {
 
 
     fn open_line(&mut self, mode: Mode) {
-        self.ret = self.mode;
         self.mode = mode;
         self.line.clear();
         self.hl = 0;
@@ -597,14 +586,20 @@ impl App {
     }
 
 
-    fn view_key(&mut self, k: KeyEvent) {
+    /// Normal mode: time, rows and the keys that change the rows, all at once (spec §2, §3).
+    fn normal_key(&mut self, k: KeyEvent) {
         if matches!(k.code, KeyCode::Tab | KeyCode::BackTab) {
             self.cancel();
             self.msg = None;
             let r = self.ws.next_mark(k.code == KeyCode::Tab);
             return self.report(r);
         }
-        let KeyCode::Char(c) = k.code else { return self.cancel() };
+        let KeyCode::Char(c) = k.code else {
+            if k.code == KeyCode::Esc {
+                self.ws.anchor = None;
+            }
+            return self.cancel();
+        };
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
         // `3m`: the count names the mark; `m` alone takes a free one
         let given = self.count.map(|n| n.saturating_sub(1) as usize);
@@ -612,6 +607,10 @@ impl App {
         if let Some(p) = pending {
             if (p, c) == ('g', 'g') {
                 self.ws.view.set_cursor(self.ws.trace.start());
+            }
+            if (p, c) == ('d', 'd') && !ctrl {
+                let r = self.ws.delete();
+                self.report(r);
             }
             if p == 'y' {
                 let r = self.copy(c);
@@ -640,7 +639,38 @@ impl App {
             }
             'f' if ctrl => self.move_sel(n_i.saturating_mul(self.page as i64) as isize),
             'b' if ctrl => self.move_sel(-(n_i.saturating_mul(self.page as i64) as isize)),
+            'r' if ctrl => {
+                let r = self.ws.redo();
+                self.report(r);
+            }
             _ if ctrl => {}
+            // the keys that change the rows need a row
+            'J' | 'K' | 'd' | 'V' | 'r' if self.ws.rows.is_empty() => {}
+            // a `V` range moves whole, past the next row on screen (spec §3)
+            'J' | 'K' if self.ws.anchor.is_some() => {
+                let r = self.ws.selection();
+                let mut b = rows::block(&self.ws.rows, r.start, r.end - 1);
+                for _ in 0..n_i {
+                    let Some(n) = rows::step(&mut self.ws.rows, b.clone(), c == 'J') else { break };
+                    b = n;
+                }
+                self.select_block(b);
+            }
+            'J' | 'K' => {
+                for _ in 0..n_i {
+                    self.ws.sel = rows::move_row(&mut self.ws.rows, self.ws.sel, c == 'J');
+                }
+            }
+            'd' => self.pending = Some('d'),
+            'V' => self.ws.anchor = if self.ws.anchor.is_some() { None } else { Some(self.ws.sel) },
+            'r' => {
+                let r = self.ws.set_radix(None);
+                self.report(r);
+            }
+            'u' => {
+                let r = self.ws.undo();
+                self.report(r);
+            }
             // the screen alone; the cursor keeps its time
             'H' => v.scroll(-half * n_i),
             'L' => v.scroll(half * n_i),
@@ -687,10 +717,9 @@ impl App {
                 };
                 self.report(r);
             }
-            'i' => {
-                // with nothing to edit yet, straight to adding
-                self.mode = Mode::Edit;
-                self.adding = self.ws.rows.is_empty();
+            'a' => {
+                self.ws.anchor = None;
+                self.adding = true;
             }
             ':' => self.open_command(),
             '?' => self.help = true,
@@ -704,74 +733,7 @@ impl App {
     }
 
 
-    /// Edit mode, rows side (spec §5 "Rows", §6).
-    fn edit_key(&mut self, k: KeyEvent) {
-        let c = match k.code {
-            KeyCode::Esc => {
-                self.cancel();
-                if self.ws.anchor.take().is_none() {
-                    self.mode = Mode::View;
-                }
-                return;
-            }
-            KeyCode::Char('r') if k.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.cancel();
-                let r = self.ws.redo();
-                return self.report(r);
-            }
-            KeyCode::Char(c) if !k.modifiers.contains(KeyModifiers::CONTROL) => c,
-            _ => return self.cancel(),
-        };
-        let Some((pending, n)) = self.counted(c) else { return };
-        let n = n.min(u32::MAX as u64) as isize;
-        if let Some(p) = pending {
-            if (p, c) == ('d', 'd') {
-                let r = self.ws.delete();
-                self.report(r);
-            }
-            return;
-        }
-        if self.ws.rows.is_empty() && !matches!(c, 'u' | ':' | 'a' | '/') {
-            return;
-        }
-        match c {
-            'j' => self.move_sel(n),
-            'k' => self.move_sel(-n),
-            'J' | 'K' => {
-                self.ws.anchor = None;
-                for _ in 0..n {
-                    self.ws.sel = rows::move_row(&mut self.ws.rows, self.ws.sel, c == 'J');
-                }
-            }
-            'd' => self.pending = Some('d'),
-            'a' => {
-                self.ws.anchor = None;
-                self.adding = true;
-            }
-            '/' => {
-                self.ws.anchor = None;
-                self.adding = true;
-                self.panel.start_search();
-            }
-            'V' => self.ws.anchor = if self.ws.anchor.is_some() { None } else { Some(self.ws.sel) },
-            'r' => {
-                let r = self.ws.set_radix(None);
-                self.report(r);
-            }
-            'u' => {
-                let r = self.ws.undo();
-                self.report(r);
-            }
-            ' ' => self.ws.toggle_group(),
-            ':' => self.open_command(),
-            '?' => self.help = true,
-            'e' => self.examine(),
-            _ => {}
-        }
-    }
-
-
-    /// Edit mode, signal panel side (spec §5 "Signal panel").
+    /// The signal panel, open (spec §5 "Signal panel").
     fn panel_key(&mut self, k: KeyEvent) {
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
         if let Some(q) = &mut self.panel.query {
@@ -862,6 +824,10 @@ impl App {
             }
             'g' => self.pending = Some('g'),
             'G' => self.panel.step(isize::MAX / 2),
+            'a' => {
+                self.panel.anchor = None;
+                self.adding = false;
+            }
             'n' => self.panel.next(true, n as usize),
             'N' => self.panel.next(false, n as usize),
             '/' => self.panel.start_search(),
@@ -967,9 +933,9 @@ impl App {
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
         let search = self.mode == Mode::Search;
         match k.code {
-            KeyCode::Esc => self.mode = self.ret,
+            KeyCode::Esc => self.mode = Mode::Normal,
             KeyCode::Enter => {
-                self.mode = self.ret;
+                self.mode = Mode::Normal;
                 let line = std::mem::take(&mut self.line);
                 let hist = if search { &mut self.searches } else { &mut self.history };
                 if !line.trim().is_empty() {
@@ -985,7 +951,7 @@ impl App {
                 };
                 self.report(r);
             }
-            KeyCode::Backspace if self.line.is_empty() => self.mode = self.ret,
+            KeyCode::Backspace if self.line.is_empty() => self.mode = Mode::Normal,
             // editing at the cursor, with the keys of vim's command line
             KeyCode::Left => self.col = self.cursor().saturating_sub(1),
             KeyCode::Right => self.col = self.cursor() + 1,

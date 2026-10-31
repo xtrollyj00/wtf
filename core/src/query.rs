@@ -77,7 +77,7 @@ pub fn find(trace: &Trace, q: &Query, s: &Search) -> Found {
 /// earlier. Those values change only where a signal read changes (n cycles later for `past`), so
 /// the expression is evaluated once per stretch between such changes, and the stretch matches or
 /// not as a whole: the cost follows the signals' changes, not the trace's cycles.
-// shortcut: works out every stretch of the range before taking any, so a search stopped at a limit
+// shortcut (#16): works out every stretch of the range before taking any, so a search stopped at a limit
 // still walks its signals to the end of the range; walk them lazily if that is ever too slow.
 fn find_clocked(trace: &Trace, q: &Query, clock: Probe, s: &Search) -> Found {
     let mut found = Found { runs: Vec::new(), total: 0, more: false };

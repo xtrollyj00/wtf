@@ -70,9 +70,10 @@ Each set keeps every distinction the others make, so a drawing reads the same in
 | busy bus | `╳` | `╳` | `#` |
 | label cut | `…` | `…` | `~` |
 | cursor, marks (where there is no colour) | `┃`, `╎` | as `unicode` | `\|`, `:` |
-| cursor off screen | `◂2`, `2▸` | as `unicode` | `<2`, `2>` |
+| cursor off screen, the signal panel's button | `◂2`, `2▸`, `signals ▸` / `◂` | as `unicode` | `<2`, `2>`, `signals >` / `<` |
 | group open / closed, signal shown (panel) | `▾`, `▸`, `●` | as `unicode` | `v`, `>`, `*` |
-| highlighted completion, insertion point | `▌`, `▸` | as `unicode` | `>`, `>` |
+| highlighted completion or menu item, insertion point, second menu | `▌`, `▸`, `▸` | as `unicode` | `>`, `>`, `>` |
+| what a drag adds (section 5) | `+ 3` | as `unicode` | `+ 3` |
 | panel and help borders (without colour) | `┌─┐│└┘` | as `unicode` | `+-+\|++` |
 | in text (`help · keys`, `65ns–85ns`) | `·`, `–` | as `unicode` | `-`, `-` |
 
@@ -91,11 +92,12 @@ Each set keeps every distinction the others make, so a drawing reads the same in
   in the config file (section 19), `background` and `text` too.
 - Colours are given as `#rrggbb` or a 256-colour index. On a terminal without truecolor (section
   4's detection), an `#rrggbb` colour is drawn as the nearest of the 256.
-- **A signal's colour**: a row can have its own colour, from a fixed set of names: `red`,
+- **A signal's colour**: a row, or a field under it (section 6), can have its own colour, from a fixed set of names: `red`,
   `orange`, `yellow`, `green`, `cyan`, `blue`, `magenta`, `gray`. The theme gives each name its
   shade, so a colour suits dark and light terminals alike. It colours the row's line or outline
   and its labels; X, Z and violations keep their own colours, and the name column keeps its own.
-  Set with `:color` (section 7), saved in the session (section 11).
+  A field without one takes its row's. Set with `:color` (section 7) or the menu, saved in the
+  session (section 11).
 - **Boxes over the waveforms** (the signal panel, the `?` and `e` boxes, records, the command
   completions) are cards: a background of their own (`panel`), the title in bold with how to
   close it dim across from it, two columns cleared on each side so no stub of a waveform is left

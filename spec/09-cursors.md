@@ -18,6 +18,9 @@ Cursors mark times on the waveform. They are numbered `1`–`9`, as in Vim's cur
 | `M` | remove the mark under the cursor |
 | `NM` | remove mark `N`, e.g. `3M` |
 
+With the mouse (section 2), a click on a number in the ruler jumps to that cursor, a drag moves a
+mark, and a right click on one has `Jump to` and `Remove mark`.
+
 - **Jumps center.** A jump to a mark (`'N`, `Tab`, `:cursor N`), or to cursor 1 (`'1`, `:cursor 1`),
   centers the screen on it, also when it is already on screen. A jump to a time (`:<time>`) or a search match (`/`, `n`, `N`)
   centers only when it lands off screen. Small moves (`h` / `l`, `w` / `b`) scroll just enough,

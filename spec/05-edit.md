@@ -1,9 +1,9 @@
-## 5. Edit mode
+## 5. Editing rows
 
-Edit mode works on the **rows** (the signals being shown). Adding happens in the **signal panel**
-(all signals in the file), which opens on the left with `a`, or with `/` already searching, and has
-the keys while it is open. `Esc` closes it and the keys go back to the rows. With no rows yet,
-`i` opens the panel straight away. The selected row is the same in View and Edit mode.
+The **rows** (the signals being shown) are changed with Normal mode keys (section 3): `dd`,
+`J` / `K`, `r`, `V`, `u`. Adding happens in the **signal panel** (all signals in the file), which
+`a` or a click on the status line's `signals ▸` opens on the left, and `a`, the button or `Esc`
+closes. It has the keys while it is open; when it closes, they go back to the rows.
 
 ### Signal panel
 
@@ -27,7 +27,51 @@ match the highlight is on (`2/5`).
 | `n` / `N` | next / previous match of the last search |
 | `Ctrl-a` | mark every signal the search matches (also while typing) |
 | `u` / `Ctrl-r` | undo / redo |
-| `Esc` | end a `V` range, then clear the marks, then close the panel and go back to the rows |
+| `a` | close the panel, as the button does: a `V` range ends, the marks stay for when it opens again |
+| `Esc` | end a `V` range, then clear the marks, then close the panel |
+
+The mouse, in the panel (a click outside it closes the panel, as `Esc`):
+
+| Mouse | Action |
+|---|---|
+| click on a scope (or a struct, record or array) | highlight it and expand / collapse it, as `l` / `h` |
+| click on a signal | highlight it |
+| double click on a signal (a struct, record or array too) | add it as a row, as `Enter` on it without marks; the marks stay |
+| `Ctrl` + click | highlight the line and mark / unmark it, as `Space` (on a scope, the signals directly in it) |
+| `Shift` + click | mark the lines from the highlight to the clicked one, as `V` there then `Space`; the highlight moves to it |
+| drag into the rows | add the pressed line, or all the marks when pressed on a marked line, below the row it is dropped on |
+| right click | highlight the line and open its menu (section 2, "Menu") |
+| wheel | move the highlight, as `j` / `k` |
+
+A click acts when the button is released on the line it was pressed on; a plain click keeps the
+marks. A double click on a scope opens or closes it once. To add several signals with the mouse,
+mark them with `Ctrl` + click and drag one of them into the rows; a drag takes the pressed line
+or the marks, never the lines it passes over.
+
+While a drag is over the rows, the insertion line (`▸ new signals go here`) follows the pointer,
+a label at the pointer says what a drop adds (`+ state`, `+ 3`), and the status line what the
+drop does (`drop to add 3 below clk · Esc cancels`). A drop selects the row under it and adds as
+`Enter` does (a scope as a group, into a group if the row is in one). Elsewhere (the panel, the
+status line) the status line says `release to cancel`, and letting go adds nothing. `Esc` cancels
+a drag. The pointer's shape stays the terminal's (OSC 22 isn't in every terminal).
+
+```
+┌ signals ───────────┐                ┌───┐   ┌───┐   ┌───
+│ / _                │clk    0     ───┘   └───┘   └───┘
+│ ▾ top              │▸ new signals go here ── + 3 ────────
+│   ▾ cpu            │state  0x1   ─ 0x1 ─🮧─── 0x2 ──────
+│     ● clk          │
+│       state        │
+│       busy         │
+│       irq          │
+└────────────────────┘
+ signals ◂  drop to add 3 below clk · Esc cancels
+```
+
+A drag scrolls the rows while the pointer rests at their edge, so it reaches rows off screen: on
+the rows' first or last row, the rows scroll a row every 50 ms; with the pointer two or more
+lines past the edge, four at a time. The wheel scrolls during a drag as well. Scrolling stops at
+the ends, and when the pointer leaves the edge or the button is released.
 
 The tree lists each scope's subscopes first, then its signals. Top-level scopes start expanded.
 An array's elements nest under it, one level per index (`grid` > `[1]` > `[2]`).
@@ -55,25 +99,17 @@ The panel stays open after adding.
 
 ### Rows
 
-| Keys | Action |
-|---|---|
-| `j` / `k` | select the next / previous row |
-| `a` | open the signal panel to add signals below the selected row |
-| `/` | open the signal panel, searching |
-| `dd` | remove the selected row |
-| `J` / `K` | move the selected row down / up |
-| `r` | cycle the radix of the selected row, or of all signals in a group (section 10) |
-| `u` / `Ctrl-r` | undo / redo |
-| `Space` | collapse / expand the selected group, or open / fold a bus, a stream or a composite (one level) |
-| `e` | examine the selected signal, as in View mode |
-| `Esc` | clear a `V` selection if there is one, otherwise back to View mode |
+The keys that change the rows are in section 3 with the others: `dd` removes, `J` / `K` move, `r`
+cycles the radix, `V` selects a range of rows for them and for `:group`, `u` / `Ctrl-r` undo and
+redo. In the panel, `/` searches the signals; on the rows it searches values (section 8), so
+adding by name is `a` then `/`.
 
 ### Undo
 
 `u` / `:undo` undo and `Ctrl-r` / `:redo` redo changes to the rows: adding, removing, moving, grouping
-and radix. The keys work in Edit mode, also while the panel is open (not while typing a search), the commands from
-any mode. The history covers the whole session.
-View-mode actions, such as moving the cursor or zooming, are not part of the undo history.
+and radix. The keys work on the rows and in the panel (not while typing a search), the commands
+from the command line. The history covers the whole session.
+Moving the cursor, zooming and other time keys are not part of the undo history.
 Undo and redo return the selection to the row the change was made on.
 Undoing back to the last saved state
 clears `[+]`.
@@ -93,7 +129,7 @@ A group is a named set of rows with a header row. Groups have one level (no nest
  ▸ stream (4)       ───▀▀──▀▀▀▀───▀───     ← collapsed: shows activity
 ```
 
-- **Collapse / expand**: `Space` on a group header, in View and Edit mode.
+- **Collapse / expand**: `Space` on a group header.
 - **Bus bits**: `Space` on a bus shows one line per bit under it, MSB first (`data[7]` … `data[0]`),
   drawn as 1-bit signals; `Space` on the bus or one of its bits folds them again. Bit lines can be
   selected (`j` / `k`, `w` / `b` jump between that bit's changes, the value column shows the bit),
@@ -111,16 +147,10 @@ A group is a named set of rows with a header row. Groups have one level (no nest
 - A collapsed header shows the number of signals in it: `▸ stream (4)`.
 - With a header selected, the status line shows the group's name and `/` shows an error.
 
-In Edit mode, on the rows side:
+On the rows (section 3): `V` then `j` / `k` select rows and `:group <name>` groups them; `dd` on
+a header removes the group and its signals; `J` / `K` on a header move the whole group, and on a
+signal next to a group's edge move it into or out of the group.
 
-| Keys | Action |
-|---|---|
-| `V`, then `j` / `k` | select a range of rows, then `:group <name>` groups them |
-| `dd` on a header | remove the group and its signals |
-| `dd` with rows selected | remove all selected rows |
-| `J` / `K` on a header | move the whole group down / up |
-
-- `J` / `K` on a signal next to a group boundary moves it into or out of the group.
 - `:group` on a selection that includes a header shows an error, since groups don't nest yet.
 
 ### Composite rows
@@ -158,8 +188,10 @@ a level**. `pkts` opens into `pkts[0]`, `pkts[1]`; `pkts[0]` into `valid`, `stat
   child's changes, the value column shows it, `e` examines it), but they move and are removed
   with their row: `dd` on one removes the whole row. Opening and folding is not an undo step.
   `Space` on an open level folds it and every level under it.
-- A composite row's radix applies to its whole value; a child takes the default radix for its
-  signal (an enum its names).
+- **Each line its own look**: a composite row's radix applies to its whole value; a child line
+  starts in the default radix for its signal (an enum its names), a stream's field in its row's,
+  and each can be given its own radix and colour (`r`, `:radix`, `:color`, the menu), kept with
+  the row. A child without a colour of its own takes its row's.
 - **Groups are not composites**: a group is the user's collection of rows; a composite is the
   trace's structure. Modules and instances stay groups (`:add top.cpu`), and a group can hold
   composite rows.

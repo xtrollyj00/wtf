@@ -11,7 +11,11 @@ server (`wtf --mcp`) so AI agents can debug traces and show their evidence in th
   (`spec/README.md` is the index: §15 MCP server is `spec/15-mcp.md`). Change it first (or with
   the code) whenever behaviour changes; code comments cite it as `spec §N`. Read only the
   sections a change touches, not the whole spec.
-- Spec §18 "Known limits" lists shortcuts taken; add one there when you take one.
+- The spec describes wtf as it is meant to work, never a shortcut. A shortcut you take gets a GitHub
+  issue labelled `known-limit`, titled with the spec section it falls short of (`§8: ...`), and a
+  `shortcut (#N):` comment in the code. Spec
+  §18 holds the limits outside wtf (terminals, simulators, formats) and the performance
+  targets; measured results are in `bench/RESULTS.md`.
 - Until 1.0.0 (README "Before 1.0.0"): no backward compatibility. Change the session format, tool
   arguments, keys or commands to the best design and drop the old form, no aliases or migration;
   mark it breaking (Conventions). A feature changes the spec in the same branch, no separate
@@ -93,7 +97,9 @@ Ideas that span files:
   where tests use them; changing one means updating every test that reads it.
 - TUI tests live in `src/main.rs` (`keys(&mut app, "jj'2")` drives keys, insta snapshots in
   `src/snapshots/`). MCP tests in `tests/mcp.rs` run the real binary over stdio, each with its
-  own `XDG_RUNTIME_DIR` (`Dir::new`). Core tests in `core/tests/` use `common::{open, with}`.
+  own `XDG_RUNTIME_DIR` (`Dir::new`). Terminal tests in `tests/terminal.rs` run the real binary in
+  a pseudo-terminal, read its screen with `vt100`, and send the mouse as the SGR escape sequences
+  a terminal does (`Term::drag`). Core tests in `core/tests/` use `common::{open, with}`.
 
 ## Conventions
 

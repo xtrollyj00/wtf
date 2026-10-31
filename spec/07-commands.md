@@ -15,9 +15,9 @@
 | `:select <row> [<last row>]` | select a signal (named as in `:add`) or group, or the rows from one to another, as `V` does |
 | `:cursor <n> [time\|off]` | put cursor `n` at a time (`:cursor 1 <time>` moves the cursor, others place a mark), remove mark `n`, or without a time jump to mark `n` (`:cursor 1` centers the screen on the cursor) |
 | `:scope [path]` | names resolve under this scope first, wherever signals are named (search, `:add`, `:select`, the agent's tools): with `:scope top.cpu`, `state` is `top.cpu.state` though `top.dma.state` exists; saved in the session; without a path, no scope |
-| `:radix <name>` | set the radix of the selected row or group, e.g. `:radix dec` |
+| `:radix <name>` | set the radix of the selected line (a row, or a field under it), group or `V` range (section 10), e.g. `:radix dec` |
 | `:names <signal> <value>=<name>...` | name values of a whole bus or bit signal, for the `enum` radix (section 10), e.g. `:names state 0=IDLE 1=BUSY 'h2=DONE`; values as a search takes them, checked against the width; rows showing the signal switch to `enum`. `:names <signal> off` removes the names. Saved in the session and given again on `:e` |
-| `:color <name\|off>` | set the colour of the selected row or group (section 14): `red`, `orange`, `yellow`, `green`, `cyan`, `blue`, `magenta`, `gray`; `off` for the theme's |
+| `:color <name\|off>` | set the colour of the selected line, group or `V` range (section 14): `red`, `orange`, `yellow`, `green`, `cyan`, `blue`, `magenta`, `gray`; `off` for the theme's |
 | `:undo` / `:redo` | undo / redo a change to the session layout |
 | `:fit [<from> <to>]` | zoom so the whole simulation fits on screen; with two cursors or times (`:fit '2 '3`, `:fit 10ns 20ns`, either order), zoom so the range between them fits. A cursor is `'N` as in marks (`'1` is the cursor). Zoom goes in steps, so a little more than the range may show, never less |
 | `:e` | reload the file, keeping signals, groups, cursor and zoom |
@@ -33,9 +33,9 @@ The command line shows the description column of this table next to each matchin
 
 Times accept `fs`, `ps`, `ns`, `us`, `ms`, `s`. A number without a unit means file ticks.
 
-- Layout commands (`:add`, `:rm`, `:group`, `:rename`, `:ungroup`, `:radix`, `:color`) work from View and
-  Edit mode and are undoable: each command that changes the rows is one undo step.
-  "Selected rows" means the `V` selection in Edit mode, otherwise the selected row.
+- Layout commands (`:add`, `:rm`, `:group`, `:rename`, `:ungroup`, `:radix`, `:color`) are
+  undoable: each command that changes the rows is one undo step.
+  "Selected rows" means the `V` range, otherwise the selected row.
 - Patterns match full signal paths: `*` matches within one scope level, `**` across levels.
 
 - `:zoom` and `:fit` keep the cursor on its time, like `z` / `x`. A zoom finer than one tick per

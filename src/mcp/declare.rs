@@ -77,12 +77,7 @@ fn declare(app: &mut Workspace, a: &WorkspaceArgs) -> Result<String, String> {
         }
     }
     let mut signal = |spec: &str| -> Option<Value> {
-        // a colour comes last (`awaddr:hex:red`, `wvalid:red`); its names are no radix's
-        let (spec, color) = match spec.rsplit_once(':') {
-            Some((n, c)) if rows::COLORS.contains(&c) => (n, Some(c)),
-            _ => (spec, None),
-        };
-        let (name, radix) = with_radix(spec);
+        let (name, radix, color) = look_spec(spec);
         let var = match app.resolve(name) {
             Ok((v, None)) => v,
             Ok(_) => {
@@ -96,24 +91,19 @@ fn declare(app: &mut Workspace, a: &WorkspaceArgs) -> Result<String, String> {
         };
         let mut row = Table::new();
         row.insert("signal".into(), Value::String(app.trace.vars[var].path.clone()));
-        if let Some(r) = radix {
-            match radix_for(r, app.trace.vars[var].width.unwrap_or(0), app.trace.vars[var].names.is_some(), name) {
-                Ok((r, frac)) => _ = row.insert("radix".into(), Value::String(radix::name(r, frac, app.trace.vars[var].width.unwrap_or(0)))),
-                Err(e) => errors.push(e),
-            }
-        }
-        if let Some(c) = color {
-            row.insert("color".into(), Value::String(c.into()));
-        }
+        look_keys(app, var, name, radix, color, &mut row, &mut errors);
         Some(Value::Table(row))
     };
-    let (mut rows, mut opens) = (Vec::new(), Vec::new());
+    let (mut rows, mut opens, mut fields_of) = (Vec::new(), Vec::new(), Vec::new());
     for spec in &a.rows {
         match spec {
             RowSpec::Signal(n) => rows.extend(signal(n)),
-            RowSpec::Open { signal: n, open } => {
+            RowSpec::Open { signal: n, open, fields } => {
                 let Some(Value::Table(mut row)) = signal(n) else { continue };
                 opens.push((n.clone(), row["signal"].as_str().unwrap_or_default().to_string(), open.clone()));
+                if !fields.is_empty() {
+                    fields_of.push((rows.len(), n.clone(), row["signal"].as_str().unwrap_or_default().to_string(), fields.clone()));
+                }
                 row.insert("open".into(), Value::Array(open.iter().map(|o| Value::String(o.clone())).collect()));
                 rows.push(Value::Table(row));
             }
@@ -126,6 +116,24 @@ fn declare(app: &mut Workspace, a: &WorkspaceArgs) -> Result<String, String> {
                 g.insert("rows".into(), Value::Array(members.iter().filter_map(|n| signal(n)).collect()));
                 rows.push(Value::Table(g));
             }
+        }
+    }
+    // each field as a row is written, named as `open` names its levels
+    for (k, n, path, fields) in fields_of {
+        let var = app.trace.by_path[&path];
+        let mut out = Vec::new();
+        for spec in &fields {
+            let (name, radix, color) = look_spec(spec);
+            let Some(f) = session::open_var(app, var, name).filter(|&f| f != var) else {
+                errors.push(format!("{n} has no field {name}; fields are named from {} on", session::open_name(app, var, var)));
+                continue;
+            };
+            let mut t = Table::from_iter([("field".into(), Value::String(name.into()))]);
+            look_keys(app, f, name, radix, color, &mut t, &mut errors);
+            out.push(Value::Table(t));
+        }
+        if let Value::Table(row) = &mut rows[k] {
+            row.insert("fields".into(), Value::Array(out));
         }
     }
     for (n, path, open) in opens {
@@ -172,3 +180,29 @@ fn declare(app: &mut Workspace, a: &WorkspaceArgs) -> Result<String, String> {
     Ok(t.to_string())
 }
 
+
+/// A row's or field's spec: its name, radix and colour (`awaddr:hex:red`, `wvalid:red`). A colour
+/// comes last; its names are no radix's.
+fn look_spec(spec: &str) -> (&str, Option<&str>, Option<&str>) {
+    let (spec, color) = match spec.rsplit_once(':') {
+        Some((n, c)) if rows::COLORS.contains(&c) => (n, Some(c)),
+        _ => (spec, None),
+    };
+    let (name, radix) = with_radix(spec);
+    (name, radix, color)
+}
+
+/// A line's `radix` and `color` keys, the radix checked against `var`.
+fn look_keys(app: &Workspace, var: usize, name: &str, radix: Option<&str>, color: Option<&str>, t: &mut toml::Table, errors: &mut Vec<String>) {
+    use toml::Value;
+    let v = &app.trace.vars[var];
+    if let Some(r) = radix {
+        match radix_for(r, v.width.unwrap_or(0), v.names.is_some(), name) {
+            Ok((r, frac)) => _ = t.insert("radix".into(), Value::String(radix::name(r, frac, v.width.unwrap_or(0)))),
+            Err(e) => errors.push(e),
+        }
+    }
+    if let Some(c) = color {
+        t.insert("color".into(), Value::String(c.into()));
+    }
+}

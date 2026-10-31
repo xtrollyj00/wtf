@@ -27,8 +27,8 @@ list of reads to the one answered with SLVERR, unfolded into its fields. Try it:
 
 - **Vim-like.** Time is the line axis: `h` / `l` move the cursor, `w` / `b` jump between
   transitions, `gg` / `G` go to the start / end, `:2000ns` goes to a time, `z` / `x` zoom.
-  Viewing is the default; changing what is shown is a separate Edit mode (`i`). The mouse works
-  too: click to place the cursor, Ctrl+wheel to zoom.
+  One mode for keys: `dd`, `J` / `K`, `r` change the rows next to the time keys, and `u` takes
+  any change back. The mouse works too: click to place the cursor, Ctrl+wheel to zoom.
 - **Signals.** A searchable signal tree, groups, buses expanded into bits, radixes (hex, binary,
   decimal, signed, octal, ASCII, float, fixed point, and enum names from FST files), computed
   signals (`data[7:4]`, `{a, b}`).
@@ -77,9 +77,10 @@ wtf shows what the file holds. A VCD keeps less than an FST: no enum names and n
 so a struct or union is a plain scope.
 
 The first start asks which glyphs your terminal draws well and whether you want dark or light
-(`wtf --setup` asks again). Then the screen is empty: press `i` to add signals (`/` searches,
-`Space` marks, `Enter` adds), `Esc` to go back to viewing, `?` for the keys of the mode you are
-in, `:` for commands, `:w` to save the session, `q` to quit.
+(`wtf --setup` asks again). Then the screen is empty: press `a` (or click `signals ▸`) to add
+signals (`/` searches, `Space` marks, `Enter` adds), `Esc` to close the panel, `?` for the keys,
+`:` for commands, `:w` to save the session, `q` to quit. The mouse works too: click, drag
+signals into the rows, right click for a menu.
 
 ## With an AI agent
 
@@ -110,7 +111,7 @@ How much it helps is measured, not claimed: `wtf-bench agent` gives an agent fai
 testbenches to debug and fix, with wtf and without it (logs, prints and reruns only). Without it
 the agent still fixed every bug, as these bugs show in the code; with it, it could more often
 also say when and where things went wrong, in fewer simulation runs, and mostly sooner and for less. The numbers and how they were taken are in
-[spec §18](spec/18-deferred.md).
+[`bench/RESULTS.md`](bench/RESULTS.md).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/agents-dark.svg">
@@ -130,8 +131,8 @@ Start with the [user guide](docs/guide.md): a 5-minute tour of `docs/demo.vcd`, 
 how it looks, and how to work with an agent.
 
 The design is in [`spec/`](spec/README.md), one file per topic: the keys, commands, search,
-sessions, the MCP server and the decoders. [Known limits](spec/18-deferred.md#known-limits)
-lists the shortcuts taken so far. [`ROADMAP.md`](ROADMAP.md) says what comes next.
+sessions, the MCP server and the decoders. [`ROADMAP.md`](ROADMAP.md) says what comes next;
+the shortcuts taken so far are the [`known-limit` issues](https://github.com/xtrollyj00/wtf/issues?q=is%3Aissue+label%3Aknown-limit).
 
 ## Contributing
 

@@ -11,4 +11,4 @@ expression: "snapshot(&mut app, 60, None)"
   data   0x96  ───── 0x43 ─────┃─────────── 0x96 ───────────
                                ┃────────────────────────────
   busy   1     ────────────────┃
- VIEW  top.cpu.data        20ns  ·  1ns/8col  ·  simple [+]
+ signals ▸  top.cpu.data   20ns  ·  1ns/8col  ·  simple [+]

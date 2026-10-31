@@ -151,7 +151,7 @@ impl Shape {
     }
 }
 
-/// The widest operand and result arithmetic takes (spec §18).
+/// The widest operand and result arithmetic takes (#11).
 const MAX_OPERAND: u32 = 64;
 const MAX_RESULT: u32 = 127;
 
@@ -232,7 +232,7 @@ impl Term {
             Term::Cond(c, a, b) => {
                 let mut read = Vec::new();
                 probes(c, &mut read);
-                // shortcut: an unknown bit anywhere in c makes it unknown, even where SV's || or && would know; upgrade if that bites
+                // shortcut (#12): an unknown bit anywhere in c makes it unknown, even where SV's || or && would know; upgrade if that bites
                 let known = |v: Option<&Val>| match v {
                     Some(Val::Bits(b)) => unsigned(b).is_some(),
                     v => v.is_some(),
@@ -1066,7 +1066,7 @@ pub fn find(trace: &Trace, var: usize, bit: Option<u32>, target: &Target, from: 
 }
 
 /// Every such time, nearest first, from one walk over the signal's changes.
-// shortcut: looks at every change; index values if searching huge traces is too slow (spec §18).
+// shortcut (#15): looks at every change; index values if searching huge traces is too slow.
 pub fn find_all<'a>(trace: &'a Trace, var: usize, bit: Option<u32>, target: &'a Target, from: Tick, forward: bool) -> impl Iterator<Item = Tick> + 'a {
     let mut changes = trace.walk(var, bit, from, forward).peekable();
     // forward, whether the change before matched

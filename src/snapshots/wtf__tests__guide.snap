@@ -9,9 +9,9 @@ expression: "snapshot(&mut open(\"vcd\", None), 60, None)"
                            simple
                     6 signals  ·  0–80ns
 
-                       i  add signals
+                       a  add signals
                        :  commands
                        ?  help
                        q  quit
 
- VIEW                              0  ·  2ns/col  ·  simple
+ signals ▸                         0  ·  2ns/col  ·  simple

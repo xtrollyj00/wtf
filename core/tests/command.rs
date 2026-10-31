@@ -117,14 +117,14 @@ fn color_and_undo() {
     let mut ws = with(&["top.cpu"]);
     ws.sel = 0; // the group: every signal in it
     ws.undoable(|ws| run(ws, "color red")).unwrap();
-    assert!(ws.rows.iter().filter_map(|r| r.sig()).all(|s| s.color == Some(0)));
+    assert!(ws.rows.iter().filter_map(|r| r.sig()).all(|s| s.look.color == Some(0)));
     assert_eq!(run(&mut ws, "color pink"), Err("unknown colour: pink (colours: red, orange, yellow, green, cyan, blue, magenta, gray)".into()));
     run(&mut ws, "undo").unwrap();
-    assert!(ws.rows.iter().filter_map(|r| r.sig()).all(|s| s.color.is_none()));
+    assert!(ws.rows.iter().filter_map(|r| r.sig()).all(|s| s.look.color.is_none()));
     run(&mut ws, "redo").unwrap();
     ws.sel = 1;
     run(&mut ws, "color off").unwrap();
-    assert_eq!(ws.rows[1].sig().unwrap().color, None);
+    assert_eq!(ws.rows[1].sig().unwrap().look.color, None);
 }
 
 #[test]

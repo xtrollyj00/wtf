@@ -222,6 +222,13 @@ fn struct_fields() {
     let view = s.ok("workspace", json!({"rows": ["pkt", {"signal": "pkts", "open": ["pkts", "pkts[1]"]}], "range": ["0ns", "20ns"]}));
     assert!(view.contains("pkts  types.pkts  hex  (open: pkts, pkts[1])"), "{view}");
     insta::assert_snapshot!("render_composites", s.ok("render", json!({"width": 60})));
+    // a field's radix and colour, written as a row's; named as levels are
+    let bad = s.tool("workspace", json!({"rows": [{"signal": "pkt", "fields": ["pair.hi:dec"]}]})).unwrap_err();
+    assert_eq!(bad, "pkt has no field pair.hi; fields are named from pkt on");
+    let view = s.ok("workspace", json!({"rows": [{"signal": "pkt", "open": ["pkt", "pkt.pair"], "fields": ["pkt.pair.hi:dec:red", "pkt.state:green"]}]}));
+    assert!(view.contains("pkt  types.pkt  hex  (open: pkt, pkt.pair)  (fields: pkt.pair.hi:dec:red, pkt.state:enum:green)"), "{view}");
+    let r = s.ok("render", json!({"width": 60}));
+    assert!(r.contains("    hi    0     ┃──── 0 ──────🮧──────────── 10 ─"), "the field in dec, lo in hex: {r}");
 }
 
 /// Enum names from the file (spec §10): tests/data/enum.fst, as in core/tests/enums.rs.

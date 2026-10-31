@@ -1,129 +1,10 @@
-## 18. Deferred
+# Results
 
-To be decided once prototypes exist:
+wtf measured against the targets in [spec §18 "Performance"](../spec/18-limits.md#performance),
+and agents debugging with and without it. Re-run the bench after a change that should move a
+number, and update it here.
 
-- Subgroups (nesting), creating groups automatically from file scopes.
-- Remote traces (client/server), for traces on a machine reached over ssh, where drawing remotely
-  lags. Until then: mount the directory with sshfs and run wtf locally, or use mosh.
-  Sketch: `wtf -r host:path/run.fst` starts `ssh host wtf --serve path/run.fst` and talks to it over
-  stdin / stdout (no ports, no daemon). The seam is `Trace`: the rest of wtf only asks it for values
-  and changes, thousands of times per frame, so those can't be remote calls. The client fetches the
-  hierarchy once and each signal's changes when it is added, and answers queries locally. Open
-  points: a wire format for signal data, version checks between client and server, fetching huge
-  signals by time window, and `:e` and errors over the link.
-- Cursors: naming cursors, more than 9.
-- More in the config file (section 19): default radix, key remapping; picking the theme from the
-  terminal's background (OSC 11).
-- Performance: targets and the rules that follow from them. Draft below; milestone 6 has a first
-  measurement (clocked searches), the targets are not settled yet.
-
-### Known limits
-
-Shortcuts taken so far, to fix when they get in the way.
-
-- A named signal can't be removed, only defined again (`:signal`); removing vars would renumber
-  them.
-- Every slice or concatenation named, even once in a search, stays a var until the trace is
-  reopened, and is listed in the panel and by `signals`.
-- The signal panel is rebuilt when computed vars appear, losing its highlighted item and Space
-  marks.
-- Sampling a stream again with fewer fields leaves the old field vars, holding no records.
-- Arithmetic (section 8) takes operands up to 64 bits and results up to 127 (an `i128`); a
-  wider one is an error suggesting a slice.
-- In `c ? a : b`, any unknown bit the condition reads makes the result x, even where SV's `&&` /
-  `||` would still know the answer (`0 && x` is 0 in SV).
-- Applying a session (also `present`) adds its signals, protocols and instances to the ones there;
-  none are removed.
-- `check` rules are violations written directly (`valid && !ready`), one record per cycle; a rule
-  over records (a frame too long) needs a decoder.
-- Streams are worked out over the whole trace at once (spec §16 "Known limit").
-- A stream row's label is `#n` with `len` (`64B`) and the text fields (delay, rule, kind); there is
-  no per-protocol label.
-- A frame's `data` is text (`de ad be ef`), held for every frame: big for long frames, and searched
-  only whole (`==`), not for a part.
-- `join` pairs strictly in order (AXI-Lite has no IDs): after a lost response, the transactions
-  after it are still paired, one off.
-- The status line's `match 3 of 157` counts matches only up to 100 000 (`100000+`), so `n` stays
-  quick on huge traces; past that the total isn't known.
-- A name that matches only in the other HDL's form (`HEADERS_VLD`, `gen(4)` for `gen[4]`, section
-  8) is looked up by putting every path in that form, each time: O(signals) per such name.
-- A slice or concatenation SPI reads its pins through (`{cs, sclk, mosi, miso}`) stays a var, as
-  every computed signal named.
-- Composite types are shown as the simulator dumps them (fixtures `types-*`, made by
-  `tests/data/types.sh`; pinned in `core/tests/types.rs`):
-  - a struct, record, union or array dumped as a scope is one row with a whole value (section
-    6, "Composite rows"), worked out from its signals at each lookup, O(signals in it); with a
-    text field its value is text, so it compares only whole (`==`); a union's value joins its
-    members, each the same bits (`word` is `0xC3C3`);
-  - a packed struct dumped as one var (Verilator without `--trace-structs`, Icarus) has no field
-    names (`pkt.state`) and no enum names, and `x[1]` of a flat packed 2-D vector is bit 1, not
-    element 1: the file has one var; a field is a slice the user names (`:signal pkt.state =
-    pkt[9:8]`);
-  - nvc dumps an enum as a string var (`pkt.state` is `busy`), its type not kept: it is a
-    string to wtf (`signals` says so), compared as text, with no enum radix;
-  - a VCD has no scope types: Verilator writes a struct as a module scope, as an FST doesn't, so
-    it is no composite row (nor is a packed struct dumped as one var); its fields are shown by
-    their leaf (`hi`, not `pkt.pair.hi`), listed scopes first, and adding it takes only its
-    direct fields. The format lost the type; wtf doesn't guess it back;
-  - Icarus dumps the blocks of its `foreach` loops (`$ivl_foreach0.i`) and generate loops'
-    genvars (`gen[0].g`, a parameter): they are in the file, so they are signals, added by
-    `:add **` as any other;
-  - a module or instance named as a signal (`value_at top.cpu`) is an error listing its signals;
-    finding the scopes a name ends with goes through every path, O(signals), only on such an
-    error;
-  - wellen 0.25.7 can't read a GHW file (GHDL) with a multidimensional array ("not yet
-    implemented"): opening it is an error, though the panic's message still goes to stderr (the
-    panic hook is process-wide, so it isn't swapped around the read); GHDL's VCD has no records
-    or arrays at all;
-  - wellen 0.25.7 misnames the elements of a Verilator FST's 2-D unpacked array whose indices are
-    equal (`grid[1][1]` becomes `types.grid[1].grid[1].`): an upstream bug.
-
-### Performance (draft)
-
-#### Size targets
-
-wtf must stay comfortable with traces up to **10 GB** and hierarchies of
-**hundreds of thousands of signals**.
-
-| Action | Target |
-|---|---|
-| open an FST trace, first screen shown | under 1 s |
-| open a VCD trace, first screen shown | under 2 s; values become available while the file is indexed in the background |
-| add a signal, its waveform shown (FST) | under 1 s |
-| any key in View or Edit mode, screen redrawn | under 50 ms, at any zoom |
-| signal panel search, per typed character | under 50 ms with 500k signals |
-| value search (`/`) on a signal with 10M transitions | under 1 s |
-| memory after opening, before adding signals | proportional to the hierarchy, never to the file size |
-
-#### Rules that follow from the targets
-
-- **Lazy loading**: opening a file reads only the hierarchy. A signal's values are read when it is
-  added, and memory grows with the shown signals, not with the file.
-- **VCD indexing**: VCD has no index, so a background pass over the file builds one. The UI stays
-  usable during the pass, shows its progress on the status line, and signals fill in as their data
-  becomes available.
-- **Drawing cost depends on the screen, not the data**: drawing a row looks up only the columns
-  on screen (e.g. by binary search over transitions), so zooming out to the whole simulation is as
-  fast as any other zoom.
-- **Long operations never block**: anything that can take longer than the redraw target
-  (indexing, loading a signal, value search) runs in the background and can be cancelled with `Esc`.
-- `:e` (reload) follows the same rules as opening.
-
-#### Measuring
-
-The targets are checked against generated reference traces (a 10 GB FST, a 10 GB VCD, a hierarchy
-with 500k signals), so results are comparable between versions and implementations.
-
-`bench/` (`wtf-bench`) writes them and times wtf on them. `gen --size 10G --format fst|vcd <dir>`
-writes `bench.fst` / `.vcd`: a 10 ns clock, a reset, `top.hot` (a 32-bit count of the cycles, a
-transition every cycle) and `--modules` (200) AXI4-Lite slaves `top.u<i>` with random
-transactions, run until the file has the size asked for; the same arguments write the same trace.
-`--modules 26316 --size 100M` is the 500k-signal hierarchy. `run <trace>` times, against the
-targets: opening in the core, adding `top.hot`, a value search for its last value, a clocked
-search over the whole trace, the first screen and the whole trace by `wtf --snapshot`, and peak
-memory (Linux only).
-
-#### First results
+## First results
 
 wtf 0.1.0 on an AMD Ryzen 9 9950X3D (32 threads), 122 GB of memory, NVMe; 2026-10-22. The traces:
 `gen --size 10G`, 3803 signals (10 GiB: 24.4M cycles in VCD, 122.8M in FST), and
@@ -143,7 +24,7 @@ wtf 0.1.0 on an AMD Ryzen 9 9950X3D (32 threads), 122 GB of memory, NVMe; 2026-1
 What they say:
 
 - A VCD is read whole when it is opened (wellen), so its memory grows with the file: 13.5 GB for
-  10 GiB. This is the miss that background indexing (above) is for.
+  10 GiB. This is the miss that background indexing (spec §18) is for.
 - Drawing is not the cost: the whole trace on screen takes as long as the first screen.
 - An FST's first screen is slow because the signals on it are loaded whole, over the whole trace:
   `top.hot` alone (123M changes) takes 7.7 s.
@@ -155,10 +36,10 @@ What they say:
   panel's tree looked each scope up among its siblings one by one, quadratic in a scope's children
   (26,300 modules under `top`). Looked up by name now, it takes 0.2 s.
 
-#### Composite rows
+## Composite rows
 
 `gen --size 1G --format fst --mem 1024` adds `top.mem[0..1023]`, 32 bits each, one element written
-a cycle (12.0M cycles), shown as one row (section 6). `wtf-bench run` on the same machine
+a cycle (12.0M cycles), shown as one row (spec §6). `wtf-bench run` on the same machine
 (2026-10-30):
 
 | | 1 GiB FST | target |
@@ -172,7 +53,7 @@ A composite's value is never stored: each value, change and changes-in-a-column 
 from its signals when asked (O(signals in it) a lookup), so the cost is loading its signals, as
 for any rows.
 
-#### The MCP server
+## The MCP server
 
 `wtf-bench mcp <trace>` plays an agent's session over `wtf --mcp` and times each call, with the
 size of its answer. On the same machine and 10 GiB traces (2026-10-22):
@@ -198,7 +79,7 @@ size of its answer. On the same machine and 10 GiB traces (2026-10-22):
 - In an FST, the first call that reads a signal waits for all of it to load: `values` over 1 µs
   takes 7.2 s for `top.hot`'s 123M changes, as the first screen does.
 
-#### Agents with and without wtf
+## Agents with and without wtf
 
 `wtf-bench agent run --no-mcp` runs the fix tasks without wtf: the agent has the RTL, the
 testbench, `sim.log` and `make sim`, and debugs with prints and reruns. Haiku (claude-haiku-5-5),

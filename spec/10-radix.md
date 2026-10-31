@@ -16,10 +16,12 @@ its values.
 | `uq<m>.<n>` | `1.25` | unsigned fixed point |
 | `enum` | `READ` | the name the file gives the value (an FST enum table, as Verilator writes SystemVerilog enums; enums written as strings, as nvc writes VHDL ones, are text already), or one given with `:names` (section 7); a value without a name in hex; only for signals with names |
 
-- **Changing**: `r` on the rows side of Edit mode cycles the selected row through the list above,
-  skipping the ones that don't fit its width (`enum`: a signal without names) and fixed point, which needs its numbers. On a group
-  header it sets every signal in the group that the radix fits. `:radix <name>` sets one directly
-  (`:radix q4.12`). Both are undoable.
+- **Changing**: `r` on the rows cycles the selected line through the list above,
+  skipping the ones that don't fit its width (`enum`: a signal without names) and fixed point, which needs its numbers. The line is
+  a row, or a field, element or stream field under it (each has its own radix, section 6); a bit
+  line is its bus's. On a group header or a `V` range it sets every signal in it that the radix
+  fits. `:radix <name>` sets one directly (`:radix q4.12`), and so does the right click's menu
+  (section 2). All are undoable.
 - **Unknown bits**: hex, binary and octal show `X` (unknown), `U` (uninitialized) and `Z` (high impedance)
   per digit. A decimal, float or fixed-point value with any unknown or uninitialized bit shows as `x`, with any
   high-impedance bit as `z`.

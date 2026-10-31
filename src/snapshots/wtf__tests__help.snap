@@ -2,23 +2,23 @@
 source: src/main.rs
 expression: "snapshot(&mut app, 100, Some(20))"
 ---
-  help · VIEW                                                                          Esc ? close
-  Move                            Rows                              Marks
-  h l       cursor left / right   j k       select a row            m M     put / remove a mark
-  w b       next / prev change    Ctrl-f/b  a screen of rows        Tab     next mark
-  gg G      start / end           Space     fold a group or bus     '2..'9  jump to a mark
-  z x       zoom in / out         e         the whole value         ''      back before the jump
-  c         center the cursor     yy yt     copy value / time
-  H L       screen left / right   i         edit rows               Other
-  Ctrl-d/u  half a screen                                           :       command
-                                  Search                            5l 3w   a count repeats a key
-                                  /         search                  q       quit
-                                  n N       next / previous match
+  help · keys                                                                          Esc ? close
+  Move                            Rows                            Change
+  h l       cursor left / right   j k       select a row          a         add signals
+  w b       next / prev change    Ctrl-f/b  a screen of rows      dd        remove
+  gg G      start / end           Space     fold a group or bus   J K       move down / up
+  z x       zoom in / out         e         the whole value       V         select rows; Esc ends
+  c         center the cursor     yy yt     copy value / time     r         next radix
+  H L       screen left / right                                   u Ctrl-r  undo / redo
+  Ctrl-d/u  half a screen
+                                                                  Search
+                                                                  /         search
+                                                                  n N       next / previous match
 
-  Search expressions
-  /0x40                              the selected row's value, in any radix
-  /x  /z                             unknown, high impedance
-  /valid && ready && data == 0x40    several signals at once
-  /@clk fell(valid) && !past(ready)  sampled at clk; also rose() stable()
+                                                                  Marks
+                                                                  m M       put / remove a mark
+                                                                  Tab       next mark
+                                                                  '2..'9    jump to a mark
+  … lines 1–16 of 28  j k scroll
 
- VIEW  top.clk                                                          12ns  ·  1ns/col  ·  simple
+ signals ▸  top.clk                                                     12ns  ·  1ns/col  ·  simple
