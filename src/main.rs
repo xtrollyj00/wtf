@@ -1357,6 +1357,146 @@ mod tests {
         assert!(app.records.is_none());
     }
 
+    /// Run the open menu's item `label`: `j` down to it, then `Enter`.
+    fn pick(app: &mut App, label: &str) {
+        let k = app.menu.as_ref().unwrap().items.iter().position(|i| i.label == label).unwrap_or_else(|| panic!("no {label} in the menu"));
+        keys(app, &format!("{}<CR>", "j".repeat(k + 1)));
+    }
+
+    #[test]
+    fn mouse_menu_actions() {
+        // each kind of menu item does what its key or command does
+        let mut app = open("vcd", Some(SESSION));
+        let t0 = Instant::now();
+        screen(&mut app, 100, Some(22));
+        // data's waveform (line 8): Open opens it into bits, Examine shows the box
+        right(&mut app, 60, 8);
+        pick(&mut app, "Open");
+        assert_eq!(app.ws.subs(app.ws.rows[3].sig().unwrap()).len(), 8);
+        keys(&mut app, "<Space>");
+        screen(&mut app, 100, Some(22));
+        right(&mut app, 60, 8);
+        pick(&mut app, "Examine");
+        assert!(app.examine.is_some());
+        keys(&mut app, "<Esc>");
+        // copying the value and the time clicked
+        right(&mut app, 60, 8);
+        pick(&mut app, "Copy value");
+        assert!(app.yank.take().is_some());
+        right(&mut app, 60, 8);
+        pick(&mut app, "Copy time");
+        assert!(app.msg.as_ref().unwrap().0.starts_with("copied: ") && app.yank.take().is_some());
+        // fixed point opens the command line to type its bits
+        right(&mut app, 60, 8);
+        pick(&mut app, "Radix");
+        let sub = app.menu.as_ref().unwrap().sub.as_ref().unwrap().1.items.len();
+        keys(&mut app, &format!("{}<CR>", "j".repeat(sub)));
+        assert_eq!((app.mode, app.line.as_str()), (app::Mode::Command, "radix q"));
+        keys(&mut app, "<Esc>");
+        // the time keys, and with a search its matches
+        let cursor = app.ws.view.cursor;
+        right(&mut app, 60, 8);
+        pick(&mut app, "Previous change");
+        assert!(app.ws.view.cursor < cursor);
+        keys(&mut app, "/0x40<CR>");
+        let found = app.ws.view.cursor;
+        right(&mut app, 60, 8);
+        pick(&mut app, "Previous match");
+        right(&mut app, 60, 8);
+        pick(&mut app, "Next match");
+        assert_eq!(app.ws.view.cursor, found, "back where the search found 0x40");
+        // a `V` range: Group… opens `:group `
+        click(&mut app, 3, 6, NONE, t0, 0);
+        click(&mut app, 3, 8, KeyModifiers::CONTROL, t0, 1000);
+        right(&mut app, 3, 6);
+        pick(&mut app, "Group…");
+        assert_eq!((app.mode, app.line.as_str()), (app::Mode::Command, "group "));
+        keys(&mut app, "<Esc><Esc>");
+        // a header: Rename… opens `:rename cpu`, Fold folds it
+        right(&mut app, 3, 4);
+        pick(&mut app, "Rename…");
+        assert_eq!(app.line, "rename cpu");
+        keys(&mut app, "<Esc>");
+        right(&mut app, 3, 4);
+        pick(&mut app, "Fold");
+        assert!(matches!(app.ws.rows[1], rows::Row::Group { collapsed: true, .. }));
+        // below the rows: Redo after an undo, Add signals… opens the panel
+        keys(&mut app, "ddu");
+        screen(&mut app, 100, Some(22));
+        right(&mut app, 50, 15);
+        pick(&mut app, "Redo");
+        assert_eq!(app.ws.rows.len(), 2, "the cpu group removed again");
+        right(&mut app, 50, 15);
+        pick(&mut app, "Add signals…");
+        assert!(app.panel_shown());
+        // a scope in the panel: Collapse, Expand
+        screen(&mut app, 100, Some(22));
+        let y = line(&app, "top");
+        right(&mut app, 5, y);
+        pick(&mut app, "Collapse");
+        assert!(!app.panel.nodes[app.panel.sel].open);
+        right(&mut app, 5, y);
+        pick(&mut app, "Expand");
+        assert!(app.panel.nodes[app.panel.sel].open);
+        // k moves up; a right click outside opens the menu there
+        right(&mut app, 5, y);
+        keys(&mut app, "jjk");
+        assert_eq!(app.menu.as_ref().unwrap().hl, Some(0));
+        right(&mut app, 5, y + 1);
+        assert!(app.menu.as_ref().is_some_and(|m| m.at == (5, y as usize + 1)));
+    }
+
+    #[test]
+    fn mouse_wheel_time_and_ruler() {
+        let mut app = open("vcd", Some(SESSION));
+        let t0 = Instant::now();
+        let wheel = |app: &mut App, kind, mods| app.mouse(at(kind, 60, 8, mods));
+        screen(&mut app, 100, Some(22));
+        // the wheel selects; Shift or sideways scrolls the time; Ctrl zooms
+        wheel(&mut app, MouseEventKind::ScrollDown, NONE);
+        wheel(&mut app, MouseEventKind::ScrollDown, NONE);
+        wheel(&mut app, MouseEventKind::ScrollUp, NONE);
+        assert_eq!(app.ws.sel, 1);
+        let start = app.ws.view.start;
+        wheel(&mut app, MouseEventKind::ScrollDown, KeyModifiers::SHIFT);
+        wheel(&mut app, MouseEventKind::ScrollRight, NONE);
+        assert!(app.ws.view.start > start);
+        wheel(&mut app, MouseEventKind::ScrollUp, KeyModifiers::SHIFT);
+        wheel(&mut app, MouseEventKind::ScrollLeft, NONE);
+        assert_eq!(app.ws.view.start, start);
+        let zoom = (app.ws.view.ticks, app.ws.view.cols);
+        wheel(&mut app, MouseEventKind::ScrollUp, KeyModifiers::CONTROL);
+        wheel(&mut app, MouseEventKind::ScrollDown, KeyModifiers::CONTROL);
+        assert_eq!((app.ws.view.ticks, app.ws.view.cols), zoom);
+        // a press on the time axis let go in place puts the cursor there, no zoom
+        let v = app.ws.view.clone();
+        click(&mut app, 40, 0, NONE, t0, 0);
+        assert_eq!((app.ws.view.cursor, app.ws.view.ticks, app.ws.view.start), (v.col_start(40 - app.wave_x as u64), v.ticks, v.start));
+        // marks off screen sit at the ruler's edges, where a click jumps to them
+        keys(&mut app, ":0<CR>m:80ns<CR>");
+        app.run("zoom 1ns").unwrap();
+        app.ws.view.center(60);
+        screen(&mut app, 100, Some(22));
+        assert!(app.ws.view.col_of(0).is_none(), "mark 2 is off screen, left");
+        let wx = app.wave_x as u16;
+        click(&mut app, wx + 1, 1, NONE, t0, 1000);
+        assert_eq!(app.ws.view.cursor, 0);
+        // cursor 1's number is not dragged; Esc on it changes nothing
+        app.ws.view.set_cursor(30);
+        screen(&mut app, 100, Some(22));
+        let x = wx + app.ws.view.col_of(app.ws.view.cursor).unwrap() as u16;
+        app.mouse(at(MouseEventKind::Down(MouseButton::Left), x, 1, NONE));
+        app.mouse(at(MouseEventKind::Drag(MouseButton::Left), x + 10, 1, NONE));
+        keys(&mut app, "<Esc>");
+        assert_eq!((app.ws.view.cursor, app.ws.marks[1]), (30, Some(0)));
+        // the wheel in the help box scrolls it both ways
+        keys(&mut app, "?");
+        screen(&mut app, 60, Some(12));
+        app.mouse(at(MouseEventKind::ScrollDown, 30, 5, NONE));
+        app.mouse(at(MouseEventKind::ScrollUp, 30, 5, NONE));
+        assert_eq!(app.scroll, 0);
+    }
+
     #[test]
     fn mouse_menu() {
         let mut app = open("vcd", Some(SESSION));

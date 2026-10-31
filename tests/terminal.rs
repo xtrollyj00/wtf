@@ -103,6 +103,12 @@ impl Term {
 
 impl Drop for Term {
     fn drop(&mut self) {
+        // quit, so a coverage run gets wtf's profile (a killed process writes none); kill if stuck
+        let _ = self.input.write_all(b"\x1b\x1b:q!\r");
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_secs(2) && matches!(self.child.try_wait(), Ok(None)) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
         let _ = self.child.kill();
         let _ = self.child.wait();
         let _ = std::fs::remove_dir_all(&self.dir);
