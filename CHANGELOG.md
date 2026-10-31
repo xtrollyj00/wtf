@@ -3,6 +3,48 @@
 What changed in each release. Commits follow [Conventional Commits](https://www.conventionalcommits.org/),
 so `git log v0.1.0..` has the details.
 
+## 0.2.0 (2026-10-31)
+
+The mouse does what GTKWave and Surfer users reach for, the keys have one mode, and structs,
+records and arrays are one row each.
+
+Breaking:
+
+- View and Edit mode are one mode. `i` and the `EDIT` badge are gone: `dd`, `J` / `K`, `r`,
+  `V` and `u` work next to the time keys, and `Esc` ends a `V` range.
+- `/` on the rows always searches values. To find a signal by name, open the panel with `a`,
+  then `/`.
+- `a`, or the `signals ▸` button at the bottom left, opens and closes the signal panel.
+- `J` / `K` move a whole `V` range.
+- Sessions write what is open under a row as `open = ["state"]`; `expanded = true` is no longer
+  read.
+- Every index in a path is `[i]` whatever the simulator wrote (`types.gen[0].p`, `grid[1][2]`).
+  Names in either HDL's form are still found, and older sessions still load.
+
+New:
+
+- The mouse: click to select and put the cursor, the wheel to move, `Ctrl` + wheel to zoom.
+  Drag a row by its name to move it, `Ctrl` + click to select a range, drag across the
+  waveforms or the time axis to zoom to that range. Double click or drag a signal out of the
+  panel to add it. Click a mark's number in the ruler to jump to it, drag it to move it.
+- A right click opens a menu of what can be done there, each item with its key.
+- A struct, record or array is one row that opens a level at a time, with its whole value;
+  adding one takes all of its signals.
+- Each field under a row, a struct's or a stream's, can have its own radix and colour (`r`,
+  `:radix`, `:color`, the menu), kept in the session.
+- VHDL's `grid(1, 2)` names an array element.
+
+Fixed:
+
+- wellen's panic on a GHW file with a multidimensional array is an open error, not a crash.
+- `value_at` answers at the time asked, not at the end of the tick it falls in.
+- `signals` says `(real)` or `(string)` instead of `(real or string)`.
+- Zero shows as a bare `0` on a ps or fs trace, not `0ps`.
+- A composite row's name no longer lands over its value.
+
+The spec describes wtf as it is meant to work. The shortcuts taken so far are GitHub issues
+labelled [`known-limit`](https://github.com/xtrollyj00/wtf/issues?q=is%3Aissue+label%3Aknown-limit).
+
 ## 0.1.0 (2026-10-28)
 
 The first release.

@@ -1,6 +1,6 @@
 [package]
 name = "wtf-bench"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "Generates huge traces and measures wtf on them against the targets in spec §18"
