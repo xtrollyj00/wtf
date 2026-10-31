@@ -197,7 +197,7 @@ fn rows_of(app: &mut Workspace, rows: Value, grouped: bool, out: &mut Vec<Row>, 
             }
         } else if let Some(Value::String(name)) = row.remove("group") {
             let collapsed = row.remove("collapsed").and_then(|c| c.as_bool()).unwrap_or(false);
-            // shortcut: groups have one level until subgroups exist (spec §18); nested ones are flattened.
+            // shortcut: groups have one level until subgroups exist (ROADMAP.md "Later"); nested ones are flattened.
             if grouped {
                 warn.push(format!("nested group flattened: {name}"));
             } else {

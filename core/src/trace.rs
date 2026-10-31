@@ -594,7 +594,7 @@ fn bit_of(v: Val, bit: Option<u32>) -> Option<Val> {
 }
 
 // One bit of a bus, for buses expanded into their bits; `bit` None is the whole variable.
-// shortcut: a bit's changes are found by checking each change of its bus, so a bit of a busy bus
+// shortcut (#18): a bit's changes are found by checking each change of its bus, so a bit of a busy bus
 // costs time proportional to the bus's changes in view; index bits if that is ever too slow.
 impl Trace {
     /// A signal's width, 1 for a bit of it.

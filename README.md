@@ -111,7 +111,7 @@ How much it helps is measured, not claimed: `wtf-bench agent` gives an agent fai
 testbenches to debug and fix, with wtf and without it (logs, prints and reruns only). Without it
 the agent still fixed every bug, as these bugs show in the code; with it, it could more often
 also say when and where things went wrong, in fewer simulation runs, and mostly sooner and for less. The numbers and how they were taken are in
-[spec §18](spec/18-deferred.md).
+[`bench/RESULTS.md`](bench/RESULTS.md).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/agents-dark.svg">
@@ -131,8 +131,8 @@ Start with the [user guide](docs/guide.md): a 5-minute tour of `docs/demo.vcd`, 
 how it looks, and how to work with an agent.
 
 The design is in [`spec/`](spec/README.md), one file per topic: the keys, commands, search,
-sessions, the MCP server and the decoders. [Known limits](spec/18-deferred.md#known-limits)
-lists the shortcuts taken so far. [`ROADMAP.md`](ROADMAP.md) says what comes next.
+sessions, the MCP server and the decoders. [`ROADMAP.md`](ROADMAP.md) says what comes next;
+the shortcuts taken so far are the [`known-limit` issues](https://github.com/xtrollyj00/wtf/issues?q=is%3Aissue+label%3Aknown-limit).
 
 ## Contributing
 

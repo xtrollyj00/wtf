@@ -11,7 +11,11 @@ server (`wtf --mcp`) so AI agents can debug traces and show their evidence in th
   (`spec/README.md` is the index: §15 MCP server is `spec/15-mcp.md`). Change it first (or with
   the code) whenever behaviour changes; code comments cite it as `spec §N`. Read only the
   sections a change touches, not the whole spec.
-- Spec §18 "Known limits" lists shortcuts taken; add one there when you take one.
+- The spec describes wtf as it is meant to work, never a shortcut. A shortcut you take gets a GitHub
+  issue labelled `known-limit`, titled with the spec section it falls short of (`§8: ...`), and a
+  `shortcut (#N):` comment in the code. Spec
+  §18 holds the limits outside wtf (terminals, simulators, formats) and the performance
+  targets; measured results are in `bench/RESULTS.md`.
 - Until 1.0.0 (README "Before 1.0.0"): no backward compatibility. Change the session format, tool
   arguments, keys or commands to the best design and drop the old form, no aliases or migration;
   mark it breaking (Conventions). A feature changes the spec in the same branch, no separate

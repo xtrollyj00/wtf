@@ -12,7 +12,7 @@ const UNITS: [(&str, u128); 6] = [
 ];
 
 /// Femtoseconds per tick, or None if the file has no usable timescale.
-// shortcut: timescales finer than 1fs (zs, as) fall back to raw ticks; upgrade if such files show up.
+// shortcut (#19): timescales finer than 1fs (zs, as) fall back to raw ticks; upgrade if such files show up.
 pub fn fs_per_tick(ts: Option<wellen::Timescale>) -> Option<u128> {
     let ts = ts?;
     let exp = ts.unit.to_exponent()? as i32 + 15;

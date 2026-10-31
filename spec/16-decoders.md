@@ -108,6 +108,5 @@ checks that return only violations.
   adds an instance.
 - **MCP.** Streams and fields are signal names for every tool; `records` lists a stream's records
   and `decode` declares instances in the workspace (section 15).
-- Known limit: decoders need the trace's history from the start, so a stream is
-  evaluated over the whole trace; for traces near the size targets (section 18) that needs
-  checkpoints later.
+- Decoders need the trace's history from the start, so a stream is evaluated from the trace's
+  start.

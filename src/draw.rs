@@ -327,7 +327,7 @@ pub fn state_style(v: &Val) -> Style {
 }
 
 /// A stream field's value between records (spec §15): all `z`.
-// shortcut: a record whose field really is all z draws as a gap too; give gaps their own value if that matters
+// shortcut (#28): a record whose field really is all z draws as a gap too; give gaps their own value if that matters
 fn gap(v: &Val) -> bool {
     matches!(v, Val::Bits(b) if !b.is_empty() && b.chars().all(|c| c == 'z'))
 }

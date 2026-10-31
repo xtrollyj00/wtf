@@ -28,8 +28,10 @@ discuss.
 for coding agents and people alike, so a pull request made with an agent's help is fine.
 
 - **The spec comes first.** [`spec/`](spec/README.md) is the source of truth for what wtf does.
-  A change in behaviour changes the spec in the same pull request. A shortcut you take goes in
-  [Known limits](spec/18-deferred.md#known-limits).
+  A change in behaviour changes the spec in the same pull request. It describes wtf as it is meant to work: a shortcut you
+  take gets an issue labelled [`known-limit`](https://github.com/xtrollyj00/wtf/issues?q=is%3Aissue+label%3Aknown-limit),
+  titled with the spec section it falls short of (`§8: ...`), and a `shortcut (#N):` comment in
+  the code.
 - **One topic per pull request**, with tests: TUI tests in `src/main.rs` (insta snapshots),
   MCP tests in `tests/mcp.rs`, core tests in `core/tests/`. `cargo test` and
   `cargo clippy --all-targets` pass; CI runs both on Linux and macOS.
@@ -42,7 +44,7 @@ for coding agents and people alike, so a pull request made with an agent's help 
 
 `wtf-bench agent` measures how much wtf helps an AI agent debug: it gives a headless agent
 (`claude -p`) a task, grades its answer, and records time, tokens and cost, with wtf and without
-it. The results so far are in [spec §18](spec/18-deferred.md). More tasks make the numbers
+it. The results so far are in [`bench/RESULTS.md`](bench/RESULTS.md). More tasks make the numbers
 mean more, and tasks from designs we haven't covered are the most useful.
 
 There are two kinds, both in `bench/agent/tasks/`:
@@ -72,7 +74,7 @@ with the report.
 ## Performance
 
 wtf should stay fast on the gigabyte dumps of real regressions; the targets are in
-[spec §18 Performance](spec/18-deferred.md#performance-draft). To measure:
+[spec §18 Performance](spec/18-limits.md#performance). To measure:
 
 ```sh
 cargo run -p wtf-bench --release -- gen --size 1G --format fst /tmp/b   # a big trace

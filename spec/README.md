@@ -3,7 +3,8 @@
 **wtf** — **W**aveform **T**erminal **F**rontend. Also what you say when the bus goes `X`.
 
 Status: milestones 1–5 and 7–9 are built, 6 has a first measurement, 10 and 11 are planned (section 17).
-Section 18 lists open topics, deferred until prototypes show what is needed.
+The spec describes wtf as it is meant to work; shortcuts taken so far are the
+[`known-limit` issues](https://github.com/xtrollyj00/wtf/issues?q=is%3Aissue+label%3Aknown-limit).
 Implementation: Rust, a core crate and the interfaces (section 1).
 
 One file per section; code cites them as `spec §N`. Read only the sections a change touches.
@@ -23,7 +24,7 @@ One file per section; code cites them as `spec §N`. Read only the sections a ch
 | 15 | [15-mcp.md](15-mcp.md) | MCP server, workspaces, present, the link, attach |
 | 16 | [16-decoders.md](16-decoders.md) | computed signals, streams, protocols, decoders, instances |
 | 17 | [17-milestones.md](17-milestones.md) | build order |
-| 18 | [18-deferred.md](18-deferred.md) | open topics, performance targets |
+| 18 | [18-limits.md](18-limits.md) | limits outside wtf, performance targets |
 | 19 | [19-config.md](19-config.md) | config file: glyphs, themes, colours |
 
 ## 1. Philosophy
@@ -32,8 +33,8 @@ wtf browses a wave file the way Vim browses a text file.
 
 - **Time is the line axis.** `:42` goes to line 42 in Vim; `:2000ns` goes to 2000 ns here.
   `gg` and `G` go to the start and end of the file, which is the start and end of the simulation.
-- **Viewing is the default.** You open a file to look at it. Changing what is shown
-  (adding and removing signals, groups, configuration) is a separate, deliberate mode.
+- **Viewing is the default.** You open a file to look at it. The keys that change what is shown
+  (`dd`, `J` / `K`, `r`) sit beside the ones that look, and `u` takes any change back.
 - **Few keys, all useful.** Only the bindings that are used all the time. Anything rarer is a `:` command.
 - **Ergonomics matter.** The common keys sit near the home row. Nothing frequent needs a stretch
   to the number row or a modifier.

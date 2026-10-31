@@ -291,7 +291,7 @@ impl Workspace {
     }
 
     /// `unknown signal`, naming the signals in it when `name` is a scope: a module has no value of
-    /// its own (spec §18), its signals do.
+    /// its own, its signals do.
     fn not_a_signal(&self, name: &str) -> String {
         let key = crate::trace::parts(&crate::trace::canon(name)).into_iter().map(str::to_string).collect::<Vec<_>>();
         let inside: Vec<&str> = self
@@ -322,7 +322,7 @@ impl Workspace {
         let end = format!(".{name}");
         let mut found: Vec<usize> = vars.clone().filter(|&v| self.trace.vars[v].path.ends_with(&end)).collect();
         if found.is_empty() {
-            // shortcut: every path in canonical form on each such lookup, O(signals); keep the
+            // shortcut (#14): every path in canonical form on each such lookup, O(signals); keep the
             // forms in the trace if names that match only this way get slow on huge traces
             let canon: Vec<String> = self.trace.vars.iter().map(|v| crate::trace::canon(&v.path)).collect();
             let key = crate::trace::canon(name);
