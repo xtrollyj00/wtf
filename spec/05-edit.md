@@ -14,6 +14,9 @@ match in tree order, wrapping around. A search matches a case-insensitive part o
 scopes included: `cpu.st` matches `top.cpu.state`. The search line shows the last search and which
 match the highlight is on (`2/5`).
 
+When computed signals appear, the panel keeps its highlighted signal or scope, open scopes,
+marks, range and search. New signals join the tree and the current search results.
+
 | Keys | Action |
 |---|---|
 | `j` / `k` | move |

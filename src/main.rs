@@ -988,6 +988,49 @@ mod tests {
     }
 
     #[test]
+    fn panel_keeps_state_when_computed_signals_appear() {
+        let mut app = panel_app();
+        app.ws.rows.clear();
+        keys(&mut app, "/state<CR><Space>V");
+        let marked = app.panel.marked.clone();
+        assert!(!marked.is_empty());
+        app.ws.define("top.extra.state", "top.cpu.state").unwrap();
+        screen(&mut app, 100, Some(22));
+        assert_eq!(highlighted(&app), "top.cpu.state");
+        assert_eq!(app.panel.marked, marked);
+        assert_eq!(app.panel.anchor, Some(app.panel.sel));
+        assert_eq!(app.panel.pattern, "state");
+        assert_eq!(app.panel.matches.len(), 3);
+        assert!(app.panel.nodes.iter().find(|n| n.path == "top.cpu").unwrap().open);
+        keys(&mut app, "/busy");
+        app.ws.define("top.more.busy", "top.cpu.busy").unwrap();
+        screen(&mut app, 100, Some(22));
+        assert_eq!(highlighted(&app), "top.cpu.busy");
+        assert_eq!(app.panel.query.as_deref(), Some("busy"));
+        assert_eq!(app.panel.matches.len(), 2);
+        keys(&mut app, "<Esc>");
+        assert_eq!(highlighted(&app), "top.cpu.state");
+        assert_eq!(app.panel.matches.len(), 3);
+    }
+
+    #[test]
+    fn panel_refresh_distinguishes_scopes_from_same_named_signals() {
+        let mut app = panel_app();
+        keys(&mut app, "jl");
+        assert_eq!(highlighted(&app), "top.cpu");
+        assert!(app.panel.nodes[app.panel.sel].var.is_none());
+        app.ws.define("top.cpu", "top.cpu.state").unwrap();
+        screen(&mut app, 100, Some(22));
+        assert_eq!(highlighted(&app), "top.cpu");
+        assert!(app.panel.nodes[app.panel.sel].var.is_none());
+        assert!(app.panel.nodes[app.panel.sel].open);
+        app.ws.define("extra", "top.cpu.busy").unwrap();
+        screen(&mut app, 100, Some(22));
+        assert!(app.panel.nodes[app.panel.sel].var.is_none());
+        assert!(app.panel.nodes[app.panel.sel].open);
+    }
+
+    #[test]
     fn mouse_panel_clicks() {
         let mut app = panel_app();
         let t0 = Instant::now();
