@@ -262,7 +262,9 @@ fn probes(app: &mut Workspace, names: &[String], radix_name: &Option<String>) ->
             None => (radix::default_for(named, p.1.is_none() && app.trace.vars[p.0].signed), 0),
             Some(r) => radix_for(r, width, named, n)?,
         };
-        out.push((n.to_string(), p, Sig { radix: r, frac, ..Sig::of(p.0, &app.trace.vars[p.0]) }));
+        let mut s = Sig::of(p.0, &app.trace.vars[p.0]);
+        (s.look.radix, s.look.frac) = (r, frac);
+        out.push((n.to_string(), p, s));
     }
     let vars: Vec<usize> = out.iter().map(|(_, p, _)| p.0).collect();
     app.trace.load(&vars);
@@ -272,7 +274,7 @@ fn probes(app: &mut Workspace, names: &[String], radix_name: &Option<String>) ->
 fn value(app: &Workspace, p: search::Probe, s: &Sig, t: Tick) -> String {
     match app.trace.value_of(p.0, p.1, t) {
         Some(Val::Bits(b)) if b.len() == 1 => b.to_uppercase(),
-        Some(v) => wtf_core::rows::label(&app.trace.vars[s.var], s, &v),
+        Some(v) => wtf_core::rows::label(&app.trace.vars[s.var], &s.look, &v),
         None => "-".into(),
     }
 }
@@ -808,13 +810,26 @@ pub fn describe(app: &Workspace, unit: Option<usize>) -> String {
             Row::Signal(s) => {
                 let var = &app.trace.vars[s.var];
                 let w = var.width.unwrap_or(0);
-                let radix = if w > 1 { format!("  {}", radix::name(s.radix, s.frac, w)) } else { String::new() };
-                let color = s.color.map(|c| format!("  {}", rows::COLORS[c])).unwrap_or_default();
+                let radix = if w > 1 { format!("  {}", radix::name(s.look.radix, s.look.frac, w)) } else { String::new() };
+                let color = s.look.color.map(|c| format!("  {}", rows::COLORS[c])).unwrap_or_default();
+                // the lines under it with a look of their own, as `fields` declares them
+                let fields = match &s.looks[..] {
+                    [] => String::new(),
+                    looks => {
+                        let one = |&(v, l): &(usize, rows::Look)| {
+                            let w = app.trace.vars[v].width.unwrap_or(0);
+                            let r = if w > 1 { format!(":{}", radix::name(l.radix, l.frac, w)) } else { String::new() };
+                            let c = l.color.map(|c| format!(":{}", rows::COLORS[c])).unwrap_or_default();
+                            format!("{}{r}{c}", wtf_core::session::open_name(app, s.var, v))
+                        };
+                        format!("  (fields: {})", looks.iter().map(one).collect::<Vec<_>>().join(", "))
+                    }
+                };
                 let bits = match &s.open[..] {
                     [] => String::new(),
                     open => format!("  (open: {})", open.iter().map(|&v| wtf_core::session::open_name(app, s.var, v)).collect::<Vec<_>>().join(", ")),
                 };
-                format!("  {}{radix}{color}{bits}", var.path)
+                format!("  {}{radix}{color}{bits}{fields}", var.path)
             }
             Row::Group { collapsed: true, .. } => "  (collapsed)".into(),
             Row::Group { .. } => String::new(),

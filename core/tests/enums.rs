@@ -18,24 +18,24 @@ fn open() -> Workspace {
 /// The selected row's value at `t` ns, as the row shows it.
 fn shown(ws: &Workspace, t: u64) -> String {
     let Row::Signal(s) = &ws.rows[ws.sel] else { panic!() };
-    rows::label(&ws.trace.vars[s.var], s, &ws.trace.value_at(s.var, t).unwrap())
+    rows::label(&ws.trace.vars[s.var], &s.look, &ws.trace.value_at(s.var, t).unwrap())
 }
 
 #[test]
 fn shown_by_name() {
     let mut ws = open();
     let Row::Signal(s) = &ws.rows[ws.sel] else { panic!() };
-    assert_eq!(s.radix, radix::ENUM);
+    assert_eq!(s.look.radix, radix::ENUM);
     let all: Vec<String> = [0, 10, 20, 30, 40, 50].iter().map(|&t| shown(&ws, t)).collect();
     assert_eq!(all, ["IDLE", "READ", "WRITE", "DONE", "0x5", "0xX"]); // no name: hex
     run(&mut ws, "radix hex").unwrap();
     assert_eq!(shown(&ws, 10), "0x1");
     // r cycles through enum on a signal with names, and only there
     ws.set_radix(None).unwrap(); // bin
-    assert_eq!(radix::next(ws.rows[ws.sel].sig().unwrap().radix, 3, true), 2);
+    assert_eq!(radix::next(ws.rows[ws.sel].sig().unwrap().look.radix, 3, true), 2);
     run(&mut ws, "radix float").unwrap_err();
     run(&mut ws, "select count").unwrap();
-    assert_eq!(ws.rows[ws.sel].sig().unwrap().radix, radix::DEFAULT);
+    assert_eq!(ws.rows[ws.sel].sig().unwrap().look.radix, radix::DEFAULT);
     assert_eq!(run(&mut ws, "radix enum"), Err("enum: the file names no values of this signal".into()));
 }
 
@@ -74,7 +74,7 @@ fn named_by_the_user() {
     run(&mut ws, "select count").unwrap();
     run(&mut ws, "names count 0=ZERO 0b1=ONE 'h2=TWO").unwrap();
     let Row::Signal(s) = &ws.rows[ws.sel] else { panic!() };
-    assert_eq!(s.radix, radix::ENUM);
+    assert_eq!(s.look.radix, radix::ENUM);
     let all: Vec<String> = [0, 10, 20, 30].iter().map(|&t| shown(&ws, t)).collect();
     assert_eq!(all, ["ZERO", "ONE", "TWO", "0x3"]);
     ws.search("two", true, 1).unwrap();

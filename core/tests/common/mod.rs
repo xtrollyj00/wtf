@@ -41,7 +41,7 @@ pub fn selected(ws: &Workspace) -> String {
 pub fn radix_of(ws: &Workspace, path: &str) -> &'static str {
     let v = var(ws, path);
     match ws.rows.iter().find_map(|r| r.sig().filter(|s| s.var == v)) {
-        Some(s) => wtf_core::radix::RADIXES[s.radix].name,
+        Some(s) => wtf_core::radix::RADIXES[s.look.radix].name,
         None => panic!("{path} isn't shown"),
     }
 }

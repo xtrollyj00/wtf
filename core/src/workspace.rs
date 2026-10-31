@@ -5,7 +5,7 @@ use crate::computed::{self, Form};
 use crate::decode;
 use crate::protocol;
 use crate::radix;
-use crate::rows::{self, Row, Sig};
+use crate::rows::{self, Look, Row, Sig};
 use crate::search;
 use crate::session;
 use crate::stream::{self, Decode, Sampler, Stream};
@@ -438,12 +438,12 @@ impl Workspace {
             self.value_names.push((path, spec.split_whitespace().collect::<Vec<_>>().join(" ")));
         }
         let signed = self.trace.vars[var].signed;
-        for r in &mut self.rows {
-            if let Row::Signal(s) = r
-                && s.var == var
-                && (named || s.radix == radix::ENUM)
-            {
-                (s.radix, s.frac) = (radix::default_for(named, signed), 0);
+        // every line showing it, a row's or one under a row
+        for s in self.rows.iter_mut().filter_map(Row::sig_mut) {
+            for l in std::iter::once(&mut s.look).filter(|_| s.var == var).chain(s.looks.iter_mut().filter(|(v, _)| *v == var).map(|(_, l)| l)) {
+                if named || l.radix == radix::ENUM {
+                    (l.radix, l.frac) = (radix::default_for(named, signed), 0);
+                }
             }
         }
         Ok(())
@@ -877,53 +877,95 @@ impl Workspace {
         Ok(())
     }
 
-    /// Set the radix of the selected signal, or of every signal in the selected group that it
-    /// fits (`radix::parse_name`'s radix, fraction bits and needed width). None cycles to the next
-    /// radix that fits (spec §10).
+    /// How line `var` under row `s` shows its value: the row's own look, a look of its own, or
+    /// else the row's for a stream's field and the default for its signal for a composite's child
+    /// (spec §6); a line without a colour of its own takes the row's.
+    pub fn look(&self, s: &Sig, var: usize) -> Look {
+        if var == s.var {
+            return s.look;
+        }
+        let own = s.looks.iter().find(|(v, _)| *v == var).map(|&(_, l)| l);
+        let l = own.unwrap_or_else(|| self.line_default(s, var));
+        Look { color: l.color.or(s.look.color), ..l }
+    }
+
+    /// The look of a line under a row that has none of its own, before the row's colour.
+    pub(crate) fn line_default(&self, s: &Sig, var: usize) -> Look {
+        match self.stream_of(s.var) {
+            Some(_) => Look { color: None, ..s.look },
+            None => Look::of(&self.trace.vars[var]),
+        }
+    }
+
+    /// The lines a radix or colour goes to, as (row, var): the signal rows of the `V` range or the
+    /// selected group, else the selected line, a row's own or one under it (a bit is its bus's).
+    pub fn targets(&self) -> Vec<(usize, usize)> {
+        let r = self.selection();
+        if self.anchor.is_some() || self.rows.get(self.sel).is_some_and(Row::is_group) {
+            return self.rows[r.clone()].iter().zip(r).filter_map(|(row, i)| row.sig().map(|s| (i, s.var))).collect();
+        }
+        match self.rows.get(self.sel) {
+            Some(Row::Signal(s)) => vec![(self.sel, self.probe(s, self.bit).0)],
+            _ => Vec::new(),
+        }
+    }
+
+    /// Change the look of line `var` under row `row`. A line under the row keeps a look of its own
+    /// only while it differs from its default.
+    fn edit_look(&mut self, row: usize, var: usize, f: impl Fn(&mut Look)) {
+        let Some(Row::Signal(s)) = self.rows.get(row) else { return };
+        let base = self.line_default(s, var);
+        let Some(Row::Signal(s)) = self.rows.get_mut(row) else { return };
+        if var == s.var {
+            return f(&mut s.look);
+        }
+        let k = s.looks.iter().position(|(v, _)| *v == var);
+        let mut l = k.map_or(base, |k| s.looks[k].1);
+        f(&mut l);
+        match k {
+            Some(k) if l == base => _ = s.looks.remove(k),
+            Some(k) => s.looks[k].1 = l,
+            None if l != base => s.looks.push((var, l)),
+            None => {}
+        }
+    }
+
+    /// Set the radix of the selected line (a row, or a field, element or stream field under it),
+    /// or of every line of the selected group or `V` range that it fits (`radix::parse_name`'s
+    /// radix, fraction bits and needed width). None cycles to the next radix that fits (spec §10).
     pub fn set_radix(&mut self, r: Option<(usize, u32, Option<u32>)>) -> Result<(), String> {
-        let end = match self.rows.get(self.sel) {
-            None => return Err("no rows".into()),
-            Some(Row::Group { .. }) => rows::group_end(&self.rows, self.sel),
-            Some(Row::Signal(_)) => self.sel + 1,
-        };
+        if self.rows.is_empty() {
+            return Err("no rows".into());
+        }
         let vars = &self.trace.vars;
-        let width = |s: &Sig| vars[s.var].width.unwrap_or(0);
-        let named = |s: &Sig| vars[s.var].names.is_some();
-        let mut sigs: Vec<&mut Sig> = self.rows[self.sel..end]
-            .iter_mut()
-            .filter_map(|r| match r {
-                Row::Signal(s) if vars[s.var].width != Some(1) => Some(s),
-                _ => None,
-            })
-            .collect();
-        let Some(first) = sigs.first() else { return Err("1-bit signals have no radix".into()) };
-        let (r, frac, need) = r.unwrap_or((radix::next(first.radix, width(first), named(first)), 0, None));
-        let fits = |s: &Sig| radix::fits(r, need, width(s), named(s));
-        if !sigs.iter().any(|s| fits(s)) {
+        let width = |v: usize| vars[v].width.unwrap_or(0);
+        let named = |v: usize| vars[v].names.is_some();
+        let targets: Vec<(usize, usize)> = self.targets().into_iter().filter(|&(_, v)| vars[v].width != Some(1)).collect();
+        let Some(&(row, first)) = targets.first() else { return Err("1-bit signals have no radix".into()) };
+        let now = self.rows[row].sig().map_or(0, |s| self.look(s, first).radix);
+        let (r, frac, need) = r.unwrap_or((radix::next(now, width(first), named(first)), 0, None));
+        let fit: Vec<(usize, usize)> = targets.into_iter().filter(|&(_, v)| radix::fits(r, need, width(v), named(v))).collect();
+        if fit.is_empty() {
             if r == radix::ENUM {
                 return Err("enum: the file names no values of this signal".into());
             }
             let w = width(first);
             return Err(format!("{} doesn't fit a {w}-bit signal", radix::name(r, frac, need.unwrap_or(w))));
         }
-        for s in sigs.iter_mut().filter(|s| fits(s)) {
-            (s.radix, s.frac) = (r, frac);
+        for (row, v) in fit {
+            self.edit_look(row, v, |l| (l.radix, l.frac) = (r, frac));
         }
         Ok(())
     }
 
-    /// Set the colour of the selected signal, or of every signal in the selected group; None
-    /// gives them the theme's (spec §14 "Colours").
+    /// Set the colour of the selected line, or of every line of the selected group or `V` range;
+    /// None gives them the theme's, or a line under a row its row's (spec §14 "Colours").
     pub fn set_color(&mut self, color: Option<usize>) -> Result<(), String> {
-        let end = match self.rows.get(self.sel) {
-            None => return Err("no rows".into()),
-            Some(Row::Group { .. }) => rows::group_end(&self.rows, self.sel),
-            Some(Row::Signal(_)) => self.sel + 1,
-        };
-        for r in &mut self.rows[self.sel..end] {
-            if let Row::Signal(s) = r {
-                s.color = color;
-            }
+        if self.rows.is_empty() {
+            return Err("no rows".into());
+        }
+        for (row, v) in self.targets() {
+            self.edit_look(row, v, |l| l.color = color);
         }
         Ok(())
     }

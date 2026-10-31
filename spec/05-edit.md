@@ -111,7 +111,7 @@ The panel stays open after adding.
 | `/` | open the signal panel, searching |
 | `dd` | remove the selected row |
 | `J` / `K` | move the selected row down / up |
-| `r` | cycle the radix of the selected row, or of all signals in a group (section 10) |
+| `r` | cycle the radix of the selected line (a row, or a field under it), or of all signals in a group or `V` range (section 10) |
 | `u` / `Ctrl-r` | undo / redo |
 | `Space` | collapse / expand the selected group, or open / fold a bus, a stream or a composite (one level) |
 | `e` | examine the selected signal, as in View mode |
@@ -207,8 +207,10 @@ a level**. `pkts` opens into `pkts[0]`, `pkts[1]`; `pkts[0]` into `valid`, `stat
   child's changes, the value column shows it, `e` examines it), but they move and are removed
   with their row: `dd` on one removes the whole row. Opening and folding is not an undo step.
   `Space` on an open level folds it and every level under it.
-- A composite row's radix applies to its whole value; a child takes the default radix for its
-  signal (an enum its names).
+- **Each line its own look**: a composite row's radix applies to its whole value; a child line
+  starts in the default radix for its signal (an enum its names), a stream's field in its row's,
+  and each can be given its own radix and colour (`r`, `:radix`, `:color`, the menu), kept with
+  the row. A child without a colour of its own takes its row's.
 - **Groups are not composites**: a group is the user's collection of rows; a composite is the
   trace's structure. Modules and instances stay groups (`:add top.cpu`), and a group can hold
   composite rows.

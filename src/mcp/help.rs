@@ -141,7 +141,8 @@ one undo step:
 - `rows`, top to bottom: `\"name\"`, `\"name:radix\"`, `\"name:radix:colour\"` (`help radix`), or a
   group `{\"group\": \"write\", \"rows\": [\"awaddr\", \"awvalid\"], \"collapsed\": false}`. Groups
   hold signals only. A struct or array is one row (`\"pkts\"`); `{\"signal\": \"pkts\", \"open\":
-  [\"pkts\", \"pkts[1]\"]}` opens levels of it, each named from the row's name.
+  [\"pkts\", \"pkts[1]\"]}` opens levels of it, each named from the row's name; `\"fields\":
+  [\"pkts[1].pair.hi:dec:red\"]` gives lines under a row a radix and colour of their own.
 - `cursors` by number, `{\"1\": \"80ns\", \"2\": \"390ns\"}`: 1 is the cursor, where values are
   read; 2 - 9 are marks on the events to show. The user jumps to a mark with 'N.
 - `range`: the visible range, `[\"60ns\", \"480ns\"]`; default the whole trace.

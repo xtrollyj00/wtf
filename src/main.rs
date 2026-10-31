@@ -313,15 +313,15 @@ mod tests {
         assert_eq!(names(&app), "▾ cpu,  clk,  cpu.state,  data,  busy,▾ g,  dma.state");
         keys(&mut app, "kkr");
         assert_eq!(app.msg, None);
-        assert!(matches!(&app.ws.rows[3], rows::Row::Signal(s) if radix::RADIXES[s.radix].name == "bin"));
+        assert!(matches!(&app.ws.rows[3], rows::Row::Signal(s) if radix::RADIXES[s.look.radix].name == "bin"));
         keys(&mut app, "kddkdd");
         assert_eq!(names(&app), "▾ cpu,  data,  busy,▾ g,  state");
         keys(&mut app, "uuu");
         assert_eq!(names(&app), "▾ cpu,  clk,  cpu.state,  data,  busy,▾ g,  dma.state");
-        assert!(matches!(&app.ws.rows[3], rows::Row::Signal(s) if radix::RADIXES[s.radix].name == "hex"));
+        assert!(matches!(&app.ws.rows[3], rows::Row::Signal(s) if radix::RADIXES[s.look.radix].name == "hex"));
         keys(&mut app, ":redo\n9jkdd");
         assert_eq!(names(&app), "▾ cpu,  clk,  state,  data,  busy");
-        assert!(matches!(&app.ws.rows[3], rows::Row::Signal(s) if radix::RADIXES[s.radix].name == "bin"));
+        assert!(matches!(&app.ws.rows[3], rows::Row::Signal(s) if radix::RADIXES[s.look.radix].name == "bin"));
         keys(&mut app, "\x1b");
         assert!(app.mode == app::Mode::View);
     }
@@ -795,7 +795,7 @@ mod tests {
         let msg = |app: &App| app.msg.as_ref().map_or(String::new(), |m| m.0.clone());
         let value = |app: &App| {
             let s = app.ws.rows[app.ws.sel].sig().unwrap();
-            wtf_core::rows::label(&app.ws.trace.vars[s.var], s, &app.ws.trace.value_at(s.var, app.ws.view.cursor).unwrap())
+            wtf_core::rows::label(&app.ws.trace.vars[s.var], &s.look, &app.ws.trace.value_at(s.var, app.ws.view.cursor).unwrap())
         };
         // data is 0x43 at 12ns
         keys(&mut app, "jjj:radix q4.4\n");
@@ -1167,7 +1167,7 @@ mod tests {
         let s = app.hit.menus[1];
         click(&mut app, s.x + 2, s.y + 3, NONE, Instant::now(), 1000);
         assert!(app.menu.is_none());
-        assert!(matches!(&app.ws.rows[3], rows::Row::Signal(s) if radix::RADIXES[s.radix].name == "dec"));
+        assert!(matches!(&app.ws.rows[3], rows::Row::Signal(s) if radix::RADIXES[s.look.radix].name == "dec"));
         // the keys: j k move, l opens the second menu, h closes it, Enter runs, Esc closes
         screen(&mut app, 100, Some(22));
         right(&mut app, 60, 8);
@@ -1176,7 +1176,7 @@ mod tests {
         keys(&mut app, "h");
         assert!(app.menu.as_ref().unwrap().sub.is_none());
         keys(&mut app, "lj<CR>");
-        assert!(matches!(&app.ws.rows[3], rows::Row::Signal(s) if s.color == Some(0)));
+        assert!(matches!(&app.ws.rows[3], rows::Row::Signal(s) if s.look.color == Some(0)));
         keys(&mut app, "u");
         right(&mut app, 60, 8);
         keys(&mut app, "x<Esc>");
@@ -1219,6 +1219,29 @@ mod tests {
         let ly = line(&app, "top.cpu");
         right(&mut app, 5, ly);
         assert_eq!(labels(&app), ["Add", "Add as group", "Expand"]);
+    }
+
+    #[test]
+    fn mouse_menu_field() {
+        // a struct's field has a radix and colour of its own (spec §6): its line's menu has them
+        let ws = workspace::Workspace::open(std::path::Path::new("tests/data/types-verilator-structs.fst")).unwrap();
+        let mut app = App::new(ws);
+        app.run("add types.pkt").unwrap();
+        keys(&mut app, "<Space>jjj<Space>j");
+        let s = app.ws.rows[0].sig().unwrap().clone();
+        let hi = app.ws.trace.by_path["types.pkt.pair.hi"];
+        assert_eq!(app.ws.probe(&s, app.ws.bit).0, hi);
+        screen(&mut app, 100, Some(22));
+        let &(y, ..) = app.hit.lines.iter().find(|l| l.1 == (app.ws.sel, app.ws.bit)).unwrap();
+        right(&mut app, 2, y as u16);
+        let labels: Vec<String> = app.menu.as_ref().unwrap().items.iter().map(|i| i.label.clone()).collect();
+        assert_eq!(labels, ["Open", "Examine", "Radix", "Colour", "Copy value", "Remove"]);
+        keys(&mut app, "jjjljjj<CR>");
+        let s = app.ws.rows[0].sig().unwrap();
+        assert_eq!((radix::RADIXES[app.ws.look(s, hi).radix].name, s.look.radix), ("dec", radix::DEFAULT));
+        // `r` on the field cycles the field's
+        keys(&mut app, "ir");
+        assert_eq!(radix::RADIXES[app.ws.look(app.ws.rows[0].sig().unwrap(), hi).radix].name, "sdec");
     }
 
     #[test]

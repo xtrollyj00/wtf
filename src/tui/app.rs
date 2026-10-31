@@ -428,7 +428,7 @@ impl App {
                 } else {
                     let (var, bit) = self.ws.probe(s, self.ws.bit);
                     match self.ws.trace.value_of(var, bit, self.ws.view.cursor) {
-                        Some(v) if self.ws.stream_of(var).is_none() => rows::label(&self.ws.trace.vars[s.var], s, &v),
+                        Some(v) if self.ws.stream_of(var).is_none() => rows::label(&self.ws.trace.vars[var], &self.ws.look(s, var), &v),
                         _ => return Err("no value here".into()),
                     }
                 }
@@ -464,7 +464,7 @@ impl App {
         let line = crate::draw::line_sig(&self.ws, s, var);
         let mut value = match self.ws.trace.value_of(var, bit, self.ws.view.cursor) {
             Some(_) if self.ws.stream_of(var).is_some() => vec!["no record here".into()],
-            Some(v) => wrap(&rows::label(&self.ws.trace.vars[var], &line, &v)),
+            Some(v) => wrap(&rows::label(&self.ws.trace.vars[var], &line.look, &v)),
             None => vec!["no value here".into()],
         };
         if bit.is_none() && self.ws.trace.is_composite(var) {
@@ -485,9 +485,13 @@ impl App {
                     out.push((name, None));
                     walk(app, c, depth + 1, out);
                 } else {
+                    // in the look its line has under the selected row
                     let v = &t.vars[c];
-                    let sig = rows::Sig::of(c, v);
-                    let value = t.value_at(c, app.ws.view.cursor).map_or("-".into(), |x| rows::label(v, &sig, &x));
+                    let look = match app.ws.rows.get(app.ws.sel) {
+                        Some(Row::Signal(s)) => app.ws.look(s, c),
+                        _ => rows::Look::of(v),
+                    };
+                    let value = t.value_at(c, app.ws.view.cursor).map_or("-".into(), |x| rows::label(v, &look, &x));
                     out.push((name, Some(value)));
                 }
             }

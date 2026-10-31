@@ -13,22 +13,39 @@ pub enum Row {
 #[derive(Clone, PartialEq, Debug)]
 pub struct Sig {
     pub var: usize,
-    pub radix: usize,
-    /// Fraction bits for a fixed-point radix (`q4.12`), 0 otherwise.
-    pub frac: u32,
+    /// How the row's own line shows its value.
+    pub look: Look,
     /// Belongs to the group whose header is above it.
     pub grouped: bool,
     /// The vars opened under this row, the row's own among them: a bus shows its bits, a stream
     /// its fields, a composite its children (`Workspace::subs`); empty when folded.
     pub open: Vec<usize>,
-    /// Its own colour, an index into `COLORS`; the theme's when None (spec §14 "Colours").
+    /// The lines under the row with a look of their own: a field, an element, a stream's field
+    /// (`Workspace::look` gives every line's).
+    pub looks: Vec<(usize, Look)>,
+}
+
+/// How a line shows its value (spec §10, §14 "Colours"): its radix, the fraction bits of a
+/// fixed-point one (`q4.12`, 0 otherwise), and its colour, an index into `COLORS` (the theme's
+/// when None; a line under a row takes the row's).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Look {
+    pub radix: usize,
+    pub frac: u32,
     pub color: Option<usize>,
 }
 
+impl Look {
+    /// The default radix for `v`, no colour of its own.
+    pub fn of(v: &Var) -> Look {
+        Look { radix: radix::default_for(v.names.is_some(), v.signed), frac: 0, color: None }
+    }
+}
+
 impl Sig {
-    /// A row for `var` in its default radix, folded, ungrouped and without a colour of its own.
+    /// A row for `var` in its default look, folded and ungrouped.
     pub fn of(var: usize, v: &Var) -> Sig {
-        Sig { var, radix: radix::default_for(v.names.is_some(), v.signed), frac: 0, grouped: false, open: Vec::new(), color: None }
+        Sig { var, look: Look::of(v), grouped: false, open: Vec::new(), looks: Vec::new() }
     }
 }
 
@@ -42,6 +59,13 @@ pub fn color_named(name: &str) -> Result<usize, String> {
 
 impl Row {
     pub fn sig(&self) -> Option<&Sig> {
+        match self {
+            Row::Signal(s) => Some(s),
+            Row::Group { .. } => None,
+        }
+    }
+
+    pub fn sig_mut(&mut self) -> Option<&mut Sig> {
         match self {
             Row::Signal(s) => Some(s),
             Row::Group { .. } => None,
@@ -272,14 +296,14 @@ fn unique_leaves(trace: &Trace, vars: &[usize]) -> Vec<String> {
     }
 }
 
-/// A value of `var` as text in the row's radix; 1-bit values (and bits of a bus) as the bit itself.
-pub fn label(var: &Var, row: &Sig, v: &Val) -> String {
+/// A value of `var` as text in the line's radix; 1-bit values (and bits of a bus) as the bit itself.
+pub fn label(var: &Var, look: &Look, v: &Val) -> String {
     match v {
         Val::Bits(b) if b.len() == 1 => b.to_uppercase(),
-        Val::Bits(b) => match (var.time, u64::from_str_radix(b, 2), var.name_of(b).filter(|_| row.radix == radix::ENUM)) {
+        Val::Bits(b) => match (var.time, u64::from_str_radix(b, 2), var.name_of(b).filter(|_| look.radix == radix::ENUM)) {
             (Some(fpt), Ok(t), _) => crate::time::format(t, Some(fpt)),
             (_, _, Some(name)) => name.into(),
-            _ => (RADIXES[row.radix].format)(b, row.frac),
+            _ => (RADIXES[look.radix].format)(b, look.frac),
         },
         Val::Text(t) => t.clone(),
     }
@@ -290,7 +314,7 @@ mod tests {
     use super::*;
 
     fn sig(var: usize, grouped: bool) -> Row {
-        Row::Signal(Sig { var, radix: 0, frac: 0, grouped, open: Vec::new(), color: None })
+        Row::Signal(Sig { var, look: Look { radix: 0, frac: 0, color: None }, grouped, open: Vec::new(), looks: Vec::new() })
     }
 
     #[test]

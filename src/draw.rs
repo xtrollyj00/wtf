@@ -235,13 +235,9 @@ pub fn put(buf: &mut Buffer, x: usize, y: usize, s: &str, style: Style) {
     buf.set_string(x as u16, y as u16, s, style);
 }
 
-/// A line's signal: a composite's child in the default radix for it (spec §6), a stream's field or
-/// a bit in its row's.
+/// A line's signal: `var` in the look it has under row `s` (`Workspace::look`).
 pub fn line_sig(ws: &Workspace, s: &Sig, var: usize) -> Sig {
-    match var == s.var || ws.stream_of(s.var).is_some() {
-        true => Sig { var, ..s.clone() },
-        false => Sig { color: s.color, ..Sig::of(var, &ws.trace.vars[var]) },
-    }
+    Sig { var, look: ws.look(s, var), ..s.clone() }
 }
 
 /// Lines a workspace's drawing takes: the time axis, the cursor ruler if there is one, and the
@@ -699,7 +695,7 @@ pub fn wave(trace: &Trace, view: &View, row: &Sig, bit: Option<u32>, bits: Optio
     let mut out = vec![[blank; 2]; ww];
     // the row's own colour, or the theme's: a bus's outline in a hue of its own, its labels in
     // the text's colour so they read first
-    let own = match row.color {
+    let own = match row.look.color {
         Some(c) => Style::new().fg(pal().hues[c]),
         None if bus => Style::new().fg(pal().bus),
         None => line(),
@@ -754,7 +750,7 @@ pub fn wave(trace: &Trace, view: &View, row: &Sig, bit: Option<u32>, bits: Optio
                     _ => String::new(),
                 };
                 let len = text.chars().count();
-                let text_st = if st == own && row.color.is_none() { Style::new() } else { st };
+                let text_st = if st == own && row.look.color.is_none() { Style::new() } else { st };
                 if len > 0 {
                     let start = a + (e - a - len) / 2;
                     for (k, ch) in text.chars().enumerate() {
@@ -806,7 +802,7 @@ pub fn wave(trace: &Trace, view: &View, row: &Sig, bit: Option<u32>, bits: Optio
             e += 1;
         }
         if let Some(v) = val(c).filter(|v| !busy[c] && state_style(v) != Style::new()) {
-            let text = rows::label(&trace.vars[var], row, &v);
+            let text = rows::label(&trace.vars[var], &row.look, &v);
             let a = c + (n[c] == Changes::One) as usize;
             let len = text.chars().count();
             if len + 2 <= e - a {
@@ -833,7 +829,7 @@ fn label(trace: &Trace, stream: Option<&Stream>, row: &Sig, v: &Val) -> String {
             Some(i) => s.label(i, trace.fs_per_tick),
             None => t.clone(),
         },
-        _ => rows::label(&trace.vars[row.var], row, v),
+        _ => rows::label(&trace.vars[row.var], &row.look, v),
     }
 }
 

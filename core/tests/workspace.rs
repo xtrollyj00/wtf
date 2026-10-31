@@ -379,7 +379,7 @@ fn computed_expressions() {
     assert_eq!((ws.trace.vars[d].width, ws.trace.vars[d].signed), (Some(10), true));
     assert_eq!(ws.trace.value_at(d, 12), Some(Val::Bits(format!("{:010b}", -61i32 as u32 & 0x3FF))));
     run(&mut ws, "add d").unwrap();
-    assert_eq!(ws.rows.last().and_then(|r| r.sig()).map(|s| s.radix), Some(wtf_core::radix::SDEC));
+    assert_eq!(ws.rows.last().and_then(|r| r.sig()).map(|s| s.look.radix), Some(wtf_core::radix::SDEC));
     ws.search("d < 0", true, 1).unwrap();
     assert_eq!(ws.view.cursor, 10);
     ws.search("d > 0", true, 1).unwrap();

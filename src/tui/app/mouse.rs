@@ -601,8 +601,8 @@ impl App {
         match act {
             Act::Toggle => self.ws.toggle_group(),
             Act::Examine => self.examine(),
-            Act::Radix(r) => return self.each_row(|ws| ws.set_radix(Some((r, 0, None)))),
-            Act::Color(c) => return self.each_row(|ws| ws.set_color(c)),
+            Act::Radix(r) => return self.ws.set_radix(Some((r, 0, None))),
+            Act::Color(c) => return self.ws.set_color(c),
             Act::RadixLine => self.prefill("radix q"),
             Act::Copy => return self.copy('y'),
             Act::Remove => return self.ws.delete(),
@@ -634,23 +634,6 @@ impl App {
         self.open_command();
         self.line = text.into();
         self.col = usize::MAX;
-    }
-
-    /// `f` on each row of the `V` range (a header brings its group), or on the selected row.
-    fn each_row(&mut self, f: impl Fn(&mut wtf_core::workspace::Workspace) -> Result<(), String>) -> Result<(), String> {
-        if self.ws.anchor.is_none() {
-            return f(&mut self.ws);
-        }
-        let (sel, anchor) = (self.ws.sel, self.ws.anchor);
-        let mut r = Err("nothing here takes it".into());
-        for i in self.ws.selection() {
-            self.ws.sel = i;
-            if f(&mut self.ws).is_ok() {
-                r = Ok(());
-            }
-        }
-        (self.ws.sel, self.ws.anchor) = (sel, anchor);
-        r
     }
 
     /// The menu of the selected row, the `V` range, or a header; `t` the time clicked on a
@@ -686,10 +669,8 @@ impl App {
                     items.push(item(if s.open.contains(&var) { "Fold" } else { "Open" }, "Space", Act::Toggle));
                 }
                 items.push(item("Examine", "e", Act::Examine));
-                if ws.bit.is_none() {
-                    radix(&mut items);
-                    colour(&mut items);
-                }
+                radix(&mut items);
+                colour(&mut items);
                 items.push(item("Copy value", "yy", Act::Copy));
                 items.push(item("Remove", "dd", Act::Remove));
             }
@@ -702,18 +683,24 @@ impl App {
         items
     }
 
-    /// The radixes the first multi-bit signal of the selection can take (spec §10), the current
-    /// one marked; fixed point opens the command line. None when there is no such signal.
+    /// The look of the first line a radix or colour goes to (`Workspace::targets`) that `keep`
+    /// keeps, and its var.
+    fn target_look(&self, keep: impl Fn(usize) -> bool) -> Option<(usize, rows::Look)> {
+        let ws = &self.ws;
+        ws.targets().into_iter().find(|&(_, v)| keep(v)).and_then(|(row, v)| Some((v, ws.look(ws.rows[row].sig()?, v))))
+    }
+
+    /// The radixes the first multi-bit line it goes to can take (spec §10), the current one
+    /// marked; fixed point opens the command line. None for 1-bit lines.
     fn radix_items(&self) -> Option<Vec<Item>> {
         let ws = &self.ws;
-        let r = ws.selection();
-        let s = ws.rows[r.start..r.end.max(ws.sel + 1)].iter().filter_map(Row::sig).find(|s| ws.trace.vars[s.var].width != Some(1))?;
-        let v = &ws.trace.vars[s.var];
+        let (var, look) = self.target_look(|v| ws.trace.vars[v].width != Some(1))?;
+        let v = &ws.trace.vars[var];
         let (width, named) = (v.width.unwrap_or(0), v.names.is_some());
         let shown = gl().shown.to_string();
         let mut items: Vec<Item> = (0..radix::RADIXES.len())
             .filter(|&k| !radix::RADIXES[k].fixed && radix::fits(k, None, width, named))
-            .map(|k| item(radix::RADIXES[k].name, if k == s.radix { &shown } else { "" }, Act::Radix(k)))
+            .map(|k| item(radix::RADIXES[k].name, if k == look.radix { &shown } else { "" }, Act::Radix(k)))
             .collect();
         if width <= 128 {
             items.push(item("q<m>.<n>…", ":radix", Act::RadixLine));
@@ -723,7 +710,7 @@ impl App {
 
     /// The eight colours, each drawn in itself, and `off`; the current one marked.
     fn color_items(&self) -> Vec<Item> {
-        let now = self.ws.rows.get(self.ws.sel).and_then(Row::sig).and_then(|s| s.color);
+        let now = self.target_look(|_| true).and_then(|(_, l)| l.color);
         let shown = gl().shown.to_string();
         let mut items: Vec<Item> = rows::COLORS
             .iter()
