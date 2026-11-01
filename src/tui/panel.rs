@@ -88,6 +88,32 @@ impl Panel {
         Panel { nodes, sel: 0, query: None, pattern: String::new(), matches: Vec::new(), origin: 0, top: 0, vars: trace.vars.len(), marked: Vec::new(), anchor: None }
     }
 
+    /// Refresh after computed signals are appended, keeping the panel's state by path.
+    pub fn refresh(&mut self, trace: &Trace) {
+        let mut next = Self::new(trace);
+        let positions: HashMap<_, _> = next.nodes.iter().enumerate().map(|(i, n)| ((n.path.as_str(), n.var.is_some()), i)).collect();
+        let remap = |i: usize| self.nodes.get(i).and_then(|n| positions.get(&(n.path.as_str(), n.var.is_some())).copied());
+        let sel = remap(self.sel).unwrap_or(0);
+        let origin = remap(self.origin).unwrap_or(sel);
+        let anchor = self.anchor.and_then(remap);
+        let top = self.visible().get(self.top).and_then(|&i| remap(i));
+        drop(positions);
+        let old: HashMap<_, _> = self.nodes.iter().map(|n| ((n.path.as_str(), n.var.is_some()), n.open)).collect();
+        for node in &mut next.nodes {
+            if let Some(&open) = old.get(&(node.path.as_str(), node.var.is_some())) {
+                node.open = open;
+            }
+        }
+        drop(old);
+        self.nodes = next.nodes;
+        self.vars = next.vars;
+        self.sel = sel;
+        self.origin = origin;
+        self.anchor = anchor;
+        self.top = top.and_then(|i| self.visible().iter().position(|&n| n == i)).unwrap_or(0);
+        self.matches = self.find(self.query.as_deref().unwrap_or(&self.pattern));
+    }
+
     /// Tree nodes on screen: the contents of closed scopes are hidden.
     pub fn visible(&self) -> Vec<usize> {
         let mut out = Vec::new();
