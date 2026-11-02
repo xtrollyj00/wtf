@@ -1,7 +1,61 @@
 ## 4. Screen layout
 
-wtf is started like Vim: `wtf <path to file>`. The file path is required; without it
-wtf prints usage and exits.
+wtf is started like Vim: `wtf <path to file>`. Without a path it shows the start screen.
+
+### Start screen
+
+`wtf` without a trace shows, as one block centred on the screen:
+
+```
+                                                            ┃
+                                                ▄▄          ┃         ▄▄▄▄▄▄
+                                               ▀▀▀▄▄        ┃       ▄▀▀▀▀▀▀▀▄▄
+                      ▀▀▀         ▀▀▀      ▀▀▀▀▀▀▀▀▀▀▀▀     ┃   ▀▀▀▀▀▀▀▀▀▀▀▀
+                       …                    (the logo, 11 lines)
+                      ──────────────────🮦───────────────────🮦━━━━━━━━━━━━━━━
+                      ────── 0x77 ──────🮧────── 0x74 ───────🮧━━━━ 0xXX ━━━━━
+
+                       Open a trace                                         o
+                       Join 4123-1 on axilite.vcd                           a
+                       Keys                                                 ?
+                       Quit                                                 q
+
+                       Recent                last 7 days
+                       axilite.vcd           ·············━    now          1
+                       axilite.vcd bug.toml  ···········━··    1d ago       2
+                       eth_parser.fst        ···━···━·━····    2d ago       3
+
+                                wtf 0.2.0   1 agent on this machine
+```
+
+- **The logo** is a trace at the wtf moment: `w t f` in a pixel font drawn with `▀` / `▄` (two
+  pixels a cell), the cursor's column in the gap between `t` and `f`, the letters before it in
+  the accent and `f` after it in the X colour (`unknown`), with a shadow (`cursor_dim`) two pixels
+  right and down. Under it a bus carries the letters' codes, `0x77`, `0x74`, then `0xXX` drawn as
+  an X. In `ascii`, without colour and in a plain `--snapshot` the logo is plain characters
+  (`#`, `"` for an upper half, `,` for a lower one) without the shadow.
+- **Actions**, a column with the key at its right: `o` open a trace (its path is typed on the
+  footer's line, `Enter` opens, `Esc` cancels), `a` join an agent's workspace (shown only when
+  an agent has one open: with one, its id and trace; with several, `a` lists them, numbered, in
+  Recent's place), `?` the keys (in Recent's place; `?` or `Esc` back), `q` (or `Ctrl-c`) quit.
+- **Recent**: the traces opened on this machine (below), the latest first, by file name, each with the session
+  it was opened with (`-S`) if not its own; `1`-`9` open one. A strip shows the last 7 days,
+  half a day a cell, oldest on the left: `━` where the trace was opened, in the bus colour by
+  the user and in cyan by an agent (the latest open in the half day decides; without colour an
+  agent's is `─`); then how long ago it was last opened. Traces that are gone are left out.
+- **Joining** opens the agent workspace's trace and follows it (`:follow <id>`, section 15). The
+  agents are looked up again after a second without a key.
+- **The footer**: the version, and how many agents (`wtf --mcp` servers) have a workspace open on
+  this machine. A trace that doesn't open says why there, and the start screen stays.
+- **Sizes**: the block is centred; Recent takes the lines left, up to 9. Under 26 lines, or 58
+  columns, the logo is one line, `w t ┃ f`, without the bus.
+- Nerd Font icons go before the actions and Recent's traces with the `nerd` glyphs only (section
+  14).
+
+The history is `$XDG_STATE_HOME/wtf/history` (`~/.local/state/wtf/history` without it): one line
+per trace a window opens or an agent's `open` (section 15), `<unix seconds>\t<you|agent>\t<trace>`
+then `\t<session>` for a `-S`, absolute paths. The newest 1000 lines are kept. A `--snapshot`
+isn't an open; one that can't be written changes nothing else.
 
 ### At launch
 

@@ -69,6 +69,8 @@ fn wtf(runtime: &Path) -> Command {
     c.env("XDG_RUNTIME_DIR", runtime);
     // the user's config must not change what the tests see (spec §19)
     c.env("XDG_CONFIG_HOME", runtime);
+    // nor read or write the user's history (spec §4 "Start screen")
+    c.env("XDG_STATE_HOME", runtime);
     c
 }
 
@@ -156,6 +158,22 @@ fn help_topics() {
         let topic = t.split('`').next().unwrap();
         assert!(s.tool("help", json!({"topic": topic})).is_ok(), "no topic {topic}");
     }
+}
+
+/// An agent's `open` goes into the history, and `wtf` without a trace shows it in Recent, an
+/// agent's half day in its colour (spec §4 "Start screen").
+#[test]
+fn opens_are_recent() {
+    let dir = Dir::new("recent");
+    let mut s = Server::start(&dir.0);
+    s.ok("open", json!({"trace": simple()}));
+    let history = std::fs::read_to_string(dir.0.join("wtf/history")).unwrap();
+    assert!(history.ends_with(&format!("\tagent\t{}\n", simple().display())), "{history}");
+    let out = wtf(&dir.0).args(["--snapshot", "100x32"]).output().unwrap();
+    let screen = String::from_utf8(out.stdout).unwrap();
+    assert!(screen.contains("simple.vcd") && screen.contains("now          1"), "{screen}");
+    // the agent's workspace, to join
+    assert!(screen.contains("Join ") && screen.contains("1 agent on this machine"), "{screen}");
 }
 
 #[test]

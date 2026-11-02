@@ -125,7 +125,7 @@ As few options as possible. Everything that describes what to show (signals, gro
 cursors, zoom, time) lives in the session file (section 11), not on the command line.
 
 ```
-wtf [-S <session>] [--glyphs <set>] [--snapshot <width>[x<height>] [--ansi] [--keys <keys>]] <trace>
+wtf [-S <session>] [--glyphs <set>] [--snapshot <width>[x<height>] [--ansi] [--keys <keys>]] [<trace>]
 wtf --setup [<trace>]
 wtf --mcp
 wtf --help
@@ -134,9 +134,9 @@ wtf --version
 
 | Option | Meaning |
 |---|---|
-| `<trace>` | the VCD or FST file to open; required |
-| `-S <session>` | load this session instead of `<trace>.session.toml` |
-| `--glyphs <set>` | draw with this glyph set: `unicode`, `box` or `ascii` (section 14), over the config file's (section 19) |
+| `<trace>` | the VCD or FST file to open; without it, the start screen (section 4), also as a `--snapshot` |
+| `-S <session>` | load this session instead of `<trace>.session.toml`; needs `<trace>` |
+| `--glyphs <set>` | draw with this glyph set: `unicode`, `box`, `ascii` or `nerd` (section 14), over the config file's (section 19) |
 | `--snapshot <width>[x<height>]` | render one screen as plain text to stdout and exit, without the terminal UI; without a height, as tall as the content |
 | `--ansi` | with `--snapshot`: print the screen in its colours, as SGR escape codes, with the configured theme (section 19); `NO_COLOR` gives the reversed cells of a terminal without colour |
 | `--keys <keys>` | with `--snapshot`: press these keys first, the screen drawn before each as the window draws it, so a mode or an overlay can be shown (`?`, `a`, `:` with its completions, `e`). Written as in Vim's mappings: plain characters, `<Esc>`, `<CR>`, `<Tab>`, `<S-Tab>`, `<BS>`, `<Space>`, `<lt>` for `<`, `<C-x>`; another `<name>` is an error, a `<` that starts no name is typed as it is |

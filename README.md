@@ -68,6 +68,7 @@ Windows is not supported.
 
 ```sh
 wtf trace.fst              # or .vcd; the format is read from the content
+wtf                        # the start screen: recent traces, agents to join
 wtf -S my.session.toml trace.fst
 wtf --snapshot 120 trace.fst   # one screen as text, for CI logs and bug reports
 wtf --snapshot 120x30 --ansi --keys '?' trace.fst   # in colour, after pressing keys

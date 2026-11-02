@@ -309,6 +309,8 @@ impl Wtf {
     #[tool(description = "Open a trace in a new workspace, the current one from then on. Answers with `info`, which lists the interfaces to decode.")]
     fn open(&self, Parameters(a): Parameters<OpenArgs>) -> Result<String, String> {
         let app = Arc::new(Mutex::new(Workspace::open(std::path::Path::new(&a.trace))?));
+        // the user's start screen shows what agents opened (spec §4 "Start screen")
+        crate::history::opened(std::path::Path::new(&a.trace), None, true);
         let mut st = lock(&self.state);
         st.opened += 1;
         let id = format!("{}-{}", std::process::id(), st.opened);

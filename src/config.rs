@@ -94,7 +94,7 @@ pub fn parse(text: &str, rgb: bool, themes: &Path, bg: Option<theme::Rgb>) -> Co
         match key.as_str() {
             "glyphs" => match value.as_str().and_then(|s| draw::SETS.iter().find(|(n, _)| *n == s)) {
                 Some((_, g)) => glyphs = g,
-                None => warnings.push(format!("config: glyphs = {}? (unicode, box, ascii)", theme::show(value))),
+                None => warnings.push(format!("config: glyphs = {}? (unicode, box, ascii, nerd)", theme::show(value))),
             },
             "theme" | "colors" | "keys" => {}
             _ => warnings.push(format!("config: unknown key {key} (keys: glyphs, theme, colors, keys)")),
@@ -182,7 +182,7 @@ mod tests {
             c.warnings,
             [
                 "config: unknown key foo (keys: glyphs, theme, colors, keys)",
-                "config: glyphs = \"utf8\"? (unicode, box, ascii)",
+                "config: glyphs = \"utf8\"? (unicode, box, ascii, nerd)",
                 "config: theme = 3? (dark, light)",
                 "config: unknown key colors.curser (keys: line, bus, fill, unknown, highz, cursor, cursor_text, column, cursor_dim, mark, selected, panel, hatch, dim, background, text, red, orange, yellow, green, cyan, blue, magenta, gray)",
                 "config: colors.cursor = \"blue\"? (\"#rrggbb\", 0-255, [\"#rrggbb\", 0-255] or \"default\")",

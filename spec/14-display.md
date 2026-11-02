@@ -47,7 +47,7 @@
 
 ### Glyphs
 
-Three glyph sets, chosen with `glyphs` in the config file (section 19) or `--glyphs` (section 12):
+Four glyph sets, chosen with `glyphs` in the config file (section 19) or `--glyphs` (section 12):
 
 - `unicode` (the default): everything above, including the Unicode 13 legacy computing glyphs
   whose lines end mid-cell, so crossings join the outlines.
@@ -55,6 +55,9 @@ Three glyph sets, chosen with `glyphs` in the config file (section 19) or `--gly
   that show the legacy computing glyphs as boxes or question marks.
 - `ascii`: 7-bit only, for plain terminals, logs and pasting a snapshot into a mail or an issue.
   Every cell is one ASCII character.
+- `nerd`: `unicode` with icons from a Nerd Font (the codicons, `nf-cod-*`) before labels: the
+  start screen's actions and traces (section 4). For a terminal set to a Nerd Font. The other
+  sets draw no icons, nor a letter in their place.
 
 Each set keeps every distinction the others make, so a drawing reads the same in any of them.
 

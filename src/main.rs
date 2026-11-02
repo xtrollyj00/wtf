@@ -1,5 +1,6 @@
 mod config;
 mod draw;
+mod history;
 mod live;
 mod mcp;
 mod theme;
@@ -17,10 +18,9 @@ use std::path::PathBuf;
 #[command(name = "wtf", version, about = "Waveform Terminal Frontend")]
 struct Args {
     /// The VCD or FST file to open
-    #[arg(required_unless_present_any = ["mcp", "setup"])]
     trace: Option<PathBuf>,
     /// Load this session instead of <trace>.session.toml
-    #[arg(short = 'S', value_name = "session")]
+    #[arg(short = 'S', value_name = "session", requires = "trace")]
     session: Option<PathBuf>,
     /// Render one screen as plain text to stdout and exit
     #[arg(long, value_name = "width[xheight]", value_parser = parse_size)]
@@ -31,7 +31,7 @@ struct Args {
     /// With --snapshot: press these keys first, e.g. `:add **<CR>?` (<Esc>, <CR>, <Tab>, <C-x>)
     #[arg(long, value_name = "keys", requires = "snapshot")]
     keys: Option<String>,
-    /// Draw with this glyph set: unicode, box (no legacy computing glyphs) or ascii
+    /// Draw with this glyph set: unicode, box (no legacy computing glyphs), ascii or nerd (unicode with Nerd Font icons)
     #[arg(long, value_name = "set", value_parser = draw::glyphs_named)]
     glyphs: Option<&'static draw::Glyphs>,
     /// Ask again which glyphs and theme to use (asked on the first start), then open <trace> if given
@@ -76,37 +76,11 @@ fn run(args: Args) -> Result<(), String> {
     draw::set_glyphs(args.glyphs.unwrap_or(config.glyphs));
     let mut warnings = config.warnings;
     warnings.extend(setup);
-    let path = args.trace.expect("clap requires it");
-    let mut app = App::new(workspace::Workspace::open(&path)?);
+    let Some(path) = args.trace else {
+        return start(args.snapshot, args.ansi, args.keys.as_deref(), config.palette, config.keys, &warnings);
+    };
+    let mut app = open(&path, args.session.clone(), warnings)?;
     app.keymap = config.keys;
-
-    // -S may name a file that doesn't exist yet: that starts an empty session, and :w creates it.
-    let session = args.session.unwrap_or_else(|| session::default_path(&path));
-    app.ws.session_path = session.clone();
-    if session.exists() {
-        let text = std::fs::read_to_string(&session).map_err(|e| format!("{}: {e}", session.display()))?;
-        warnings.extend(session::apply(&mut app.ws, &text)?);
-    }
-    // an agent's evidence for this trace, left while no window was open (spec §15 "Present"):
-    // shown when newer than the user's own session, offered otherwise
-    let agent = session::agent_path(&path);
-    let mut offer = None;
-    if let Ok(at) = std::fs::metadata(&agent).and_then(|m| m.modified()) {
-        let own = std::fs::metadata(&session).and_then(|m| m.modified()).ok();
-        if own.is_none_or(|own| at > own) {
-            if let Err(e) = app.show_agent_file() {
-                warnings.push(format!("{}: {e}", agent.display()));
-            }
-        } else {
-            offer = Some("an agent presented this trace before your last :w; :agent shows it".to_string());
-        }
-    }
-    if !warnings.is_empty() {
-        app.msg = Some((warnings.join("; "), true));
-    } else if let Some(o) = offer {
-        app.msg = Some((o, false));
-    }
-
     match args.snapshot {
         Some((w, h)) => {
             // plain text keeps the default palette: `text` tells the cursor columns by it
@@ -124,9 +98,89 @@ fn run(args: Args) -> Result<(), String> {
         }
         None => {
             set_palette(config.palette);
+            history::opened(&path, args.session.as_deref(), false);
             tui::run(&mut app)
         }
     }
+}
+
+/// Without a trace: the start screen (spec §4), then the trace picked in a window, or its
+/// snapshot.
+fn start(snapshot: Option<(u16, Option<u16>)>, ansi: bool, keys: Option<&str>, palette: draw::Palette, keymap: tui::keys::Keymap, warnings: &[String]) -> Result<(), String> {
+    let mut start = tui::start::Start::load();
+    start.msg = (!warnings.is_empty()).then(|| warnings.join("; "));
+    if let Some((w, h)) = snapshot {
+        if ansi {
+            set_palette(palette);
+        }
+        start.plain = !ansi;
+        for k in tui::app::parse_keys(keys.unwrap_or(""))? {
+            start.key(k);
+        }
+        let area = Rect::new(0, 0, w, h.unwrap_or_else(|| start.height()));
+        let mut buf = Buffer::empty(area);
+        start.draw(area, &mut buf);
+        print!("{}", if ansi { draw::ansi(&buf) } else { draw::text(&buf) });
+        return Ok(());
+    }
+    set_palette(palette);
+    loop {
+        let (path, session, follow) = match tui::start::run(&mut start)? {
+            tui::start::Choice::Quit => return Ok(()),
+            tui::start::Choice::Open { trace, session } => (trace, session, None),
+            tui::start::Choice::Join { trace, id } => (trace, None, Some(id)),
+        };
+        // a trace that doesn't open is said there, and the user picks again
+        let mut app = match open(&path, session.clone(), Vec::new()) {
+            Ok(app) => app,
+            Err(e) => {
+                start.msg = Some(e);
+                continue;
+            }
+        };
+        if let Some(id) = follow
+            && let Err(e) = app.run(&format!("follow {id}"))
+        {
+            app.msg = Some((e, true));
+        }
+        app.keymap = keymap;
+        history::opened(&path, session.as_deref(), false);
+        return tui::run(&mut app);
+    }
+}
+
+/// The trace opened with its session (`-S`, or the one next to it), and an agent's evidence left
+/// for it; `warnings` go on the status line.
+fn open(path: &std::path::Path, session: Option<PathBuf>, mut warnings: Vec<String>) -> Result<App, String> {
+    let mut app = App::new(workspace::Workspace::open(path)?);
+
+    // -S may name a file that doesn't exist yet: that starts an empty session, and :w creates it.
+    let session = session.unwrap_or_else(|| session::default_path(path));
+    app.ws.session_path = session.clone();
+    if session.exists() {
+        let text = std::fs::read_to_string(&session).map_err(|e| format!("{}: {e}", session.display()))?;
+        warnings.extend(session::apply(&mut app.ws, &text)?);
+    }
+    // an agent's evidence for this trace, left while no window was open (spec §15 "Present"):
+    // shown when newer than the user's own session, offered otherwise
+    let agent = session::agent_path(path);
+    let mut offer = None;
+    if let Ok(at) = std::fs::metadata(&agent).and_then(|m| m.modified()) {
+        let own = std::fs::metadata(&session).and_then(|m| m.modified()).ok();
+        if own.is_none_or(|own| at > own) {
+            if let Err(e) = app.show_agent_file() {
+                warnings.push(format!("{}: {e}", agent.display()));
+            }
+        } else {
+            offer = Some("an agent presented this trace before your last :w; :agent shows it".to_string());
+        }
+    }
+    if !warnings.is_empty() {
+        app.msg = Some((warnings.join("; "), true));
+    } else if let Some(o) = offer {
+        app.msg = Some((o, false));
+    }
+    Ok(app)
 }
 
 /// The configured palette, or none where `NO_COLOR` is set.
@@ -1883,7 +1937,7 @@ mod tests {
             insta::assert_snapshot!(name, text);
         }
         draw::set_glyphs(&draw::UNICODE);
-        assert!(Args::try_parse_from(["wtf", "--glyphs", "utf8", "x.vcd"]).err().unwrap().to_string().contains("unknown glyphs: utf8 (unicode, box, ascii)"));
+        assert!(Args::try_parse_from(["wtf", "--glyphs", "utf8", "x.vcd"]).err().unwrap().to_string().contains("unknown glyphs: utf8 (unicode, box, ascii, nerd)"));
     }
 
     #[test]

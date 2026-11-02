@@ -40,7 +40,7 @@ impl Term {
         // SAFETY: both descriptors are fresh from openpty and owned here
         let (master, slave) = unsafe { (File::from_raw_fd(master), File::from_raw_fd(slave)) };
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_wtf"));
-        cmd.args(args).env("XDG_CONFIG_HOME", &dir).env("XDG_RUNTIME_DIR", &dir).env("TERM", "xterm-256color").env("NO_COLOR", "1");
+        cmd.args(args).env("XDG_CONFIG_HOME", &dir).env("XDG_STATE_HOME", &dir).env("XDG_RUNTIME_DIR", &dir).env("TERM", "xterm-256color").env("NO_COLOR", "1");
         cmd.stdin(slave.try_clone().unwrap()).stdout(slave.try_clone().unwrap()).stderr(slave);
         // SAFETY: only async-signal-safe calls between fork and exec: a new session whose
         // controlling terminal is the pty, as a terminal emulator starts its shell
@@ -148,6 +148,25 @@ fn mouse_reporting_on_and_off() {
     let status = t.child.wait().unwrap();
     assert!(status.success());
     t.wait("mouse reporting off", |s| s.mouse_protocol_mode() == vt100::MouseProtocolMode::None);
+}
+
+#[test]
+fn start_screen_opens_a_trace() {
+    // without a trace: the start screen; o, a path and Enter open it in a window, which goes
+    // into the history, and the next start lists it as recent 1 (spec §4 "Start screen")
+    let mut t = Term::spawn("start", &[]);
+    t.wait("the start screen", |s| s.contents().contains("Open a trace"));
+    t.send("otests/data/nope.vcd\r");
+    t.wait("the error", |s| s.contents().contains("nope.vcd") && !s.contents().contains("open tests"));
+    t.send("otests/data/simple.vcd\r");
+    t.wait("the window", |s| s.contents().contains("add signals"));
+    t.send(":q!\r");
+    assert!(t.child.wait().unwrap().success());
+    let history = std::fs::read_to_string(t.dir.join("wtf/history")).unwrap();
+    assert!(history.contains("\tyou\t") && history.trim_end().ends_with("simple.vcd"), "{history}");
+    let out = Command::new(env!("CARGO_BIN_EXE_wtf")).args(["--snapshot", "100x32"]).env("XDG_STATE_HOME", &t.dir).env("XDG_RUNTIME_DIR", &t.dir).output().unwrap();
+    let screen = String::from_utf8(out.stdout).unwrap();
+    assert!(screen.lines().any(|l| l.contains("simple.vcd") && l.trim_end().ends_with('1')), "{screen}");
 }
 
 #[test]

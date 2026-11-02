@@ -61,7 +61,8 @@ Multi-key sequences (`gg`, `dd`, `'1`) wait for their second key without a timeo
 
 These are the default keys. The config file's `[keys]` changes them (section 19, "Keys"), and
 the `?` box and the menus name the keys as changed. `Esc` and the counts stay as they are, and so
-do the keys of the signal panel, the boxes, the menus and the command line.
+do the keys of the start screen (section 4), the signal panel, the boxes, the menus and the
+command line.
 
 `z` / `x` sit under the left hand, so one hand zooms while the other stays on `hjkl`.
 

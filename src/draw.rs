@@ -146,6 +146,8 @@ pub struct Glyphs {
     /// Separators in text: `help · keys`, `65ns–85ns`.
     pub dot: char,
     pub dash: char,
+    /// Nerd Font icons beside labels (the start screen's); the other sets draw none.
+    pub icons: bool,
 }
 
 pub const UNICODE: Glyphs = Glyphs {
@@ -172,6 +174,7 @@ pub const UNICODE: Glyphs = Glyphs {
     border: ['┌', '┐', '└', '┘', '─', '│'],
     dot: '·',
     dash: '–',
+    icons: false,
 };
 
 /// Box drawing only: the legacy computing glyphs' pieces become corners.
@@ -202,12 +205,16 @@ pub const ASCII: Glyphs = Glyphs {
     border: ['+', '+', '+', '+', '-', '|'],
     dot: '-',
     dash: '-',
+    icons: false,
 };
 
-pub const SETS: [(&str, &Glyphs); 3] = [("unicode", &UNICODE), ("box", &BOX), ("ascii", &ASCII)];
+/// `unicode` with Nerd Font icons (the `nf-cod-*` codicons), for terminals set to a Nerd Font.
+pub const NERD: Glyphs = Glyphs { icons: true, ..UNICODE };
+
+pub const SETS: [(&str, &Glyphs); 4] = [("unicode", &UNICODE), ("box", &BOX), ("ascii", &ASCII), ("nerd", &NERD)];
 
 pub fn glyphs_named(name: &str) -> Result<&'static Glyphs, String> {
-    SETS.iter().find(|(n, _)| *n == name).map(|(_, g)| *g).ok_or_else(|| format!("unknown glyphs: {name} (unicode, box, ascii)"))
+    SETS.iter().find(|(n, _)| *n == name).map(|(_, g)| *g).ok_or_else(|| format!("unknown glyphs: {name} (unicode, box, ascii, nerd)"))
 }
 
 thread_local! {

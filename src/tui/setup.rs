@@ -152,13 +152,17 @@ impl Setup {
         let label = 14;
         let sw = w.saturating_sub(x + label + 2).min(64);
         let mut y = 6;
+        // a blank line between samples where all fit with it
+        let gap = (y + names.len() * (SAMPLE_LINES + 1) - 1 <= h.saturating_sub(2)) as usize;
         for (i, name) in names.iter().enumerate() {
             if y + SAMPLE_LINES > h.saturating_sub(2) {
                 break;
             }
             let on = i == self.sel;
             let mark = if on { gl().hl } else { ' ' };
-            put(buf, x, y + SAMPLE_LINES / 2, &format!("{mark} {} {name}", i + 1), if on { accent } else { Style::new() });
+            // a set with icons shows one: a font without them draws a box
+            let icon = if !self.theme_step && draw::SETS[i].1.icons { " \u{ea83}" } else { "" };
+            put(buf, x, y + SAMPLE_LINES / 2, &format!("{mark} {} {name}{icon}", i + 1), if on { accent } else { Style::new() });
             // the sample in its own glyphs and palette, then back to the screen's
             let (g, p) = match self.theme_step {
                 false => (draw::SETS[i].1, self.base),
@@ -180,7 +184,7 @@ impl Setup {
                     *cell = s[(dx as u16, 1 + dy as u16)].clone();
                 }
             }
-            y += SAMPLE_LINES + 1;
+            y += SAMPLE_LINES + gap;
         }
         let keys = format!("1{}{} or j k, Enter to pick {} Esc for the defaults {} wtf --setup asks again", gl().dash, names.len(), gl().dot, gl().dot);
         put(buf, x, h.saturating_sub(2), &keys, dim);
@@ -260,7 +264,7 @@ mod tests {
         // without colour, no theme question
         let a = press(&mut Setup::new(true, true, None), KeyCode::Char('3')).unwrap().unwrap();
         assert_eq!((a.glyphs, a.theme), ("ascii", None));
-        assert!(press(&mut Setup::new(false, true, None), KeyCode::Char('4')).is_none());
+        assert!(press(&mut Setup::new(false, true, None), KeyCode::Char('5')).is_none());
         // on a light terminal light is selected, and the default
         let mut s = Setup::new(false, true, Some((0xfa, 0xfa, 0xfa)));
         press(&mut s, KeyCode::Enter);

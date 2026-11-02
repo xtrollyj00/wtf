@@ -7,6 +7,7 @@ pub mod keys;
 pub mod panel;
 pub mod render;
 pub mod setup;
+pub mod start;
 
 use crate::live;
 use app::App;
