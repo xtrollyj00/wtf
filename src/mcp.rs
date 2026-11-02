@@ -753,11 +753,14 @@ impl Wtf {
         let shown: Vec<Result<String, String>> = live::on_trace("window", &app.trace_path).iter().map(|id| live::request(id, live::Request::Put(text.clone()))).collect();
         match shown.len() {
             0 => {
-                let mut path = app.trace_path.as_os_str().to_owned();
-                path.push(".agent.session.toml");
-                let path = std::path::PathBuf::from(path);
-                session::write(&path, &text)?;
-                Ok(format!("no wtf window is open on this trace; written to {0} (open it with: wtf -S {0} {1})", path.display(), app.trace_path.display()))
+                // with the trail, so the user sees how the agent got there (spec §15 "Present")
+                let path = session::agent_path(&app.trace_path);
+                session::write(&path, &session::to_link_toml(&app))?;
+                Ok(format!(
+                    "no wtf window is open on this trace; written to {}. Tell the user: `wtf {}` shows it (their own view is one `u` away)",
+                    path.display(),
+                    app.trace_path.display()
+                ))
             }
             1 => shown.into_iter().next().unwrap().map(|m| format!("shown in the user's window: {m}")),
             n => {

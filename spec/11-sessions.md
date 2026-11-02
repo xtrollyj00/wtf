@@ -143,6 +143,8 @@ wtf --version
 | `--setup` | ask again which glyphs and theme to use, as on the first start (section 19), then open `<trace>` if given |
 | `--mcp` | serve AI agents over MCP on stdin / stdout instead of opening the screen (section 15) |
 
+- An agent's session left for the trace (`<trace>.agent.session.toml`) shows on opening when newer
+  than the user's session file, and is offered otherwise (section 15 "Present").
 - An agent working on the trace joins the window by itself (section 15 "Joining"); `:follow`
   shows its workspace, also with `--snapshot --keys ':follow<CR>'`.
 - `--snapshot` is for CI logs, bug reports and wtf's own tests. Each screen cell becomes exactly

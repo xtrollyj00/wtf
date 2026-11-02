@@ -162,9 +162,15 @@ reuse wtf's own pieces:
 - **Present**: `present` shows the workspace in every wtf window on the same trace: its layout
   and cursors replace the window's, as one undo step (`:undo`, or `u`, restores the user's view),
   and so do its named signals, protocols and decodes: those the window had and the agent's
-  session doesn't name go. The status line says `agent: presented …`. Without a window it writes
-  a session file and says how to open it (`wtf -S <file> <trace>`), so headless work still ends
-  in something to look at.
+  session doesn't name go. The status line says `agent: presented …`.
+- **Without a window** (the simulation failed in CI, or the user hasn't opened the trace),
+  `present` writes `<trace>.agent.session.toml` with the trail, and its answer tells the agent to
+  tell the user `wtf <trace>` shows it. When a window opens on the trace and finds that file
+  newer than the user's own session file (or no session file), it shows it as `present` does
+  (one undo step: `u` gives the user's own view), its steps in `:trail`, and says so:
+  `agent: presented … ; :trail lists its 14 steps; u gives your own view`. An older one, the user
+  having `:w`ed since, is only offered: `an agent presented this trace before your last :w; :agent
+  shows it`. `:agent` (section 7) shows it any time.
 - **User's view**: `user_view` reads the window on the trace (the most recently started, if
   there are several): its rows, cursors, selected signal and visible range, so the agent can
   start from what the user is looking at.

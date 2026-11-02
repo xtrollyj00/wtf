@@ -136,7 +136,8 @@ bytes and its size); `count: 1` with `from` shows one whole.
         "showing evidence: the `workspace` declaration, `view`, `render`, `present`",
         "\
 To show the user evidence, declare the workspace, check it with `view` / `render`, then `present`
-it into the user's wtf window (they can undo with u). The user also sees each query and change
+it into the user's wtf windows on the trace (they can undo with u). With none open, present
+writes a session file that `wtf <trace>` shows when the user opens the trace: tell them so. The user also sees each query and change
 you make as a step (`:trail`), with its time, so ask what you mean to show. `workspace` replaces everything at once, as
 one undo step:
 - `rows`, top to bottom: `\"name\"`, `\"name:radix\"`, `\"name:radix:colour\"` (`help radix`), or a

@@ -286,9 +286,10 @@ What it does (§15):
    records (`records` with `where` and `group_by`). Records are exact and carry the protocol
    checks; hand-written searches are its fallback.
 3. **Presents.** It prepares rows, marks (each with a name and a note saying what happens there)
-   and a visible range, then `present`s them in your open windows on the same trace. Your layout is replaced as one undo step; `:undo` gives you your
-   own view back. Without an open window it writes a session file and tells you how to open it
-   (`wtf -S <file> <trace>`).
+   and a visible range, then `present`s them in your open windows on the same trace. With none
+   open, it leaves them in `<trace>.agent.session.toml`: `wtf <trace>` shows them when you open
+   the trace, with the steps it took in `:trail`. Your layout is replaced as one undo step;
+   `:undo` gives you your own view back.
 4. **Never saves your session.** You `:w` if you want to keep what it showed.
 
 An agent working on your trace joins your window by itself: the status line says `agent 4123-1

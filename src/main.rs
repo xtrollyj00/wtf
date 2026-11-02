@@ -86,8 +86,24 @@ fn run(args: Args) -> Result<(), String> {
         let text = std::fs::read_to_string(&session).map_err(|e| format!("{}: {e}", session.display()))?;
         warnings.extend(session::apply(&mut app.ws, &text)?);
     }
+    // an agent's evidence for this trace, left while no window was open (spec §15 "Present"):
+    // shown when newer than the user's own session, offered otherwise
+    let agent = session::agent_path(&path);
+    let mut offer = None;
+    if let Ok(at) = std::fs::metadata(&agent).and_then(|m| m.modified()) {
+        let own = std::fs::metadata(&session).and_then(|m| m.modified()).ok();
+        if own.is_none_or(|own| at > own) {
+            if let Err(e) = app.show_agent_file() {
+                warnings.push(format!("{}: {e}", agent.display()));
+            }
+        } else {
+            offer = Some("an agent presented this trace before your last :w; :agent shows it".to_string());
+        }
+    }
     if !warnings.is_empty() {
         app.msg = Some((warnings.join("; "), true));
+    } else if let Some(o) = offer {
+        app.msg = Some((o, false));
     }
 
     match args.snapshot {

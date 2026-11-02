@@ -16,6 +16,14 @@ pub fn default_path(trace: &std::path::Path) -> std::path::PathBuf {
     p.into()
 }
 
+/// Where an agent's `present` writes its session when no window is open on the trace:
+/// `<trace>.agent.session.toml` (spec §15 "Present").
+pub fn agent_path(trace: &std::path::Path) -> std::path::PathBuf {
+    let mut p = trace.as_os_str().to_owned();
+    p.push(".agent.session.toml");
+    p.into()
+}
+
 /// Apply a session to a freshly opened app. Returns warnings for the status line.
 pub fn apply(app: &mut Workspace, text: &str) -> Result<Vec<String>, String> {
     let mut t: Table = text.parse().map_err(|e: toml::de::Error| format!("session: {}", e.message()))?;

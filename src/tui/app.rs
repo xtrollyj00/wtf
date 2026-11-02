@@ -165,6 +165,21 @@ impl App {
         Ok(msg.0)
     }
 
+    /// Show the session an agent left for this trace (`<trace>.agent.session.toml`) as `present`
+    /// shows it, its steps in `:trail` (spec §15 "Present").
+    pub fn show_agent_file(&mut self) -> Result<(), String> {
+        let path = session::agent_path(&self.ws.trace_path);
+        let text = std::fs::read_to_string(&path).map_err(|_| format!("no agent session for this trace ({})", path.display()))?;
+        let (msg, err) = self.ws.present(&text, false)?;
+        self.mode = Mode::Normal;
+        let steps = match self.ws.trail.len() {
+            0 => String::new(),
+            n => format!("; :trail lists its {n} steps"),
+        };
+        self.msg = Some((format!("{msg}{steps}; u gives your own view"), err));
+        Ok(())
+    }
+
     /// A `present` from an agent over the link: shown, and while following, it is what
     /// `:follow off` comes back to (spec §15 "Following").
     pub fn take_present(&mut self, text: &str) -> Result<String, String> {
@@ -223,6 +238,7 @@ impl App {
             }
             "e" => return self.reload(),
             "follow" => return self.set_follow(arg.trim()),
+            "agent" => return self.show_agent_file(),
             "records" => return self.open_records(arg.trim()),
             // the window picks the unit that fits; `unit` is for agents' answers (spec §15)
             "unit" => return Err("unit sets the time unit of an agent's answers; the window picks what fits".into()),

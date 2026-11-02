@@ -552,11 +552,25 @@ fn present_and_user_view() {
     s.ok("open", json!({"trace": trace}));
     s.ok("command", json!({"line": "add top.cpu.data"}));
 
-    // no window: written to a session file
+    // no window: written to a session file, with the steps (spec §15 "Present")
+    s.ok("command", json!({"line": "cursor 2 20ns name=first busy note=busy rises"}));
     let r = s.ok("present", json!({}));
     let file = dir.0.join("simple.vcd.agent.session.toml");
-    assert_eq!(r, format!("no wtf window is open on this trace; written to {0} (open it with: wtf -S {0} {1})", file.display(), trace.display()));
-    assert!(std::fs::read_to_string(&file).unwrap().contains(r#"signal = "top.cpu.data""#));
+    assert_eq!(r, format!("no wtf window is open on this trace; written to {}. Tell the user: `wtf {}` shows it (their own view is one `u` away)", file.display(), trace.display()));
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(text.contains(r#"signal = "top.cpu.data""#) && text.contains("[[trail]]\ntool = \"command\"\nask = \"cursor 2 20ns name=first busy note=busy rises\""), "{text}");
+
+    // the user opens the trace: the agent's file is newer than theirs (none), so it shows
+    let shot = |keys: &str| String::from_utf8(wtf(&dir.0).arg(&trace).args(["--snapshot", "120", "--keys", keys]).output().unwrap().stdout).unwrap();
+    let opened = shot("");
+    assert!(opened.contains("2 first busy") && opened.contains("agent: presented 1 signals, 2 cursors; :trail lists its 2 steps; u gives your own view"), "{opened}");
+    assert!(shot(":trail<CR>").contains("2 steps"));
+    // after the user's own :w the file is only offered; :agent shows it
+    std::fs::write(dir.0.join("simple.vcd.session.toml"), "version = 1\n").unwrap();
+    let offered = shot("");
+    assert!(offered.contains("an agent presented this trace before your last :w; :agent shows it") && !offered.contains("first busy"), "{offered}");
+    assert!(shot(":agent<CR>").contains("2 first busy"));
+    std::fs::remove_file(dir.0.join("simple.vcd.session.toml")).unwrap();
 
     // a window on another trace doesn't count; one on this trace gets the workspace
     let _other = fake_window(&dir.0, "1", &simple(), "version = 1\n");

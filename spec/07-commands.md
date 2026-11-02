@@ -23,6 +23,7 @@
 | `:e` | reload the file, keeping signals, groups, cursor and zoom |
 | `:w [file]` | save the session (section 11) |
 | `:wq` | save the session and quit |
+| `:agent` | show the session an agent left for this trace when no window was open (`<trace>.agent.session.toml`, section 15 "Present"), as `present` shows it, its steps in `:trail` |
 | `:trail` | the agent's steps the window has (section 15 "Trail"), in a box like `:records`'s; `Enter` jumps to a step's time |
 | `:records <stream> [where <expr>]` | a box listing a stream's records (section 16), `#n start–end` and every field, as the `records` tool does; `where` takes the same expression. In the box `j` / `k` move, `Ctrl-f` / `Ctrl-b` a box of records, `g` / `G` go to the first / last, `Enter` jumps the cursor to the record's start (a jump, so `''` comes back) and selects the stream's row if shown, `Esc` or `q` closes it. No `group_by` or `count_only`: those are for agents |
 | `:follow [<id>\|off]` | follow an agent working on this trace (section 15 "Following"): show its workspace now and each change it makes, as `present` shows it. With several agents, `:follow <id>` names one (the error lists them); without any, it is an error. `:follow off` stops and brings back the view from before `:follow`, or what the agent presented meanwhile |
