@@ -105,6 +105,11 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
             app.hit.records = shown.enumerate().map(|(k, i)| (b.y as usize + 2 + k, i)).collect();
         }
     }
+    if app.leader.is_some() {
+        leader(app, buf, w, body);
+    } else if app.which_key {
+        which_key(app, buf, w, body);
+    }
     if app.menu.is_some() {
         menu(app, buf, w, body);
     }
@@ -269,7 +274,7 @@ fn help_text(app: &App) -> (&'static str, Vec<Section>, &'static str, Examples) 
                 k(&[A::JumpBack], "back before the jump"),
             ],
         ),
-        ("Other", vec![k(&[A::Command], "command"), (format!("5{} 3{}", m.show(A::Right), m.show(A::NextChange)), "a count repeats a key"), k(&[A::Quit], "quit")]),
+        ("Other", vec![k(&[A::Command], "command"), k(&[A::Leader], "leader menu"), (format!("5{} 3{}", m.show(A::Right), m.show(A::NextChange)), "a count repeats a key"), k(&[A::Quit], "quit")]),
     ];
     let search: Examples = &[
         ("/0x40", "the selected row's value, in any radix"),
@@ -439,6 +444,123 @@ fn menu(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
     }
 }
 
+/// A card for which-key and the leader menu: its background (a border without colour), the
+/// title in bold at the top left, `footer` dim at the bottom right.
+fn panel_card(buf: &mut Buffer, r: Rect, title: &str, footer: &str) {
+    let (x0, y0, bw, bh) = (r.x as usize, r.y as usize, r.width as usize, r.height as usize);
+    let st = Style::new().bg(pal().panel).fg(Color::Reset);
+    let b = gl().border;
+    let w = buf.area.width as usize;
+    for y in 0..bh {
+        let line = match (pal().mono, y) {
+            (true, 0) => format!("{}{}{}", b[0], b[4].to_string().repeat(bw - 2), b[1]),
+            (true, _) if y == bh - 1 => format!("{}{}{}", b[2], b[4].to_string().repeat(bw - 2), b[3]),
+            (true, _) => format!("{}{}{}", b[5], " ".repeat(bw - 2), b[5]),
+            (false, _) => " ".repeat(bw),
+        };
+        put(buf, x0, y0 + y, &line, st.fg(pal().dim));
+        // a column cleared on each side, so no stub of a waveform is left beside it
+        for x in [x0.wrapping_sub(1), x0 + bw].into_iter().filter(|&x| x < w) {
+            buf[(x as u16, (y0 + y) as u16)].set_char(' ');
+        }
+    }
+    put(buf, x0 + 2, y0, &format!(" {title} "), st.add_modifier(Modifier::BOLD));
+    let fw = footer.chars().count();
+    put(buf, (x0 + bw).saturating_sub(fw + 3), y0 + bh - 1, &format!(" {footer} "), st.fg(pal().dim));
+}
+
+/// Which-key (spec §2): what can follow the keys pending, in a card in the bottom right; after
+/// `'`, the cursors with their names and times; after a count, the keys it repeats.
+fn which_key(app: &App, buf: &mut Buffer, w: usize, body: usize) {
+    use crate::tui::keys::Keymap;
+    let ws = &app.ws;
+    let fpt = ws.trace.fs_per_tick;
+    let mut lines: Vec<(String, String, String)> = Vec::new();
+    let typed = app.pending();
+    let next = if typed.chars().all(|c| c.is_ascii_digit()) { app.keymap.counted() } else { app.keymap.next(&app.typed_keys()) };
+    for (k, a) in next {
+        if a == A::Jump {
+            for (i, t) in ws.cursor_list() {
+                let name = if i == 0 { "cursor".into() } else if ws.labels[i].name.is_empty() { format!("mark {}", i + 1) } else { ws.labels[i].name.clone() };
+                lines.push((format!("{k}{}", i + 1), name, time::format(t, fpt)));
+            }
+        } else {
+            lines.push((k, Keymap::desc(a).into(), String::new()));
+        }
+    }
+    if lines.is_empty() {
+        return;
+    }
+    let kw = lines.iter().map(|l| l.0.chars().count()).max().unwrap_or(0);
+    let dw = lines.iter().map(|l| l.1.chars().count()).max().unwrap_or(0);
+    let tw = lines.iter().map(|l| l.2.chars().count()).max().unwrap_or(0);
+    let arrow = gl().right;
+    let inner = kw + 3 + dw + if tw > 0 { 2 + tw } else { 0 };
+    let (bw, bh) = ((inner + 4).max(typed.chars().count() + 16), lines.len().min(body.saturating_sub(1)) + 2);
+    if bw > w || bh > body || bh < 3 {
+        return;
+    }
+    let r = Rect::new((w - bw - 1) as u16, (body - bh) as u16, bw as u16, bh as u16);
+    panel_card(buf, r, &typed, "Esc close");
+    let st = Style::new().bg(pal().panel).fg(Color::Reset);
+    for (y, (k, d, t)) in lines.iter().take(bh - 2).enumerate() {
+        let (x, y) = (r.x as usize + 2, r.y as usize + 1 + y);
+        put(buf, x, y, k, st.fg(pal().cursor).add_modifier(Modifier::BOLD));
+        put(buf, x + kw + 1, y, &arrow.to_string(), st.fg(pal().dim));
+        put(buf, x + kw + 3, y, d, st);
+        put(buf, x + kw + 3 + dw + 2, y, t, st.fg(pal().dim));
+    }
+}
+
+/// The leader menu (spec §2): the open group's entries across the bottom of the screen, in
+/// columns; a group in magenta with `+`, an entry with its command dim at its column's right.
+fn leader(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
+    use crate::tui::keys::Entry;
+    let Some(path) = &app.leader else { return };
+    let Some(Entry::Group { name, items }) = app.keymap.leader.at(path) else { return };
+    const COL: usize = 40;
+    let cols = (w.saturating_sub(4) / COL).max(1);
+    let rows = items.len().div_ceil(cols).max(1);
+    let bh = rows + 4;
+    if bh > body || w < 20 {
+        return;
+    }
+    let r = Rect::new(0, (body - bh) as u16, w as u16, bh as u16);
+    let title = if name.is_empty() { app.pending() } else { format!("{}  {name}", app.pending()) };
+    panel_card(buf, r, &title, &format!("Esc close   Backspace {}", if path.is_empty() { "close" } else { "up" }));
+    let st = Style::new().bg(pal().panel).fg(Color::Reset);
+    let cw = (w - 4) / cols;
+    let mut hits = Vec::new();
+    // the groups first
+    let mut items: Vec<&(crate::tui::keys::Key, Entry)> = items.iter().collect();
+    items.sort_by_key(|(_, e)| !matches!(e, Entry::Group { .. }));
+    for (i, (k, e)) in items.into_iter().enumerate() {
+        let (x, y) = (2 + (i / rows) * cw, r.y as usize + 2 + i % rows);
+        put(buf, x, y, &k.show(), st.fg(pal().cursor).add_modifier(Modifier::BOLD));
+        put(buf, x + 2, y, &gl().right.to_string(), st.fg(pal().dim));
+        let room = cw.saturating_sub(6);
+        let cut = |t: &str, n: usize| if t.chars().count() > n { t.chars().take(n.saturating_sub(1)).chain([gl().cut]).collect() } else { t.to_string() };
+        match e {
+            Entry::Group { name, .. } => {
+                let mag = if pal().mono { st.add_modifier(Modifier::BOLD) } else { st.fg(pal().hues[6]).add_modifier(Modifier::BOLD) };
+                put(buf, x + 4, y, &cut(&format!("+{name}"), room), mag);
+            }
+            Entry::Run { label, line } => {
+                let lw = label.chars().count().min(room);
+                put(buf, x + 4, y, &cut(label, room), st);
+                // the command, where it fits after the label
+                let cmd = line.trim_end();
+                let cl = cmd.chars().count();
+                if lw + 2 + cl <= room {
+                    put(buf, x + 4 + room - cl, y, cmd, st.fg(pal().dim));
+                }
+            }
+        }
+        hits.push((Rect::new(x as u16, y as u16, cw as u16, 1), *k));
+    }
+    app.hit.leader = hits;
+}
+
 /// A menu card's width: a column for the highlight, the labels, two spaces, the keys, and a
 /// column of margin on each side.
 fn card_width(items: &[crate::tui::app::Item]) -> usize {
@@ -546,9 +668,16 @@ fn status(app: &App, buf: &mut Buffer, w: usize, y: usize) -> Rect {
     let button = format!(" signals {} ", if app.adding { gl().left } else { gl().right });
     let bst = if pal().mono { Style::new().add_modifier(Modifier::BOLD) } else { Style::new().bg(pal().panel).fg(Color::Reset).add_modifier(Modifier::BOLD) };
     put(buf, 0, y, &button, bst);
-    let bw = button.chars().count();
-    let lead = bw + 1;
+    let mut bw = button.chars().count();
     let at = Rect::new(0, y as u16, bw as u16, 1);
+    // the keys pending (`5`, `g`, `Space a`), in the accent (spec §2 "Which-key")
+    let pending = app.pending();
+    if !pending.is_empty() {
+        let st = if pal().mono { Style::new().add_modifier(Modifier::REVERSED | Modifier::BOLD) } else { Style::new().bg(pal().selected).fg(pal().cursor).add_modifier(Modifier::BOLD) };
+        put(buf, bw + 1, y, &format!(" {pending} "), st);
+        bw += pending.chars().count() + 3;
+    }
+    let lead = bw + 1;
     // the cursor's time first, the rest dim, a dot between; the agents' time unit when one set it
     let dim = Style::new().fg(pal().dim);
     let sep = format!("  {}  ", gl().dot);

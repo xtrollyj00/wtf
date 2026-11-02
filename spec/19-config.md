@@ -10,6 +10,7 @@ optional; without it wtf uses the defaults.
 
 ```toml
 glyphs = "box"          # unicode (default), box, ascii, nerd (section 14)
+which_key = 300         # ms keys wait before which-key shows what can follow (section 2); 0 at once
 theme = "light"         # dark, light, or one of the user's (below); default: the one that
                         # suits the terminal's background
 
@@ -61,7 +62,7 @@ start = "<C-g>"
 | `half_right` | `<C-d>` | `redo` | `<C-r>` | `help` | `?` |
 | `half_left` | `<C-u>` | `copy_value` | `yy` | `quit` | `q` |
 | `screen_left` | `H` | `copy_time` | `yt` | | |
-| `screen_right` | `L` | `center` | `c` | | |
+| `screen_right` | `L` | `center` | `c` | `leader` | `<Space>` |
 | `page_down` | `<C-f>` | | | | |
 
 - A key is one key or two. `jump` is followed by the cursor's number, as `'2` is.
@@ -72,6 +73,71 @@ start = "<C-g>"
   zoom_out's key`. A digit can't start a key (digits are counts), nor can `Esc` (it cancels).
 - An unknown action lists the actions. A bad entry is skipped, as any other in the file, and
   the action keeps its key.
+
+### Leader
+
+`[leader]` adds to and changes the leader menu (section 2, "Leader"). An entry is a key and
+`["what it does", ":command"]`; a table is a group, with `name`; `""` removes the entry on a key.
+An entry replaces the one on its key, and a group merges into the group there:
+
+```toml
+[leader]
+f = ["find signal", ":pick signals"]
+q = ""                  # no quit in the menu
+
+[leader.a]              # add to the agent group
+t = ["steps", ":trail"]
+```
+
+The defaults:
+
+```toml
+u = ["undo", ":undo"]
+"?" = ["keys", ":help"]
+q = ["quit", ":q"]
+
+[s]
+name = "signals"
+a = ["add…", ":add "]
+n = ["name a computed signal…", ":signal "]
+g = ["group the selection…", ":group "]
+r = ["rename the group…", ":rename "]
+u = ["ungroup", ":ungroup"]
+c = ["colour…", ":color "]
+x = ["radix…", ":radix "]
+s = ["scope…", ":scope "]
+
+[c]
+name = "cursors"
+f = ["zoom to fit", ":fit"]
+z = ["zoom to…", ":zoom "]
+m = ["mark at a time…", ":cursor "]
+
+[d]
+name = "decode"
+d = ["decode…", ":decode "]
+p = ["protocol…", ":protocol "]
+r = ["records…", ":records "]
+n = ["name values…", ":names "]
+
+[a]
+name = "agent"
+f = ["follow…", ":follow "]
+F = ["stop following", ":follow off"]
+t = ["trail", ":trail"]
+s = ["the agent's session", ":agent"]
+
+[w]
+name = "session"
+w = ["save", ":w"]
+e = ["reload the trace", ":e"]
+q = ["save and quit", ":wq"]
+Q = ["quit without saving", ":q!"]
+```
+
+- A key is one key, as for `[keys]`, but not `Esc` or `Backspace` (they close and go up).
+- A bad entry is skipped and named: `config: leader.x = ["x", "q"]? (["what it does",
+  ":command"], a table for a group, or "" to remove)`.
 
 ### First start
 

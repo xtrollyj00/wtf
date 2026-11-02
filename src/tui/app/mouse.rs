@@ -40,6 +40,8 @@ pub struct Hit {
     /// The menu, then its second menu: where each was drawn, its items from the line under the
     /// top.
     pub menus: Vec<Rect>,
+    /// The leader menu's entries on screen, each with its key.
+    pub leader: Vec<(Rect, crate::tui::keys::Key)>,
 }
 
 impl Hit {
@@ -160,6 +162,23 @@ impl App {
         let at = (m.column as usize, m.row as usize);
         if self.menu.is_some() {
             return self.menu_mouse(m, at, now);
+        }
+        // the leader menu: a click on an entry picks it, anywhere else closes the menu
+        if let Some(path) = &self.leader {
+            if m.kind == MouseEventKind::Down(MouseButton::Left) || m.kind == MouseEventKind::Down(MouseButton::Right) {
+                let hit = self.hit.leader.iter().find(|(r, _)| inside(Some(*r), at.0, at.1)).map(|&(_, k)| k);
+                match hit.filter(|_| m.kind == MouseEventKind::Down(MouseButton::Left)) {
+                    Some(k) => {
+                        let mut next = path.clone();
+                        next.push(k);
+                        let mark = self.ws.mark();
+                        self.leader_pick(next);
+                        self.ws.record(mark);
+                    }
+                    None => self.leader = None,
+                }
+            }
+            return;
         }
         if matches!(self.mode, Mode::Command | Mode::Search) {
             return self.line_mouse(m, at, now);

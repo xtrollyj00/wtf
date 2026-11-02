@@ -77,16 +77,18 @@ fn run(args: Args) -> Result<(), String> {
     let mut warnings = config.warnings;
     warnings.extend(setup);
     let Some(path) = args.trace else {
-        return start(args.snapshot, args.ansi, args.keys.as_deref(), config.palette, config.keys, &warnings);
+        return start(args.snapshot, args.ansi, args.keys.as_deref(), config.palette, (config.keys, config.which_key), &warnings);
     };
     let mut app = open(&path, args.session.clone(), warnings)?;
-    app.keymap = config.keys;
+    (app.keymap, app.which_delay) = (config.keys, config.which_key);
     match args.snapshot {
         Some((w, h)) => {
             // plain text keeps the default palette: `text` tells the cursor columns by it
             if args.ansi {
                 set_palette(config.palette);
             }
+            // keys come with no time between them: which-key shows at once
+            app.which_delay = std::time::Duration::ZERO;
             // drawn before each key, as the window is: what a key does can depend on the width
             for k in tui::app::parse_keys(args.keys.as_deref().unwrap_or(""))? {
                 screen(&mut app, w, h);
@@ -106,7 +108,7 @@ fn run(args: Args) -> Result<(), String> {
 
 /// Without a trace: the start screen (spec §4), then the trace picked in a window, or its
 /// snapshot.
-fn start(snapshot: Option<(u16, Option<u16>)>, ansi: bool, keys: Option<&str>, palette: draw::Palette, keymap: tui::keys::Keymap, warnings: &[String]) -> Result<(), String> {
+fn start(snapshot: Option<(u16, Option<u16>)>, ansi: bool, keys: Option<&str>, palette: draw::Palette, keymap: (tui::keys::Keymap, std::time::Duration), warnings: &[String]) -> Result<(), String> {
     let mut start = tui::start::Start::load();
     start.msg = (!warnings.is_empty()).then(|| warnings.join("; "));
     if let Some((w, h)) = snapshot {
@@ -143,7 +145,7 @@ fn start(snapshot: Option<(u16, Option<u16>)>, ansi: bool, keys: Option<&str>, p
         {
             app.msg = Some((e, true));
         }
-        app.keymap = keymap;
+        (app.keymap, app.which_delay) = keymap;
         history::opened(&path, session.as_deref(), false);
         return tui::run(&mut app);
     }
@@ -1838,6 +1840,59 @@ mod tests {
         // `r` on the field cycles the field's
         keys(&mut app, "r");
         assert_eq!(radix::RADIXES[app.ws.look(app.ws.rows[0].sig().unwrap(), hi).radix].name, "sdec");
+    }
+
+    #[test]
+    fn which_key() {
+        // keys pending wait which_key before it shows what can follow; a count shows the keys it
+        // goes to; the status line shows what is pending (spec §2 "Which-key")
+        let mut app = open("vcd", Some(SESSION));
+        app.run("cursor 2 30ns name=first bad write").unwrap();
+        let t0 = Instant::now();
+        keys(&mut app, "'");
+        assert!(!app.which_key && !app.which_tick(t0) && app.which_tick(t0 + Duration::from_millis(400)));
+        insta::assert_snapshot!(snapshot(&mut app, 80, Some(14)));
+        keys(&mut app, "2");
+        assert!(!app.which_key && app.ws.view.cursor == 30);
+        // at once when it already shows, or with no wait
+        app.which_delay = Duration::ZERO;
+        keys(&mut app, "3");
+        let screen = snapshot(&mut app, 80, Some(30));
+        assert!(screen.contains(" 3  ") && screen.contains("put mark N") && screen.contains("zoom in"), "{screen}");
+        keys(&mut app, "<Esc>g");
+        assert!(snapshot(&mut app, 80, Some(14)).contains("g ▸ start of the trace"));
+        keys(&mut app, "g");
+        assert!(!app.which_key && app.pending().is_empty());
+    }
+
+    #[test]
+    fn leader() {
+        // Space opens the menu at once; a group opens, Backspace goes up and then closes; an
+        // entry runs its command, or puts it on the command line to finish (spec §2 "Leader")
+        let mut app = open("vcd", Some(SESSION));
+        keys(&mut app, "<Space>");
+        insta::assert_snapshot!(snapshot(&mut app, 100, Some(16)));
+        keys(&mut app, "a");
+        assert!(snapshot(&mut app, 100, Some(16)).contains("Space a  agent"));
+        keys(&mut app, "<BS><BS>");
+        assert!(app.leader.is_none());
+        keys(&mut app, "<Space>sa");
+        assert!(app.leader.is_none() && app.mode == app::Mode::Command && app.line == "add ");
+        keys(&mut app, "<Esc>dd");
+        assert!(app.ws.can_undo().0);
+        let rows = app.ws.rows.len();
+        keys(&mut app, "<Space>u");
+        assert_eq!(app.ws.rows.len(), rows + 1);
+        // a key with no entry closes it; a click on an entry picks it, outside closes
+        keys(&mut app, "<Space>Z");
+        assert!(app.leader.is_none() && app.mode == app::Mode::Normal);
+        keys(&mut app, "<Space>");
+        snapshot(&mut app, 100, Some(16));
+        let (r, _) = *app.hit.leader.iter().find(|(_, k)| k.show() == "w").unwrap();
+        app.mouse(at(MouseEventKind::Down(MouseButton::Left), r.x + 1, r.y, NONE));
+        assert!(snapshot(&mut app, 100, Some(16)).contains("Space w  session"));
+        app.mouse(at(MouseEventKind::Down(MouseButton::Left), 5, 0, NONE));
+        assert!(app.leader.is_none());
     }
 
     #[test]

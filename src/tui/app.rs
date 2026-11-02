@@ -7,7 +7,7 @@ use wtf_core::rows::{self, Row};
 use wtf_core::time;
 use wtf_core::workspace::{Msg, Workspace};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use crate::tui::keys::{Action as A, Key, Keymap, Meaning};
+use crate::tui::keys::{Action as A, Entry, Key, Keymap, Meaning};
 
 mod mouse;
 pub use mouse::{Drag, Held, Hit, Item, Menu, Target};
@@ -60,6 +60,13 @@ pub struct App {
     pending: Option<char>,
     /// Normal mode's keys (spec §19 "Keys").
     pub keymap: Keymap,
+    /// When the keys pending (a count, the start of a sequence) were first typed; which-key shows
+    /// what can follow once they have waited `which_key` (spec §2 "Which-key").
+    typed_at: Option<std::time::Instant>,
+    pub which_key: bool,
+    pub which_delay: std::time::Duration,
+    /// The leader menu, open at this group (the keys from the top) (spec §2 "Leader").
+    pub leader: Option<Vec<Key>>,
     pub quit: bool,
     /// The `?` box with the keys of the current mode is open.
     pub help: bool,
@@ -152,6 +159,10 @@ impl App {
             typed: Vec::new(),
             pending: None,
             keymap: Keymap::default(),
+            typed_at: None,
+            which_key: false,
+            which_delay: std::time::Duration::from_millis(300),
+            leader: None,
             quit: false,
             help: false,
             examine: None,
@@ -430,6 +441,10 @@ impl App {
             return self.records_key(k);
         }
         let mark = self.ws.mark();
+        if self.leader.is_some() {
+            self.leader_key(k);
+            return self.ws.record(mark);
+        }
         match self.mode {
             Mode::Normal if self.adding => self.panel_key(k),
             Mode::Normal => self.normal_key(k),
@@ -661,6 +676,7 @@ impl App {
     fn cancel(&mut self) {
         self.count = None;
         self.typed.clear();
+        (self.typed_at, self.which_key) = (None, false);
         self.pending = None;
     }
 
@@ -701,14 +717,17 @@ impl App {
             && (d > 0 || self.count.is_some())
         {
             self.count = Some(self.count.unwrap_or(0).saturating_mul(10).saturating_add(d as u64));
+            self.wait();
             return;
         }
         self.typed.push(key);
         let hit = self.keymap.hit(&self.typed);
         if hit == Meaning::Prefix {
+            self.wait();
             return;
         }
         self.typed.clear();
+        (self.typed_at, self.which_key) = (None, false);
         self.msg = None;
         // `3m`: the count names the mark; `m` alone takes a free one
         let given = self.count.map(|n| n.saturating_sub(1) as usize);
@@ -717,6 +736,75 @@ impl App {
             Meaning::Action(a) => self.action(a, n, given),
             Meaning::Jump(i) => self.action(A::Jump, 1, Some(i)),
             Meaning::Prefix | Meaning::None => {}
+        }
+    }
+
+    /// Keys pending: which-key waits from the first, and shows at once if it already shows.
+    fn wait(&mut self) {
+        self.typed_at.get_or_insert_with(std::time::Instant::now);
+        self.which_key |= self.which_delay.is_zero();
+    }
+
+    /// Which-key's time come: true when it starts showing, to draw again.
+    pub fn which_tick(&mut self, now: std::time::Instant) -> bool {
+        let due = !self.which_key && self.typed_at.is_some_and(|t| now.duration_since(t) >= self.which_delay);
+        self.which_key |= due;
+        due
+    }
+
+    /// The start of a sequence typed so far.
+    pub fn typed_keys(&self) -> Vec<Key> {
+        self.typed.clone()
+    }
+
+    /// The keys pending, as the status line shows them: `5`, `g`, `Space a`.
+    pub fn pending(&self) -> String {
+        let keys = |ks: &[Key]| ks.iter().map(|k| k.show()).collect::<Vec<_>>();
+        if let Some(path) = &self.leader {
+            return [vec![self.keymap.show(A::Leader)], keys(path)].concat().join(" ");
+        }
+        let typed = keys(&self.typed);
+        let sep = if typed.iter().any(|k| k.chars().count() > 1) { " " } else { "" };
+        format!("{}{}", self.count.map_or(String::new(), |n| n.to_string()), typed.join(sep))
+    }
+
+    /// The leader menu has the keys: an entry runs, a group opens, `Backspace` goes up, `Esc` and
+    /// any other key close it (spec §2 "Leader").
+    fn leader_key(&mut self, k: KeyEvent) {
+        let Some(path) = self.leader.as_mut() else { return };
+        match k.code {
+            KeyCode::Backspace => {
+                if path.pop().is_none() {
+                    self.leader = None;
+                }
+            }
+            KeyCode::Esc => self.leader = None,
+            _ => {
+                let mut next = path.clone();
+                next.push(Key::of(k));
+                self.leader_pick(next);
+            }
+        }
+    }
+
+    /// The leader menu's entry at `path`: a group opens, a command runs (or, ending in a space,
+    /// waits on the command line), anything else closes the menu.
+    pub fn leader_pick(&mut self, path: Vec<Key>) {
+        match self.keymap.leader.at(&path).cloned() {
+            Some(Entry::Group { .. }) => self.leader = Some(path),
+            Some(Entry::Run { line, .. }) => {
+                self.leader = None;
+                self.msg = None;
+                let line = &line[1..];
+                if line.ends_with(' ') {
+                    self.open_command();
+                    (self.line, self.col) = (line.into(), usize::MAX);
+                } else {
+                    let r = self.run(line);
+                    self.report(r);
+                }
+            }
+            None => self.leader = None,
         }
     }
 
@@ -842,6 +930,7 @@ impl App {
                 let r = self.ws.next_mark(a == A::NextMark);
                 self.report(r);
             }
+            A::Leader => self.leader = Some(Vec::new()),
         }
     }
 

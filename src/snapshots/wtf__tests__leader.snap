@@ -1,0 +1,20 @@
+---
+source: src/main.rs
+expression: "snapshot(&mut app, 100, Some(16))"
+---
+                   0           12ns    20ns      30ns      40ns      50ns      60ns      70ns
+                        ┌────┐ ┃  ┌────┐    ┌────┐    ┌────┐    ┌────┐    ┌────┐    ┌────┐    ┌────┐
+clk          0     ─────┘    └─┃──┘    └────┘    └────┘    └────┘    └────┘    └────┘    └────┘    └
+                               ┃
+▾ cpu                          ┃
+                   ──────────🮦─┃───────🮦───────────────────🮦───────────────────🮦────────────────────
+  cpu.state  0x1   ── 0x0 ───🮧─┃ 0x1 ──🮧─────── 0x2 ───────🮧─────── 0x4 ───────🮧─────── 0x5 ────────
+   Space
+
+  s ▸ +signals                                    w ▸ +session
+  c ▸ +cursors                                    u ▸ undo                                 :undo
+  d ▸ +decode                                     ? ▸ keys                                 :help
+  a ▸ +agent                                      q ▸ quit                                    :q
+
+                                                                       Esc close   Backspace close
+ signals ▸   Space  top.clk                                             12ns  ·  1ns/col  ·  simple

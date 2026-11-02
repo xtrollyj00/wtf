@@ -18,7 +18,7 @@ impl Key {
     }
 
     /// As the `?` box and the menus show it: `x`, `Ctrl-d`, `Space`, `Enter`, `Tab`.
-    fn show(self) -> String {
+    pub fn show(self) -> String {
         let name = match self.code {
             KeyCode::Char(' ') => "Space".into(),
             KeyCode::Char(c) => c.to_string(),
@@ -33,57 +33,60 @@ impl Key {
 }
 
 macro_rules! actions {
-    ($($a:ident $name:literal $key:literal,)*) => {
+    ($($a:ident $name:literal $key:literal $desc:literal $count:literal,)*) => {
         /// What a Normal mode key does; its name is the `[keys]` entry.
         #[derive(Clone, Copy, PartialEq, Eq, Debug)]
         pub enum Action { $($a,)* }
-        pub const ACTIONS: &[(Action, &str, &str)] = &[$((Action::$a, $name, $key),)*];
+        /// Each action: its name, default key, what which-key says it does, and whether it takes a
+        /// count (repeated, or a mark's number).
+        pub const ACTIONS: &[(Action, &str, &str, &str, bool)] = &[$((Action::$a, $name, $key, $desc, $count),)*];
     };
 }
 
 // the defaults, in `--keys` notation (spec §3)
 actions! {
-    Left "left" "h",
-    Right "right" "l",
-    NextChange "next_change" "w",
-    PrevChange "prev_change" "b",
-    Down "down" "j",
-    Up "up" "k",
-    Fold "fold" "<CR>",
-    Examine "examine" "e",
-    Start "start" "gg",
-    End "end" "G",
-    HalfRight "half_right" "<C-d>",
-    HalfLeft "half_left" "<C-u>",
-    ScreenLeft "screen_left" "H",
-    ScreenRight "screen_right" "L",
-    Center "center" "c",
-    PageDown "page_down" "<C-f>",
-    PageUp "page_up" "<C-b>",
-    ZoomIn "zoom_in" "z",
-    ZoomOut "zoom_out" "x",
-    Panel "panel" "a",
-    Remove "remove" "dd",
-    MoveDown "move_down" "J",
-    MoveUp "move_up" "K",
-    Range "range" "V",
-    Radix "radix" "r",
-    Undo "undo" "u",
-    Redo "redo" "<C-r>",
-    CopyValue "copy_value" "yy",
-    CopyTime "copy_time" "yt",
-    Search "search" "/",
-    NextMatch "next_match" "n",
-    PrevMatch "prev_match" "N",
-    Mark "mark" "m",
-    Unmark "unmark" "M",
-    NextMark "next_mark" "<Tab>",
-    PrevMark "prev_mark" "<S-Tab>",
-    Jump "jump" "'",
-    JumpBack "jump_back" "''",
-    Command "command" ":",
-    Help "help" "?",
-    Quit "quit" "q",
+    Left "left" "h" "cursor left" true,
+    Right "right" "l" "cursor right" true,
+    NextChange "next_change" "w" "next change" true,
+    PrevChange "prev_change" "b" "previous change" true,
+    Down "down" "j" "next row" true,
+    Up "up" "k" "previous row" true,
+    Fold "fold" "<CR>" "open / fold the row" false,
+    Examine "examine" "e" "the whole value" false,
+    Start "start" "gg" "start of the trace" false,
+    End "end" "G" "end of the trace" false,
+    HalfRight "half_right" "<C-d>" "half a screen right" true,
+    HalfLeft "half_left" "<C-u>" "half a screen left" true,
+    ScreenLeft "screen_left" "H" "screen left" true,
+    ScreenRight "screen_right" "L" "screen right" true,
+    Center "center" "c" "center the cursor" false,
+    PageDown "page_down" "<C-f>" "a screen of rows down" true,
+    PageUp "page_up" "<C-b>" "a screen of rows up" true,
+    ZoomIn "zoom_in" "z" "zoom in" true,
+    ZoomOut "zoom_out" "x" "zoom out" true,
+    Panel "panel" "a" "add signals" false,
+    Remove "remove" "dd" "remove the row" false,
+    MoveDown "move_down" "J" "move the row down" true,
+    MoveUp "move_up" "K" "move the row up" true,
+    Range "range" "V" "select rows" false,
+    Radix "radix" "r" "next radix" false,
+    Undo "undo" "u" "undo" false,
+    Redo "redo" "<C-r>" "redo" false,
+    CopyValue "copy_value" "yy" "copy the value" false,
+    CopyTime "copy_time" "yt" "copy the cursor's time" false,
+    Search "search" "/" "search a value" false,
+    NextMatch "next_match" "n" "next match" true,
+    PrevMatch "prev_match" "N" "previous match" true,
+    Mark "mark" "m" "put mark N" true,
+    Unmark "unmark" "M" "remove mark N" true,
+    NextMark "next_mark" "<Tab>" "next mark" false,
+    PrevMark "prev_mark" "<S-Tab>" "previous mark" false,
+    Jump "jump" "'" "jump to a cursor" false,
+    JumpBack "jump_back" "''" "back before the jump" false,
+    Command "command" ":" "command" false,
+    Help "help" "?" "keys" false,
+    Quit "quit" "q" "quit" false,
+    Leader "leader" "<Space>" "the leader menu" false,
 }
 
 /// `jump` takes the cursor's number after its key (`'2`); it stands for that digit in a sequence.
@@ -103,11 +106,133 @@ pub enum Meaning {
 pub struct Keymap {
     /// Each action's key; `jump`'s ends in `DIGIT`.
     keys: Vec<Vec<Key>>,
+    /// The leader menu (spec §19 "Leader"): a group named "".
+    pub leader: Entry,
 }
+
+/// An entry of the leader menu: a `:` command, or a group of entries.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Entry {
+    /// What it does, and the command: run, or with a trailing space put on the command line.
+    Run { label: String, line: String },
+    Group { name: String, items: Vec<(Key, Entry)> },
+}
+
+/// The leader menu's defaults, as a `[leader]` table in the config file would write them.
+pub const LEADER: &str = r#"
+u = ["undo", ":undo"]
+"?" = ["keys", ":help"]
+q = ["quit", ":q"]
+
+[s]
+name = "signals"
+a = ["add…", ":add "]
+n = ["name a computed signal…", ":signal "]
+g = ["group the selection…", ":group "]
+r = ["rename the group…", ":rename "]
+u = ["ungroup", ":ungroup"]
+c = ["colour…", ":color "]
+x = ["radix…", ":radix "]
+s = ["scope…", ":scope "]
+
+[c]
+name = "cursors"
+f = ["zoom to fit", ":fit"]
+z = ["zoom to…", ":zoom "]
+m = ["mark at a time…", ":cursor "]
+
+[d]
+name = "decode"
+d = ["decode…", ":decode "]
+p = ["protocol…", ":protocol "]
+r = ["records…", ":records "]
+n = ["name values…", ":names "]
+
+[a]
+name = "agent"
+f = ["follow…", ":follow "]
+F = ["stop following", ":follow off"]
+t = ["trail", ":trail"]
+s = ["the agent's session", ":agent"]
+
+[w]
+name = "session"
+w = ["save", ":w"]
+e = ["reload the trace", ":e"]
+q = ["save and quit", ":wq"]
+Q = ["quit without saving", ":q!"]
+"#;
 
 impl Default for Keymap {
     fn default() -> Self {
-        Keymap { keys: ACTIONS.iter().map(|&(a, _, k)| seq(a, k).expect("the defaults parse")).collect() }
+        let keys = ACTIONS.iter().map(|&(a, _, k, ..)| seq(a, k).expect("the defaults parse")).collect();
+        let mut leader = Entry::Group { name: String::new(), items: Vec::new() };
+        let mut warnings = Vec::new();
+        merge(&mut leader, &LEADER.parse().expect("the leader's defaults are TOML"), "leader", &mut warnings);
+        assert!(warnings.is_empty(), "{warnings:?}");
+        Keymap { keys, leader }
+    }
+}
+
+/// `table` over the group `into`: an entry replaces the one on its key, a group merges into the
+/// group there, `""` removes it. A bad entry is skipped with a warning naming it by `at`.
+fn merge(into: &mut Entry, table: &toml::Table, at: &str, warnings: &mut Vec<String>) {
+    let Entry::Group { name, items } = into else { return };
+    for (k, v) in table {
+        if k == "name" {
+            match v.as_str() {
+                Some(n) => *name = n.into(),
+                None => warnings.push(format!("config: {at}.name = {}? (a string)", theme::show(v))),
+            }
+            continue;
+        }
+        let key = match crate::tui::app::parse_keys(k).map(|ks| ks.into_iter().map(Key::of).collect::<Vec<_>>()).as_deref() {
+            Ok([key]) if !matches!(key.code, KeyCode::Esc | KeyCode::Backspace) => *key,
+            _ => {
+                warnings.push(format!("config: {at}.{k}? (one key, not Esc or Backspace: \"x\", \"<C-x>\")"));
+                continue;
+            }
+        };
+        let i = items.iter().position(|(ik, _)| *ik == key);
+        let bad = |w: &mut Vec<String>| w.push(format!("config: {at}.{k} = {}? ([\"what it does\", \":command\"], a table for a group, or \"\" to remove)", theme::show(v)));
+        match v {
+            toml::Value::String(t) if t.is_empty() => _ = i.map(|i| items.remove(i)),
+            toml::Value::Array(a) => match a.as_slice() {
+                [toml::Value::String(label), toml::Value::String(line)] if line.starts_with(':') => {
+                    let e = Entry::Run { label: label.clone(), line: line.clone() };
+                    match i {
+                        Some(i) => items[i].1 = e,
+                        None => items.push((key, e)),
+                    }
+                }
+                _ => bad(warnings),
+            },
+            toml::Value::Table(t) => {
+                let i = match i {
+                    Some(i) if matches!(items[i].1, Entry::Group { .. }) => i,
+                    _ => {
+                        let g = (key, Entry::Group { name: k.clone(), items: Vec::new() });
+                        match i {
+                            Some(i) => items[i] = g,
+                            None => items.push(g),
+                        }
+                        i.unwrap_or(items.len() - 1)
+                    }
+                };
+                merge(&mut items[i].1, t, &format!("{at}.{k}"), warnings);
+            }
+            _ => bad(warnings),
+        }
+    }
+}
+
+impl Entry {
+    /// The group at `path` (keys from the top), if each key is one.
+    pub fn at(&self, path: &[Key]) -> Option<&Entry> {
+        path.iter().try_fold(self, |e, k| match e {
+            Entry::Group { items, .. } => items.iter().find(|(ik, _)| ik == k).map(|(_, e)| e),
+            Entry::Run { .. } => None,
+        })
     }
 }
 
@@ -183,6 +308,35 @@ impl Keymap {
         Meaning::None
     }
 
+    /// The `[leader]` table over the defaults.
+    pub fn set_leader(&mut self, table: &toml::Table, warnings: &mut Vec<String>) {
+        merge(&mut self.leader, table, "leader", warnings);
+    }
+
+    /// What can follow `typed` (the start of a longer key), for which-key: the rest of each key,
+    /// and its action. `jump`'s rest is the cursors, which the caller lists.
+    pub fn next(&self, typed: &[Key]) -> Vec<(String, Action)> {
+        let mut out: Vec<(String, Action)> = self
+            .keys
+            .iter()
+            .enumerate()
+            .filter(|(_, k)| k.len() > typed.len() && clash(typed, k))
+            .map(|(i, k)| (k[typed.len()..].iter().filter(|&&k| k != DIGIT).map(|k| k.show()).collect::<Vec<_>>().join(" "), ACTIONS[i].0))
+            .collect();
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out
+    }
+
+    /// What which-key says `a` does.
+    pub fn desc(a: Action) -> &'static str {
+        ACTIONS[a as usize].3
+    }
+
+    /// The actions a count repeats, with their keys, for which-key after a count.
+    pub fn counted(&self) -> Vec<(String, Action)> {
+        ACTIONS.iter().filter(|a| a.4).map(|a| (self.show(a.0), a.0)).collect()
+    }
+
     /// An action's key as the `?` box and the menus show it: `x`, `gg`, `Ctrl-r`; `jump`'s without
     /// the number.
     pub fn show(&self, a: Action) -> String {
@@ -225,19 +379,44 @@ mod tests {
     }
 
     #[test]
+    fn leader_table() {
+        // an entry replaces the one on its key, a group merges, "" removes; bad ones are named
+        let mut m = Keymap::default();
+        let mut w = Vec::new();
+        let t: toml::Table = "u = \"\"\nf = [\"find\", \":pick signals\"]\nab = [\"x\", \":q\"]\nx = [\"x\", \"q\"]\n[a]\nname = \"ai\"\nt = [\"steps\", \":trail\"]\n[g]\nname = \"go\"\ns = [\"start\", \":0\"]".parse().unwrap();
+        m.set_leader(&t, &mut w);
+        let k = |t: &str| keys(t);
+        assert_eq!(m.leader.at(&k("u")), None);
+        assert_eq!(m.leader.at(&k("f")), Some(&Entry::Run { label: "find".into(), line: ":pick signals".into() }));
+        assert!(matches!(m.leader.at(&k("a")), Some(Entry::Group { name, .. }) if name == "ai"));
+        assert_eq!(m.leader.at(&k("at")), Some(&Entry::Run { label: "steps".into(), line: ":trail".into() }));
+        // the rest of the agent group stays
+        assert!(m.leader.at(&k("aF")).is_some());
+        assert!(m.leader.at(&k("gs")).is_some());
+        assert_eq!(
+            w,
+            [
+                "config: leader.ab? (one key, not Esc or Backspace: \"x\", \"<C-x>\")",
+                "config: leader.x = [\"x\", \"q\"]? ([\"what it does\", \":command\"], a table for a group, or \"\" to remove)",
+            ]
+        );
+    }
+
+    #[test]
     fn config_table() {
         let mut w = Vec::new();
-        let t: toml::Table = "zoom_in = \"i\"\nfold = \"<Space>\"\nzom = \"z\"\nquit = \"x\"\nundo = \"gg\"\nstart = \"5\"\nup = 3\nleft = \"abc\"\njump = \"<C-j>\"".parse().unwrap();
+        let t: toml::Table = "zoom_in = \"i\"\nfold = \"<C-o>\"\nhelp = \"<Space>\"\nzom = \"z\"\nquit = \"x\"\nundo = \"gg\"\nstart = \"5\"\nup = 3\nleft = \"abc\"\njump = \"<C-j>\"".parse().unwrap();
         let m = Keymap::from_table(&t, &mut w);
         assert_eq!(m.hit(&keys("i")), Meaning::Action(Action::ZoomIn));
         assert_eq!(m.hit(&keys("z")), Meaning::None);
-        assert_eq!(m.hit(&keys("<Space>")), Meaning::Action(Action::Fold));
+        assert_eq!(m.hit(&keys("<C-o>")), Meaning::Action(Action::Fold));
         assert_eq!(m.hit(&keys("<C-j>4")), Meaning::Jump(3));
-        assert_eq!(m.show(Action::Fold), "Space");
+        assert_eq!(m.show(Action::Fold), "Ctrl-o");
         let names = ACTIONS.iter().map(|a| a.1).collect::<Vec<_>>().join(", ");
         assert_eq!(
             w,
             [
+                "config: keys.help = \"<Space>\"? Space is leader's key".to_string(),
                 format!("config: unknown key keys.zom (actions: {names})"),
                 "config: keys.quit = \"x\"? x is zoom_out's key".into(),
                 "config: keys.undo = \"gg\"? gg is start's key".into(),

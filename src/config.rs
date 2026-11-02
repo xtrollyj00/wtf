@@ -10,12 +10,17 @@ pub struct Config {
     pub glyphs: &'static draw::Glyphs,
     pub palette: Palette,
     pub keys: Keymap,
+    /// How long keys wait before which-key shows what can follow (spec §19).
+    pub which_key: std::time::Duration,
     pub warnings: Vec<String>,
 }
 
 /// `$XDG_CONFIG_HOME/wtf/`, or `~/.config/wtf/`: `config.toml` and the user's `themes/`. A missing
 /// file means the defaults.
 /// `bg` is the terminal's background, if it answered: the theme's surfaces are fitted to it.
+/// Which-key's wait, without `which_key` in the file.
+const WHICH_KEY: std::time::Duration = std::time::Duration::from_millis(300);
+
 pub fn load(bg: Option<theme::Rgb>) -> Config {
     match dir() {
         Some(d) => load_from(&d, bg),
@@ -86,18 +91,23 @@ pub fn parse(text: &str, rgb: bool, themes: &Path, bg: Option<theme::Rgb>) -> Co
         Ok(t) => t,
         Err(e) => {
             warnings.push(format!("config: {}", theme::toml_error(&e, text)));
-            return Config { glyphs: &draw::UNICODE, palette: dark(), keys: Keymap::default(), warnings };
+            return Config { glyphs: &draw::UNICODE, palette: dark(), keys: Keymap::default(), which_key: WHICH_KEY, warnings };
         }
     };
     let mut glyphs = &draw::UNICODE;
+    let mut which_key = WHICH_KEY;
     for (key, value) in &table {
         match key.as_str() {
             "glyphs" => match value.as_str().and_then(|s| draw::SETS.iter().find(|(n, _)| *n == s)) {
                 Some((_, g)) => glyphs = g,
                 None => warnings.push(format!("config: glyphs = {}? (unicode, box, ascii, nerd)", theme::show(value))),
             },
-            "theme" | "colors" | "keys" => {}
-            _ => warnings.push(format!("config: unknown key {key} (keys: glyphs, theme, colors, keys)")),
+            "which_key" => match value.as_integer().filter(|&n| (0..=10_000).contains(&n)) {
+                Some(n) => which_key = std::time::Duration::from_millis(n as u64),
+                None => warnings.push(format!("config: which_key = {}? (milliseconds, 0-10000)", theme::show(value))),
+            },
+            "theme" | "colors" | "keys" | "leader" => {}
+            _ => warnings.push(format!("config: unknown key {key} (keys: glyphs, theme, which_key, colors, keys, leader)")),
         }
     }
     // the theme first, so the single colours override it whatever the order in the file
@@ -119,7 +129,7 @@ pub fn parse(text: &str, rgb: bool, themes: &Path, bg: Option<theme::Rgb>) -> Co
             None => warnings.push(format!("config: colors = {}? (a table of colours)", theme::show(v))),
         }
     }
-    let keys = match table.get("keys") {
+    let mut keys = match table.get("keys") {
         None => Keymap::default(),
         Some(toml::Value::Table(t)) => Keymap::from_table(t, &mut warnings),
         Some(v) => {
@@ -127,7 +137,12 @@ pub fn parse(text: &str, rgb: bool, themes: &Path, bg: Option<theme::Rgb>) -> Co
             Keymap::default()
         }
     };
-    Config { glyphs, palette, keys, warnings }
+    match table.get("leader") {
+        None => {}
+        Some(toml::Value::Table(t)) => keys.set_leader(t, &mut warnings),
+        Some(v) => warnings.push(format!("config: leader = {}? (a table of key = [\"what it does\", \":command\"])", theme::show(v))),
+    }
+    Config { glyphs, palette, keys, which_key, warnings }
 }
 
 #[cfg(test)]
@@ -181,7 +196,7 @@ mod tests {
         assert_eq!(
             c.warnings,
             [
-                "config: unknown key foo (keys: glyphs, theme, colors, keys)",
+                "config: unknown key foo (keys: glyphs, theme, which_key, colors, keys, leader)",
                 "config: glyphs = \"utf8\"? (unicode, box, ascii, nerd)",
                 "config: theme = 3? (dark, light)",
                 "config: unknown key colors.curser (keys: line, bus, fill, unknown, highz, cursor, cursor_text, column, cursor_dim, mark, selected, panel, hatch, dim, background, text, red, orange, yellow, green, cyan, blue, magenta, gray)",

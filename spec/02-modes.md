@@ -50,6 +50,7 @@
 | `:` | command |
 | `?` | help: a box with the keys (of the signal panel while it is open), in the accent colour under dim headings (Move, Rows, Marks...), in as many columns as fit, and below them a few things to type (searches, commands), each with what it does; `Esc`, `q` or `?` closes it; it scrolls as the `e` box does |
 | `q` | quit, same as `:q` |
+| `Space` | the leader menu (below, "Leader") |
 
 A count before a key repeats it, as in Vim: `5l`, `3w`, `3x`. Counts apply to `h` `l` `w` `b`
 `j` `k` `J` `K` `z` `x` `n` `N` `Ctrl-d` `Ctrl-u` `H` `L` `Ctrl-f` `Ctrl-b`.
@@ -65,6 +66,39 @@ do the keys of the start screen (section 4), the signal panel, the boxes, the me
 command line.
 
 `z` / `x` sit under the left hand, so one hand zooms while the other stays on `hjkl`.
+
+### Which-key
+
+Keys that wait for more (a count, the first key of `gg`, `dd`, `yy`, `'1`) show beside the
+status line's `signals ▸`, in the accent (`5`, `g`, `'`). When they have waited 300 ms
+(`which_key` in the config file, section 19), a card in the bottom right lists what can follow:
+each key, `▸`, and what it does. After `'` it lists the cursors, each with its name (a mark
+without one is `mark N`, cursor 1 `cursor`) and time, and `'` back before the jump; after a count,
+the keys a count goes to. Typed quickly, `gg`, `yy` or `''` never show it. The next key goes on
+as it would without the card; `Esc` cancels.
+
+### Leader
+
+`Space` opens the leader menu at once: a card across the bottom of the screen with the entries
+of the config file's `[leader]` (section 19) in columns, each its key, `▸`, and what it does, its
+command dim at the column's right. Groups come first, in magenta with `+` (`+signals`); their key
+opens them. The status line shows the keys so far (`Space a`), the card's title the group's name.
+
+```
+   Space
+  s ▸ +signals                                    w ▸ +session
+  c ▸ +cursors                                    u ▸ undo                                 :undo
+  d ▸ +decode                                     ? ▸ keys                                 :help
+  a ▸ +agent                                      q ▸ quit                                    :q
+                                                                       Esc close   Backspace close
+```
+
+- An entry runs its `:` command, as typed on the command line. A command ending in a space
+  (`:add `) opens the command line with it typed, to finish and run with `Enter`.
+- `Backspace` goes up a group, and at the top closes the menu; `Esc` or a key with no entry
+  closes it.
+- Entries are only commands: the menu teaches what to type, and an entry does nothing a command
+  doesn't.
 
 ### Mouse
 
@@ -146,6 +180,7 @@ What is on top takes the mouse, and a click outside it closes it, as `Esc` does:
 | the signal panel | as section 5, "Signal panel"; a click on the rows side closes the panel, a drag from the panel drops there |
 | the `e` and `?` boxes | the wheel scrolls, as `j` / `k` |
 | the `:records` box (section 7) | a click highlights a record, a double click jumps to it as `Enter`, the wheel moves the highlight |
+| the leader menu | a click on an entry picks it, as its key; a click elsewhere closes it |
 | the command completions (section 4) | a click puts the command on the command line as `Tab`, a double click runs it as `Enter`, the wheel moves the highlight; a click outside closes the command line |
 | a menu | as "Menu" below |
 
