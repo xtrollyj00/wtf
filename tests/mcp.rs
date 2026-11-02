@@ -341,6 +341,11 @@ fn workspace_in_one_call() {
     // view in a unit of the agent's
     s.ok("workspace", json!({"rows": ["top.clk"], "cursors": {"2": "35ns"}}));
     assert!(s.ok("view", json!({"unit": "ps"})).contains("  2: 35000ps, +35000ps after 1\nvisible: 0ps - "));
+    // a mark with a name and a note (spec §9); the cursor takes a time only
+    let view = s.ok("workspace", json!({"rows": ["top.clk"], "cursors": {"2": {"time": "35ns", "name": "first bad write", "note": "AW before W"}, "3": {"time": "45ns", "name": "end"}}}));
+    assert!(view.contains("  2: 35ns, +35ns after 1, \"first bad write\": AW before W\n  3: 45ns, +10ns after 2, \"end\"\n"), "{view}");
+    let bad = s.tool("workspace", json!({"rows": ["top.clk"], "cursors": {"1": {"time": "5ns", "name": "x"}}}));
+    assert_eq!(bad, Err("cursors: 1 is the cursor and moves, so it takes a time only; name a mark (2-9)".into()));
     // a collapsed group
     let view = s.ok("workspace", json!({"scope": "top", "rows": [{"group": "cpu", "rows": ["cpu.data", "cpu.busy"], "collapsed": true}, "clk"]}));
     // (the description lists a collapsed group's signals too, under its header)
@@ -355,6 +360,10 @@ fn workspace_in_one_call() {
     assert_eq!(s.ok("find", json!({"expr": "pair == 2"})), "time\n20ns");
     let bad = s.tool("workspace", json!({"signals": ["x = nope", "y"], "rows": ["x"]}));
     assert_eq!(bad, Err("signal x: unknown signal: nope\nsignals: y: not `name = expr`\nunknown signal: x".into()));
+    // decoding made with `command` before stays: the declaration adds to it (spec §15)
+    s.ok("command", json!({"line": "protocol beat clock=top.clk when=top.cpu.busy d=top.cpu.data"}));
+    s.ok("workspace", json!({"rows": ["top.clk"]}));
+    assert!(s.ok("records", json!({"stream": "beat", "count_only": true})).starts_with("2 records"), "the decode survived");
 }
 
 #[test]
@@ -452,14 +461,15 @@ fn answers_are_capped() {
 }
 
 #[test]
-fn workspaces_and_attach() {
+fn workspaces_and_joining() {
     let dir = Dir::new("ws");
     let mut s = Server::start(&dir.0);
     assert_eq!(s.ok("sessions", json!({})), "no sessions: the user has no wtf window open; `open` a trace");
     let pid = s.child.id();
     let fst = std::fs::canonicalize("tests/data/simple.fst").unwrap();
-    assert!(s.ok("open", json!({"trace": simple()})).starts_with(&format!("workspace {pid}-1 (wtf --attach {pid}-1)\nsimple.vcd\n")));
-    assert!(s.ok("open", json!({"trace": fst})).starts_with(&format!("workspace {pid}-2 (wtf --attach {pid}-2)\nsimple.fst\n")));
+    let joined = "(the user's wtf windows on this trace see your steps; :follow there shows the workspace)";
+    assert!(s.ok("open", json!({"trace": simple()})).starts_with(&format!("workspace {pid}-1 {joined}\nsimple.vcd\n")));
+    assert!(s.ok("open", json!({"trace": fst})).starts_with(&format!("workspace {pid}-2 {joined}\nsimple.fst\n")));
     let _window = fake_window(&dir.0, "77", &simple(), "version = 1\n");
     let mut listed: Vec<String> = s.ok("sessions", json!({})).lines().map(String::from).collect();
     listed.sort();
@@ -478,15 +488,13 @@ fn workspaces_and_attach() {
     s.ok("command", json!({"line": "cursor 2 30ns"}));
     insta::assert_snapshot!("render_workspace", s.ok("render", json!({"width": 60})));
 
-    // the user joins: `wtf --attach` lists the same sessions, and shows a workspace's rows and cursors
-    let out = wtf(&dir.0).arg("--attach").output().unwrap();
-    let listed: Vec<String> = String::from_utf8(out.stdout).unwrap().lines().map(String::from).collect();
-    assert!(listed.contains(&format!("{pid}-1  agent  {}", simple().display())), "{listed:?}");
-    let shot = |id: String| String::from_utf8(wtf(&dir.0).args(["--attach", &id, "--snapshot", "60"]).output().unwrap().stdout).unwrap();
-    insta::assert_snapshot!("attach_vcd", shot(format!("{pid}-1")));
-    assert!(shot(format!("{pid}-2")).contains("busy"));
-    let out = wtf(&dir.0).args(["--attach", "nope"]).output().unwrap();
-    assert_eq!(String::from_utf8(out.stderr).unwrap(), "wtf: no session nope; `wtf --attach` lists them\n");
+    // a window on the trace follows the agent working on it (spec §15 "Following")
+    let shot = |trace: &Path, keys: &str| String::from_utf8(wtf(&dir.0).arg(trace).args(["--snapshot", "120", "--keys", keys]).output().unwrap().stdout).unwrap();
+    let followed = shot(&simple(), ":follow<CR>");
+    assert!(followed.contains("data  0xXX") && followed.contains("1─────────── 30ns ────────────2") && followed.contains(&format!("following {pid}-1")), "{followed}");
+    assert!(shot(&fst, ":follow<CR>").contains("busy"));
+    assert!(shot(&simple(), ":follow<CR>:follow<CR>").contains(&format!("following {pid}-1")));
+    assert!(shot(&simple(), &format!(":follow {pid}-2<CR>")).contains(&format!("no agent {pid}-2 on this trace (agents: {pid}-1)")));
 
     // an agent's workspace can be read over the link, not written
     let mut link = UnixStream::connect(dir.0.join(format!("wtf-{pid}-1.sock"))).unwrap();
@@ -497,7 +505,46 @@ fn workspaces_and_attach() {
 
     // the server's sockets go with it
     drop(s);
-    assert_eq!(String::from_utf8(wtf(&dir.0).arg("--attach").output().unwrap().stdout).unwrap(), "77  window  ".to_string() + &simple().display().to_string() + "\n");
+    assert!(shot(&simple(), ":follow<CR>").contains("no agent is working on this trace"));
+}
+
+#[test]
+fn trail_reaches_the_window() {
+    // spec §15 "Trail": queries and changes are steps; present hands over those since the last
+    let dir = Dir::new("trail");
+    let mut s = Server::start(&dir.0);
+    let trace = dir.0.join("simple.vcd");
+    std::fs::copy("tests/data/simple.vcd", &trace).unwrap();
+    s.ok("open", json!({"trace": trace}));
+    s.ok("command", json!({"line": "add top.cpu.data"}));
+    s.ok("find", json!({"expr": "top.cpu.busy", "count_only": true}));
+    s.ok("help", json!({"topic": "times"}));
+    let _ = s.tool("value_at", json!({"signals": ["nope"], "time": "10ns"}));
+    // the agent's own declaration keeps the steps before it
+    s.ok("workspace", json!({"rows": ["top.cpu.data"]}));
+    // a window reads the whole trail over the link (spec §15 "Joining"); present carries none
+    let window = fake_window(&dir.0, "5", &trace, "version = 1\n");
+    s.ok("present", json!({}));
+    assert!(!window.recv().unwrap().contains("[[trail]]"));
+    let ws = UnixStream::connect(dir.0.join(format!("wtf-{}-1.sock", s.child.id()))).unwrap();
+    let mut ws = BufReader::new(ws);
+    writeln!(ws.get_mut(), "GET").unwrap();
+    let mut toml = String::new();
+    ws.read_to_string(&mut toml).unwrap();
+    let steps: Vec<&str> = toml.split("\n[[trail]]\n").skip(1).collect();
+    assert_eq!(steps.len(), 4, "{toml}");
+    assert_eq!(steps[0], "tool = \"command\"\nask = \"add top.cpu.data\"\nanswer = \"added 1: top.cpu.data\"\n");
+    assert!(steps[1].starts_with("tool = \"find\"\nask = \"top.cpu.busy\"\nanswer = \"1 matches, first 20ns") && steps[1].ends_with("time = \"20ns\"\n"), "{}", steps[1]);
+    assert!(steps[2].starts_with("tool = \"value_at\"\nask = \"nope at 10ns\"\nanswer = \"error: "), "{}", steps[2]);
+    // the agent's own declaration keeps the steps before it
+    assert!(steps[3].starts_with("tool = \"workspace\"\nask = \"1 rows, 0 cursors\"\nanswer = \"declared\"\n"), "{}", steps[3]);
+    // a real window following the agent lists them
+    let shot = String::from_utf8(wtf(&dir.0).arg(&trace).args(["--snapshot", "100x14", "--keys", ":follow<CR>:trail<CR>"]).output().unwrap().stdout).unwrap();
+    assert!(shot.contains("4 steps") && shot.contains("find top.cpu.busy  ·  1 matches, first 20ns"), "{shot}");
+    // every window on the trace gets a present (spec §15 "Present")
+    let second = fake_window(&dir.0, "6", &trace, "version = 1\n");
+    assert_eq!(s.ok("present", json!({})), "shown in the user's 2 windows on this trace: agent: presented; agent: presented");
+    assert!(window.recv().is_ok() && second.recv().is_ok());
 }
 
 #[test]
@@ -510,11 +557,32 @@ fn present_and_user_view() {
     s.ok("open", json!({"trace": trace}));
     s.ok("command", json!({"line": "add top.cpu.data"}));
 
-    // no window: written to a session file
+    // no window: written to a session file, with the steps (spec §15 "Present")
+    s.ok("command", json!({"line": "cursor 2 20ns name=first busy note=busy rises"}));
     let r = s.ok("present", json!({}));
     let file = dir.0.join("simple.vcd.agent.session.toml");
-    assert_eq!(r, format!("no wtf window is open on this trace; written to {0} (open it with: wtf -S {0} {1})", file.display(), trace.display()));
-    assert!(std::fs::read_to_string(&file).unwrap().contains(r#"signal = "top.cpu.data""#));
+    assert_eq!(r, format!("no wtf window is open on this trace; written to {}. Tell the user: `wtf {}` shows it (their own view is one `u` away)", file.display(), trace.display()));
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(text.contains(r#"signal = "top.cpu.data""#) && text.contains("[[trail]]\ntool = \"command\"\nask = \"cursor 2 20ns name=first busy note=busy rises\""), "{text}");
+
+    // the user opens the trace: the agent's file is newer than theirs (none), so it shows
+    let shot = |keys: &str| String::from_utf8(wtf(&dir.0).arg(&trace).args(["--snapshot", "120", "--keys", keys]).output().unwrap().stdout).unwrap();
+    let opened = shot("");
+    assert!(opened.contains("2 first busy") && opened.contains("agent: presented 1 signals, 2 cursors; :trail lists its 2 steps; u gives your own view"), "{opened}");
+    assert!(shot(":trail<CR>").contains("2 steps"));
+    // after the user's own :w the file is only offered; :agent shows it
+    std::fs::write(dir.0.join("simple.vcd.session.toml"), "version = 1\n").unwrap();
+    let offered = shot("");
+    assert!(offered.contains("an agent presented this trace before your last :w; :agent shows it") && !offered.contains("first busy"), "{offered}");
+    assert!(shot(":agent<CR>").contains("2 first busy"));
+    std::fs::remove_file(dir.0.join("simple.vcd.session.toml")).unwrap();
+    // one without steps says none; one that doesn't read is a warning
+    std::fs::write(&file, "version = 1\n[[rows]]\nsignal = \"top.clk\"\n").unwrap();
+    let opened = shot("");
+    assert!(opened.contains("agent: presented 1 signals, 1 cursors; u gives your own view"), "{opened}");
+    std::fs::write(&file, "rows = [").unwrap();
+    assert!(shot("").contains("simple.vcd.agent.session.toml: session: "));
+    std::fs::remove_file(&file).unwrap();
 
     // a window on another trace doesn't count; one on this trace gets the workspace
     let _other = fake_window(&dir.0, "1", &simple(), "version = 1\n");
@@ -817,7 +885,7 @@ fn names_under_the_scope() {
     // cleared, the session has none; `state` is then the one the workspace shows
     s.ok("command", json!({"line": "scope"}));
     s.ok("present", json!({}));
-    assert!(!std::fs::read_to_string(dir.0.join("simple.vcd.agent.session.toml")).unwrap().contains("scope"));
+    assert!(!std::fs::read_to_string(dir.0.join("simple.vcd.agent.session.toml")).unwrap().contains("\nscope = "));
     assert!(s.ok("value_at", at).contains("state = "));
 }
 

@@ -17,7 +17,7 @@ use std::path::PathBuf;
 #[command(name = "wtf", version, about = "Waveform Terminal Frontend")]
 struct Args {
     /// The VCD or FST file to open
-    #[arg(required_unless_present_any = ["mcp", "attach", "setup"])]
+    #[arg(required_unless_present_any = ["mcp", "setup"])]
     trace: Option<PathBuf>,
     /// Load this session instead of <trace>.session.toml
     #[arg(short = 'S', value_name = "session")]
@@ -31,18 +31,14 @@ struct Args {
     /// With --snapshot: press these keys first, e.g. `:add **<CR>?` (<Esc>, <CR>, <Tab>, <C-x>)
     #[arg(long, value_name = "keys", requires = "snapshot")]
     keys: Option<String>,
-    /// Open a window on a session (an agent's workspace or another window); without an id, list
-    /// the open sessions
-    #[arg(long, value_name = "id", conflicts_with = "trace")]
-    attach: Option<Option<String>>,
     /// Draw with this glyph set: unicode, box (no legacy computing glyphs) or ascii
     #[arg(long, value_name = "set", value_parser = draw::glyphs_named)]
     glyphs: Option<&'static draw::Glyphs>,
     /// Ask again which glyphs and theme to use (asked on the first start), then open <trace> if given
-    #[arg(long, conflicts_with_all = ["snapshot", "attach"])]
+    #[arg(long, conflicts_with = "snapshot")]
     setup: bool,
     /// Serve AI agents over MCP on stdin / stdout, e.g. `claude mcp add wtf -- wtf --mcp`
-    #[arg(long, conflicts_with_all = ["trace", "session", "snapshot", "attach", "glyphs"])]
+    #[arg(long, conflicts_with_all = ["trace", "session", "snapshot", "glyphs"])]
     mcp: bool,
 }
 
@@ -68,7 +64,7 @@ fn run(args: Args) -> Result<(), String> {
     }
     // the first start in a terminal asks how to draw (spec §19 "First start")
     use std::io::IsTerminal;
-    let window = args.snapshot.is_none() && args.attach != Some(None) && std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+    let window = args.snapshot.is_none() && std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
     // asked once, before anything reads keys: the themes fit their surfaces to it
     let bg = (window && !no_color()).then(theme::terminal_background).flatten();
     let setup = (args.setup || (window && config::first_start())).then(|| tui::setup::run(no_color(), bg)).flatten();
@@ -80,19 +76,7 @@ fn run(args: Args) -> Result<(), String> {
     draw::set_glyphs(args.glyphs.unwrap_or(config.glyphs));
     let mut warnings = config.warnings;
     warnings.extend(setup);
-    let (path, shared, attached) = match args.attach {
-        Some(None) => {
-            let list: Vec<String> = live::sessions()?.iter().map(|s| format!("{}  {}  {}", s.id, s.kind, s.trace.display())).collect();
-            println!("{}", if list.is_empty() { "no sessions are open".into() } else { list.join("\n") });
-            return Ok(());
-        }
-        Some(Some(id)) => {
-            let s = live::sessions()?.into_iter().find(|s| s.id == id).ok_or(format!("no session {id}; `wtf --attach` lists them"))?;
-            let (_, text) = live::get(&id)?;
-            (s.trace, Some(text), Some(id))
-        }
-        None => (args.trace.expect("clap requires it"), None, None),
-    };
+    let path = args.trace.expect("clap requires it");
     let mut app = App::new(workspace::Workspace::open(&path)?);
 
     // -S may name a file that doesn't exist yet: that starts an empty session, and :w creates it.
@@ -102,13 +86,24 @@ fn run(args: Args) -> Result<(), String> {
         let text = std::fs::read_to_string(&session).map_err(|e| format!("{}: {e}", session.display()))?;
         warnings.extend(session::apply(&mut app.ws, &text)?);
     }
+    // an agent's evidence for this trace, left while no window was open (spec §15 "Present"):
+    // shown when newer than the user's own session, offered otherwise
+    let agent = session::agent_path(&path);
+    let mut offer = None;
+    if let Ok(at) = std::fs::metadata(&agent).and_then(|m| m.modified()) {
+        let own = std::fs::metadata(&session).and_then(|m| m.modified()).ok();
+        if own.is_none_or(|own| at > own) {
+            if let Err(e) = app.show_agent_file() {
+                warnings.push(format!("{}: {e}", agent.display()));
+            }
+        } else {
+            offer = Some("an agent presented this trace before your last :w; :agent shows it".to_string());
+        }
+    }
     if !warnings.is_empty() {
         app.msg = Some((warnings.join("; "), true));
-    }
-    // a copy of the session on top of the usual one, as the agent's `present` does: u goes back
-    if let Some(text) = shared {
-        app.present(&text)?;
-        app.follow = attached.map(|id| tui::app::Follow::new(&id, &text));
+    } else if let Some(o) = offer {
+        app.msg = Some((o, false));
     }
 
     match args.snapshot {
@@ -516,45 +511,92 @@ mod tests {
     }
 
     #[test]
-    fn follow_the_agent() {
+    fn agents_join_and_are_followed() {
+        // spec §15 "Joining", "Following", "Trail": an agent on the trace joins; its steps arrive
+        // without moving the view; followed, its changes are shown; leaving stops the following
         let mut app = open("vcd", None);
         let msg = |app: &App| app.msg.as_ref().map_or(String::new(), |m| m.0.clone());
-        keys(&mut app, ":follow\n");
-        assert_eq!(msg(&app), "not attached to an agent's session: wtf --attach <id> follows one");
-        // what the agent shows: first its cpu group, then the dma signals too
+        keys(&mut app, ":trail\n");
+        assert!(msg(&app).starts_with("no trail yet"));
+        app.msg = None;
+        let step = |tool: &str, ask: &str, answer: &str, time| wtf_core::workspace::Step { tool: tool.into(), ask: ask.into(), answer: answer.into(), time };
         let mut agent = open("vcd", None);
         keys(&mut agent, ":add top.cpu\n:30ns\n");
-        let first = session::to_toml(&agent.ws);
-        app.present(&first).unwrap();
-        app.follow = Some(tui::app::Follow::new("4123-1", &first));
+        agent.ws.add_step(step("command", "add top.cpu", "added 4", None));
+        let id = "4123-1".to_string();
+        assert!(app.agents_now(vec![(id.clone(), session::to_link_toml(&agent.ws))]));
+        assert_eq!(msg(&app), "agent 4123-1 joined (:follow shows its workspace)");
+        assert_eq!((app.ws.rows.len(), app.ws.trail.len()), (0, 1));
+        assert!(!app.agents_now(vec![(id.clone(), session::to_link_toml(&agent.ws))])); // nothing new
+        // a new step: on the status line, the view as it was
+        agent.ws.add_step(step("find", "top.cpu.busy", "1 matches, first 20ns, last 20ns", Some(20)));
+        assert!(app.agents_now(vec![(id.clone(), session::to_link_toml(&agent.ws))]));
+        assert_eq!(msg(&app), "agent: find top.cpu.busy  ·  1 matches, first 20ns, last 20ns");
+        assert_eq!((app.ws.rows.len(), app.ws.trail.len()), (0, 2));
+        // the user's own message stays; the step is still on the trail
+        keys(&mut app, ":nope\n");
+        agent.ws.add_step(step("find", "top.rst", "1 matches, first 0, last 0", Some(0)));
+        assert!(app.agents_now(vec![(id.clone(), session::to_link_toml(&agent.ws))]));
+        assert_eq!((msg(&app), app.ws.trail.len()), ("unknown command: nope".into(), 3));
+        app.msg = None;
+        keys(&mut app, ":trail\n");
+        let r = app.records.as_ref().unwrap();
+        assert_eq!((r.title.as_str(), r.hl, r.items[1].0), ("3 steps", 2, Some(20)));
+        keys(&mut app, "k<CR>");
+        assert_eq!((app.records.is_none(), app.ws.view.cursor), (true, 20));
+        // followed (as :follow does it): the agent's changes show, the user's moves stay till then
+        let text = session::to_link_toml(&agent.ws);
+        let own = session::to_shared_toml(&app.ws);
+        app.present(&text).unwrap();
+        app.follow = Some(tui::app::Follow { id: id.clone(), shown: text, own, presented: false });
+        assert_eq!((app.ws.rows.len(), app.ws.view.cursor), (4, 30));
+        keys(&mut app, "5l");
+        agent.ws.add_step(step("value_at", "top.cpu.data at 40ns", "at 40ns:", Some(40)));
+        assert!(app.agents_now(vec![(id.clone(), session::to_link_toml(&agent.ws))]));
+        assert_eq!(app.ws.view.cursor, 35);
+        // the agent steers the view: its cursor and a range it renders show too
+        keys(&mut agent, ":60ns\n:fit 50ns 70ns\n");
+        assert!(app.agents_now(vec![(id.clone(), session::to_link_toml(&agent.ws))]));
+        assert_eq!((app.ws.rows.len(), app.ws.view.cursor, app.ws.view.start), (4, 60, 50));
+        keys(&mut agent, ":add top.dma.state\n");
+        assert!(app.agents_now(vec![(id.clone(), session::to_link_toml(&agent.ws))]));
+        assert_eq!((app.ws.rows.len(), app.ws.view.cursor), (5, 60));
         let screen = snapshot(&mut app, 110, None);
         assert!(screen.contains("following 4123-1"), "{screen}");
-        assert!(!app.agent_changed(Ok(first.clone()))); // no change, nothing to do
-        keys(&mut app, "5l");
-        assert_eq!(app.ws.view.cursor, 35); // the user's moves stay until the agent's next change
-        keys(&mut agent, ":add top.dma.state\n");
-        let second = session::to_toml(&agent.ws);
-        assert!(app.agent_changed(Ok(second.clone())));
-        assert_eq!((app.ws.rows.len(), app.ws.view.cursor), (5, 30));
-        assert!(msg(&app).starts_with("agent: presented"));
-        // each change is one undo step
-        app.ws.undo().unwrap();
-        assert_eq!(app.ws.rows.len(), 4);
-        app.ws.redo().unwrap();
-        assert_eq!(app.ws.rows.len(), 5);
-        // off: changes wait; on again shows the newest
+        // a second agent's steps carry its id, and don't replace the followed agent's trail
+        let mut other = open("vcd", None);
+        other.ws.add_step(step("find", "top.rst", "1 matches, first 0, last 0", Some(0)));
+        let both = |a: &App, o: &App| vec![(id.clone(), session::to_link_toml(&a.ws)), ("4123-2".to_string(), session::to_link_toml(&o.ws))];
+        assert!(app.agents_now(both(&agent, &other)));
+        assert_eq!(msg(&app), "agent 4123-2 joined (:follow shows its workspace)");
+        other.ws.add_step(step("find", "top.clk", "8 matches, first 5, last 75", Some(5)));
+        assert!(app.agents_now(both(&agent, &other)));
+        assert_eq!(app.ws.trail.len(), 4);
+        // :follow off: the user's own view back, one undo step
         keys(&mut app, ":follow off\n");
-        assert_eq!(msg(&app), "not following 4123-1");
-        app.msg = None;
-        assert!(!snapshot(&mut app, 100, None).contains("following"));
-        assert!(!app.agent_changed(Ok(first.clone())));
+        assert_eq!((app.follow.is_none(), app.ws.rows.len(), msg(&app)), (true, 0, "not following 4123-1; your view is back (u: what you followed)".into()));
+        keys(&mut app, "u");
         assert_eq!(app.ws.rows.len(), 5);
-        keys(&mut app, ":follow\n");
-        assert_eq!(app.ws.rows.len(), 4);
-        // the session gone: the window stays as it is
-        assert!(app.agent_changed(Err("no session 4123-1".into())));
-        assert_eq!((app.follow.is_none(), msg(&app)), (true, "not following 4123-1: no session 4123-1".into()));
-        assert_eq!(app.ws.rows.len(), 4);
+        keys(&mut app, ":follow off\n");
+        assert_eq!(msg(&app), "not following an agent");
+        // a present while following is what :follow off comes back to
+        let text = session::to_link_toml(&agent.ws);
+        app.follow = Some(tui::app::Follow { id: id.clone(), shown: text, own: session::to_shared_toml(&app.ws), presented: false });
+        keys(&mut agent, ":rm top.dma.state\n");
+        app.take_present(&session::to_shared_toml(&agent.ws)).unwrap();
+        keys(&mut agent, ":add top.rst\n");
+        assert!(app.agents_now(both(&agent, &other)));
+        assert_eq!(app.ws.rows.len(), 5);
+        keys(&mut app, ":follow off\n");
+        assert_eq!((app.ws.rows.len(), msg(&app)), (4, "not following 4123-1; the agent's present is back (u: what you followed)".into()));
+        // the followed agent leaves: the window stays as it is
+        let text = session::to_link_toml(&agent.ws);
+        app.follow = Some(tui::app::Follow { id: id.clone(), shown: text, own: session::to_shared_toml(&app.ws), presented: false });
+        app.msg = None;
+        assert!(app.agents_now(vec![("4123-2".to_string(), session::to_link_toml(&other.ws))]));
+        assert_eq!((app.follow.is_none(), msg(&app), app.ws.rows.len()), (true, "agent 4123-1 left; not following it".into(), 4));
+        assert!(app.agents_now(vec![]));
+        assert_eq!(msg(&app), "agent 4123-2 left");
     }
 
     #[test]
@@ -809,7 +851,7 @@ mod tests {
         app.ws.view.set_width(20);
         app.ws.view.set_zoom(1.0);
         // as an agent presents them: the cursor on one event, marks on others
-        app.ws.present("version = 1\n[cursors]\n1 = \"10\"\n2 = \"30\"\n3 = \"70\"\n[[rows]]\nsignal = \"top.clk\"\n").unwrap();
+        app.ws.present("version = 1\n[cursors]\n1 = \"10\"\n2 = \"30\"\n3 = \"70\"\n[[rows]]\nsignal = \"top.clk\"\n", false).unwrap();
         app.ws.view.set_cursor(10);
         app.ws.view.start = 0;
         keys(&mut app, "''");
@@ -1301,11 +1343,17 @@ mod tests {
         screen(&mut app, 100, Some(22));
         let x2 = x(&app);
         ev(&mut app, down, x2, 1, 300);
+        ev(&mut app, drag, x2 + 5, 1, 305);
         ev(&mut app, drag, x2 + 10, 1, 310);
         let t = app.ws.view.col_start(x2 as u64 + 10 - app.wave_x as u64);
         assert_eq!((app.ws.marks[1], app.msg.as_ref().unwrap().0.starts_with("mark 2 at ")), (Some(t), true));
         ev(&mut app, up, x2 + 10, 1, 320);
         assert_eq!((app.ws.marks[1], app.ws.view.cursor), (Some(t), m2));
+        // the drag is one undo step (spec §5 "Undo")
+        keys(&mut app, "u");
+        assert_eq!(app.ws.marks[1], Some(m2));
+        keys(&mut app, "<C-r>");
+        assert_eq!(app.ws.marks[1], Some(t));
         screen(&mut app, 100, Some(22));
         let x3 = x(&app);
         ev(&mut app, down, x3, 1, 400);
@@ -1393,6 +1441,29 @@ mod tests {
         screen(&mut app, 100, Some(22));
         click(&mut app, 50, 2, NONE, t0, 3000);
         assert_eq!(app.mode, app::Mode::Normal);
+    }
+
+    #[test]
+    fn named_marks() {
+        // spec §9: a mark's name on the ruler after its number; its note on the status line while
+        // the cursor is on it
+        let mut app = open("vcd", None);
+        app.run("add top.clk").unwrap();
+        app.run("cursor 2 30ns name=first bad write note=AW came before W").unwrap();
+        app.run("cursor 3 60ns").unwrap();
+        let s = snapshot(&mut app, 100, Some(8));
+        assert!(s.contains("2 first bad write───") && !s.contains("2 first bad write:"), "{s}");
+        keys(&mut app, "'2");
+        let s = snapshot(&mut app, 100, Some(8));
+        assert!(s.lines().last().unwrap().contains("2 first bad write: AW came before W"), "{s}");
+        // a name too long for the gap is cut before the next mark
+        app.run("cursor 2 name=a name much too long to fit between the two marks here").unwrap();
+        let s = snapshot(&mut app, 100, Some(8));
+        assert!(s.contains("fi…─3"), "{s}");
+        // a mark right after it leaves no room: no name
+        app.run("cursor 3 31ns").unwrap();
+        let s = snapshot(&mut app, 100, Some(8));
+        assert!(!s.lines().nth(1).unwrap().contains("a name"), "the ruler: {s}");
     }
 
     #[test]

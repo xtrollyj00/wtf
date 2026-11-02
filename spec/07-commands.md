@@ -13,7 +13,7 @@
 | `:rename <name>` | rename the group the selected row is in |
 | `:ungroup` | dissolve the group the selected row is in; its signals stay where they are |
 | `:select <row> [<last row>]` | select a signal (named as in `:add`) or group, or the rows from one to another, as `V` does |
-| `:cursor <n> [time\|off]` | put cursor `n` at a time (`:cursor 1 <time>` moves the cursor, others place a mark), remove mark `n`, or without a time jump to mark `n` (`:cursor 1` centers the screen on the cursor) |
+| `:cursor <n> [time\|off] [name=<text>] [note=<text>]` | put cursor `n` at a time (`:cursor 1 <time>` moves the cursor, others place a mark), remove mark `n`, or without a time jump to mark `n` (`:cursor 1` centers the screen on the cursor). `name=` and `note=` say what a mark shows (section 9), with a time or on a mark that exists; each runs to the next key, an empty one clears it |
 | `:scope [path]` | names resolve under this scope first, wherever signals are named (search, `:add`, `:select`, the agent's tools): with `:scope top.cpu`, `state` is `top.cpu.state` though `top.dma.state` exists; saved in the session; without a path, no scope |
 | `:radix <name>` | set the radix of the selected line (a row, or a field under it), group or `V` range (section 10), e.g. `:radix dec` |
 | `:names <signal> <value>=<name>...` | name values of a whole bus or bit signal, for the `enum` radix (section 10), e.g. `:names state 0=IDLE 1=BUSY 'h2=DONE`; values as a search takes them, checked against the width; rows showing the signal switch to `enum`. `:names <signal> off` removes the names. Saved in the session and given again on `:e` |
@@ -23,8 +23,10 @@
 | `:e` | reload the file, keeping signals, groups, cursor and zoom |
 | `:w [file]` | save the session (section 11) |
 | `:wq` | save the session and quit |
+| `:agent` | show the session an agent left for this trace when no window was open (`<trace>.agent.session.toml`, section 15 "Present"), as `present` shows it, its steps in `:trail` |
+| `:trail` | the agent's steps the window has (section 15 "Trail"), in a box like `:records`'s; `Enter` jumps to a step's time |
 | `:records <stream> [where <expr>]` | a box listing a stream's records (section 16), `#n start–end` and every field, as the `records` tool does; `where` takes the same expression. In the box `j` / `k` move, `Ctrl-f` / `Ctrl-b` a box of records, `g` / `G` go to the first / last, `Enter` jumps the cursor to the record's start (a jump, so `''` comes back) and selects the stream's row if shown, `Esc` or `q` closes it. No `group_by` or `count_only`: those are for agents |
-| `:follow [off]` | in a window attached to an agent's session (section 15), follow it: a changed session is shown as `present` shows it. `:follow off` stops following; `:follow` resumes, showing the session if it changed meanwhile. Elsewhere it is an error |
+| `:follow [<id>\|off]` | follow an agent working on this trace (section 15 "Following"): show its workspace now and each change it makes, as `present` shows it. With several agents, `:follow <id>` names one (the error lists them); without any, it is an error. `:follow off` stops and brings back the view from before `:follow`, or what the agent presented meanwhile |
 | `:help [<topic>]` | show the keys of the current mode, like `?`; with a topic, a box with its text from the agents' `help` tool (section 15), e.g. `:help records`. In the box `j` / `k` scroll, `Ctrl-f` / `Ctrl-b` a box, `g` / `G` go to the top / end, `Esc` or `q` closes it |
 | `:q` | quit; refuses if the session has unsaved changes |
 | `:q!` | quit without saving |

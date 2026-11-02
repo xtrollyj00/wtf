@@ -16,14 +16,29 @@ pub fn default_path(trace: &std::path::Path) -> std::path::PathBuf {
     p.into()
 }
 
-/// Apply a session to a freshly opened app. Returns warnings for the status line.
-pub fn apply(app: &mut Workspace, text: &str) -> Result<Vec<String>, String> {
+/// Where an agent's `present` writes its session when no window is open on the trace:
+/// `<trace>.agent.session.toml` (spec §15 "Present").
+pub fn agent_path(trace: &std::path::Path) -> std::path::PathBuf {
+    let mut p = trace.as_os_str().to_owned();
+    p.push(".agent.session.toml");
+    p.into()
+}
+
+/// A session's text as a table, if it reads and this wtf supports its version: the errors that
+/// refuse a whole session, checked before anything changes.
+pub fn read(text: &str) -> Result<Table, String> {
     let mut t: Table = text.parse().map_err(|e: toml::de::Error| format!("session: {}", e.message()))?;
-    let mut warn = Vec::new();
     let version = t.remove("version").map_or(Ok(VERSION), |v| v.as_integer().ok_or("session: version must be a number"))?;
     if version > VERSION {
         return Err(format!("session version {version} is newer than this wtf supports ({VERSION})"));
     }
+    Ok(t)
+}
+
+/// Apply a session to a freshly opened app. Returns warnings for the status line.
+pub fn apply(app: &mut Workspace, text: &str) -> Result<Vec<String>, String> {
+    let mut t = read(text)?;
+    let mut warn = Vec::new();
 
     // the scope first: the names after it resolve under it
     if let Some(scope) = t.remove("scope") {
@@ -106,7 +121,6 @@ pub fn apply(app: &mut Workspace, text: &str) -> Result<Vec<String>, String> {
     app.trace.load(&vars);
     app.rows = rows;
     app.sel = 0;
-    app.saved = rows_toml(app);
     if !missing.is_empty() {
         warn.push(format!("not in trace: {}", missing.join(", ")));
     }
@@ -142,13 +156,45 @@ pub fn apply(app: &mut Workspace, text: &str) -> Result<Vec<String>, String> {
     if let Some(Value::Table(cursors)) = t.remove("cursors") {
         for (k, v) in cursors {
             match k.parse::<usize>() {
+                Ok(1) if v.is_table() => warn.push("cursors.1: the cursor moves and has no name or note; give it a time".into()),
                 Ok(1) => app.view.cursor = time(&v, &mut warn).unwrap_or(0),
-                Ok(n @ 2..=9) => app.marks[n - 1] = time(&v, &mut warn),
+                // a mark is a time, or a table with its time, name and note (spec §9)
+                Ok(n @ 2..=9) => match v {
+                    Value::Table(mut m) => {
+                        let text = |m: &mut Table, key: &str, warn: &mut Vec<String>| match m.remove(key) {
+                            None => String::new(),
+                            Some(Value::String(s)) => s,
+                            Some(_) => {
+                                warn.push(format!("cursors.{k}.{key} must be a string"));
+                                String::new()
+                            }
+                        };
+                        let (name, note) = (text(&mut m, "name", &mut warn), text(&mut m, "note", &mut warn));
+                        match m.remove("time") {
+                            Some(t) => {
+                                app.marks[n - 1] = time(&t, &mut warn);
+                                app.labels[n - 1] = crate::workspace::Label::new(&name, &note);
+                            }
+                            None => warn.push(format!("cursors.{k}: needs a time")),
+                        }
+                        unknown(&format!("cursors.{k}."), &m, &mut warn);
+                    }
+                    v => app.marks[n - 1] = time(&v, &mut warn),
+                },
                 _ => warn.push(format!("cursors: no cursor {k} (1-9)")),
             }
         }
     }
+    // the agent's steps, in a session another window shares (spec §15 "Trail")
+    // a session without steps (the agent's own `workspace`) leaves the trail as it is
+    if let Some(v) = t.remove("trail") {
+        let mut trail = Vec::new();
+        steps(app, Some(v), &mut trail, &mut warn);
+        app.trail = trail;
+    }
     unknown("", &t, &mut warn);
+    // after the marks: `[+]` compares them too
+    app.saved = layout_toml(app);
     Ok(warn)
 }
 
@@ -326,6 +372,12 @@ pub fn open_var(app: &Workspace, row: usize, name: &str) -> Option<usize> {
     app.trace.by_path.get(&format!("{base}{rest}")).copied()
 }
 
+/// What `[+]` compares (spec §5 "Undo"): the rows and the marks, as the session writes them.
+pub fn layout_toml(app: &Workspace) -> String {
+    let marks: String = app.cursor_list().into_iter().filter(|c| c.0 > 0).map(|(i, t)| format!("{i} {t} {:?}\n", app.labels[i])).collect();
+    rows_toml(app) + &marks
+}
+
 /// The layout part of a session. `[+]` compares it with the one last saved or loaded; it names
 /// signals by path, so it still compares after `:e` reopens the trace.
 pub fn rows_toml(app: &Workspace) -> String {
@@ -392,10 +444,58 @@ pub fn to_toml(app: &Workspace) -> String {
     toml(app, false)
 }
 
-/// The session as another window takes it (`present`, `wtf --attach`): with `to`, the end of the
-/// visible range, so a window of another width shows the same stretch.
+/// The session as another window takes it (`present`): with `to`, the end of the visible range,
+/// so a window of another width shows the same stretch.
 pub fn to_shared_toml(app: &Workspace) -> String {
     toml(app, true)
+}
+
+/// The session a window reads from an agent's workspace (spec §15 "Joining"): shared, then the
+/// whole trail.
+pub fn to_link_toml(app: &Workspace) -> String {
+    toml(app, true) + &trail_toml(app)
+}
+
+/// A shared session without its trail, which comes last: what a window following an agent
+/// compares, so a new step alone doesn't touch the user's view (spec §15 "Following").
+pub fn without_trail(text: &str) -> &str {
+    text.split_once("\n[[trail]]\n").map_or(text, |(view, _)| view)
+}
+
+/// The steps a shared session holds.
+pub fn read_trail(app: &Workspace, text: &str) -> Vec<crate::workspace::Step> {
+    let mut ws_trail = Vec::new();
+    if let Ok(mut t) = text.parse::<Table>() {
+        steps(app, t.remove("trail"), &mut ws_trail, &mut Vec::new());
+    }
+    ws_trail
+}
+
+/// `[[trail]]` tables as steps, into `out`.
+fn steps(app: &Workspace, v: Option<Value>, out: &mut Vec<crate::workspace::Step>, warn: &mut Vec<String>) {
+    let (fpt, end) = (app.trace.fs_per_tick, app.trace.end());
+    for s in v.as_ref().and_then(Value::as_array).map_or(&[][..], |a| a.as_slice()) {
+        let text = |k: &str| s.get(k).and_then(Value::as_str).map(String::from);
+        match (text("tool"), text("ask"), text("answer")) {
+            (Some(tool), Some(ask), Some(answer)) => {
+                let time = text("time").and_then(|t| time::parse(&t, fpt).ok()).map(|t| (t.max(0.0).round() as u64).min(end));
+                out.push(crate::workspace::Step { tool, ask, answer, time });
+            }
+            _ => warn.push("trail: a step needs a tool, an ask and an answer".into()),
+        }
+    }
+}
+
+/// The trail as `[[trail]]` tables (spec §15 "Trail").
+fn trail_toml(app: &Workspace) -> String {
+    let fpt = app.trace.fs_per_tick;
+    app.trail
+        .iter()
+        .map(|s| {
+            let time = s.time.map_or(String::new(), |t| format!("time = {}\n", quote(&time::format_exact(t, fpt))));
+            format!("\n[[trail]]\ntool = {}\nask = {}\nanswer = {}\n{time}", quote(&s.tool), quote(&s.ask), quote(&s.answer))
+        })
+        .collect()
 }
 
 fn toml(app: &Workspace, shared: bool) -> String {
@@ -403,8 +503,21 @@ fn toml(app: &Workspace, shared: bool) -> String {
     let v = &app.view;
     // below one tick per column the zoom is a fraction of a tick, written as plain ticks
     let zoom = if v.cols == 1 { time::format_exact(v.ticks, fpt) } else { (1.0 / v.cols as f64).to_string() };
-    let cursors: String =
-        app.cursor_list().iter().map(|&(i, t)| format!("{} = {}\n", i + 1, quote(&time::format_exact(t, fpt)))).collect();
+    let cursors: String = app
+        .cursor_list()
+        .iter()
+        .map(|&(i, t)| {
+            let t = quote(&time::format_exact(t, fpt));
+            let l = &app.labels[i];
+            match l.is_empty() {
+                true => format!("{} = {t}\n", i + 1),
+                false => {
+                    let keys = [("name", &l.name), ("note", &l.note)].into_iter().filter(|(_, v)| !v.is_empty()).map(|(k, v)| format!(", {k} = {}", quote(v)));
+                    format!("{} = {{ time = {t}{} }}\n", i + 1, keys.collect::<String>())
+                }
+            }
+        })
+        .collect();
     format!(
         "# wtf session\nversion = {VERSION}\n{}{}\n[view]\nzoom = {}\ntime = {}\n{}\n[cursors]\n{cursors}{}",
         app.scope.as_ref().map_or(String::new(), |s| format!("scope = {}\n", quote(s))),

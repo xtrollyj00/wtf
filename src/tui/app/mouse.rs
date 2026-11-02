@@ -87,7 +87,8 @@ pub enum Held {
     /// Pressed on a waveform or the time axis: from column `from` to `to`; the view before.
     Zoom { from: u64, to: u64, moved: bool, view: wtf_core::view::View },
     /// Pressed on cursor `i`'s number in the ruler, at column `from`; the time it had.
-    Mark { i: usize, from: u64, moved: bool, was: Tick },
+    /// `mark`: the undo step a mark moved is, recorded when it is let go.
+    Mark { i: usize, from: u64, moved: bool, was: Tick, mark: wtf_core::workspace::Mark },
 }
 
 /// A right click's menu (spec §2 "Menu"): drawn with its corner at `at`, moved to fit.
@@ -188,8 +189,8 @@ impl App {
             self.panel_mouse(m, at, now);
             return self.ws.record(mark);
         }
-        // a row being moved is one undo step, recorded when it is let go
-        if matches!(self.held, Some(Held::Move { .. })) {
+        // a row or a mark being moved is one undo step, recorded when it is let go
+        if matches!(self.held, Some(Held::Move { .. } | Held::Mark { .. })) {
             return self.rows_mouse(m, at);
         }
         if self.mode == Mode::Normal {
@@ -240,7 +241,7 @@ impl App {
                 if let Some(i) = self.ruler_at(x, y) {
                     let from = (x - self.wave_x) as u64;
                     let was = if i == 0 { self.ws.view.cursor } else { self.ws.marks[i].unwrap_or(0) };
-                    self.held = Some(Held::Mark { i, from, moved: false, was });
+                    self.held = Some(Held::Mark { i, from, moved: false, was, mark: self.ws.mark() });
                     return;
                 }
                 let name = x >= self.hit.x0 && x < self.hit.x0 + self.hit.name_w;
@@ -422,7 +423,10 @@ impl App {
                 let r = self.ws.goto_mark(i);
                 self.report(r);
             }
-            Held::Mark { .. } => self.msg = None,
+            Held::Mark { mark, .. } => {
+                self.msg = None;
+                self.ws.record(mark);
+            }
         }
     }
 

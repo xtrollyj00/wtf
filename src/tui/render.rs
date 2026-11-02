@@ -528,7 +528,7 @@ fn status(app: &App, buf: &mut Buffer, w: usize, y: usize) -> Rect {
     let dim = Style::new().fg(pal().dim);
     let sep = format!("  {}  ", gl().dot);
     let mut parts: Vec<(String, Style)> = Vec::new();
-    if let Some(f) = app.follow.as_ref().filter(|f| f.on) {
+    if let Some(f) = app.follow.as_ref() {
         parts.extend([(format!("following {}", f.id), Style::new().fg(pal().cursor)), (sep.clone(), dim)]);
     }
     parts.push((time::format(app.ws.view.cursor, fpt), Style::new()));
@@ -544,6 +544,15 @@ fn status(app: &App, buf: &mut Buffer, w: usize, y: usize) -> Rect {
     let right: String = parts.iter().map(|(t, _)| t.as_str()).collect();
     let (left, st) = match &app.msg {
         Some((m, err)) => (m.clone(), if *err { red() } else { Style::new() }),
+        // on a mark with a name or note, what it says (spec §9)
+        None if app.ws.label_at_cursor().is_some() => {
+            let (i, l) = app.ws.label_at_cursor().unwrap();
+            let text = [l.name.as_str(), l.note.as_str()].into_iter().filter(|t| !t.is_empty()).collect::<Vec<_>>().join(": ");
+            let text = format!("{} {text}", i + 1);
+            let room = w.saturating_sub(lead + right.chars().count() + 2);
+            let text = if text.chars().count() > room { text.chars().take(room.saturating_sub(1)).chain([gl().cut]).collect() } else { text };
+            (text, Style::new().fg(pal().cursor))
+        }
         None => match app.ws.rows.get(app.ws.sel) {
             // a stream's record at the cursor, as much of it as fits (`e` shows all of it)
             Some(Row::Signal(r)) if app.ws.record_at(r.var).is_some() => {
@@ -577,7 +586,7 @@ fn status(app: &App, buf: &mut Buffer, w: usize, y: usize) -> Rect {
     // a long path keeps its end, where the signal name is
     let left = if len > room { format!("{}{}", gl().cut, left.chars().skip(len + 1 - room).collect::<String>()) } else { left };
     // a path's scope dim, as in the name column, so the signal's name stands out
-    let leaf = if app.msg.is_none() && matches!(app.ws.rows.get(app.ws.sel), Some(Row::Signal(r)) if app.ws.record_at(r.var).is_none()) { left.rfind('.').map_or(0, |d| d + 1) } else { 0 };
+    let leaf = if app.msg.is_none() && app.ws.label_at_cursor().is_none() && matches!(app.ws.rows.get(app.ws.sel), Some(Row::Signal(r)) if app.ws.record_at(r.var).is_none()) { left.rfind('.').map_or(0, |d| d + 1) } else { 0 };
     put(buf, x, y, &left[..leaf], dim);
     put(buf, x + left[..leaf].chars().count(), y, &left[leaf..], st);
     let mut x = w.saturating_sub(right.chars().count());

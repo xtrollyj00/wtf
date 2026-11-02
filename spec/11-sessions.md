@@ -46,6 +46,7 @@ time = "0ns"            # left edge of the view
 [cursors]
 1 = "120ns"
 2 = "160ns"
+3 = { time = "200ns", name = "first bad write", note = "AW came before W" }   # a mark with a name (section 9)
 
 [[signal]]
 name = "op"
@@ -112,6 +113,10 @@ rows = [
   exactly: in the largest unit that keeps them at 1 or more, with every decimal needed
   (`16.432us`, `2.595000001us`), read back to the same tick. A zoom finer than one tick per column
   is written as a fraction of a tick.
+- `[cursors]` maps each number to a time; a mark with a name or note (section 9) is an inline
+  table, `3 = { time = "200ns", name = "first bad write", note = "..." }`.
+- `[[trail]]` entries (`tool`, `ask`, `answer`, optional `time`) are the agent's steps, last in a
+  session another window takes from an agent (section 15 "Trail"); a saved session has none.
 - Unknown keys are skipped with a warning, so files with extra settings still load.
 
 ## 12. Command line
@@ -121,7 +126,6 @@ cursors, zoom, time) lives in the session file (section 11), not on the command 
 
 ```
 wtf [-S <session>] [--glyphs <set>] [--snapshot <width>[x<height>] [--ansi] [--keys <keys>]] <trace>
-wtf --attach [<id>] [--glyphs <set>] [--snapshot <width>[x<height>] [--ansi] [--keys <keys>]]
 wtf --setup [<trace>]
 wtf --mcp
 wtf --help
@@ -136,10 +140,13 @@ wtf --version
 | `--snapshot <width>[x<height>]` | render one screen as plain text to stdout and exit, without the terminal UI; without a height, as tall as the content |
 | `--ansi` | with `--snapshot`: print the screen in its colours, as SGR escape codes, with the configured theme (section 19); `NO_COLOR` gives the reversed cells of a terminal without colour |
 | `--keys <keys>` | with `--snapshot`: press these keys first, the screen drawn before each as the window draws it, so a mode or an overlay can be shown (`?`, `a`, `:` with its completions, `e`). Written as in Vim's mappings: plain characters, `<Esc>`, `<CR>`, `<Tab>`, `<BS>`, `<Space>`, `<lt>` for `<`, `<C-x>`; another `<name>` is an error, a `<` that starts no name is typed as it is |
-| `--attach [<id>]` | without an id, list the open sessions (windows and agent workspaces); with one, open a window on that session's trace showing its rows and cursors (section 15) |
 | `--setup` | ask again which glyphs and theme to use, as on the first start (section 19), then open `<trace>` if given |
 | `--mcp` | serve AI agents over MCP on stdin / stdout instead of opening the screen (section 15) |
 
+- An agent's session left for the trace (`<trace>.agent.session.toml`) shows on opening when newer
+  than the user's session file, and is offered otherwise (section 15 "Present").
+- An agent working on the trace joins the window by itself (section 15 "Joining"); `:follow`
+  shows its workspace, also with `--snapshot --keys ':follow<CR>'`.
 - `--snapshot` is for CI logs, bug reports and wtf's own tests. Each screen cell becomes exactly
   one character, the same glyph the terminal UI draws, so columns stay aligned. What it shows comes
   from the session.

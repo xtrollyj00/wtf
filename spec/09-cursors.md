@@ -35,6 +35,25 @@ mark, and a right click on one has `Jump to` and `Remove mark`.
   doesn't exist, `m` with all 8 marks in use, `1m` / `1M` (cursor 1 is the cursor).
 - `Tab` goes to marks without reaching for the number row; `'N` jumps to a specific one.
 
+### Names and notes
+
+A mark can say what happens there, so the evidence an agent presents explains itself: a **name**
+(`first bad write`) and a **note** (`AW came before W, so the address latched is stale`).
+
+- `:cursor 2 390ns name=first bad write note=AW came before W` places a mark with both;
+  `:cursor 2 name=...` or `note=...` changes them on a mark that exists, and an empty one clears
+  it. The agent gives them in `workspace` cursors (section 15); sessions keep them (section 11).
+- The ruler shows the name after the mark's number, in place of the Δt to the next cursor, cut
+  with `…` before it; a name with no room for three columns isn't shown.
+- While the cursor is on a mark with a name or note (after `'N`, `Tab` or a click on its
+  number), the status line shows `2 first bad write: AW came before W` in the cursor's colour,
+  cut at the end if long. A message on the status line comes first.
+- A mark moved (`Nm`, `:cursor N <time>`, dragging it) keeps its name and note; a new mark has
+  none, and removing a mark removes them. Cursor 1 moves all the time, so it has neither.
+- Placing, moving, naming and removing a mark can be undone (`u`, section 5 "Undo"), and the
+  marks are part of `[+]`; moving cursor 1 isn't a change.
+- Names and notes are one line each: line breaks and runs of spaces become one space.
+
 ### Cursor ruler
 
 When there are marks, a ruler line appears above the waveforms. It shows the cursor and each

@@ -145,12 +145,29 @@ fn declare(app: &mut Workspace, a: &WorkspaceArgs) -> Result<String, String> {
     let exact = |t: Tick| Value::String(time::format_exact(t, app.trace.fs_per_tick));
     let time_of = |s: &str, errors: &mut Vec<String>| at(app, s).map_err(|e| errors.push(format!("{s}: {e}"))).ok();
     let mut cursors = Table::new();
-    for (n, t) in &a.cursors {
+    for (n, c) in &a.cursors {
+        let (t, name, note) = match c {
+            CursorSpec::Time(t) => (t, "", ""),
+            CursorSpec::Mark { time, name, note } => (time, name.as_str(), note.as_str()),
+        };
         if !matches!(n.parse::<u8>(), Ok(1..=9)) {
             errors.push(format!("cursors: no cursor {n} (1-9)"));
+        } else if n == "1" && matches!(c, CursorSpec::Mark { .. }) {
+            errors.push("cursors: 1 is the cursor and moves, so it takes a time only; name a mark (2-9)".into());
         } else if let Some((lo, hi)) = time_of(t, &mut errors) {
             // a cursor stays at the time written, not the end of its span (spec §15 "Times")
-            cursors.insert(n.clone(), exact((lo + hi).div_ceil(2)));
+            let at = exact((lo + hi).div_ceil(2));
+            let value = match c {
+                CursorSpec::Time(_) => at,
+                CursorSpec::Mark { .. } => {
+                    let mut m = Table::new();
+                    m.insert("time".into(), at);
+                    m.insert("name".into(), Value::String(name.into()));
+                    m.insert("note".into(), Value::String(note.into()));
+                    Value::Table(m)
+                }
+            };
+            cursors.insert(n.clone(), value);
         }
     }
     let (from, to) = match &a.range {

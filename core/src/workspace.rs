@@ -34,7 +34,7 @@ pub struct Workspace {
     /// The trace file, for `:e`, and the session file `:w` writes (spec §11).
     pub trace_path: PathBuf,
     pub session_path: PathBuf,
-    /// The layout as last saved or loaded (`session::rows_toml`); `[+]` when it differs.
+    /// The layout as last saved or loaded (`session::layout_toml`); `[+]` when it differs.
     pub saved: String,
     /// Counts `:e` reloads: a reload replaces the rows without being an undo step.
     reloads: u32,
@@ -42,6 +42,11 @@ pub struct Workspace {
     /// Marks by number, index 1 - 8 for cursors 2 - 9 (spec §9). Cursor 1 is the cursor, whose
     /// time is `view.cursor`, so index 0 stays None.
     pub marks: [Option<Tick>; 9],
+    /// Each mark's name and note, by the same index (spec §9).
+    pub labels: [Label; 9],
+    /// The agent's steps (spec §15 "Trail"), oldest first, at most `TRAIL`: the workspace's own in
+    /// an agent's, the followed (or last active) agent's in a window.
+    pub trail: Vec<Step>,
     /// Where cursor 1 was before the last jump that moved it, for `''` (spec §9).
     pub back: Option<Tick>,
     /// The time unit of the agent's answers (`:unit`), or None for the one the fastest clock used
@@ -70,17 +75,67 @@ pub struct Workspace {
     pub bit: Option<u32>,
     /// The other end of a `V` selection in Edit mode.
     pub anchor: Option<usize>,
-    /// Row layouts before each change, and after each undo (spec §5 "Undo"), each with the
-    /// selection it had, so undo returns to where the change was made.
-    undo: Vec<(Vec<Row>, usize)>,
-    redo: Vec<(Vec<Row>, usize)>,
+    /// Layouts before each change, and after each undo (spec §5 "Undo"), each with the selection
+    /// it had, so undo returns to where the change was made.
+    undo: Vec<Layout>,
+    redo: Vec<Layout>,
 }
+
+/// A mark's name and note (spec §9): what the agent (or the user) says happens there. Empty when
+/// it has none.
+#[derive(Clone, Default, PartialEq, Debug)]
+pub struct Label {
+    pub name: String,
+    pub note: String,
+}
+
+impl Label {
+    /// One line each, whitespace collapsed: the ruler and the status line show them.
+    pub fn new(name: &str, note: &str) -> Label {
+        let line = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+        Label { name: line(name), note: line(note) }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.name.is_empty() && self.note.is_empty()
+    }
+}
+
+/// One of the agent's tool calls, as the user's window shows it (spec §15 "Trail"): the tool,
+/// what it asked, the first line of the answer, and the time it is about, if any.
+#[derive(Clone, PartialEq, Debug)]
+pub struct Step {
+    pub tool: String,
+    pub ask: String,
+    pub answer: String,
+    pub time: Option<Tick>,
+}
+
+/// The most steps a trail keeps; older ones go.
+pub const TRAIL: usize = 200;
 
 /// What `Workspace::record` compares against.
 pub struct Mark {
-    rows: Vec<Row>,
-    sel: usize,
+    before: Layout,
     counts: (usize, usize, u32),
+}
+
+/// What an undo step restores (spec §5 "Undo"): the rows, the marks with their names and notes,
+/// and the selection the change was made on. Cursor 1, zoom and the visible time are no part of
+/// it: looking around isn't a change.
+#[derive(Clone)]
+struct Layout {
+    rows: Vec<Row>,
+    marks: [Option<Tick>; 9],
+    labels: [Label; 9],
+    sel: usize,
+}
+
+impl Layout {
+    /// The same rows (`rows::same_layout`) and the same marks.
+    fn same(&self, other: &Layout) -> bool {
+        rows::same_layout(&self.rows, &other.rows) && self.marks == other.marks && self.labels == other.labels
+    }
 }
 
 impl Workspace {
@@ -103,6 +158,8 @@ impl Workspace {
             reloads: 0,
             view,
             marks: [None; 9],
+            labels: Default::default(),
+            trail: Vec::new(),
             back: None,
             unit: None,
             clock_unit: None,
@@ -124,15 +181,26 @@ impl Workspace {
 
     /// The state an undo step would restore, taken before a change (`record`).
     pub fn mark(&self) -> Mark {
-        Mark { rows: self.rows.clone(), sel: self.sel, counts: (self.undo.len(), self.redo.len(), self.reloads) }
+        Mark { before: self.layout(), counts: (self.undo.len(), self.redo.len(), self.reloads) }
     }
 
-    /// Record one undo step if the rows changed since `mark` (unless that was an undo, redo or
-    /// reload itself).
+    fn layout(&self) -> Layout {
+        Layout { rows: self.rows.clone(), marks: self.marks, labels: self.labels.clone(), sel: self.sel }
+    }
+
+    /// Put back a layout, giving the one there was.
+    fn restore(&mut self, l: Layout) -> Layout {
+        let now = self.layout();
+        (self.rows, self.marks, self.labels, self.sel) = (l.rows, l.marks, l.labels, l.sel);
+        now
+    }
+
+    /// Record one undo step if the rows or the marks changed since `mark` (unless that was an
+    /// undo, redo or reload itself).
     pub fn record(&mut self, m: Mark) {
         let undid = (self.undo.len(), self.redo.len(), self.reloads) != m.counts;
-        if !undid && !rows::same_layout(&m.rows, &self.rows) {
-            self.undo.push((m.rows, m.sel));
+        if !undid && !m.before.same(&self.layout()) {
+            self.undo.push(m.before);
             self.redo.clear();
         }
         self.drop_unused();
@@ -146,7 +214,7 @@ impl Workspace {
             return;
         }
         let mut keep: HashSet<usize> = HashSet::new();
-        let layouts = std::iter::once(&self.rows).chain(self.undo.iter().chain(&self.redo).map(|(r, _)| r));
+        let layouts = std::iter::once(&self.rows).chain(self.undo.iter().chain(&self.redo).map(|l| &l.rows));
         for s in layouts.flat_map(|rows| rows.iter().filter_map(Row::sig)) {
             keep.insert(s.var);
             keep.extend(&s.open);
@@ -156,7 +224,7 @@ impl Workspace {
         let streams = self.streams.iter().flat_map(|s| std::iter::once(s.name.clone()).chain(s.schema.iter().map(|f| format!("{}.{}", s.name, f.name))));
         keep.extend(names.chain(streams).filter_map(|p| self.trace.by_path.get(&p).copied()));
         let Some(to) = self.trace.retain_computed(&keep) else { return };
-        let layouts = std::iter::once(&mut self.rows).chain(self.undo.iter_mut().chain(&mut self.redo).map(|(r, _)| r));
+        let layouts = std::iter::once(&mut self.rows).chain(self.undo.iter_mut().chain(&mut self.redo).map(|l| &mut l.rows));
         for s in layouts.flat_map(|rows| rows.iter_mut().filter_map(|r| match r {
             Row::Signal(s) => Some(s),
             _ => None,
@@ -548,23 +616,29 @@ impl Workspace {
     }
 
     /// Show a session the agent prepared (`present`, spec §15): its rows and cursors
-    /// replace the window's, as one undo step; the session file stays as it was (`[+]`). Returns
-    /// the status message, `agent: presented …` (an error if parts didn't fit).
-    pub fn present(&mut self, text: &str) -> Result<Msg, String> {
-        // check it reads before anything changes
-        text.parse::<toml::Table>().map_err(|e| format!("session: {}", e.message()))?;
-        let before = (self.rows.clone(), self.sel);
+    /// replace the window's, as one undo step; the session file stays as it was (`[+]`). Its named
+    /// signals, protocols and decodes replace the window's too, unless `keep_decoding`: then the
+    /// workspace's stay, those the session names replacing ones of the same name (the agent's own
+    /// `workspace`, `user_view` adopt). Returns the status message, `agent: presented …` (an error
+    /// if parts didn't fit).
+    pub fn present(&mut self, text: &str, keep_decoding: bool) -> Result<Msg, String> {
+        // a session refused whole changes nothing
+        session::read(text)?;
+        let before = self.layout();
         let saved = std::mem::take(&mut self.saved);
         (self.marks, self.view.cursor, self.back) = ([None; 9], 0, None);
+        self.labels = Default::default();
         // the session is all that is shown: named signals and decoding it leaves out go (§15)
-        self.signals.clear();
-        self.protocols.clear();
-        self.decodes.clear();
-        self.streams.clear();
+        if !keep_decoding {
+            self.signals.clear();
+            self.protocols.clear();
+            self.decodes.clear();
+            self.streams.clear();
+        }
         let warn = session::apply(self, text);
         self.saved = saved;
         let warn = warn?;
-        if !rows::same_layout(&before.0, &self.rows) {
+        if !before.same(&self.layout()) {
             self.undo.push(before);
             self.redo.clear();
         }
@@ -578,7 +652,7 @@ impl Workspace {
 
     /// The layout differs from the session file: `[+]`, and `:q` refuses.
     pub fn modified(&self) -> bool {
-        session::rows_toml(self) != self.saved
+        session::layout_toml(self) != self.saved
     }
 
 
@@ -662,18 +736,18 @@ impl Workspace {
 
 
     pub fn undo(&mut self) -> Result<(), String> {
-        let (rows, sel) = self.undo.pop().ok_or("already at oldest change")?;
-        self.redo.push((std::mem::replace(&mut self.rows, rows), self.sel));
-        self.sel = sel;
+        let l = self.undo.pop().ok_or("already at oldest change")?;
+        let now = self.restore(l);
+        self.redo.push(now);
         self.fix_sel();
         Ok(())
     }
 
 
     pub fn redo(&mut self) -> Result<(), String> {
-        let (rows, sel) = self.redo.pop().ok_or("already at newest change")?;
-        self.undo.push((std::mem::replace(&mut self.rows, rows), self.sel));
-        self.sel = sel;
+        let l = self.redo.pop().ok_or("already at newest change")?;
+        let now = self.restore(l);
+        self.undo.push(now);
         self.fix_sel();
         Ok(())
     }
@@ -849,6 +923,18 @@ impl Workspace {
         std::iter::once((0, self.view.cursor)).chain((1..9).filter_map(|i| self.marks[i].map(|t| (i, t)))).collect()
     }
 
+    /// Add one of the agent's steps to the trail, dropping the oldest past `TRAIL`.
+    pub fn add_step(&mut self, step: Step) {
+        self.trail.push(step);
+        let over = self.trail.len().saturating_sub(TRAIL);
+        self.trail.drain(..over);
+    }
+
+    /// The lowest numbered mark at the cursor with a name or a note, as (index, label).
+    pub fn label_at_cursor(&self) -> Option<(usize, &Label)> {
+        (1..9).find(|&i| self.marks[i] == Some(self.view.cursor) && !self.labels[i].is_empty()).map(|i| (i, &self.labels[i]))
+    }
+
     /// `m` / `Nm`: mark `n` (an index, 1 - 8), or the lowest free one, at the cursor.
     pub fn set_mark(&mut self, n: Option<usize>) -> Result<(), String> {
         let i = match n {
@@ -857,6 +943,10 @@ impl Workspace {
             Some(i) => return Err(format!("no cursor {}: marks are 2-9", i + 1)),
             None => (1..9).find(|&i| self.marks[i].is_none()).ok_or("all 8 marks in use")?,
         };
+        // a mark moved keeps its name; a new one has none
+        if self.marks[i].is_none() {
+            self.labels[i] = Label::default();
+        }
         self.marks[i] = Some(self.view.cursor);
         Ok(())
     }
@@ -870,6 +960,7 @@ impl Workspace {
             None => (1..9).find(|&i| self.marks[i] == Some(self.view.cursor)).ok_or("no mark under the cursor")?,
         };
         self.marks[i] = None;
+        self.labels[i] = Label::default();
         Ok(())
     }
 

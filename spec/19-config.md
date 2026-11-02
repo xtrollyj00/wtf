@@ -33,8 +33,7 @@ red = "#ff5555"         # the shade of a signal colour (section 14)
 
 ### First start
 
-When wtf opens a window in a terminal (stdin and stdout both one; not `--snapshot`, `--mcp` or
-`--attach` listing) and there is no config file, it first asks two questions, each with samples
+When wtf opens a window in a terminal (stdin and stdout both one; not `--snapshot` or `--mcp`) and there is no config file, it first asks two questions, each with samples
 of a clock and a bus drawn as wtf draws them:
 
 1. Which glyph set the terminal draws cleanly: `unicode`, `box` and `ascii` side by side. Fonts

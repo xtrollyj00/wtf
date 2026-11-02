@@ -107,9 +107,13 @@ reuse wtf's own pieces:
   writes the state it wants instead of editing toward it:
   `{"scope": "dut", "rows": ["s_axi_aclk", {"group": "write", "rows": ["s_axi_awaddr:hex",
   "s_axi_awvalid"]}], "cursors": {"1": "80ns", "2": "390ns"}, "range": ["60ns",
-  "480ns"]}`. A struct, record or array is a row as any signal (`"pkt"`, folded); `{"signal":
+  "480ns"]}`. A mark may say what it shows: `"2": {"time": "390ns", "name": "first bad write",
+  "note": "AW came before W"}` (section 9); `view` lists the name and note after its time. A struct, record or array is a row as any signal (`"pkt"`, folded); `{"signal":
   "grid", "open": ["grid", "grid[1]"]}` opens levels of it, as a session's `open`. It is the
-  session (section 11) in another shape, and goes through the same checks.
+  session (section 11) in another shape, and goes through the same checks. Its rows, cursors,
+  range and scope replace the workspace's; its `signals`, `protocols` and `decode` are added,
+  each replacing one of the same name, and those it doesn't name stay, so an interface decoded
+  with `command` before is kept. `user_view` with `adopt` keeps them the same way.
   Every unknown or ambiguous name, bad radix and bad time is reported at once and nothing
   changes, so one retry fixes them. It answers as `view` does.
 - `command` answers with the rows it added and removed, so a pattern that caught too much shows.
@@ -155,17 +159,24 @@ reuse wtf's own pieces:
   `:radix`, `:color`, `:<time>`, `:zoom`, `:fit`, the cursor commands `:cursor <n> <time>` and
   `:cursor <n> off`). `render` without signals draws the workspace, so the agent can check what it
   prepared; `view` describes it (rows, cursors with Δt, visible range).
-- **Present**: `present` shows the workspace in the user's wtf window for the same trace, if one
-  is open: its layout and cursors replace the window's, as one undo step (`:undo`, or `u`, restores the
-  user's view), and so do its named signals, protocols and decodes: those the window had and the
-  agent's session doesn't name go. The status line says `agent: presented …`. Without a window it writes a
-  session file and says how to open it (`wtf -S <file> <trace>`), so headless work still ends
-  in something to look at.
-- **User's view**: `user_view` reads the open window's rows, cursors, selected signal and
-  visible range, so the agent can start from what the user is looking at.
-- **Link**: each wtf window listens on a local socket (see Registry); `wtf --mcp` looks for one with the same trace path. Two requests travel over it,
-  both as session TOML (section 11): "send your session" and "take this session". Several
-  windows on one trace: the most recently started one.
+- **Present**: `present` shows the workspace in every wtf window on the same trace: its layout
+  and cursors replace the window's, as one undo step (`:undo`, or `u`, restores the user's view),
+  and so do its named signals, protocols and decodes: those the window had and the agent's
+  session doesn't name go. The status line says `agent: presented …`.
+- **Without a window** (the simulation failed in CI, or the user hasn't opened the trace),
+  `present` writes `<trace>.agent.session.toml` with the trail, and its answer tells the agent to
+  tell the user `wtf <trace>` shows it. When a window opens on the trace and finds that file
+  newer than the user's own session file (or no session file), it shows it as `present` does
+  (one undo step: `u` gives the user's own view), its steps in `:trail`, and says so:
+  `agent: presented … ; :trail lists its 14 steps; u gives your own view`. An older one, the user
+  having `:w`ed since, is only offered: `an agent presented this trace before your last :w; :agent
+  shows it`. `:agent` (section 7) shows it any time.
+- **User's view**: `user_view` reads the window on the trace (the most recently started, if
+  there are several): its rows, cursors, selected signal and visible range, so the agent can
+  start from what the user is looking at.
+- **Link**: each wtf window and each agent workspace listens on a local socket (see Registry).
+  Two requests travel over it, both as session TOML (section 11): "send your session" and "take
+  this session".
 - The agent's changes never save the user's session file by themselves; the user `:w`s if they
   want to keep them.
 - `wtf --mcp` takes no trace. The agent lists what is open with `sessions`, opens traces with
@@ -176,13 +187,43 @@ reuse wtf's own pieces:
   a number (`4123-1`). A third request, "who are you", answers the kind (window or agent) and
   the trace's full path without waiting for the window's main loop, so listing is instant.
   Listing removes sockets nobody listens on (left by killed processes).
-- **Attach**: `wtf --attach <id>` opens a window on the session's trace with its usual session
-  file, then shows the session's rows and cursors on top, as `present` does (`:undo` restores the
-  usual view). It follows the session: every 500 ms it reads the agent's session, and when it has
-  changed it shows it as `present` does (one undo step, `:undo` restores), so the agent's updates
-  arrive as it makes them (`:follow off` stops, section 7). The user's moves stay until the agent's
-  next change, and the right of the status line starts with `following <id>`. If the session goes away, the window stays as it is and says
-  `not following <id>`. `:w` saves to the trace's session file. `wtf --attach` alone lists the
-  sessions.
+- **Joining**: an agent works on a trace, not on a window. Every wtf window on a trace looks for
+  agent workspaces on the same trace every 500 ms, whichever was opened first, and says so on the
+  status line: `agent 4123-1 joined`, and `agent 4123-1 left` when its workspace goes. A window
+  never takes the agent's layout by itself: the agent explores in its own workspace, and the
+  user's view moves only on `present` or while following.
+- **Following**: `:follow` (section 7) shows the agent's workspace in the window and keeps it in
+  step: whenever the agent's workspace changes (rows, marks, decoding, and its view and cursor:
+  the agent steers what the user sees), the window shows it as `present` does (one undo step,
+  `:undo` restores). A new step alone changes nothing. The user's moves stay until the agent's
+  next change, and the right of the status line starts with `following <id>`. With several agents
+  on the trace, `:follow <id>` picks one. `:follow off` stops and brings back the user's own view
+  from before `:follow`, as one undo step (`u` shows what was followed), unless the agent
+  presented while it was followed: a `present` is the agent handing over, so `:follow off` comes
+  back to that. The agent leaving stops it too, the window staying as it is: the agent's last
+  state.
 - Workspaces live as long as the server: when the agent's client exits they are gone (`present`
   first to keep one).
+
+### Trail
+
+The user sees what the agent did, not only where it ended up. Each call of a tool that queries
+the trace or changes the workspace (`find`, `records`, `values`, `value_at`, `render`, `command`,
+`workspace`) is a **step** on the current workspace's trail: the tool, what it asked (`find`'s
+expression, `records`' stream and `where`, a command's line, ...), the first line of the answer
+(`error: ...` for an error; `declared` for `workspace`, whose answer is a `view`), and the time it is about: the `time` or `from` asked, or the first
+time a `find` or `records` answer lists. Lookups (`help`, `info`, `signals`, `view`, `sessions`,
+`protocols`, `user_view`) and `open`, `use`, `reload` and `present` are no steps. A trail keeps
+the last 200 steps.
+
+- The session a window reads from an agent's workspace carries the trail as `[[trail]]` tables
+  after everything else (`tool`, `ask`, `answer`, `time`; section 11). `present` carries none: the
+  window has the steps already. A session file the window saves (`:w`) has none.
+- Every window on the trace takes the agents' new steps without moving the user's view, followed
+  or not, and shows each on the status line: `agent: find @clk wr && addr == 0x40  ·  3 matches,
+  first 120ns` (`agent 4123-1: …` with several agents), red for an error. An agent's message
+  (a step, joining, leaving, its present) replaces only another agent message or an empty status
+  line, never the user's own (an error after `:q`); the step is in `:trail` either way.
+- `:trail` (section 7) lists the steps of the agent followed, or else of the agent that made the
+  last step, oldest first and the newest highlighted,
+  in the box `:records` uses; `Enter` on a step with a time moves the cursor there.

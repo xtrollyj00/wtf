@@ -191,3 +191,46 @@ fn drag_adds_from_the_panel() {
     t.send("\x1b");
     t.wait("rst added below dma.state", |s| line_of(s, "rst").is_some_and(|y| y > line_of(s, "dma.state").unwrap()));
 }
+
+#[test]
+fn an_agent_joins_and_leaves() {
+    // spec §15 "Joining": a window looks for agents on its trace every half second; one found
+    // joins, each new step shows on the status line, and one gone leaves
+    use std::io::{BufRead, BufReader};
+    use std::os::unix::net::UnixListener;
+    let args = session();
+    let t = Term::spawn("agent", &args.iter().map(String::as_str).collect::<Vec<_>>());
+    t.wait("the rows", |s| line_of(s, "dma.state").is_some());
+    let trace = std::fs::canonicalize("tests/data/simple.vcd").unwrap();
+    let step = |n: usize| (0..n).map(|k| format!("\n[[trail]]\ntool = \"find\"\nask = \"step {k}\"\nanswer = \"{k} matches\"\n")).collect::<String>();
+    let session = Arc::new(Mutex::new(format!("version = 1\n{}", step(1))));
+    let sock = t.dir.join("wtf-999-1.sock");
+    let listener = UnixListener::bind(&sock).unwrap();
+    let (answer, info) = (session.clone(), format!("agent\n{}", trace.display()));
+    // the agent's side of the link, as a workspace answers (spec §15 "Link")
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { return };
+            let mut head = String::new();
+            BufReader::new(stream.try_clone().unwrap()).read_line(&mut head).unwrap();
+            let body = match head.trim_end() {
+                "INFO" => info.clone(),
+                _ => format!("rows (> selected):\n---\n{}", answer.lock().unwrap()),
+            };
+            let _ = write!(stream, "OK {}\n{body}", body.len());
+        }
+    });
+    t.wait("the agent joined", |s| s.contents().contains("agent 999-1 joined"));
+    *session.lock().unwrap() = format!("version = 1\n{}", step(2));
+    t.wait("its new step", |s| s.contents().contains("agent: find step 1  ·  1 matches"));
+    std::fs::remove_file(&sock).unwrap();
+    t.wait("the agent left", |s| s.contents().contains("agent 999-1 left"));
+    // a present arrives over the window's own socket
+    let text = "version = 1\n[[rows]]\nsignal = \"top.rst\"\n";
+    let mut link = std::os::unix::net::UnixStream::connect(t.dir.join(format!("wtf-{}.sock", t.child.id()))).unwrap();
+    write!(link, "PUT {}\n{text}", text.len()).unwrap();
+    let mut answer = String::new();
+    link.read_to_string(&mut answer).unwrap();
+    assert!(answer.starts_with("OK ") && answer.contains("agent: presented 1 signals"), "{answer}");
+    t.wait("the present", |s| line_of(s, "rst").is_some() && line_of(s, "dma.state").is_none());
+}

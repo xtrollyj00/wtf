@@ -201,21 +201,47 @@ fn select(app: &mut Workspace, arg: &str) -> Result<(), String> {
 /// `:cursor n time` puts mark n there (`:cursor 1 time` moves the cursor), `:cursor n off` removes
 /// mark n, and `:cursor n` jumps to it (spec §9).
 fn cursor(app: &mut Workspace, arg: &str) -> Result<(), String> {
-    let usage = "usage: :cursor <1-9> [time|off]";
-    let (n, what) = arg.split_once(char::is_whitespace).unwrap_or((arg, ""));
+    let usage = "usage: :cursor <1-9> [time|off] [name=<text>] [note=<text>]";
+    let (n, rest) = arg.split_once(char::is_whitespace).unwrap_or((arg, ""));
     let i = n.parse::<usize>().ok().filter(|n| (1..=9).contains(n)).ok_or(usage)? - 1;
-    match what.trim() {
-        "" => app.goto_mark(i),
-        "off" => app.remove_mark(Some(i)),
+    // the keys start at the first word with `=`; a name or note runs to the next key
+    let rest = rest.trim();
+    let at = rest.split_whitespace().find(|w| w.contains('=')).map_or(rest.len(), |w| w.as_ptr() as usize - rest.as_ptr() as usize);
+    let (what, keys) = (rest[..at].trim(), key_values(&rest[at..]).ok_or(usage)?);
+    if let Some((k, _)) = keys.iter().find(|(k, _)| k != "name" && k != "note") {
+        return Err(format!(":cursor has no key {k} (name, note)"));
+    }
+    if i == 0 && !keys.is_empty() {
+        return Err("cursor 1 is the cursor and moves: name a mark (2-9)".into());
+    }
+    match what {
+        "" if keys.is_empty() => return app.goto_mark(i),
+        "" if app.marks[i].is_none() => return Err(format!("no cursor {}: give it a time first (:cursor {} <time> ...)", i + 1, i + 1)),
+        "" => {}
+        "off" if keys.is_empty() => return app.remove_mark(Some(i)),
+        "off" => return Err(usage.into()),
         t => {
             let t = (crate::time::parse(t, app.trace.fs_per_tick)?.max(0.0).round() as u64).min(app.trace.end());
             match i {
                 0 => app.jump(t, false),
-                i => app.marks[i] = Some(t),
+                i => {
+                    // a mark moved keeps its name; a new one has none
+                    if app.marks[i].is_none() {
+                        app.labels[i] = Default::default();
+                    }
+                    app.marks[i] = Some(t)
+                }
             }
-            Ok(())
         }
     }
+    for (k, v) in keys {
+        let l = &app.labels[i];
+        app.labels[i] = match k.as_str() {
+            "name" => crate::workspace::Label::new(&v, &l.note),
+            _ => crate::workspace::Label::new(&l.name, &v),
+        };
+    }
+    Ok(())
 }
 
 /// `:fit [from to]`: the whole simulation, or the range between two cursors (`'2 '3`, `'1` is
@@ -249,7 +275,7 @@ fn fit(app: &mut Workspace, arg: &str) -> Result<(), String> {
 pub fn save(app: &mut Workspace, arg: &str) -> Result<Msg, String> {
     let path = if arg.is_empty() { app.session_path.clone() } else { arg.into() };
     session::write(&path, &session::to_toml(app))?;
-    app.saved = session::rows_toml(app);
+    app.saved = session::layout_toml(app);
     let msg = format!("written: {}", path.display());
     app.session_path = path;
     Ok((msg, false))
