@@ -422,19 +422,20 @@ pub fn to_toml(app: &Workspace) -> String {
     toml(app, false)
 }
 
-/// The session as another window takes it (`wtf --attach`): with `to`, the end of the visible
-/// range, so a window of another width shows the same stretch, and the agent's whole trail.
+/// The session as another window takes it (`present`): with `to`, the end of the visible range,
+/// so a window of another width shows the same stretch.
 pub fn to_shared_toml(app: &Workspace) -> String {
-    toml(app, true) + &trail_toml(app, 0)
+    toml(app, true)
 }
 
-/// The session `present` hands over: shared, with the steps since the last present.
-pub fn to_presented_toml(app: &Workspace) -> String {
-    toml(app, true) + &trail_toml(app, app.presented)
+/// The session a window reads from an agent's workspace (spec §15 "Joining"): shared, then the
+/// whole trail.
+pub fn to_link_toml(app: &Workspace) -> String {
+    toml(app, true) + &trail_toml(app)
 }
 
-/// A shared session without its trail, which comes last: what a window following the agent
-/// compares, so a new step alone doesn't move the user's view (spec §15 "Trail").
+/// A shared session without its trail, which comes last: what a window following an agent
+/// compares, so a new step alone doesn't touch the user's view (spec §15 "Following").
 pub fn without_trail(text: &str) -> &str {
     text.split_once("\n[[trail]]\n").map_or(text, |(view, _)| view)
 }
@@ -463,10 +464,10 @@ fn steps(app: &Workspace, v: Option<Value>, out: &mut Vec<crate::workspace::Step
     }
 }
 
-/// The trail from step `from` on, as `[[trail]]` tables (spec §15 "Trail").
-fn trail_toml(app: &Workspace, from: usize) -> String {
+/// The trail as `[[trail]]` tables (spec §15 "Trail").
+fn trail_toml(app: &Workspace) -> String {
     let fpt = app.trace.fs_per_tick;
-    app.trail[from.min(app.trail.len())..]
+    app.trail
         .iter()
         .map(|s| {
             let time = s.time.map_or(String::new(), |t| format!("time = {}\n", quote(&time::format_exact(t, fpt))));

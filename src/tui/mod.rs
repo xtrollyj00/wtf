@@ -21,29 +21,26 @@ pub fn run(app: &mut App) -> Result<(), String> {
             None
         }
     };
-    // the agent's session, read every half second while attached, each change sent on
-    let agent = app.follow.as_ref().map(|f| {
+    // the agents on this trace and their sessions, read every half second, each change sent on
+    // (spec §15 "Joining")
+    let agents = {
         let (tx, rx) = std::sync::mpsc::channel();
-        let id = f.id.clone();
+        let trace = app.ws.trace_path.clone();
         std::thread::spawn(move || {
-            let mut last = String::new();
+            let mut last: Vec<(String, String)> = Vec::new();
             loop {
+                let now: Vec<(String, String)> = live::on_trace("agent", &trace).into_iter().filter_map(|id| live::get(&id).ok().map(|(_, t)| (id, t))).collect();
+                if now != last {
+                    last = now.clone();
+                    if tx.send(now).is_err() {
+                        return;
+                    }
+                }
                 std::thread::sleep(std::time::Duration::from_millis(500));
-                let now = live::get(&id).map(|(_, t)| t);
-                let gone = now.is_err();
-                if now.as_ref().is_ok_and(|t| *t == last) {
-                    continue;
-                }
-                if let Ok(t) = &now {
-                    last = t.clone();
-                }
-                if tx.send(now).is_err() || gone {
-                    return;
-                }
             }
         });
         rx
-    });
+    };
     let mut term = ratatui::init();
     let _ = crossterm::execute!(std::io::stdout(), crossterm::event::EnableMouseCapture);
     let res = (|| -> std::io::Result<()> {
@@ -58,7 +55,7 @@ pub fn run(app: &mut App) -> Result<(), String> {
                 if let Some(inc) = live.as_ref().and_then(|(_, rx)| rx.try_recv().ok()) {
                     let answer = match inc.request {
                         live::Request::Get => Ok(crate::mcp::link_answer(&app.ws)),
-                        live::Request::Put(text) => app.present(&text),
+                        live::Request::Put(text) => app.take_present(&text),
                     };
                     let _ = inc.reply.send(answer);
                     break;
@@ -70,8 +67,8 @@ pub fn run(app: &mut App) -> Result<(), String> {
                 if app.tick(std::time::Instant::now()) {
                     break;
                 }
-                if let Some(now) = agent.as_ref().and_then(|rx| rx.try_recv().ok())
-                    && app.agent_changed(now)
+                if let Ok(now) = agents.try_recv()
+                    && app.agents_now(now)
                 {
                     break;
                 }

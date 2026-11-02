@@ -103,7 +103,8 @@ start	end	delay	addr	data	resp
 
 When it has found something, it prepares the rows and puts marks on the events, then `present`s
 them in your open wtf window (`:undo` gives you your own view back). With no window open, it writes
-a session file for you to open. `wtf --attach` lists what agents have open.
+a session file for you to open. While it works, your window on the trace shows each step it takes,
+and `:follow` shows its workspace as it builds it.
 
 https://github.com/user-attachments/assets/7c244cad-1cd9-48b3-ba10-d42ba655e726
 

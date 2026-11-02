@@ -173,7 +173,7 @@ fn presents_a_session() {
     let mut ws = with(&["top.clk"]);
     ws.saved = wtf_core::session::rows_toml(&ws);
     let text = "[cursors]\n2 = \"30ns\"\n[[rows]]\nsignal = \"top.cpu.data\"\n[[rows]]\nsignal = \"top.nope\"\n";
-    let (msg, warned) = ws.present(text).unwrap();
+    let (msg, warned) = ws.present(text, false).unwrap();
     assert_eq!((msg.as_str(), warned), ("agent: presented 1 signals, 2 cursors; not in trace: top.nope", true));
     assert_eq!(names(&ws), ["data"]);
     // not saved: the user decides, and can go back
@@ -181,7 +181,7 @@ fn presents_a_session() {
     ws.undo().unwrap();
     assert_eq!(names(&ws), ["clk"]);
     // a session that doesn't read changes nothing
-    assert!(ws.present("rows = [").unwrap_err().starts_with("session: "));
+    assert!(ws.present("rows = [", false).unwrap_err().starts_with("session: "));
     assert_eq!(names(&ws), ["clk"]);
 }
 

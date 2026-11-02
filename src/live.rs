@@ -164,8 +164,14 @@ pub fn sessions() -> Result<Vec<Session>, String> {
 
 /// The most recently started window on this trace.
 pub fn window_on(trace: &Path) -> Option<String> {
-    let trace = std::fs::canonicalize(trace).ok()?;
-    sessions().ok()?.into_iter().find(|s| s.kind == "window" && s.trace == trace).map(|s| s.id)
+    on_trace("window", trace).into_iter().next()
+}
+
+/// The sessions of `kind` (`window`, `agent`) on this trace, most recently started first (spec
+/// §15 "Joining").
+pub fn on_trace(kind: &str, trace: &Path) -> Vec<String> {
+    let Ok(trace) = std::fs::canonicalize(trace) else { return Vec::new() };
+    sessions().unwrap_or_default().into_iter().filter(|s| s.kind == kind && s.trace == trace).map(|s| s.id).collect()
 }
 
 /// Send a request to session `id` and wait for its answer.

@@ -528,7 +528,7 @@ fn status(app: &App, buf: &mut Buffer, w: usize, y: usize) -> Rect {
     let dim = Style::new().fg(pal().dim);
     let sep = format!("  {}  ", gl().dot);
     let mut parts: Vec<(String, Style)> = Vec::new();
-    if let Some(f) = app.follow.as_ref().filter(|f| f.on) {
+    if let Some(f) = app.follow.as_ref() {
         parts.extend([(format!("following {}", f.id), Style::new().fg(pal().cursor)), (sep.clone(), dim)]);
     }
     parts.push((time::format(app.ws.view.cursor, fpt), Style::new()));

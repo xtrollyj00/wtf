@@ -317,11 +317,11 @@ impl Wtf {
             live::Request::Get => Ok(link_answer(&lock(&shared_app))),
             live::Request::Put(_) => Err("an agent's workspace takes no sessions".into()),
         })
-        .map_err(|e| format!("can't listen for wtf --attach: {e}"))?;
+        .map_err(|e| format!("can't listen for the user's wtf windows: {e}"))?;
         st.workspaces.push(Opened { id: id.clone(), app, _link: link });
         st.current = st.workspaces.len() - 1;
         drop(st);
-        Ok(format!("workspace {id} (wtf --attach {id})\n{}", self.info()?))
+        Ok(format!("workspace {id} (the user's wtf windows on this trace see your steps; :follow there shows the workspace)\n{}", self.info()?))
     }
 
     #[tool(name = "use", description = "Make another of this server's workspaces the current one.")]
@@ -735,33 +735,34 @@ impl Wtf {
         let w = current(self)?;
         let mut app = lock(&w);
         let text = declared(&mut app, &a)?;
-        let (msg, warned) = app.present(&text)?;
+        // decodes made before with `command` stay (spec §15)
+        let (msg, warned) = app.present(&text, true)?;
         let warn = if warned { format!("({msg})\n") } else { String::new() };
         Ok(budget(format!("{}{warn}", describe(&app, None))))
     }
 
-    #[tool(description = "Show the workspace to the user, in their wtf window on this trace or as a session file.")]
+    #[tool(description = "Show the workspace to the user, in every wtf window on this trace or as a session file.")]
     fn present(&self) -> Result<String, String> {
         let w = current(self)?;
-        let mut app = lock(&w);
+        let app = lock(&w);
         if app.rows.is_empty() {
             return Err("the workspace has no signals yet: set it up with `workspace` or `command`".into());
         }
-        // with the steps since the last present (spec §15 "Trail")
-        let text = session::to_presented_toml(&app);
-        match live::window_on(&app.trace_path) {
-            Some(id) => {
-                let shown = live::request(&id, live::Request::Put(text)).map(|m| format!("shown in the user's window: {m}"))?;
-                app.presented = app.trail.len();
-                Ok(shown)
-            }
-            None => {
+        let text = session::to_shared_toml(&app);
+        // every window on the trace: they are all the user's (spec §15 "Present")
+        let shown: Vec<Result<String, String>> = live::on_trace("window", &app.trace_path).iter().map(|id| live::request(id, live::Request::Put(text.clone()))).collect();
+        match shown.len() {
+            0 => {
                 let mut path = app.trace_path.as_os_str().to_owned();
                 path.push(".agent.session.toml");
                 let path = std::path::PathBuf::from(path);
                 session::write(&path, &text)?;
-                app.presented = app.trail.len();
                 Ok(format!("no wtf window is open on this trace; written to {0} (open it with: wtf -S {0} {1})", path.display(), app.trace_path.display()))
+            }
+            1 => shown.into_iter().next().unwrap().map(|m| format!("shown in the user's window: {m}")),
+            n => {
+                let answers: Vec<String> = shown.into_iter().map(|r| r.unwrap_or_else(|e| format!("error: {e}"))).collect();
+                Ok(format!("shown in the user's {n} windows on this trace: {}", answers.join("; ")))
             }
         }
     }
@@ -774,9 +775,9 @@ impl Wtf {
         let (described, toml) = live::get(&id)?;
         if a.adopt {
             // the window's copy of the trail isn't the agent's own
-            let trail = (std::mem::take(&mut app.trail), app.presented);
-            let r = app.present(&toml);
-            (app.trail, app.presented) = trail;
+            let trail = std::mem::take(&mut app.trail);
+            let r = app.present(&toml, true);
+            app.trail = trail;
             let (msg, warned) = r?;
             let warn = if warned { format!("; {msg}") } else { String::new() };
             return Ok(format!("{described}\n(adopted into the workspace{warn})"));
@@ -805,9 +806,10 @@ fn screen(app: &mut Workspace, w: u16, asked: &Option<String>) -> Result<String,
     Ok(format!("{} - {}:\n{}", show(app, from, u), show(app, to, rounded), text.trim_end_matches('\n')))
 }
 
-/// The answer to `GET` on the link: the session in words, `---`, then as another window takes it.
+/// The answer to `GET` on the link: the session in words, `---`, then as another window takes it,
+/// with its trail (spec §15 "Joining").
 pub fn link_answer(app: &Workspace) -> String {
-    live::get_answer(&describe(app, None), &session::to_shared_toml(app))
+    live::get_answer(&describe(app, None), &session::to_link_toml(app))
 }
 
 /// The workspace in words, for `view`, its times in `unit` (default: the one that fits them).
@@ -934,7 +936,7 @@ mod tests {
         assert!(agent.info().unwrap_err().starts_with("no trace is open"));
         let opened = agent.open(Parameters(OpenArgs { trace: trace.display().to_string() })).unwrap();
         let id = format!("{}-1", std::process::id());
-        assert!(opened.starts_with(&format!("workspace {id} (wtf --attach {id})\nsimple.vcd\n")), "{opened}");
+        assert!(opened.starts_with(&format!("workspace {id} (the user's wtf windows on this trace see your steps; :follow there shows the workspace)\nsimple.vcd\n")), "{opened}");
         assert!(agent.sessions().contains(&format!("{id}  agent  {}  (yours, current)", trace.display())), "{}", agent.sessions());
         assert!(agent.use_session(Parameters(UseArgs { session: "nope".into() })).is_err());
 
@@ -968,7 +970,7 @@ mod tests {
         cmd("radix dec").unwrap();
         let view = agent.view(Parameters(ViewArgs { unit: None })).unwrap();
         assert!(view.contains("2: 20ns, +20ns after 1"), "{view}");
-        // what `wtf --attach` gets from the workspace
+        // what a window on the trace reads from the workspace (spec §15 "Joining")
         let attached = live::request(&id, live::Request::Get).unwrap();
         assert!(attached.starts_with(&view) && attached.contains("\nto = \"79ns\"\n"), "{attached}");
         assert!(agent.render(Parameters(RenderArgs { signals: vec![], from: None, to: None, width: Some(80), unit: None })).unwrap().contains("▾ evidence"));

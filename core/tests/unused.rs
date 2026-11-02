@@ -51,7 +51,7 @@ fn present_shows_only_what_the_session_names() {
     cmd(&mut ws, "signal hi = cpu.data[7:4]");
     let clk = ws.trace.by_path["top.clk"];
     let session = wtf_core::session::to_toml(&with(&["top.clk"]));
-    ws.present(&session).unwrap();
+    ws.present(&session, false).unwrap();
     assert!(ws.streams.is_empty() && ws.protocols.is_empty() && ws.signals.is_empty());
     assert!(!has(&ws, "p") && !has(&ws, "p.d") && !has(&ws, "hi"));
     assert_eq!(ws.rows[0].sig().unwrap().var, clk);

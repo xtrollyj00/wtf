@@ -60,7 +60,10 @@ pub struct App {
     pub records: Option<Records>,
     /// Text `yy` / `yt` copied, for the terminal's clipboard (OSC 52).
     pub yank: Option<String>,
-    /// The agent's session this window follows (`wtf --attach`).
+    /// The agents working on this trace (spec §15 "Joining"), by id, with the session each had
+    /// when last read.
+    pub agents: Vec<(String, String)>,
+    /// The agent this window follows (`:follow`).
     pub follow: Option<Follow>,
     /// The trace file as last loaded, and a change to it seen since, with when it was first seen.
     seen: Stamp,
@@ -77,21 +80,16 @@ pub struct App {
     pub menu: Option<Menu>,
 }
 
-/// A window opened with `wtf --attach <id>` follows that session: each change the agent makes
-/// is shown as `present` shows it (spec §15 "Attach").
+/// The agent a window follows (`:follow`, spec §15 "Following"): each change it makes to its
+/// workspace is shown as `present` shows it.
 pub struct Follow {
     pub id: String,
-    /// Following, not stopped with `:follow off`.
-    pub on: bool,
-    /// The session text last shown, and the newest the agent has.
-    shown: String,
-    latest: String,
-}
-
-impl Follow {
-    pub fn new(id: &str, text: &str) -> Self {
-        Follow { id: id.to_string(), on: true, shown: text.to_string(), latest: text.to_string() }
-    }
+    /// The agent's session as last shown.
+    pub shown: String,
+    /// The view `:follow off` brings back, as a session: the user's own from before `:follow`, or
+    /// what the agent presented since, and whether it was presented.
+    pub own: String,
+    pub presented: bool,
 }
 
 /// A file's modification time and size: a new simulation run changes them.
@@ -147,6 +145,7 @@ impl App {
             examine: None,
             records: None,
             yank: None,
+            agents: Vec::new(),
             follow: None,
             seen,
             changed: None,
@@ -160,10 +159,20 @@ impl App {
 
     /// Show a session the agent prepared (`Workspace::present`) and say so.
     pub fn present(&mut self, text: &str) -> Result<String, String> {
-        let msg = self.ws.present(text)?;
+        let msg = self.ws.present(text, false)?;
         self.mode = Mode::Normal;
         self.msg = Some(msg.clone());
         Ok(msg.0)
+    }
+
+    /// A `present` from an agent over the link: shown, and while following, it is what
+    /// `:follow off` comes back to (spec §15 "Following").
+    pub fn take_present(&mut self, text: &str) -> Result<String, String> {
+        let msg = self.present(text)?;
+        if let Some(f) = self.follow.as_mut() {
+            (f.own, f.presented) = (session::to_shared_toml(&self.ws), true);
+        }
+        Ok(msg)
     }
 
     /// One of the agent's steps as a line: the tool, what it asked, the answer's first line.
@@ -194,7 +203,7 @@ impl App {
             // the agent's steps, newest last; Enter jumps to a step's time (spec §15 "Trail")
             "trail" => {
                 if self.ws.trail.is_empty() {
-                    return Err("no trail yet: the agent's steps show here when you follow it (wtf --attach) or it presents".into());
+                    return Err("no trail yet: the steps of an agent working on this trace show here".into());
                 }
                 let items: Vec<_> = self.ws.trail.iter().map(|s| (s.time, Self::step_line(s))).collect();
                 let (title, hl) = (format!("{} steps", items.len()), items.len() - 1);
@@ -235,61 +244,90 @@ impl App {
     }
 
 
-    /// The agent's session as it is now, or why it can't be read (the session is gone). Shows a
-    /// change when following; returns true when there is something new to draw.
-    pub fn agent_changed(&mut self, now: Result<String, String>) -> bool {
-        let Some(f) = &mut self.follow else { return false };
-        match now {
-            Ok(text) => {
-                f.latest = text;
-                self.show_latest()
-            }
-            Err(e) => {
-                self.msg = Some((format!("not following {}: {e}", f.id), true));
-                self.follow = None;
-                true
-            }
-        }
-    }
-
-    fn show_latest(&mut self) -> bool {
-        let Some(f) = &mut self.follow else { return false };
-        if !f.on || f.latest == f.shown {
+    /// The agents on this trace and their sessions now (spec §15 "Joining"): says who joined and
+    /// left and each new step, takes the trail of the agent followed (or else of the one that made
+    /// the step), and shows the followed agent's changes. Returns true when there is something new
+    /// to draw.
+    pub fn agents_now(&mut self, now: Vec<(String, String)>) -> bool {
+        if now == self.agents {
             return false;
         }
-        let old = std::mem::replace(&mut f.shown, f.latest.clone());
-        let text = f.shown.clone();
-        let before = self.ws.trail.len();
-        // a new step alone takes the steps, leaving the user's view where it is (spec §15 "Trail")
-        if session::without_trail(&old) == session::without_trail(&text) {
-            self.ws.trail = session::read_trail(&self.ws, &text);
-        } else {
-            let r = self.present(&text).map(drop);
-            self.report(r);
+        let old = std::mem::replace(&mut self.agents, now);
+        let ids = |l: &[(String, String)]| l.iter().map(|a| a.0.clone()).collect::<Vec<_>>();
+        let (was, is) = (ids(&old), ids(&self.agents));
+        let mut said: Vec<(String, bool)> = Vec::new();
+        for id in is.iter().filter(|id| !was.contains(id)) {
+            said.push((format!("agent {id} joined (:follow shows its workspace)"), false));
         }
-        if self.ws.trail.len() != before
-            && let Some(s) = self.ws.trail.last()
-        {
-            self.msg = Some((format!("agent: {}", Self::step_line(s)), s.answer.starts_with("error: ")));
+        for id in was.iter().filter(|id| !is.contains(id)) {
+            if self.follow.as_ref().is_some_and(|f| &f.id == id) {
+                self.follow = None;
+                said.push((format!("agent {id} left; not following it"), true));
+            } else {
+                said.push((format!("agent {id} left"), false));
+            }
+        }
+        let several = self.agents.len() > 1;
+        for (id, text) in self.agents.clone() {
+            let before = old.iter().find(|a| a.0 == id).map_or(String::new(), |a| a.1.clone());
+            if text == before {
+                continue;
+            }
+            let followed = self.follow.as_ref().is_some_and(|f| f.id == id);
+            if followed && session::without_trail(&text) != session::without_trail(&self.follow.as_ref().unwrap().shown) {
+                let r = self.present(&text).map(drop);
+                self.report(r);
+            }
+            if let Some(f) = self.follow.as_mut().filter(|f| f.id == id) {
+                f.shown = text.clone();
+            }
+            let trail = session::read_trail(&self.ws, &text);
+            if trail != session::read_trail(&self.ws, &before) && !trail.is_empty() && (followed || self.follow.is_none()) {
+                self.ws.trail = trail;
+                // an agent just joined says so; its steps before are in `:trail`
+                if let Some(s) = self.ws.trail.last().filter(|_| was.contains(&id)) {
+                    let who = if several { format!("agent {id}") } else { "agent".into() };
+                    said.push((format!("{who}: {}", Self::step_line(s)), s.answer.starts_with("error: ")));
+                }
+            }
+        }
+        if let Some(last) = said.pop() {
+            self.msg = Some(last);
         }
         true
     }
 
-    /// `:follow` / `:follow off`.
+    /// `:follow [<id>]` / `:follow off` (spec §15 "Following"): the agents are listed afresh, so it
+    /// works before the first look and in `--snapshot`.
     fn set_follow(&mut self, arg: &str) -> Result<(), String> {
-        let Some(f) = &mut self.follow else { return Err("not attached to an agent's session: wtf --attach <id> follows one".into()) };
-        match arg {
-            "off" => {
-                f.on = false;
-                self.msg = Some((format!("not following {}", f.id), false));
-            }
-            "" => {
-                f.on = true;
-                self.msg = Some((format!("following {}", f.id), false));
-                self.show_latest();
-            }
-            _ => return Err("usage: :follow [off]".into()),
+        if arg == "off" {
+            let f = self.follow.take().ok_or("not following an agent")?;
+            // back to the user's own view, or what the agent presented: one undo step, u shows
+            // what was followed
+            self.ws.present(&f.own, false)?;
+            let back = if f.presented { "the agent's present is back" } else { "your view is back" };
+            self.msg = Some((format!("not following {}; {back} (u: what you followed)", f.id), false));
+            return Ok(());
         }
+        let agents = crate::live::on_trace("agent", &self.ws.trace_path);
+        let id = match (arg, agents.as_slice()) {
+            (_, []) => return Err("no agent is working on this trace".into()),
+            ("", [one]) => one.clone(),
+            ("", _) => return Err(format!("several agents work on this trace: :follow <id> ({})", agents.join(", "))),
+            (id, _) if agents.iter().any(|a| a == id) => id.to_string(),
+            (id, _) => return Err(format!("no agent {id} on this trace (agents: {})", agents.join(", "))),
+        };
+        let (_, text) = crate::live::get(&id)?;
+        // following another agent keeps the view from before the first
+        let (own, presented) = self.follow.take().map_or_else(|| (session::to_shared_toml(&self.ws), false), |f| (f.own, f.presented));
+        self.present(&text)?;
+        self.follow = Some(Follow { id: id.clone(), shown: text.clone(), own, presented });
+        if let Some(a) = self.agents.iter_mut().find(|a| a.0 == id) {
+            a.1 = text;
+        } else {
+            self.agents.push((id.clone(), text));
+        }
+        self.msg = Some((format!("following {id}"), false));
         Ok(())
     }
 

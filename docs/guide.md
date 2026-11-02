@@ -223,7 +223,7 @@ Search expressions: `/0x40` a value, `/x` `/z` unknown / high impedance, `/valid
 `/@clk fell(valid) && !past(ready)` (also `rose()` `stable()`).
 
 Command line (§12): `wtf [-S <session>] [--glyphs <set>] [--snapshot <w>[x<h>] [--ansi]
-[--keys <keys>]] <trace>`, `wtf --attach [<id>]`, `wtf --mcp`.
+[--keys <keys>]] <trace>`, `wtf --mcp`.
 
 ## Look and feel
 
@@ -285,14 +285,17 @@ What it does (§15):
 2. **Decodes first.** It finds the interfaces by their signals and runs a decoder, then reads the
    records (`records` with `where` and `group_by`). Records are exact and carry the protocol
    checks; hand-written searches are its fallback.
-3. **Presents.** It prepares rows, marks and a visible range, then `present`s them in your open
-   window for the same trace. Your layout is replaced as one undo step; `:undo` gives you your
+3. **Presents.** It prepares rows, marks (each with a name and a note saying what happens there)
+   and a visible range, then `present`s them in your open windows on the same trace. Your layout is replaced as one undo step; `:undo` gives you your
    own view back. Without an open window it writes a session file and tells you how to open it
    (`wtf -S <file> <trace>`).
 4. **Never saves your session.** You `:w` if you want to keep what it showed.
 
-`wtf --attach` lists the open sessions, yours and the agents'. `wtf --attach <id>` opens a window
-on an agent's workspace and follows it, so you watch it work; `:follow off` stops following.
+An agent working on your trace joins your window by itself: the status line says `agent 4123-1
+joined`, then shows each query it makes (`agent: find … · 3 matches, first 120ns`) without moving
+your view. `:trail` lists its steps, and `Enter` on one jumps to its time. `:follow` shows the
+agent's workspace and keeps it in step as the agent works; `:follow off` stops. Opening the
+trace after the agent started works the same way.
 Inside the window, `:help records`, `:help decode` and the like show the reference the agent
 reads.
 

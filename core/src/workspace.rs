@@ -44,10 +44,9 @@ pub struct Workspace {
     pub marks: [Option<Tick>; 9],
     /// Each mark's name and note, by the same index (spec §9).
     pub labels: [Label; 9],
-    /// The agent's steps (spec §15 "Trail"), oldest first, at most `TRAIL`; and how many of them
-    /// the last `present` already handed over.
+    /// The agent's steps (spec §15 "Trail"), oldest first, at most `TRAIL`: the workspace's own in
+    /// an agent's, the followed (or last active) agent's in a window.
     pub trail: Vec<Step>,
-    pub presented: usize,
     /// Where cursor 1 was before the last jump that moved it, for `''` (spec §9).
     pub back: Option<Tick>,
     /// The time unit of the agent's answers (`:unit`), or None for the one the fastest clock used
@@ -144,7 +143,6 @@ impl Workspace {
             marks: [None; 9],
             labels: Default::default(),
             trail: Vec::new(),
-            presented: 0,
             back: None,
             unit: None,
             clock_unit: None,
@@ -590,9 +588,12 @@ impl Workspace {
     }
 
     /// Show a session the agent prepared (`present`, spec §15): its rows and cursors
-    /// replace the window's, as one undo step; the session file stays as it was (`[+]`). Returns
-    /// the status message, `agent: presented …` (an error if parts didn't fit).
-    pub fn present(&mut self, text: &str) -> Result<Msg, String> {
+    /// replace the window's, as one undo step; the session file stays as it was (`[+]`). Its named
+    /// signals, protocols and decodes replace the window's too, unless `keep_decoding`: then the
+    /// workspace's stay, those the session names replacing ones of the same name (the agent's own
+    /// `workspace`, `user_view` adopt). Returns the status message, `agent: presented …` (an error
+    /// if parts didn't fit).
+    pub fn present(&mut self, text: &str, keep_decoding: bool) -> Result<Msg, String> {
         // check it reads before anything changes
         text.parse::<toml::Table>().map_err(|e| format!("session: {}", e.message()))?;
         let before = (self.rows.clone(), self.sel);
@@ -600,10 +601,12 @@ impl Workspace {
         (self.marks, self.view.cursor, self.back) = ([None; 9], 0, None);
         self.labels = Default::default();
         // the session is all that is shown: named signals and decoding it leaves out go (§15)
-        self.signals.clear();
-        self.protocols.clear();
-        self.decodes.clear();
-        self.streams.clear();
+        if !keep_decoding {
+            self.signals.clear();
+            self.protocols.clear();
+            self.decodes.clear();
+            self.streams.clear();
+        }
         let warn = session::apply(self, text);
         self.saved = saved;
         let warn = warn?;
@@ -897,7 +900,6 @@ impl Workspace {
         self.trail.push(step);
         let over = self.trail.len().saturating_sub(TRAIL);
         self.trail.drain(..over);
-        self.presented = self.presented.saturating_sub(over);
     }
 
     /// The lowest numbered mark at the cursor with a name or a note, as (index, label).

@@ -360,6 +360,10 @@ fn workspace_in_one_call() {
     assert_eq!(s.ok("find", json!({"expr": "pair == 2"})), "time\n20ns");
     let bad = s.tool("workspace", json!({"signals": ["x = nope", "y"], "rows": ["x"]}));
     assert_eq!(bad, Err("signal x: unknown signal: nope\nsignals: y: not `name = expr`\nunknown signal: x".into()));
+    // decoding made with `command` before stays: the declaration adds to it (spec §15)
+    s.ok("command", json!({"line": "protocol beat clock=top.clk when=top.cpu.busy d=top.cpu.data"}));
+    s.ok("workspace", json!({"rows": ["top.clk"]}));
+    assert!(s.ok("records", json!({"stream": "beat", "count_only": true})).starts_with("2 records"), "the decode survived");
 }
 
 #[test]
@@ -457,14 +461,15 @@ fn answers_are_capped() {
 }
 
 #[test]
-fn workspaces_and_attach() {
+fn workspaces_and_joining() {
     let dir = Dir::new("ws");
     let mut s = Server::start(&dir.0);
     assert_eq!(s.ok("sessions", json!({})), "no sessions: the user has no wtf window open; `open` a trace");
     let pid = s.child.id();
     let fst = std::fs::canonicalize("tests/data/simple.fst").unwrap();
-    assert!(s.ok("open", json!({"trace": simple()})).starts_with(&format!("workspace {pid}-1 (wtf --attach {pid}-1)\nsimple.vcd\n")));
-    assert!(s.ok("open", json!({"trace": fst})).starts_with(&format!("workspace {pid}-2 (wtf --attach {pid}-2)\nsimple.fst\n")));
+    let joined = "(the user's wtf windows on this trace see your steps; :follow there shows the workspace)";
+    assert!(s.ok("open", json!({"trace": simple()})).starts_with(&format!("workspace {pid}-1 {joined}\nsimple.vcd\n")));
+    assert!(s.ok("open", json!({"trace": fst})).starts_with(&format!("workspace {pid}-2 {joined}\nsimple.fst\n")));
     let _window = fake_window(&dir.0, "77", &simple(), "version = 1\n");
     let mut listed: Vec<String> = s.ok("sessions", json!({})).lines().map(String::from).collect();
     listed.sort();
@@ -483,15 +488,12 @@ fn workspaces_and_attach() {
     s.ok("command", json!({"line": "cursor 2 30ns"}));
     insta::assert_snapshot!("render_workspace", s.ok("render", json!({"width": 60})));
 
-    // the user joins: `wtf --attach` lists the same sessions, and shows a workspace's rows and cursors
-    let out = wtf(&dir.0).arg("--attach").output().unwrap();
-    let listed: Vec<String> = String::from_utf8(out.stdout).unwrap().lines().map(String::from).collect();
-    assert!(listed.contains(&format!("{pid}-1  agent  {}", simple().display())), "{listed:?}");
-    let shot = |id: String| String::from_utf8(wtf(&dir.0).args(["--attach", &id, "--snapshot", "60"]).output().unwrap().stdout).unwrap();
-    insta::assert_snapshot!("attach_vcd", shot(format!("{pid}-1")));
-    assert!(shot(format!("{pid}-2")).contains("busy"));
-    let out = wtf(&dir.0).args(["--attach", "nope"]).output().unwrap();
-    assert_eq!(String::from_utf8(out.stderr).unwrap(), "wtf: no session nope; `wtf --attach` lists them\n");
+    // a window on the trace follows the agent working on it (spec §15 "Following")
+    let shot = |trace: &Path, keys: &str| String::from_utf8(wtf(&dir.0).arg(trace).args(["--snapshot", "120", "--keys", keys]).output().unwrap().stdout).unwrap();
+    let followed = shot(&simple(), ":follow<CR>");
+    assert!(followed.contains("data  0xXX") && followed.contains("1─────────── 30ns ────────────2") && followed.contains(&format!("following {pid}-1")), "{followed}");
+    assert!(shot(&fst, ":follow<CR>").contains("busy"));
+    assert!(shot(&simple(), &format!(":follow {pid}-2<CR>")).contains(&format!("no agent {pid}-2 on this trace (agents: {pid}-1)")));
 
     // an agent's workspace can be read over the link, not written
     let mut link = UnixStream::connect(dir.0.join(format!("wtf-{pid}-1.sock"))).unwrap();
@@ -502,7 +504,7 @@ fn workspaces_and_attach() {
 
     // the server's sockets go with it
     drop(s);
-    assert_eq!(String::from_utf8(wtf(&dir.0).arg("--attach").output().unwrap().stdout).unwrap(), "77  window  ".to_string() + &simple().display().to_string() + "\n");
+    assert!(shot(&simple(), ":follow<CR>").contains("no agent is working on this trace"));
 }
 
 #[test]
@@ -519,21 +521,25 @@ fn trail_reaches_the_window() {
     let _ = s.tool("value_at", json!({"signals": ["nope"], "time": "10ns"}));
     // the agent's own declaration keeps the steps before it
     s.ok("workspace", json!({"rows": ["top.cpu.data"]}));
+    // a window reads the whole trail over the link (spec §15 "Joining"); present carries none
     let window = fake_window(&dir.0, "5", &trace, "version = 1\n");
     s.ok("present", json!({}));
-    let toml = window.recv().unwrap();
+    assert!(!window.recv().unwrap().contains("[[trail]]"));
+    let ws = UnixStream::connect(dir.0.join(format!("wtf-{}-1.sock", s.child.id()))).unwrap();
+    let mut ws = BufReader::new(ws);
+    writeln!(ws.get_mut(), "GET").unwrap();
+    let mut toml = String::new();
+    ws.read_to_string(&mut toml).unwrap();
     let steps: Vec<&str> = toml.split("\n[[trail]]\n").skip(1).collect();
     assert_eq!(steps.len(), 4, "{toml}");
-    assert!(steps[3].starts_with("tool = \"workspace\"\nask = \"1 rows, 0 cursors\"\nanswer = \"declared\"\n"), "{}", steps[3]);
     assert_eq!(steps[0], "tool = \"command\"\nask = \"add top.cpu.data\"\nanswer = \"added 1: top.cpu.data\"\n");
     assert!(steps[1].starts_with("tool = \"find\"\nask = \"top.cpu.busy\"\nanswer = \"1 matches, first 20ns") && steps[1].ends_with("time = \"20ns\"\n"), "{}", steps[1]);
     assert!(steps[2].starts_with("tool = \"value_at\"\nask = \"nope at 10ns\"\nanswer = \"error: "), "{}", steps[2]);
-    // the next present carries only what came after
-    s.ok("value_at", json!({"signals": ["top.cpu.data"], "time": "30ns"}));
-    s.ok("present", json!({}));
-    let toml = window.recv().unwrap();
-    let steps: Vec<&str> = toml.split("\n[[trail]]\n").skip(1).collect();
-    assert_eq!(steps, ["tool = \"value_at\"\nask = \"top.cpu.data at 30ns\"\nanswer = \"at 30ns:\"\ntime = \"30ns\"\n"], "{toml}");
+    // the agent's own declaration keeps the steps before it
+    assert!(steps[3].starts_with("tool = \"workspace\"\nask = \"1 rows, 0 cursors\"\nanswer = \"declared\"\n"), "{}", steps[3]);
+    // a real window following the agent lists them
+    let shot = String::from_utf8(wtf(&dir.0).arg(&trace).args(["--snapshot", "100x14", "--keys", ":follow<CR>:trail<CR>"]).output().unwrap().stdout).unwrap();
+    assert!(shot.contains("4 steps") && shot.contains("find top.cpu.busy  ·  1 matches, first 20ns"), "{shot}");
 }
 
 #[test]

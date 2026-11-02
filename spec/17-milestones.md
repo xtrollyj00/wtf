@@ -16,7 +16,7 @@ Each milestone ends with something usable for day-to-day debugging.
 7. **AI-assisted debugging.** The agent investigates headless and shows its evidence live in your
    window: its own workspace, `present`, `user_view` and the link to the window (section 15).
 8. **Sessions.** One MCP server for every trace, and the user can join the agent's work:
-   `sessions`, `open`, `use`, the registry of sockets and `wtf --attach` (section 15).
+   `sessions`, `open`, `use`, the registry of sockets, joining and following (section 15).
 9. **Decoders and computed signals** (section 16).
    - **First cut**: computed signals (slices, concatenation, `rose` / `fell` / `stable` /
      `past`), records and decoders, the protocols on streams `frame`, `pair` and `check`, sampled
