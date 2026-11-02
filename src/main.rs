@@ -1394,6 +1394,22 @@ mod tests {
     }
 
     #[test]
+    fn field_all_z() {
+        // a record whose field is all z draws it (0xZZ, 45ns - 55ns); before the first record, a gap
+        let mut app = open("vcd", None);
+        app.run("protocol p clock=top.clk when=!top.rst d=top.cpu.data").unwrap();
+        app.run("add p.d").unwrap();
+        app.run("50ns").unwrap();
+        let w = draw::waveform(&mut app.ws, 100);
+        let row = w.lines().find(|l| l.starts_with("d ")).unwrap();
+        assert!(row.contains("0xZZ"), "{w}");
+        app.run("0ns").unwrap();
+        let w = draw::waveform(&mut app.ws, 100);
+        let row = w.lines().find(|l| l.starts_with("d ")).unwrap();
+        assert_eq!(row.split('┃').next().unwrap().trim(), "d", "the value column is blank: {w}");
+    }
+
+    #[test]
     fn mouse_records() {
         let mut app = open("vcd", Some(SESSION));
         let t0 = Instant::now();
@@ -1739,7 +1755,7 @@ mod tests {
         keys(&mut app, ":select data\n:color blue\n");
         assert!(app.msg.is_none(), "{:?}", app.msg);
         let row = app.ws.rows[app.ws.sel].sig().unwrap().clone();
-        let cells = draw::wave(&app.ws.trace, &app.ws.view, &row, None, None, None, false, 60);
+        let cells = draw::wave(&app.ws.trace, &app.ws.view, &row, None, None, None, None, 60);
         let fgs: Vec<_> = cells.iter().map(|c| c[0].1.fg).collect();
         // its values in its colour; X and Z keep theirs
         assert!(fgs.contains(&Some(draw::pal().hues[5])) && fgs.contains(&Some(draw::pal().unknown)) && fgs.contains(&Some(draw::pal().highz)), "{fgs:?}");
