@@ -49,6 +49,9 @@ pub struct App {
     matches: Option<(String, u64, bool)>,
     /// Status line message; true for errors.
     pub msg: Option<Msg>,
+    /// The last message an agent's joining, leaving or step put there: one replaces only that or
+    /// none, never the user's own (an error after `:q`, say).
+    agent_msg: Option<Msg>,
     count: Option<u64>,
     pending: Option<char>,
     pub quit: bool,
@@ -138,6 +141,7 @@ impl App {
             last_search: None,
             matches: None,
             msg: None,
+            agent_msg: None,
             count: None,
             pending: None,
             quit: false,
@@ -161,7 +165,8 @@ impl App {
     pub fn present(&mut self, text: &str) -> Result<String, String> {
         let msg = self.ws.present(text, false)?;
         self.mode = Mode::Normal;
-        self.msg = Some(msg.clone());
+        // the agent's: its next step may take the status line
+        (self.msg, self.agent_msg) = (Some(msg.clone()), Some(msg.clone()));
         Ok(msg.0)
     }
 
@@ -307,8 +312,11 @@ impl App {
                 }
             }
         }
-        if let Some(last) = said.pop() {
-            self.msg = Some(last);
+        if let Some(last) = said.pop()
+            && (self.msg.is_none() || self.msg == self.agent_msg)
+        {
+            self.msg = Some(last.clone());
+            self.agent_msg = Some(last);
         }
         true
     }

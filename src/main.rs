@@ -518,6 +518,7 @@ mod tests {
         let msg = |app: &App| app.msg.as_ref().map_or(String::new(), |m| m.0.clone());
         keys(&mut app, ":trail\n");
         assert!(msg(&app).starts_with("no trail yet"));
+        app.msg = None;
         let step = |tool: &str, ask: &str, answer: &str, time| wtf_core::workspace::Step { tool: tool.into(), ask: ask.into(), answer: answer.into(), time };
         let mut agent = open("vcd", None);
         keys(&mut agent, ":add top.cpu\n:30ns\n");
@@ -532,10 +533,16 @@ mod tests {
         assert!(app.agents_now(vec![(id.clone(), session::to_link_toml(&agent.ws))]));
         assert_eq!(msg(&app), "agent: find top.cpu.busy  ·  1 matches, first 20ns, last 20ns");
         assert_eq!((app.ws.rows.len(), app.ws.trail.len()), (0, 2));
+        // the user's own message stays; the step is still on the trail
+        keys(&mut app, ":nope\n");
+        agent.ws.add_step(step("find", "top.rst", "1 matches, first 0, last 0", Some(0)));
+        assert!(app.agents_now(vec![(id.clone(), session::to_link_toml(&agent.ws))]));
+        assert_eq!((msg(&app), app.ws.trail.len()), ("unknown command: nope".into(), 3));
+        app.msg = None;
         keys(&mut app, ":trail\n");
         let r = app.records.as_ref().unwrap();
-        assert_eq!((r.title.as_str(), r.hl, r.items[1].0), ("2 steps", 1, Some(20)));
-        keys(&mut app, "<CR>");
+        assert_eq!((r.title.as_str(), r.hl, r.items[1].0), ("3 steps", 2, Some(20)));
+        keys(&mut app, "k<CR>");
         assert_eq!((app.records.is_none(), app.ws.view.cursor), (true, 20));
         // followed (as :follow does it): the agent's changes show, the user's moves stay till then
         let text = session::to_link_toml(&agent.ws);
@@ -564,7 +571,7 @@ mod tests {
         assert_eq!(msg(&app), "agent 4123-2 joined (:follow shows its workspace)");
         other.ws.add_step(step("find", "top.clk", "8 matches, first 5, last 75", Some(5)));
         assert!(app.agents_now(both(&agent, &other)));
-        assert_eq!(app.ws.trail.len(), 3);
+        assert_eq!(app.ws.trail.len(), 4);
         // :follow off: the user's own view back, one undo step
         keys(&mut app, ":follow off\n");
         assert_eq!((app.follow.is_none(), app.ws.rows.len(), msg(&app)), (true, 0, "not following 4123-1; your view is back (u: what you followed)".into()));
@@ -585,6 +592,7 @@ mod tests {
         // the followed agent leaves: the window stays as it is
         let text = session::to_link_toml(&agent.ws);
         app.follow = Some(tui::app::Follow { id: id.clone(), shown: text, own: session::to_shared_toml(&app.ws), presented: false });
+        app.msg = None;
         assert!(app.agents_now(vec![("4123-2".to_string(), session::to_link_toml(&other.ws))]));
         assert_eq!((app.follow.is_none(), msg(&app), app.ws.rows.len()), (true, "agent 4123-1 left; not following it".into(), 4));
         assert!(app.agents_now(vec![]));

@@ -221,7 +221,9 @@ the last 200 steps.
   window has the steps already. A session file the window saves (`:w`) has none.
 - Every window on the trace takes the agents' new steps without moving the user's view, followed
   or not, and shows each on the status line: `agent: find @clk wr && addr == 0x40  ·  3 matches,
-  first 120ns` (`agent 4123-1: …` with several agents), red for an error.
+  first 120ns` (`agent 4123-1: …` with several agents), red for an error. An agent's message
+  (a step, joining, leaving, its present) replaces only another agent message or an empty status
+  line, never the user's own (an error after `:q`); the step is in `:trail` either way.
 - `:trail` (section 7) lists the steps of the agent followed, or else of the agent that made the
   last step, oldest first and the newest highlighted,
   in the box `:records` uses; `Enter` on a step with a time moves the cursor there.
