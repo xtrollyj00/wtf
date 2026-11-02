@@ -493,6 +493,7 @@ fn workspaces_and_joining() {
     let followed = shot(&simple(), ":follow<CR>");
     assert!(followed.contains("data  0xXX") && followed.contains("1─────────── 30ns ────────────2") && followed.contains(&format!("following {pid}-1")), "{followed}");
     assert!(shot(&fst, ":follow<CR>").contains("busy"));
+    assert!(shot(&simple(), ":follow<CR>:follow<CR>").contains(&format!("following {pid}-1")));
     assert!(shot(&simple(), &format!(":follow {pid}-2<CR>")).contains(&format!("no agent {pid}-2 on this trace (agents: {pid}-1)")));
 
     // an agent's workspace can be read over the link, not written
@@ -540,6 +541,10 @@ fn trail_reaches_the_window() {
     // a real window following the agent lists them
     let shot = String::from_utf8(wtf(&dir.0).arg(&trace).args(["--snapshot", "100x14", "--keys", ":follow<CR>:trail<CR>"]).output().unwrap().stdout).unwrap();
     assert!(shot.contains("4 steps") && shot.contains("find top.cpu.busy  ·  1 matches, first 20ns"), "{shot}");
+    // every window on the trace gets a present (spec §15 "Present")
+    let second = fake_window(&dir.0, "6", &trace, "version = 1\n");
+    assert_eq!(s.ok("present", json!({})), "shown in the user's 2 windows on this trace: agent: presented; agent: presented");
+    assert!(window.recv().is_ok() && second.recv().is_ok());
 }
 
 #[test]
@@ -571,6 +576,13 @@ fn present_and_user_view() {
     assert!(offered.contains("an agent presented this trace before your last :w; :agent shows it") && !offered.contains("first busy"), "{offered}");
     assert!(shot(":agent<CR>").contains("2 first busy"));
     std::fs::remove_file(dir.0.join("simple.vcd.session.toml")).unwrap();
+    // one without steps says none; one that doesn't read is a warning
+    std::fs::write(&file, "version = 1\n[[rows]]\nsignal = \"top.clk\"\n").unwrap();
+    let opened = shot("");
+    assert!(opened.contains("agent: presented 1 signals, 1 cursors; u gives your own view"), "{opened}");
+    std::fs::write(&file, "rows = [").unwrap();
+    assert!(shot("").contains("simple.vcd.agent.session.toml: session: "));
+    std::fs::remove_file(&file).unwrap();
 
     // a window on another trace doesn't count; one on this trace gets the workspace
     let _other = fake_window(&dir.0, "1", &simple(), "version = 1\n");

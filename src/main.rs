@@ -516,6 +516,8 @@ mod tests {
         // without moving the view; followed, its changes are shown; leaving stops the following
         let mut app = open("vcd", None);
         let msg = |app: &App| app.msg.as_ref().map_or(String::new(), |m| m.0.clone());
+        keys(&mut app, ":trail\n");
+        assert!(msg(&app).starts_with("no trail yet"));
         let step = |tool: &str, ask: &str, answer: &str, time| wtf_core::workspace::Step { tool: tool.into(), ask: ask.into(), answer: answer.into(), time };
         let mut agent = open("vcd", None);
         keys(&mut agent, ":add top.cpu\n:30ns\n");
@@ -585,6 +587,8 @@ mod tests {
         app.follow = Some(tui::app::Follow { id: id.clone(), shown: text, own: session::to_shared_toml(&app.ws), presented: false });
         assert!(app.agents_now(vec![("4123-2".to_string(), session::to_link_toml(&other.ws))]));
         assert_eq!((app.follow.is_none(), msg(&app), app.ws.rows.len()), (true, "agent 4123-1 left; not following it".into(), 4));
+        assert!(app.agents_now(vec![]));
+        assert_eq!(msg(&app), "agent 4123-2 left");
     }
 
     #[test]
@@ -1448,6 +1452,10 @@ mod tests {
         app.run("cursor 2 name=a name much too long to fit between the two marks here").unwrap();
         let s = snapshot(&mut app, 100, Some(8));
         assert!(s.contains("fi…─3"), "{s}");
+        // a mark right after it leaves no room: no name
+        app.run("cursor 3 31ns").unwrap();
+        let s = snapshot(&mut app, 100, Some(8));
+        assert!(!s.lines().nth(1).unwrap().contains("a name"), "the ruler: {s}");
     }
 
     #[test]
