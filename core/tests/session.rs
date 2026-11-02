@@ -18,6 +18,13 @@ fn round_trip() {
     let mut back = open();
     assert_eq!(session::apply(&mut back, &text), Ok(vec![]));
     assert_eq!(session::to_toml(&back), text);
+    // a named mark is a table; one without a name stays a time
+    wtf_core::command::run(&mut back, "cursor 3 name=done note=\"last \"").unwrap();
+    let text = session::to_toml(&back);
+    assert!(text.contains("2 = \"35ns\"\n3 = { time = \"50ns\", name = \"done\", note = \"last\" }\n"), "{text}");
+    let mut again = open();
+    assert_eq!(session::apply(&mut again, &text), Ok(vec![]));
+    assert_eq!(session::to_toml(&again), text);
     assert_eq!((&back.rows, back.marks, back.view.cursor), (&ws.rows, ws.marks, 35));
     assert_eq!(back.scope.as_deref(), Some("top.cpu"));
     assert!(text.contains("unit = \"ps\"\n"), "{text}");

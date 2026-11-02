@@ -119,9 +119,10 @@ pub struct WorkspaceArgs {
     pub decode: Vec<DecodeSpec>,
     /// The rows, top to bottom: `"name:radix:colour"`, a group or a struct's open levels (`help workspace`).
     pub rows: Vec<RowSpec>,
-    /// Cursors by number, `{"1": "80ns", "2": "390ns"}`: 1 the cursor, 2 - 9 marks.
+    /// Cursors by number, `{"1": "80ns", "2": "390ns"}`: 1 the cursor, 2 - 9 marks; a mark may be
+    /// `{"time": "390ns", "name": "first bad write", "note": "..."}`.
     #[serde(default)]
-    pub cursors: std::collections::BTreeMap<String, String>,
+    pub cursors: std::collections::BTreeMap<String, CursorSpec>,
     /// The visible range, `["60ns", "480ns"]`; default the whole trace.
     pub range: Option<[String; 2]>,
 }
@@ -219,4 +220,18 @@ pub struct UserViewArgs {
 pub struct CommandArgs {
     /// A `:` command without the colon: `decode ...`, `add ...`, `cursor 2 80ns` (`help commands`).
     pub line: String,
+}
+
+/// A cursor: its time, or a mark's time with a name and a note (spec §9).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum CursorSpec {
+    Time(String),
+    Mark {
+        time: String,
+        #[serde(default)]
+        name: String,
+        #[serde(default)]
+        note: String,
+    },
 }

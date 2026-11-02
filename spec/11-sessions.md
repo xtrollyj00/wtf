@@ -46,6 +46,7 @@ time = "0ns"            # left edge of the view
 [cursors]
 1 = "120ns"
 2 = "160ns"
+3 = { time = "200ns", name = "first bad write", note = "AW came before W" }   # a mark with a name (section 9)
 
 [[signal]]
 name = "op"

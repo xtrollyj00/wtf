@@ -31,7 +31,7 @@ pub const COMMANDS: &[Command] = &[
     Command { name: "rename", usage: ":rename <name>", desc: "Rename the group the selected row is in", args: true },
     Command { name: "ungroup", usage: ":ungroup", desc: "Dissolve the group the selected row is in, keeping its signals", args: false },
     Command { name: "select", usage: ":select <row> [<last row>]", desc: "Select a signal or group by name, or the rows from one to another", args: true },
-    Command { name: "cursor", usage: ":cursor <n> [time|off]", desc: "Put mark n at a time (1: the cursor), remove it, or jump to it, e.g. :cursor 2 120ns", args: true },
+    Command { name: "cursor", usage: ":cursor <n> [time|off] [name=] [note=]", desc: "Put mark n at a time (1: the cursor), name it, remove it, or jump to it, e.g. :cursor 2 120ns name=bad write", args: true },
     Command { name: "undo", usage: ":undo", desc: "Undo the last change to the rows", args: false },
     Command { name: "redo", usage: ":redo", desc: "Redo a change undone with :undo", args: false },
     Command { name: "fit", usage: ":fit [<from> <to>]", desc: "Zoom to the whole simulation, or between cursors or times, e.g. :fit '2 '3 or :fit 10ns 20ns", args: true },

@@ -42,6 +42,8 @@ pub struct Workspace {
     /// Marks by number, index 1 - 8 for cursors 2 - 9 (spec §9). Cursor 1 is the cursor, whose
     /// time is `view.cursor`, so index 0 stays None.
     pub marks: [Option<Tick>; 9],
+    /// Each mark's name and note, by the same index (spec §9).
+    pub labels: [Label; 9],
     /// Where cursor 1 was before the last jump that moved it, for `''` (spec §9).
     pub back: Option<Tick>,
     /// The time unit of the agent's answers (`:unit`), or None for the one the fastest clock used
@@ -76,6 +78,26 @@ pub struct Workspace {
     redo: Vec<(Vec<Row>, usize)>,
 }
 
+/// A mark's name and note (spec §9): what the agent (or the user) says happens there. Empty when
+/// it has none.
+#[derive(Clone, Default, PartialEq, Debug)]
+pub struct Label {
+    pub name: String,
+    pub note: String,
+}
+
+impl Label {
+    /// One line each, whitespace collapsed: the ruler and the status line show them.
+    pub fn new(name: &str, note: &str) -> Label {
+        let line = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+        Label { name: line(name), note: line(note) }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.name.is_empty() && self.note.is_empty()
+    }
+}
+
 /// What `Workspace::record` compares against.
 pub struct Mark {
     rows: Vec<Row>,
@@ -103,6 +125,7 @@ impl Workspace {
             reloads: 0,
             view,
             marks: [None; 9],
+            labels: Default::default(),
             back: None,
             unit: None,
             clock_unit: None,
@@ -556,6 +579,7 @@ impl Workspace {
         let before = (self.rows.clone(), self.sel);
         let saved = std::mem::take(&mut self.saved);
         (self.marks, self.view.cursor, self.back) = ([None; 9], 0, None);
+        self.labels = Default::default();
         // the session is all that is shown: named signals and decoding it leaves out go (§15)
         self.signals.clear();
         self.protocols.clear();
@@ -849,6 +873,11 @@ impl Workspace {
         std::iter::once((0, self.view.cursor)).chain((1..9).filter_map(|i| self.marks[i].map(|t| (i, t)))).collect()
     }
 
+    /// The lowest numbered mark at the cursor with a name or a note, as (index, label).
+    pub fn label_at_cursor(&self) -> Option<(usize, &Label)> {
+        (1..9).find(|&i| self.marks[i] == Some(self.view.cursor) && !self.labels[i].is_empty()).map(|i| (i, &self.labels[i]))
+    }
+
     /// `m` / `Nm`: mark `n` (an index, 1 - 8), or the lowest free one, at the cursor.
     pub fn set_mark(&mut self, n: Option<usize>) -> Result<(), String> {
         let i = match n {
@@ -857,6 +886,10 @@ impl Workspace {
             Some(i) => return Err(format!("no cursor {}: marks are 2-9", i + 1)),
             None => (1..9).find(|&i| self.marks[i].is_none()).ok_or("all 8 marks in use")?,
         };
+        // a mark moved keeps its name; a new one has none
+        if self.marks[i].is_none() {
+            self.labels[i] = Label::default();
+        }
         self.marks[i] = Some(self.view.cursor);
         Ok(())
     }
@@ -870,6 +903,7 @@ impl Workspace {
             None => (1..9).find(|&i| self.marks[i] == Some(self.view.cursor)).ok_or("no mark under the cursor")?,
         };
         self.marks[i] = None;
+        self.labels[i] = Label::default();
         Ok(())
     }
 

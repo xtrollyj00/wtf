@@ -13,7 +13,7 @@
 | `:rename <name>` | rename the group the selected row is in |
 | `:ungroup` | dissolve the group the selected row is in; its signals stay where they are |
 | `:select <row> [<last row>]` | select a signal (named as in `:add`) or group, or the rows from one to another, as `V` does |
-| `:cursor <n> [time\|off]` | put cursor `n` at a time (`:cursor 1 <time>` moves the cursor, others place a mark), remove mark `n`, or without a time jump to mark `n` (`:cursor 1` centers the screen on the cursor) |
+| `:cursor <n> [time\|off] [name=<text>] [note=<text>]` | put cursor `n` at a time (`:cursor 1 <time>` moves the cursor, others place a mark), remove mark `n`, or without a time jump to mark `n` (`:cursor 1` centers the screen on the cursor). `name=` and `note=` say what a mark shows (section 9), with a time or on a mark that exists; each runs to the next key, an empty one clears it |
 | `:scope [path]` | names resolve under this scope first, wherever signals are named (search, `:add`, `:select`, the agent's tools): with `:scope top.cpu`, `state` is `top.cpu.state` though `top.dma.state` exists; saved in the session; without a path, no scope |
 | `:radix <name>` | set the radix of the selected line (a row, or a field under it), group or `V` range (section 10), e.g. `:radix dec` |
 | `:names <signal> <value>=<name>...` | name values of a whole bus or bit signal, for the `enum` radix (section 10), e.g. `:names state 0=IDLE 1=BUSY 'h2=DONE`; values as a search takes them, checked against the width; rows showing the signal switch to `enum`. `:names <signal> off` removes the names. Saved in the session and given again on `:e` |

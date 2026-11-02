@@ -33,7 +33,7 @@ fn view_and_cursors() {
     assert_eq!(run(&mut ws, "cursor 1"), Ok(None));
     assert_eq!(run(&mut ws, "cursor 1 off"), Err("cursor 1 can't be removed".into()));
     assert_eq!(run(&mut ws, "cursor 4"), Err("no cursor 4".into()));
-    assert_eq!(run(&mut ws, "cursor 10 1ns"), Err("usage: :cursor <1-9> [time|off]".into()));
+    assert_eq!(run(&mut ws, "cursor 10 1ns"), Err("usage: :cursor <1-9> [time|off] [name=<text>] [note=<text>]".into()));
     assert_eq!(run(&mut ws, "warp"), Err("unknown command: warp".into()));
 }
 
@@ -162,4 +162,29 @@ fn quoted_values() {
     assert!(run(&mut ws, r#"decode c check clock=clk hot="busy"#).unwrap_err().starts_with("usage"));
     let err = run(&mut ws, r#"decode c check clock=clk hot="x=1 && busy""#).unwrap_err();
     assert_eq!(err, "c: hot: unknown signal: x");
+}
+
+#[test]
+fn mark_names_and_notes() {
+    // spec §9: a mark has a name and a note; `:cursor` sets them, moving keeps them
+    let mut ws = with(&["top.clk"]);
+    run(&mut ws, "cursor 2 30ns name=first bad write note=AW came before W, addr latched stale").unwrap();
+    assert_eq!((ws.marks[1], ws.labels[1].name.as_str(), ws.labels[1].note.as_str()), (Some(30), "first bad write", "AW came before W, addr latched stale"));
+    run(&mut ws, "cursor 2 40ns").unwrap();
+    assert_eq!((ws.marks[1], ws.labels[1].name.as_str()), (Some(40), "first bad write"));
+    run(&mut ws, "cursor 2 name=\"stale  addr\"").unwrap();
+    assert_eq!((ws.labels[1].name.as_str(), ws.labels[1].note.as_str()), ("stale addr", "AW came before W, addr latched stale"));
+    run(&mut ws, "cursor 2 note=").unwrap();
+    assert!(ws.labels[1].note.is_empty());
+    // removed, then placed again: a new mark, no name
+    run(&mut ws, "cursor 2 off").unwrap();
+    run(&mut ws, "cursor 2 50ns").unwrap();
+    assert!(ws.labels[1].is_empty());
+    // the cursor at a named mark
+    run(&mut ws, "cursor 3 60ns name=here").unwrap();
+    run(&mut ws, "cursor 1 60ns").unwrap();
+    assert_eq!(ws.label_at_cursor().map(|(i, l)| (i, l.name.as_str())), Some((2, "here")));
+    assert_eq!(run(&mut ws, "cursor 1 name=x"), Err("cursor 1 is the cursor and moves: name a mark (2-9)".into()));
+    assert_eq!(run(&mut ws, "cursor 4 name=x"), Err("no cursor 4: give it a time first (:cursor 4 <time> ...)".into()));
+    assert_eq!(run(&mut ws, "cursor 3 colour=red"), Err(":cursor has no key colour (name, note)".into()));
 }

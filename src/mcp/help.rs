@@ -144,7 +144,10 @@ one undo step:
   [\"pkts\", \"pkts[1]\"]}` opens levels of it, each named from the row's name; `\"fields\":
   [\"pkts[1].pair.hi:dec:red\"]` gives lines under a row a radix and colour of their own.
 - `cursors` by number, `{\"1\": \"80ns\", \"2\": \"390ns\"}`: 1 is the cursor, where values are
-  read; 2 - 9 are marks on the events to show. The user jumps to a mark with 'N.
+  read; 2 - 9 are marks on the events to show. The user jumps to a mark with 'N. Say what a mark
+  shows with `{\"time\": \"390ns\", \"name\": \"first bad write\", \"note\": \"AW before W, so the
+  address latched is stale\"}`: the name stands on the ruler, the note on the user's status line
+  when they jump there.
 - `range`: the visible range, `[\"60ns\", \"480ns\"]`; default the whole trace.
 - `scope` (`help names`); `signals`: computed signals, `[\"op = cmd[7:0]\"]`.
 - `protocols`: `{name, clock, when, fields: [\"tdata = tdata\"], roles}`, as `protocol` makes them;
@@ -163,7 +166,8 @@ edits the workspace step by step instead (`help commands`).",
   commands act on), `group <name>`, `rename <name>`, `ungroup`, `radix <radix>`, `color
   <colour|off>` (`help radix`), `names <signal> <value>=<name>...` (names for its values, as an
   FST enum table gives them; `off` removes them), `undo`, `redo`. The answer lists the rows added and removed.
-- Cursors and view: `cursor <1-9> [time|off]` (without a time, jump to that mark), `<time>`
+- Cursors and view: `cursor <1-9> [time|off] [name=<text>] [note=<text>]` (without a time or
+  keys, jump to that mark; `name=` / `note=` say what a mark shows), `<time>`
   (moves the cursor), `zoom <time per column>`, `fit [<from> <to>]` (all, or between cursors
   `'2 '3` or times).
 - Names and times: `scope <path>` (`help names`), `unit <ns|ps|...|auto>` (`help times`).

@@ -847,7 +847,10 @@ pub fn describe(app: &Workspace, unit: Option<usize>) -> String {
         .enumerate()
         .map(|(k, &(i, t))| {
             let dt = if k > 0 { format!(", +{} after {}", show(app, t - cursors[k - 1].1, u), cursors[k - 1].0 + 1) } else { String::new() };
-            format!("  {}: {}{dt}", i + 1, show(app, t, u))
+            let l = &app.labels[i];
+            let name = if l.name.is_empty() { String::new() } else { format!(", \"{}\"", l.name) };
+            let note = if l.note.is_empty() { String::new() } else { format!(": {}", l.note) };
+            format!("  {}: {}{dt}{name}{note}", i + 1, show(app, t, u))
         })
         .collect();
     // the end is where a zoom step happens to stop: rounded, unlike the times the agent set

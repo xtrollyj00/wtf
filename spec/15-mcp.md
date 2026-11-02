@@ -107,7 +107,8 @@ reuse wtf's own pieces:
   writes the state it wants instead of editing toward it:
   `{"scope": "dut", "rows": ["s_axi_aclk", {"group": "write", "rows": ["s_axi_awaddr:hex",
   "s_axi_awvalid"]}], "cursors": {"1": "80ns", "2": "390ns"}, "range": ["60ns",
-  "480ns"]}`. A struct, record or array is a row as any signal (`"pkt"`, folded); `{"signal":
+  "480ns"]}`. A mark may say what it shows: `"2": {"time": "390ns", "name": "first bad write",
+  "note": "AW came before W"}` (section 9); `view` lists the name and note after its time. A struct, record or array is a row as any signal (`"pkt"`, folded); `{"signal":
   "grid", "open": ["grid", "grid[1]"]}` opens levels of it, as a session's `open`. It is the
   session (section 11) in another shape, and goes through the same checks.
   Every unknown or ambiguous name, bad radix and bad time is reported at once and nothing

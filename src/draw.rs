@@ -603,8 +603,23 @@ fn ruler(ws: &Workspace, buf: &mut Buffer, wx: usize, ww: usize, y: usize) {
         // like bus labels: only if it fits with a spare column on each side
         let label = format!(" {} ", time::format(pair[1].1 - pair[0].1, ws.trace.fs_per_tick));
         let len = label.chars().count();
-        if len + 2 <= span {
+        if len + 2 <= span && ws.labels[pair[0].0].name.is_empty() {
             put(buf, wx + a + 1 + (span - len) / 2, y, &label, dim);
+        }
+    }
+    // a mark's name right after its number, in place of the Δt, cut to the next cursor (spec §9)
+    for (k, &(i, t)) in list.iter().enumerate() {
+        let name = &ws.labels[i].name;
+        if name.is_empty() || v.col_of(t).is_none() {
+            continue;
+        }
+        let from = col(t) + 1;
+        let to = list.get(k + 1).map_or(ww, |n| col(n.1)).saturating_sub(1);
+        let room = to.saturating_sub(from);
+        if room >= 3 {
+            let text = format!(" {name}");
+            let text: String = if text.chars().count() > room { text.chars().take(room - 1).chain([gl().cut]).collect() } else { text };
+            put(buf, wx + from, y, &text, Style::new());
         }
     }
     list.sort_by_key(|&(i, _)| i == 0);

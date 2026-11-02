@@ -142,8 +142,31 @@ pub fn apply(app: &mut Workspace, text: &str) -> Result<Vec<String>, String> {
     if let Some(Value::Table(cursors)) = t.remove("cursors") {
         for (k, v) in cursors {
             match k.parse::<usize>() {
+                Ok(1) if v.is_table() => warn.push("cursors.1: the cursor moves and has no name or note; give it a time".into()),
                 Ok(1) => app.view.cursor = time(&v, &mut warn).unwrap_or(0),
-                Ok(n @ 2..=9) => app.marks[n - 1] = time(&v, &mut warn),
+                // a mark is a time, or a table with its time, name and note (spec §9)
+                Ok(n @ 2..=9) => match v {
+                    Value::Table(mut m) => {
+                        let text = |m: &mut Table, key: &str, warn: &mut Vec<String>| match m.remove(key) {
+                            None => String::new(),
+                            Some(Value::String(s)) => s,
+                            Some(_) => {
+                                warn.push(format!("cursors.{k}.{key} must be a string"));
+                                String::new()
+                            }
+                        };
+                        let (name, note) = (text(&mut m, "name", &mut warn), text(&mut m, "note", &mut warn));
+                        match m.remove("time") {
+                            Some(t) => {
+                                app.marks[n - 1] = time(&t, &mut warn);
+                                app.labels[n - 1] = crate::workspace::Label::new(&name, &note);
+                            }
+                            None => warn.push(format!("cursors.{k}: needs a time")),
+                        }
+                        unknown(&format!("cursors.{k}."), &m, &mut warn);
+                    }
+                    v => app.marks[n - 1] = time(&v, &mut warn),
+                },
                 _ => warn.push(format!("cursors: no cursor {k} (1-9)")),
             }
         }
@@ -403,8 +426,21 @@ fn toml(app: &Workspace, shared: bool) -> String {
     let v = &app.view;
     // below one tick per column the zoom is a fraction of a tick, written as plain ticks
     let zoom = if v.cols == 1 { time::format_exact(v.ticks, fpt) } else { (1.0 / v.cols as f64).to_string() };
-    let cursors: String =
-        app.cursor_list().iter().map(|&(i, t)| format!("{} = {}\n", i + 1, quote(&time::format_exact(t, fpt)))).collect();
+    let cursors: String = app
+        .cursor_list()
+        .iter()
+        .map(|&(i, t)| {
+            let t = quote(&time::format_exact(t, fpt));
+            let l = &app.labels[i];
+            match l.is_empty() {
+                true => format!("{} = {t}\n", i + 1),
+                false => {
+                    let keys = [("name", &l.name), ("note", &l.note)].into_iter().filter(|(_, v)| !v.is_empty()).map(|(k, v)| format!(", {k} = {}", quote(v)));
+                    format!("{} = {{ time = {t}{} }}\n", i + 1, keys.collect::<String>())
+                }
+            }
+        })
+        .collect();
     format!(
         "# wtf session\nversion = {VERSION}\n{}{}\n[view]\nzoom = {}\ntime = {}\n{}\n[cursors]\n{cursors}{}",
         app.scope.as_ref().map_or(String::new(), |s| format!("scope = {}\n", quote(s))),

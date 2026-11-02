@@ -1396,6 +1396,25 @@ mod tests {
     }
 
     #[test]
+    fn named_marks() {
+        // spec §9: a mark's name on the ruler after its number; its note on the status line while
+        // the cursor is on it
+        let mut app = open("vcd", None);
+        app.run("add top.clk").unwrap();
+        app.run("cursor 2 30ns name=first bad write note=AW came before W").unwrap();
+        app.run("cursor 3 60ns").unwrap();
+        let s = snapshot(&mut app, 100, Some(8));
+        assert!(s.contains("2 first bad write───") && !s.contains("2 first bad write:"), "{s}");
+        keys(&mut app, "'2");
+        let s = snapshot(&mut app, 100, Some(8));
+        assert!(s.lines().last().unwrap().contains("2 first bad write: AW came before W"), "{s}");
+        // a name too long for the gap is cut before the next mark
+        app.run("cursor 2 name=a name much too long to fit between the two marks here").unwrap();
+        let s = snapshot(&mut app, 100, Some(8));
+        assert!(s.contains("fi…─3"), "{s}");
+    }
+
+    #[test]
     fn field_all_z() {
         // a record whose field is all z draws it (0xZZ, 45ns - 55ns); before the first record, a gap
         let mut app = open("vcd", None);

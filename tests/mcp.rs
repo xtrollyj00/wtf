@@ -341,6 +341,11 @@ fn workspace_in_one_call() {
     // view in a unit of the agent's
     s.ok("workspace", json!({"rows": ["top.clk"], "cursors": {"2": "35ns"}}));
     assert!(s.ok("view", json!({"unit": "ps"})).contains("  2: 35000ps, +35000ps after 1\nvisible: 0ps - "));
+    // a mark with a name and a note (spec §9); the cursor takes a time only
+    let view = s.ok("workspace", json!({"rows": ["top.clk"], "cursors": {"2": {"time": "35ns", "name": "first bad write", "note": "AW before W"}, "3": {"time": "45ns", "name": "end"}}}));
+    assert!(view.contains("  2: 35ns, +35ns after 1, \"first bad write\": AW before W\n  3: 45ns, +10ns after 2, \"end\"\n"), "{view}");
+    let bad = s.tool("workspace", json!({"rows": ["top.clk"], "cursors": {"1": {"time": "5ns", "name": "x"}}}));
+    assert_eq!(bad, Err("cursors: 1 is the cursor and moves, so it takes a time only; name a mark (2-9)".into()));
     // a collapsed group
     let view = s.ok("workspace", json!({"scope": "top", "rows": [{"group": "cpu", "rows": ["cpu.data", "cpu.busy"], "collapsed": true}, "clk"]}));
     // (the description lists a collapsed group's signals too, under its header)
