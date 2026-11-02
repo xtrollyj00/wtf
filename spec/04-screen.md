@@ -146,6 +146,32 @@ the rows and their waveforms stay visible on the right, with a line marking wher
 
 See section 5 for the keys.
 
+### Notifications
+
+What wtf says (an error, `copied: 0x96`, an agent joining, each of its steps) shows on the status
+line as before, and also in a card in the top right, so several stack and none is missed:
+
+```
+                                    ┌─ error ──────────────────────────────┐
+                                    │ bad time: nope                       │
+                                    └──────────────────────────────────────┘
+                                    ┌─ 41-2 ───────────────────────────────┐
+                                    │ agent 41-2: find @clk busy  ·  20ns  │
+                                    └──────────────────────────────────────┘
+```
+
+- The newest on top, up to three, two fifths of the width (24 to 48 columns), the text in up to
+  three lines, the last cut with `…`.
+- An error's border is red with `error` in it; an agent's cyan with its id; the user's own dim,
+  without a title.
+- A card shows 4 seconds, an error 8, and fades (all of it dim) over its last second. `Esc` in
+  Normal mode clears them.
+- They hide under a box, a menu, the leader menu and the picker, which have the keys.
+- What a drag's status line says while it moves (section 2, "Drags") is not a message.
+- `:messages` lists every message (the last 200) in a box like `:help <topic>`'s, each with the
+  clock time it came and who caused it, `you` or the agent's id: `14:03:05  you      error: bad
+  time: nope`.
+
 ### Command line
 
 `:` opens the command line at the bottom, in place of the status line, as in Vim.

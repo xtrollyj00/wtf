@@ -70,7 +70,7 @@ pub fn run(app: &mut App) -> Result<(), String> {
                 if app.tick(std::time::Instant::now()) {
                     break;
                 }
-                if app.which_tick(std::time::Instant::now()) {
+                if app.which_tick(std::time::Instant::now()) || app.note_tick(std::time::Instant::now()) {
                     break;
                 }
                 if let Ok(now) = agents.try_recv()

@@ -50,6 +50,15 @@ pub struct App {
     matches: Option<(String, u64, bool)>,
     /// Status line message; true for errors.
     pub msg: Option<Msg>,
+    /// Every message, oldest first (`:messages`); the newest show in the corner a while (spec §4
+    /// "Notifications").
+    pub notes: Vec<Note>,
+    /// The message last put in `notes`, so each goes in once.
+    logged: Option<Msg>,
+    /// Notes before this one are dismissed from the corner (`Esc`).
+    pub dismissed: usize,
+    /// When the corner was last drawn while a note showed, to draw again as they fade.
+    noted: Option<std::time::Instant>,
     /// The last message an agent's joining, leaving or step put there: one replaces only that or
     /// none, never the user's own (an error after `:q`, say).
     agent_msg: Option<Msg>,
@@ -110,6 +119,26 @@ pub struct Follow {
     pub presented: bool,
 }
 
+/// A message as `:messages` keeps it: what it said, whether an error, who caused it (an agent's
+/// id, or none for the user), and when.
+#[derive(Clone, Debug)]
+pub struct Note {
+    pub text: String,
+    pub err: bool,
+    pub who: Option<String>,
+    /// Seconds since the epoch, for the clock time `:messages` shows.
+    pub wall: u64,
+    pub at: std::time::Instant,
+}
+
+/// How long a note shows in the corner: an error longer; it fades over the last second.
+pub fn note_life(err: bool) -> std::time::Duration {
+    std::time::Duration::from_secs(if err { 8 } else { 4 })
+}
+
+/// The messages `:messages` keeps.
+const NOTES: usize = 200;
+
 /// A file's modification time and size: a new simulation run changes them.
 pub type Stamp = Option<(std::time::SystemTime, u64)>;
 
@@ -157,6 +186,10 @@ impl App {
             matches: None,
             msg: None,
             agent_msg: None,
+            notes: Vec::new(),
+            logged: None,
+            dismissed: 0,
+            noted: None,
             count: None,
             typed: Vec::new(),
             pending: None,
@@ -189,6 +222,8 @@ impl App {
         self.mode = Mode::Normal;
         // the agent's: its next step may take the status line
         (self.msg, self.agent_msg) = (Some(msg.clone()), Some(msg.clone()));
+        let who = self.follow.as_ref().map_or("agent".into(), |f| f.id.clone());
+        self.log(&msg, Some(who));
         Ok(msg.0)
     }
 
@@ -252,6 +287,18 @@ impl App {
                 self.records = Some(Records { name: "trail".into(), stream: String::new(), title, items, hl, top: 0, page: 1 });
                 None
             }
+            // every message, with its time and who caused it (spec §4 "Notifications")
+            "messages" => {
+                self.note_msg();
+                if self.notes.is_empty() {
+                    return Err("no messages yet".into());
+                }
+                let items: Vec<_> = self.notes.iter().map(|n| (None, format!("{}  {:<8} {}{}", clock(n.wall), n.who.as_deref().unwrap_or("you"), if n.err { "error: " } else { "" }, n.text))).collect();
+                // scrolled to the newest
+                let hl = items.len().saturating_sub(1);
+                self.records = Some(Records { name: "messages".into(), stream: String::new(), title: String::new(), items, hl, top: 0, page: 1 });
+                None
+            }
             "w" => Some(command::save(&mut self.ws, arg.trim())?),
             "wq" => {
                 command::save(&mut self.ws, arg.trim())?;
@@ -299,9 +346,12 @@ impl App {
         let old = std::mem::replace(&mut self.agents, now);
         let ids = |l: &[(String, String)]| l.iter().map(|a| a.0.clone()).collect::<Vec<_>>();
         let (was, is) = (ids(&old), ids(&self.agents));
+        // each with the agent it is about, for `:messages`
         let mut said: Vec<(String, bool)> = Vec::new();
+        let mut whose: Vec<String> = Vec::new();
         for id in is.iter().filter(|id| !was.contains(id)) {
             said.push((format!("agent {id} joined (:follow shows its workspace)"), false));
+            whose.push(id.clone());
         }
         for id in was.iter().filter(|id| !is.contains(id)) {
             if self.follow.as_ref().is_some_and(|f| &f.id == id) {
@@ -310,6 +360,7 @@ impl App {
             } else {
                 said.push((format!("agent {id} left"), false));
             }
+            whose.push(id.clone());
         }
         let several = self.agents.len() > 1;
         for (id, text) in self.agents.clone() {
@@ -332,8 +383,14 @@ impl App {
                 if let Some(s) = self.ws.trail.last().filter(|_| was.contains(&id)) {
                     let who = if several { format!("agent {id}") } else { "agent".into() };
                     said.push((format!("{who}: {}", Self::step_line(s)), s.answer.starts_with("error: ")));
+                    whose.push(id.clone());
                 }
             }
+        }
+        // every one in the corner and `:messages`; the last on the status line, unless the
+        // user's own message is there
+        for (m, id) in said.iter().zip(whose) {
+            self.log(m, Some(id));
         }
         if let Some(last) = said.pop()
             && (self.msg.is_none() || self.msg == self.agent_msg)
@@ -711,6 +768,7 @@ impl App {
     fn normal_key(&mut self, k: KeyEvent) {
         if k.code == KeyCode::Esc {
             self.ws.anchor = None;
+            self.dismissed = self.notes.len();
             return self.cancel();
         }
         let key = Key::of(k);
@@ -754,6 +812,48 @@ impl App {
     pub fn which_tick(&mut self, now: std::time::Instant) -> bool {
         let due = !self.which_key && self.typed_at.is_some_and(|t| now.duration_since(t) >= self.which_delay);
         self.which_key |= due;
+        due
+    }
+
+    /// Put a message in `notes`, as said by `who` (an agent's id, none for the user).
+    fn log(&mut self, (text, err): &Msg, who: Option<String>) {
+        let wall = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        self.notes.push(Note { text: text.clone(), err: *err, who, wall, at: std::time::Instant::now() });
+        if self.notes.len() > NOTES {
+            self.notes.remove(0);
+            self.dismissed = self.dismissed.saturating_sub(1);
+        }
+    }
+
+    /// The status line's message, once, into `notes`: the user's own, as the agents' are put there
+    /// when they come (drawn each screen, so every way a message is set goes through here).
+    pub fn note_msg(&mut self) {
+        if self.msg != self.logged {
+            // a drag's status line says what letting go does, as it moves: not a message
+            let dragging = self.drag.is_some() || self.held.is_some();
+            match self.msg.clone() {
+                Some(m) if self.msg != self.agent_msg && !dragging => self.log(&m, None),
+                // an agent's is put there when it comes
+                _ => {}
+            }
+            self.logged = self.msg.clone();
+        }
+    }
+
+    /// The notes the corner shows at `now`: not dismissed, not gone, the newest first.
+    pub fn shown_notes(&self, now: std::time::Instant) -> Vec<&Note> {
+        self.notes[self.dismissed.min(self.notes.len())..].iter().rev().filter(|n| now.duration_since(n.at) < note_life(n.err)).collect()
+    }
+
+    /// The corner while notes show: true every quarter second, to draw them fading and gone.
+    pub fn note_tick(&mut self, now: std::time::Instant) -> bool {
+        if self.shown_notes(now).is_empty() && self.noted.is_none() {
+            return false;
+        }
+        let due = self.noted.is_none_or(|t| now.duration_since(t) >= std::time::Duration::from_millis(250));
+        if due {
+            self.noted = (!self.shown_notes(now).is_empty()).then_some(now);
+        }
         due
     }
 
@@ -1272,6 +1372,17 @@ fn common_scope(paths: &[&str]) -> String {
     let first = scopes.first().cloned().unwrap_or_default();
     let n = (0..first.len()).take_while(|&i| scopes.iter().all(|s| s.get(i) == Some(&first[i]))).count();
     wtf_core::trace::join(first[..n].iter().copied())
+}
+
+/// `secs` since the epoch as the local clock shows it, `14:03:05`.
+fn clock(secs: u64) -> String {
+    let t = secs as libc::time_t;
+    // SAFETY: localtime_r reads `t` and writes only `tm`, which it is given
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    if unsafe { libc::localtime_r(&t, &mut tm) }.is_null() {
+        return "--:--:--".into();
+    }
+    format!("{:02}:{:02}:{:02}", tm.tm_hour, tm.tm_min, tm.tm_sec)
 }
 
 /// Keys as `App::keys` takes them, each a key event.

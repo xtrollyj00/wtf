@@ -32,6 +32,7 @@ pub const COMMANDS: &[Command] = &[
     Command { name: "ungroup", usage: ":ungroup", desc: "Dissolve the group the selected row is in, keeping its signals", args: false },
     Command { name: "select", usage: ":select <row> [<last row>]", desc: "Select a signal or group by name, or the rows from one to another", args: true },
     Command { name: "pick", usage: ":pick <source>", desc: "A fuzzy list with a preview: signals, marks, records <stream>, commands, sessions, trail; Ctrl-s goes to the next", args: true },
+    Command { name: "messages", usage: ":messages", desc: "Every message so far, with its time and who caused it: you or an agent", args: false },
     Command { name: "trail", usage: ":trail", desc: "The agent's steps; Enter jumps to a step's time", args: false },
     Command { name: "cursor", usage: ":cursor <n> [time|off] [name=] [note=]", desc: "Put mark n at a time (1: the cursor), name it, remove it, or jump to it, e.g. :cursor 2 120ns name=bad write", args: true },
     Command { name: "undo", usage: ":undo", desc: "Undo the last change to the rows", args: false },

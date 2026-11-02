@@ -1843,6 +1843,37 @@ mod tests {
     }
 
     #[test]
+    fn notifications() {
+        // each message goes into the history once, shows in the top right a while, the user's
+        // and each agent's apart; Esc dismisses them; :messages lists them (spec §4)
+        let mut app = open("vcd", Some(SESSION));
+        keys(&mut app, ":zoom nope\n");
+        let screen = snapshot(&mut app, 80, Some(14));
+        assert!(screen.contains("─ error ─") && screen.contains("│ bad time: nope"), "{screen}");
+        keys(&mut app, "yt");
+        snapshot(&mut app, 80, Some(14));
+        snapshot(&mut app, 80, Some(14));
+        let said: Vec<_> = app.notes.iter().map(|n| (n.text.as_str(), n.err, n.who.clone())).collect();
+        assert_eq!(said, [("bad time: nope", true, None), ("copied: 12ns", false, None)]);
+        let now = Instant::now();
+        assert_eq!(app.shown_notes(now).len(), 2);
+        assert_eq!(app.shown_notes(now + Duration::from_secs(5)).len(), 1); // the error stays longer
+        assert!(app.shown_notes(now + Duration::from_secs(9)).is_empty());
+        assert!(app.note_tick(now) && !app.note_tick(now + Duration::from_millis(100)) && app.note_tick(now + Duration::from_millis(300)));
+        keys(&mut app, "<Esc>");
+        assert!(app.shown_notes(now).is_empty());
+        // agents: every one said, with its id, though the status line shows only the last
+        app.agents_now(vec![("41-1".into(), String::new()), ("41-2".into(), String::new())]);
+        snapshot(&mut app, 80, Some(14));
+        let who: Vec<_> = app.notes.iter().skip(2).map(|n| (n.text.clone(), n.who.clone())).collect();
+        assert_eq!(who, [("agent 41-1 joined (:follow shows its workspace)".to_string(), Some("41-1".to_string())), ("agent 41-2 joined (:follow shows its workspace)".into(), Some("41-2".into()))], "{:?}", app.notes);
+        assert_eq!(app.notes.len(), 4);
+        keys(&mut app, ":messages\n");
+        let screen = snapshot(&mut app, 100, Some(14));
+        assert!(screen.contains("you      error: bad time: nope") && screen.contains("41-2     agent 41-2 joined"), "{screen}");
+    }
+
+    #[test]
     fn which_key() {
         // keys pending wait which_key before it shows what can follow; a count shows the keys it
         // goes to; the status line shows what is pending (spec §2 "Which-key")

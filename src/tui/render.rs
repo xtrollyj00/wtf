@@ -19,6 +19,7 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
     }
     let body = h - 1;
     app.hit = crate::tui::app::Hit { body, ..Default::default() };
+    app.note_msg();
     // computed signals made since (`:signal`, a slice named in a search)
     if app.panel.version != app.ws.trace.version {
         app.panel.refresh(&app.ws.trace);
@@ -67,6 +68,10 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
         let text = format!(" + {label} ");
         let x = (x + 1).min(w.saturating_sub(text.chars().count()));
         put(buf, x, y, &text, Style::new().bg(pal().cursor).fg(pal().cursor_text).add_modifier(Modifier::BOLD));
+    }
+    // under what has the keys, so they don't show around its edges
+    if !(app.help || app.examine.is_some() || app.records.is_some() || app.menu.is_some() || app.leader.is_some() || app.picker.is_some()) {
+        notes(app, buf, w, body);
     }
     if app.help {
         let mut scroll = app.scroll;
@@ -443,6 +448,87 @@ fn menu(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
             app.hit.menus.push(r);
         }
     }
+}
+
+/// The newest messages in the top right, newest first (spec §4 "Notifications"): an error's
+/// border red with `error` in it, an agent's cyan with its id, the user's dim; each fades over
+/// its last second.
+fn notes(app: &App, buf: &mut Buffer, w: usize, body: usize) {
+    let now = std::time::Instant::now();
+    let nw = (w * 2 / 5).clamp(24, 48);
+    if nw + 2 > w {
+        return;
+    }
+    let x0 = w - nw - 1;
+    let mut y = 1;
+    for n in app.shown_notes(now).into_iter().take(3) {
+        let fading = crate::tui::app::note_life(n.err).saturating_sub(now.duration_since(n.at)) < std::time::Duration::from_secs(1);
+        let edge = match (n.err, &n.who) {
+            (true, _) => pal().unknown,
+            (false, Some(_)) => pal().hues[4],
+            (false, None) => pal().dim,
+        };
+        let (edge, text) = if fading { (pal().dim, pal().dim) } else { (edge, Color::Reset) };
+        let lines = wrap_text(&n.text, nw - 4, 3);
+        let bh = lines.len() + 2;
+        if y + bh > body {
+            break;
+        }
+        let st = if pal().mono { Style::new() } else { Style::new().bg(pal().panel) };
+        let b = gl().border;
+        for dy in 0..bh {
+            let line = match dy {
+                0 => format!("{}{}{}", b[0], b[4].to_string().repeat(nw - 2), b[1]),
+                _ if dy == bh - 1 => format!("{}{}{}", b[2], b[4].to_string().repeat(nw - 2), b[3]),
+                _ => format!("{}{}{}", b[5], " ".repeat(nw - 2), b[5]),
+            };
+            put(buf, x0, y + dy, &line, st.fg(edge));
+        }
+        let title = match (n.err, &n.who) {
+            (true, _) => Some("error".to_string()),
+            (false, Some(id)) => Some(id.clone()),
+            (false, None) => None,
+        };
+        if let Some(t) = title {
+            put(buf, x0 + 2, y, &format!(" {t} "), st.fg(edge).add_modifier(Modifier::BOLD));
+        }
+        for (i, l) in lines.iter().enumerate() {
+            put(buf, x0 + 2, y + 1 + i, l, st.fg(text));
+        }
+        y += bh;
+    }
+}
+
+/// `text` in lines of `width` at most, broken between words, `max` lines (the last cut with `…`).
+fn wrap_text(text: &str, width: usize, max: usize) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    for word in text.split_whitespace() {
+        // a word longer than a line is cut into pieces
+        let chars: Vec<char> = word.chars().collect();
+        for piece in chars.chunks(width.max(1)) {
+            let piece: String = piece.iter().collect();
+            if !cur.is_empty() && cur.chars().count() + 1 + piece.chars().count() > width {
+                lines.push(std::mem::take(&mut cur));
+            }
+            if !cur.is_empty() {
+                cur.push(' ');
+            }
+            cur.push_str(&piece);
+        }
+    }
+    if !cur.is_empty() {
+        lines.push(cur);
+    }
+    if lines.len() > max {
+        lines.truncate(max);
+        let last = &mut lines[max - 1];
+        if last.chars().count() >= width {
+            *last = last.chars().take(width - 1).collect();
+        }
+        last.push(gl().cut);
+    }
+    lines
 }
 
 /// A card for which-key and the leader menu: its background (a border without colour), the
