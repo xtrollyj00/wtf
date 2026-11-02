@@ -106,7 +106,7 @@ checks that return only violations.
   (`rx.frame`, its segments the records) with a signal per field (`rx.frame.len`), holding the
   field's value during each record.
 - **TUI.** A stream row draws like a bus, a segment per record with a short label
-  (`#3 64B`); `Space` expands it into a row per field. Violation records draw red. Field
+  (`#3 64B`); `Enter` expands it into a row per field. Violation records draw red. Field
   signals search like any other (`/len == 64`). `:decode <name> <protocol> <role>=<signal>...`
   adds an instance.
 - **MCP.** Streams and fields are signal names for every tool; `records` lists a stream's records

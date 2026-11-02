@@ -1,13 +1,15 @@
-//! The config file (spec §19): glyph set, theme and single colours, read once at start. A bad
+//! The config file (spec §19): glyph set, theme, single colours and keys, read once at start. A bad
 //! entry is skipped with a warning for the status line; nothing in it stops wtf.
 
 use crate::draw::{self, Palette};
 use crate::theme;
+use crate::tui::keys::Keymap;
 use std::path::{Path, PathBuf};
 
 pub struct Config {
     pub glyphs: &'static draw::Glyphs,
     pub palette: Palette,
+    pub keys: Keymap,
     pub warnings: Vec<String>,
 }
 
@@ -84,7 +86,7 @@ pub fn parse(text: &str, rgb: bool, themes: &Path, bg: Option<theme::Rgb>) -> Co
         Ok(t) => t,
         Err(e) => {
             warnings.push(format!("config: {}", theme::toml_error(&e, text)));
-            return Config { glyphs: &draw::UNICODE, palette: dark(), warnings };
+            return Config { glyphs: &draw::UNICODE, palette: dark(), keys: Keymap::default(), warnings };
         }
     };
     let mut glyphs = &draw::UNICODE;
@@ -94,8 +96,8 @@ pub fn parse(text: &str, rgb: bool, themes: &Path, bg: Option<theme::Rgb>) -> Co
                 Some((_, g)) => glyphs = g,
                 None => warnings.push(format!("config: glyphs = {}? (unicode, box, ascii)", theme::show(value))),
             },
-            "theme" | "colors" => {}
-            _ => warnings.push(format!("config: unknown key {key} (keys: glyphs, theme, colors)")),
+            "theme" | "colors" | "keys" => {}
+            _ => warnings.push(format!("config: unknown key {key} (keys: glyphs, theme, colors, keys)")),
         }
     }
     // the theme first, so the single colours override it whatever the order in the file
@@ -117,7 +119,15 @@ pub fn parse(text: &str, rgb: bool, themes: &Path, bg: Option<theme::Rgb>) -> Co
             None => warnings.push(format!("config: colors = {}? (a table of colours)", theme::show(v))),
         }
     }
-    Config { glyphs, palette, warnings }
+    let keys = match table.get("keys") {
+        None => Keymap::default(),
+        Some(toml::Value::Table(t)) => Keymap::from_table(t, &mut warnings),
+        Some(v) => {
+            warnings.push(format!("config: keys = {}? (a table of action = key)", theme::show(v)));
+            Keymap::default()
+        }
+    };
+    Config { glyphs, palette, keys, warnings }
 }
 
 #[cfg(test)]
@@ -171,7 +181,7 @@ mod tests {
         assert_eq!(
             c.warnings,
             [
-                "config: unknown key foo (keys: glyphs, theme, colors)",
+                "config: unknown key foo (keys: glyphs, theme, colors, keys)",
                 "config: glyphs = \"utf8\"? (unicode, box, ascii)",
                 "config: theme = 3? (dark, light)",
                 "config: unknown key colors.curser (keys: line, bus, fill, unknown, highz, cursor, cursor_text, column, cursor_dim, selected, panel, hatch, dim, background, text, red, orange, yellow, green, cyan, blue, magenta, gray)",

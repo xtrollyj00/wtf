@@ -133,9 +133,9 @@ A group is a named set of rows with a header row. Groups have one level (no nest
  ▸ stream (4)       ───▀▀──▀▀▀▀───▀───     ← collapsed: shows activity
 ```
 
-- **Collapse / expand**: `Space` on a group header.
-- **Bus bits**: `Space` on a bus shows one line per bit under it, MSB first (`data[7]` … `data[0]`),
-  drawn as 1-bit signals; `Space` on the bus or one of its bits folds them again. Bit lines can be
+- **Collapse / expand**: `Enter` on a group header.
+- **Bus bits**: `Enter` on a bus shows one line per bit under it, MSB first (`data[7]` … `data[0]`),
+  drawn as 1-bit signals; `Enter` on the bus or one of its bits folds them again. Bit lines can be
   selected (`j` / `k`, `w` / `b` jump between that bit's changes, the value column shows the bit),
   but they move and are removed with their bus. Like collapsing, expanding is not an undo step.
   Combining bits or signals into new ones is done by computed signals (`:signal`, section 16).
@@ -162,7 +162,7 @@ signal next to a group's edge move it into or out of the group.
 
 ### Composite rows
 
-A struct, record or array is one signal in the HDL, so it is one row. `Space` opens it one level,
+A struct, record or array is one signal in the HDL, so it is one row. `Enter` opens it one level,
 the way a bus opens into its bits and a stream into its fields: **every index and every field is
 a level**. `pkts` opens into `pkts[0]`, `pkts[1]`; `pkts[0]` into `valid`, `state`, `pair`;
 `pair` into `hi`, `lo`. `grid` opens into `grid[0]`, `grid[1]`, and `grid[1]` into `grid[1][0]`
@@ -194,7 +194,7 @@ a level**. `pkts` opens into `pkts[0]`, `pkts[1]`; `pkts[0]` into `valid`, `stat
 - **Like bit lines**: child lines are selected with `j` / `k` (`w` / `b` jump between that
   child's changes, the value column shows it, `e` examines it), but they move and are removed
   with their row: `dd` on one removes the whole row. Opening and folding is not an undo step.
-  `Space` on an open level folds it and every level under it.
+  `Enter` on an open level folds it and every level under it.
 - **Each line its own look**: a composite row's radix applies to its whole value; a child line
   starts in the default radix for its signal (an enum its names), a stream's field in its row's,
   and each can be given its own radix and colour (`r`, `:radix`, `:color`, the menu), kept with

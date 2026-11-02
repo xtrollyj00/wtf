@@ -26,7 +26,7 @@ start with, in the accent.
 
 The guide disappears once a signal is added, and comes back if all signals are removed. A click
 anywhere on it opens the signal panel, as `a` does.
-With no rows, row keys (`j`, `k`, `w`, `b`, `/`, `n`, `N`, `Space`) do nothing; time keys still move
+With no rows, row keys (`j`, `k`, `w`, `b`, `/`, `n`, `N`, `Enter`) do nothing; time keys still move
 the cursor.
 
 ### Normal mode

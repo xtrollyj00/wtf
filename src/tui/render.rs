@@ -2,6 +2,7 @@
 //! the `?` box, the launch guide, the status line and the command line around them.
 
 use crate::tui::app::{App, Held, Mode};
+use crate::tui::keys::Action as A;
 use crate::draw::{self, gl, pal, put, red, ROW_LINES};
 use wtf_core::rows::Row;
 use wtf_core::time;
@@ -195,57 +196,80 @@ fn panel(app: &mut App, buf: &mut Buffer, pw: usize, body: usize) -> Option<(u16
     Some(((3 + q.chars().count()).min(pw - 2) as u16, 1))
 }
 
-type Keys = &'static [(&'static str, &'static [(&'static str, &'static str)])];
+/// Sections of the `?` box: a heading, then each key and what it does.
+type Section = (&'static str, Vec<(String, &'static str)>);
+type Keys<'a> = &'a [Section];
 type Examples = &'static [(&'static str, &'static str)];
 
-/// The keys for the `?` box, the panel's while it is open: its title, the keys under section headings, and a few
-/// things to type, each with what it does.
-fn help_text(app: &App) -> (&'static str, Keys, &'static str, Examples) {
+/// The keys for the `?` box, the panel's while it is open: its title, the keys under section
+/// headings, and a few things to type, each with what it does. Normal mode's keys are the
+/// keymap's, so a key changed in the config file shows here (spec §19 "Keys").
+fn help_text(app: &App) -> (&'static str, Vec<Section>, &'static str, Examples) {
+    let fixed = |keys: &[(&str, &'static str)]| keys.iter().map(|&(k, d)| (k.to_string(), d)).collect::<Vec<_>>();
     if app.panel_shown() {
-        let keys: Keys = &[
-            ("Move", &[("j k", "move"), ("l h", "open / close a scope"), ("gg G", "first / last line"), ("/", "search paths"), ("n N", "next / previous match")]),
-            ("Mark", &[("Space", "mark a signal or scope"), ("V", "mark a range"), ("Ctrl-a", "mark all matches")]),
-            ("Add", &[("Enter", "add as rows"), ("Ctrl-g", "add as a group"), ("u Ctrl-r", "undo / redo"), ("a", "close"), ("Esc", "clear marks / close")]),
+        let keys = vec![
+            ("Move", fixed(&[("j k", "move"), ("l h", "open / close a scope"), ("gg G", "first / last line"), ("/", "search paths"), ("n N", "next / previous match")])),
+            ("Mark", fixed(&[("Space", "mark a signal or scope"), ("V", "mark a range"), ("Ctrl-a", "mark all matches")])),
+            ("Add", fixed(&[("Enter", "add as rows"), ("Ctrl-g", "add as a group"), ("u Ctrl-r", "undo / redo"), ("a", "close"), ("Esc", "clear marks / close")])),
         ];
         return ("signal panel", keys, "", &[("", "New signals go below the selected row, at the accent line.")]);
     }
-    let keys: Keys = &[
+    let m = &app.keymap;
+    let k = |acts: &[A], d: &'static str| {
+        let keys: Vec<String> = acts.iter().map(|&a| m.show(a)).collect();
+        // `Ctrl-d/u`: one Ctrl for both, so the column stays narrow
+        let rest: Option<Vec<&str>> = keys.iter().map(|k| k.strip_prefix("Ctrl-")).collect();
+        match rest {
+            Some(r) if r.len() > 1 => (format!("Ctrl-{}", r.join("/")), d),
+            _ => (keys.join(" "), d),
+        }
+    };
+    let j = m.show(A::Jump);
+    let keys = vec![
         (
             "Move",
-            &[
-                ("h l", "cursor left / right"),
-                ("w b", "next / prev change"),
-                ("gg G", "start / end"),
-                ("z x", "zoom in / out"),
-                ("c", "center the cursor"),
-                ("H L", "screen left / right"),
-                ("Ctrl-d/u", "half a screen"),
+            vec![
+                k(&[A::Left, A::Right], "cursor left / right"),
+                k(&[A::NextChange, A::PrevChange], "next / prev change"),
+                k(&[A::Start, A::End], "start / end"),
+                k(&[A::ZoomIn, A::ZoomOut], "zoom in / out"),
+                k(&[A::Center], "center the cursor"),
+                k(&[A::ScreenLeft, A::ScreenRight], "screen left / right"),
+                k(&[A::HalfRight, A::HalfLeft], "half a screen"),
             ],
         ),
         (
             "Rows",
-            &[
-                ("j k", "select a row"),
-                ("Ctrl-f/b", "a screen of rows"),
-                ("Space", "fold a group or bus"),
-                ("e", "the whole value"),
-                ("yy yt", "copy value / time"),
+            vec![
+                k(&[A::Down, A::Up], "select a row"),
+                k(&[A::PageDown, A::PageUp], "a screen of rows"),
+                k(&[A::Fold], "fold a group or bus"),
+                k(&[A::Examine], "the whole value"),
+                k(&[A::CopyValue, A::CopyTime], "copy value / time"),
             ],
         ),
         (
             "Change",
-            &[
-                ("a", "add signals"),
-                ("dd", "remove"),
-                ("J K", "move down / up"),
-                ("V", "select rows; Esc ends"),
-                ("r", "next radix"),
-                ("u Ctrl-r", "undo / redo"),
+            vec![
+                k(&[A::Panel], "add signals"),
+                k(&[A::Remove], "remove"),
+                k(&[A::MoveDown, A::MoveUp], "move down / up"),
+                k(&[A::Range], "select rows; Esc ends"),
+                k(&[A::Radix], "next radix"),
+                k(&[A::Undo, A::Redo], "undo / redo"),
             ],
         ),
-        ("Search", &[("/", "search"), ("n N", "next / previous match")]),
-        ("Marks", &[("m M", "put / remove a mark"), ("Tab", "next mark"), ("'2..'9", "jump to a mark"), ("''", "back before the jump")]),
-        ("Other", &[(":", "command"), ("5l 3w", "a count repeats a key"), ("q", "quit")]),
+        ("Search", vec![k(&[A::Search], "search"), k(&[A::NextMatch, A::PrevMatch], "next / previous match")]),
+        (
+            "Marks",
+            vec![
+                k(&[A::Mark, A::Unmark], "put / remove a mark"),
+                k(&[A::NextMark], "next mark"),
+                (format!("{j}2..{j}9"), "jump to a mark"),
+                k(&[A::JumpBack], "back before the jump"),
+            ],
+        ),
+        ("Other", vec![k(&[A::Command], "command"), (format!("5{} 3{}", m.show(A::Right), m.show(A::NextChange)), "a count repeats a key"), k(&[A::Quit], "quit")]),
     ];
     let search: Examples = &[
         ("/0x40", "the selected row's value, in any radix"),
@@ -263,6 +287,7 @@ type Line = Vec<(String, Style)>;
 /// fit; the things to type below them.
 fn help(app: &App, buf: &mut Buffer, w: usize, body: usize, scroll: &mut usize) -> Option<Rect> {
     let (title, sections, heading, examples) = help_text(app);
+    let sections = &sections[..];
     let key = Style::new().fg(pal().cursor).add_modifier(Modifier::BOLD);
     let dim = Style::new().fg(pal().dim);
     // each column's keys as wide as its widest

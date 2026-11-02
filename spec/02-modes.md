@@ -23,7 +23,7 @@
 | `h` / `l` | move the time cursor one column left / right |
 | `w` / `b` | next / previous transition of the selected signal |
 | `j` / `k` | select the next / previous signal |
-| `Space` | collapse / expand the selected group (section 6), or expand a bus into its bits, a stream into its fields, or a struct, record or array one level into its fields or elements (section 6, "Composite rows") / fold them |
+| `Enter` | collapse / expand the selected group (section 6), or expand a bus into its bits, a stream into its fields, or a struct, record or array one level into its fields or elements (section 6, "Composite rows") / fold them |
 | `e` | examine: a box with the selected signal's whole value at the cursor; on a stream, its record there (times and every field, a frame's `data` 16 bytes a line); on a struct, record or array, without opening it, one line per field, nested fields indented, an array's elements by index (`pkt`: `valid 1`, `state BUSY`, `pair`, `  hi 0xA`, `  lo 0x5`; `pkts`: `[0]` and `[1]`, each with its fields); `Esc`, `q` or `e` closes it. A box longer than the screen takes its whole width and scrolls: `j` / `k`, `Ctrl-d` / `Ctrl-u`, `g` / `G`, its last line saying which lines show |
 | `gg` / `G` | time cursor to the start / end of the simulation |
 | `Ctrl-d` / `Ctrl-u` | move the screen half its width right / left, the cursor the same distance (at the start or end of the simulation the cursor still moves) |
@@ -59,6 +59,10 @@ A bare `0` does nothing, and so do other `Ctrl` keys.
 Multi-key sequences (`gg`, `dd`, `'1`) wait for their second key without a timeout.
 `Esc` or an invalid second key cancels them.
 
+These are the default keys. The config file's `[keys]` changes them (section 19, "Keys"), and
+the `?` box and the menus name the keys as changed. `Esc` and the counts stay as they are, and so
+do the keys of the signal panel, the boxes, the menus and the command line.
+
 `z` / `x` sit under the left hand, so one hand zooms while the other stays on `hjkl`.
 
 ### Mouse
@@ -75,8 +79,8 @@ or column it was pressed on. A double click is a second click on the same thing 
 
 | Mouse | Action |
 |---|---|
-| click on a row's name | select it; on the selected row, open / fold it, as `Space` (a bus into its bits; a bit line folds its bus) |
-| click on a `▸` / `▾` marker | select the row and open / fold it, as `Space` (a group, a stream, a struct, record or array, each level) |
+| click on a row's name | select it; on the selected row, open / fold it, as `Enter` (a bus into its bits; a bit line folds its bus) |
+| click on a `▸` / `▾` marker | select the row and open / fold it, as `Enter` (a group, a stream, a struct, record or array, each level) |
 | click on a row's waveform | select it and put the cursor at that column's time |
 | `Ctrl` + click on a row | select the rows from the selected one to it, as `V` then `j` / `k`; again, from the same start to the new one. `Shift` + click as well, where the terminal passes it on (section 18) |
 | click inside a `V` range | select that row; the range ends |
@@ -151,7 +155,7 @@ key or command, so the menu teaches the keys. An item does what its key does.
 
 ```
  pkt          ▸ 0x5A5     ──┌─────────────────────┐
-                            │▌Open           Space│
+                            │▌Open           Enter│
  pkts[0]      ▸ 0x000     ──│ Examine            e│
                             │ Radix              ▸│┌─────────┐
                             │ Colour             ▸││ hex    ●│
@@ -169,7 +173,7 @@ key or command, so the menu teaches the keys. An item does what its key does.
 - An item ending in `▸` opens a second menu beside it (left if there is no room on the right), by a
   click, `Enter` or `l`; `h` or `Esc` closes only the second menu. Its current choice is marked `●`.
 - Only items that apply are listed:
-  - a row: `Open` / `Fold` (`Space`, where it opens), `Examine` (`e`), `Radix` ▸ (the radixes the
+  - a row: `Open` / `Fold` (`Enter`, where it opens), `Examine` (`e`), `Radix` ▸ (the radixes the
     signal can take, section 10; `q<m>.<n>` opens the command line with `:radix q`), `Colour` ▸
     (the eight colours each drawn in it, and `off`), `Copy value` (`yy`), `Remove` (`dd`);
   - on a row's waveform also, for the column clicked, `Mark here` (`m`) and `Copy time` (`yt`);

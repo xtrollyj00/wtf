@@ -1,6 +1,6 @@
 ## 19. Configuration
 
-How wtf looks on this machine, kept apart from sessions: a session is what to show of a trace and
+How wtf looks and which keys it takes on this machine, kept apart from sessions: a session is what to show of a trace and
 travels with it; the config file is the user's terminal and taste, and stays on the machine.
 
 ### The file
@@ -12,6 +12,9 @@ optional; without it wtf uses the defaults.
 glyphs = "box"          # unicode (default), box, ascii (section 14)
 theme = "light"         # dark, light, or one of the user's (below); default: the one that
                         # suits the terminal's background
+
+[keys]                  # move Normal mode's keys (below)
+zoom_in = "i"
 
 [colors]                # change single colours of the theme
 cursor = "#e5c07b"
@@ -30,6 +33,45 @@ red = "#ff5555"         # the shade of a signal colour (section 14)
   rest, and the status line says what was wrong and what is allowed: `config: unknown key
   colors.curser (keys: line, fill, …)`, `config: glyphs = "utf8"? (unicode, box, ascii)`. A file
   that isn't TOML is left out whole, with the parse error's line.
+
+### Keys
+
+`[keys]` moves Normal mode's keys (section 3): each entry is an action and its key, written as for
+`--keys` (section 11): `"x"`, `"gx"`, `"<C-x>"`, `"<CR>"`, `"<Space>"`, `"<Tab>"`, `"<S-Tab>"`.
+
+```toml
+[keys]
+zoom_in = "i"
+fold = "<Space>"
+start = "<C-g>"
+```
+
+| Action | Key | Action | Key | Action | Key |
+|---|---|---|---|---|---|
+| `left` | `h` | `page_up` | `<C-b>` | `search` | `/` |
+| `right` | `l` | `zoom_in` | `z` | `next_match` | `n` |
+| `next_change` | `w` | `zoom_out` | `x` | `prev_match` | `N` |
+| `prev_change` | `b` | `panel` | `a` | `mark` | `m` |
+| `down` | `j` | `remove` | `dd` | `unmark` | `M` |
+| `up` | `k` | `move_down` | `J` | `next_mark` | `<Tab>` |
+| `fold` | `<CR>` | `move_up` | `K` | `prev_mark` | `<S-Tab>` |
+| `examine` | `e` | `range` | `V` | `jump` | `'` |
+| `start` | `gg` | `radix` | `r` | `jump_back` | `''` |
+| `end` | `G` | `undo` | `u` | `command` | `:` |
+| `half_right` | `<C-d>` | `redo` | `<C-r>` | `help` | `?` |
+| `half_left` | `<C-u>` | `copy_value` | `yy` | `quit` | `q` |
+| `screen_left` | `H` | `copy_time` | `yt` | | |
+| `screen_right` | `L` | `center` | `c` | | |
+| `page_down` | `<C-f>` | | | | |
+
+- A key is one key or two. `jump` is followed by the cursor's number, as `'2` is.
+- An action left out keeps its key. A moved action's old key does nothing, unless another action
+  takes it.
+- Every key must be typeable: two actions on one key, or one action's key the start of another's
+  (`g` and `gg`), is an error naming the action that has it: `config: keys.quit = "x"? x is
+  zoom_out's key`. A digit can't start a key (digits are counts), nor can `Esc` (it cancels).
+- An unknown action lists the actions. A bad entry is skipped, as any other in the file, and
+  the action keeps its key.
 
 ### First start
 

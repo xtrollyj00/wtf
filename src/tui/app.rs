@@ -7,6 +7,7 @@ use wtf_core::rows::{self, Row};
 use wtf_core::time;
 use wtf_core::workspace::{Msg, Workspace};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crate::tui::keys::{Action as A, Key, Keymap, Meaning};
 
 mod mouse;
 pub use mouse::{Drag, Held, Hit, Item, Menu, Target};
@@ -53,7 +54,12 @@ pub struct App {
     /// none, never the user's own (an error after `:q`, say).
     agent_msg: Option<Msg>,
     count: Option<u64>,
+    /// The first key of a Normal mode sequence (`g` of `gg`), typed.
+    typed: Vec<Key>,
+    /// The signal panel's `g` of `gg`.
     pending: Option<char>,
+    /// Normal mode's keys (spec §19 "Keys").
+    pub keymap: Keymap,
     pub quit: bool,
     /// The `?` box with the keys of the current mode is open.
     pub help: bool,
@@ -143,7 +149,9 @@ impl App {
             msg: None,
             agent_msg: None,
             count: None,
+            typed: Vec::new(),
             pending: None,
+            keymap: Keymap::default(),
             quit: false,
             help: false,
             examine: None,
@@ -381,6 +389,7 @@ impl App {
     /// `<Space>`, `<lt>` and `<C-x>`; raw control characters work too (`\n`, `\x1b`, `\x01` is
     /// Ctrl-a). Another `<name>` is an error, as it would be typed letter by letter; a `<` that
     /// starts no name is itself (spec §12 `--keys`).
+    #[cfg(test)]
     pub fn keys(&mut self, s: &str) -> Result<(), String> {
         parse_keys(s)?.into_iter().for_each(|k| self.key(k));
         Ok(())
@@ -651,6 +660,7 @@ impl App {
     /// Esc and other non-character keys cancel a count or a pending sequence.
     fn cancel(&mut self) {
         self.count = None;
+        self.typed.clear();
         self.pending = None;
     }
 
@@ -675,149 +685,163 @@ impl App {
     }
 
 
-    /// Normal mode: time, rows and the keys that change the rows, all at once (spec §2, §3).
+    /// Normal mode: time, rows and the keys that change the rows, all at once (spec §2, §3); the
+    /// keys are the keymap's (spec §19 "Keys").
     fn normal_key(&mut self, k: KeyEvent) {
-        if matches!(k.code, KeyCode::Tab | KeyCode::BackTab) {
-            self.cancel();
-            self.msg = None;
-            let r = self.ws.next_mark(k.code == KeyCode::Tab);
-            return self.report(r);
-        }
-        let KeyCode::Char(c) = k.code else {
-            if k.code == KeyCode::Esc {
-                self.ws.anchor = None;
-            }
+        if k.code == KeyCode::Esc {
+            self.ws.anchor = None;
             return self.cancel();
-        };
-        let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
-        // `3m`: the count names the mark; `m` alone takes a free one
-        let given = self.count.map(|n| n.saturating_sub(1) as usize);
-        let Some((pending, n)) = self.counted(c) else { return };
-        if let Some(p) = pending {
-            if (p, c) == ('g', 'g') {
-                self.ws.view.set_cursor(self.ws.trace.start());
-            }
-            if (p, c) == ('d', 'd') && !ctrl {
-                let r = self.ws.delete();
-                self.report(r);
-            }
-            if p == 'y' {
-                let r = self.copy(c);
-                self.report(r);
-            }
-            if p == '\'' {
-                let r = match c.to_digit(10) {
-                    _ if c == '\'' => self.ws.jump_back(),
-                    Some(d) if d > 0 => self.ws.goto_mark(d as usize - 1),
-                    _ => Err(format!("no cursor {c}")),
-                };
-                self.report(r);
-            }
+        }
+        let key = Key::of(k);
+        // a count comes before a key: `5l`, `3m`
+        if self.typed.is_empty()
+            && !key.ctrl
+            && let KeyCode::Char(c) = k.code
+            && let Some(d) = c.to_digit(10)
+            && (d > 0 || self.count.is_some())
+        {
+            self.count = Some(self.count.unwrap_or(0).saturating_mul(10).saturating_add(d as u64));
             return;
         }
+        self.typed.push(key);
+        let hit = self.keymap.hit(&self.typed);
+        if hit == Meaning::Prefix {
+            return;
+        }
+        self.typed.clear();
+        self.msg = None;
+        // `3m`: the count names the mark; `m` alone takes a free one
+        let given = self.count.map(|n| n.saturating_sub(1) as usize);
+        let n = self.count.take().unwrap_or(1);
+        match hit {
+            Meaning::Action(a) => self.action(a, n, given),
+            Meaning::Jump(i) => self.action(A::Jump, 1, Some(i)),
+            Meaning::Prefix | Meaning::None => {}
+        }
+    }
+
+    /// What a Normal mode key does, `n` times or on cursor `given` (`3m`, `'3`).
+    pub fn action(&mut self, a: A, n: u64, given: Option<usize>) {
         let v = &mut self.ws.view;
         let half = (v.width / 2).max(1) as i64;
         let n_i = n.min(u32::MAX as u64) as i64;
-        match c {
+        match a {
             // half a screen, the cursor along; at the start or end it moves on alone
-            'd' | 'u' if ctrl => {
-                let cols = if c == 'd' { half * n_i } else { -half * n_i };
+            A::HalfRight | A::HalfLeft => {
+                let right = a == A::HalfRight;
+                let cols = if right { half * n_i } else { -half * n_i };
                 v.scroll(cols);
                 let d = cols.unsigned_abs().saturating_mul(v.ticks) / v.cols;
-                v.set_cursor(if c == 'd' { v.cursor.saturating_add(d) } else { v.cursor.saturating_sub(d) });
+                v.set_cursor(if right { v.cursor.saturating_add(d) } else { v.cursor.saturating_sub(d) });
             }
-            'f' if ctrl => self.move_sel(n_i.saturating_mul(self.page as i64) as isize),
-            'b' if ctrl => self.move_sel(-(n_i.saturating_mul(self.page as i64) as isize)),
-            'r' if ctrl => {
+            A::PageDown => self.move_sel(n_i.saturating_mul(self.page as i64) as isize),
+            A::PageUp => self.move_sel(-(n_i.saturating_mul(self.page as i64) as isize)),
+            A::Redo => {
                 let r = self.ws.redo();
                 self.report(r);
             }
-            _ if ctrl => {}
             // the keys that change the rows need a row
-            'J' | 'K' | 'd' | 'V' | 'r' if self.ws.rows.is_empty() => {}
+            A::MoveDown | A::MoveUp | A::Remove | A::Range | A::Radix if self.ws.rows.is_empty() => {}
             // a `V` range moves whole, past the next row on screen (spec §3)
-            'J' | 'K' if self.ws.anchor.is_some() => {
+            A::MoveDown | A::MoveUp if self.ws.anchor.is_some() => {
                 let r = self.ws.selection();
                 let mut b = rows::block(&self.ws.rows, r.start, r.end - 1);
                 for _ in 0..n_i {
-                    let Some(n) = rows::step(&mut self.ws.rows, b.clone(), c == 'J') else { break };
+                    let Some(n) = rows::step(&mut self.ws.rows, b.clone(), a == A::MoveDown) else { break };
                     b = n;
                 }
                 self.select_block(b);
             }
-            'J' | 'K' => {
+            A::MoveDown | A::MoveUp => {
                 for _ in 0..n_i {
-                    self.ws.sel = rows::move_row(&mut self.ws.rows, self.ws.sel, c == 'J');
+                    self.ws.sel = rows::move_row(&mut self.ws.rows, self.ws.sel, a == A::MoveDown);
                 }
             }
-            'd' => self.pending = Some('d'),
-            'V' => self.ws.anchor = if self.ws.anchor.is_some() { None } else { Some(self.ws.sel) },
-            'r' => {
+            A::Remove => {
+                let r = self.ws.delete();
+                self.report(r);
+            }
+            A::Range => self.ws.anchor = if self.ws.anchor.is_some() { None } else { Some(self.ws.sel) },
+            A::Radix => {
                 let r = self.ws.set_radix(None);
                 self.report(r);
             }
-            'u' => {
+            A::Undo => {
                 let r = self.ws.undo();
                 self.report(r);
             }
             // the screen alone; the cursor keeps its time
-            'H' => v.scroll(-half * n_i),
-            'L' => v.scroll(half * n_i),
-            'c' => v.center(v.cursor),
-            'h' => v.set_cursor(v.cursor.saturating_sub(n.saturating_mul(v.step()))),
-            'l' => v.set_cursor(v.cursor.saturating_add(n.saturating_mul(v.step()))),
-            'w' | 'b' => {
+            A::ScreenLeft => v.scroll(-half * n_i),
+            A::ScreenRight => v.scroll(half * n_i),
+            A::Center => v.center(v.cursor),
+            A::Left => v.set_cursor(v.cursor.saturating_sub(n.saturating_mul(v.step()))),
+            A::Right => v.set_cursor(v.cursor.saturating_add(n.saturating_mul(v.step()))),
+            A::NextChange | A::PrevChange => {
+                let fwd = a == A::NextChange;
                 // on a group: the nearest change of any of its signals
                 let vars = self.ws.sel_vars();
                 let mut t = self.ws.view.cursor;
                 for _ in 0..n {
                     let next = vars.iter().filter_map(|&(v, b)| {
-                        if c == 'w' { self.ws.trace.next_change_of(v, b, t) } else { self.ws.trace.prev_change_of(v, b, t) }
+                        if fwd { self.ws.trace.next_change_of(v, b, t) } else { self.ws.trace.prev_change_of(v, b, t) }
                     });
-                    match if c == 'w' { next.min() } else { next.max() } {
+                    match if fwd { next.min() } else { next.max() } {
                         Some(x) => t = x,
                         None => break,
                     }
                 }
                 self.ws.view.set_cursor(t);
             }
-            'j' => self.move_sel(n.min(u32::MAX as u64) as isize),
-            'k' => self.move_sel(-(n.min(u32::MAX as u64) as isize)),
-            ' ' => self.ws.toggle_group(),
-            'g' => self.pending = Some('g'),
-            'G' => v.set_cursor(v.end),
-            'z' => (0..n).for_each(|_| v.zoom_in()),
-            'x' => (0..n).for_each(|_| v.zoom_out()),
-            '/' => self.open_line(Mode::Search),
-            '\'' => self.pending = Some('\''),
-            'y' => self.pending = Some('y'),
-            'm' => {
+            A::Down => self.move_sel(n.min(u32::MAX as u64) as isize),
+            A::Up => self.move_sel(-(n.min(u32::MAX as u64) as isize)),
+            A::Fold => self.ws.toggle_group(),
+            A::Start => v.set_cursor(self.ws.trace.start()),
+            A::End => v.set_cursor(v.end),
+            A::ZoomIn => (0..n).for_each(|_| v.zoom_in()),
+            A::ZoomOut => (0..n).for_each(|_| v.zoom_out()),
+            A::Search => self.open_line(Mode::Search),
+            A::Jump => {
+                let r = self.ws.goto_mark(given.unwrap_or(0));
+                self.report(r);
+            }
+            A::JumpBack => {
+                let r = self.ws.jump_back();
+                self.report(r);
+            }
+            A::CopyValue | A::CopyTime => {
+                let r = self.copy(if a == A::CopyValue { 'y' } else { 't' });
+                self.report(r);
+            }
+            A::Mark => {
                 let r = self.ws.set_mark(given);
                 self.report(r);
             }
-            'M' => {
+            A::Unmark => {
                 let r = self.ws.remove_mark(given);
                 self.report(r);
             }
-            'n' | 'N' => {
+            A::NextMatch | A::PrevMatch => {
                 let r = match self.last_search.clone() {
-                    Some(text) => self.search(&text, c == 'n', n),
+                    Some(text) => self.search(&text, a == A::NextMatch, n),
                     None => Err("no search yet".into()),
                 };
                 self.report(r);
             }
-            'a' => {
+            A::Panel => {
                 self.ws.anchor = None;
                 self.adding = true;
             }
-            ':' => self.open_command(),
-            '?' => self.help = true,
-            'e' => self.examine(),
-            'q' => {
+            A::Command => self.open_command(),
+            A::Help => self.help = true,
+            A::Examine => self.examine(),
+            A::Quit => {
                 let r = self.run("q");
                 self.report(r);
             }
-            _ => {}
+            A::NextMark | A::PrevMark => {
+                let r = self.ws.next_mark(a == A::NextMark);
+                self.report(r);
+            }
         }
     }
 
@@ -1168,12 +1192,13 @@ pub fn parse_keys(s: &str) -> Result<Vec<KeyEvent>, String> {
             Some("esc") => Some(key(KeyCode::Esc, none)),
             Some("cr" | "enter") => Some(key(KeyCode::Enter, none)),
             Some("tab") => Some(key(KeyCode::Tab, none)),
+            Some("s-tab") => Some(key(KeyCode::BackTab, KeyModifiers::SHIFT)),
             Some("bs") => Some(key(KeyCode::Backspace, none)),
             Some("lt") => Some(key(KeyCode::Char('<'), none)),
             Some("space") => Some(key(KeyCode::Char(' '), none)),
             Some(n) if n.len() == 3 && n.starts_with("c-") => Some(key(KeyCode::Char(n.chars().nth(2).unwrap()), KeyModifiers::CONTROL)),
             Some(n) if !n.is_empty() && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') => {
-                return Err(format!("unknown key <{}> (keys: <Esc> <CR> <Tab> <BS> <Space> <lt> <C-x>; < itself is <lt>)", name.unwrap()));
+                return Err(format!("unknown key <{}> (keys: <Esc> <CR> <Tab> <S-Tab> <BS> <Space> <lt> <C-x>; < itself is <lt>)", name.unwrap()));
             }
             _ => None,
         };

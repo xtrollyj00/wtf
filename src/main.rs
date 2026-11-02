@@ -78,6 +78,7 @@ fn run(args: Args) -> Result<(), String> {
     warnings.extend(setup);
     let path = args.trace.expect("clap requires it");
     let mut app = App::new(workspace::Workspace::open(&path)?);
+    app.keymap = config.keys;
 
     // -S may name a file that doesn't exist yet: that starts an empty session, and :w creates it.
     let session = args.session.unwrap_or_else(|| session::default_path(&path));
@@ -279,7 +280,7 @@ mod tests {
     #[test]
     fn collapsed_group() {
         let mut app = open("vcd", Some(SESSION));
-        keys(&mut app, "j ");
+        keys(&mut app, "j<CR>");
         insta::assert_snapshot!(snapshot(&mut app, 60, None));
         keys(&mut app, "w");
         assert_eq!(app.ws.view.cursor, 20); // the next change of any signal in the group, after 12ns
@@ -288,7 +289,7 @@ mod tests {
         keys(&mut app, "j");
         assert_eq!(app.msg, None);
         assert!(matches!(&app.ws.rows[app.ws.sel], rows::Row::Signal(s) if app.ws.trace.vars[s.var].path == "top.dma.state"));
-        keys(&mut app, "k ");
+        keys(&mut app, "k<CR>");
         assert_eq!(rows::visible(&app.ws.rows).len(), 6);
     }
 
@@ -399,7 +400,7 @@ mod tests {
         app.run("add calc.mode").unwrap();
         app.run("add top.clk").unwrap();
         app.ws.sel = 0;
-        keys(&mut app, " ");
+        keys(&mut app, "<CR>");
         insta::assert_snapshot!(snapshot(&mut app, 80, None));
     }
 
@@ -453,33 +454,33 @@ mod tests {
         keys(&mut app, ":rm gen(0).p gen(1).p\n");
         insta::assert_snapshot!("composite_folded", snapshot(&mut app, 80, None));
         // grid opens into its rows, grid[1] into its elements; the selection stays on grid[1]
-        keys(&mut app, "kk jj ");
+        keys(&mut app, "kk<CR>jj<CR>");
         assert_eq!((app.ws.sel, app.ws.bit), (0, Some(3)));
         insta::assert_snapshot!("composite_grid_1", snapshot(&mut app, 80, None));
-        // an element of 4 bits opens into its bits; Space on a bit folds the level it is in; on
+        // an element of 4 bits opens into its bits; Enter on a bit folds the level it is in; on
         // the row, the row and all under it
-        keys(&mut app, "j ");
+        keys(&mut app, "j<CR>");
         assert_eq!((app.ws.sel, app.ws.bit), (0, Some(6)));
-        keys(&mut app, "j ");
+        keys(&mut app, "j<CR>");
         assert_eq!((app.ws.sel, app.ws.bit), (0, Some(2)));
-        keys(&mut app, "kkk ");
+        keys(&mut app, "kkk<CR>");
         assert_eq!((app.ws.sel, app.ws.bit), (0, None));
         assert!(matches!(&app.ws.rows[0], rows::Row::Signal(s) if s.open.is_empty()));
         // pkt > pair
-        keys(&mut app, "j jjj ");
+        keys(&mut app, "j<CR>jjj<CR>");
         insta::assert_snapshot!("composite_pkt_pair", snapshot(&mut app, 80, None));
         keys(&mut app, "j");
         assert_eq!(app.ws.trace.vars[app.ws.probe(app.ws.rows[1].sig().unwrap(), app.ws.bit).0].path, "types.pkt.pair.hi");
         // e on a folded struct and array: the fields, nested, without opening it
-        keys(&mut app, "k kkke");
+        keys(&mut app, "k<CR>kkke");
         assert_eq!(
             app.examine.clone(),
             Some(("types.pkt @ 10ns".to_string(), ["0x101A5", "", "valid  1", "state  busy", "pair", "  hi   0xA", "  lo   0x5"].map(String::from).to_vec()))
         );
-        keys(&mut app, "e je");
+        keys(&mut app, "e<CR>je");
         insta::assert_snapshot!("composite_examine_pkts", snapshot(&mut app, 80, Some(24)));
         // dd on a line under a row removes the row; u brings it back
-        keys(&mut app, "e jdd");
+        keys(&mut app, "e<CR>jdd");
         assert_eq!(app.ws.rows.len(), 2);
         keys(&mut app, "u");
         assert_eq!(app.ws.rows.len(), 3);
@@ -488,7 +489,7 @@ mod tests {
     #[test]
     fn expand_bus() {
         let mut app = open("vcd", Some(SESSION));
-        keys(&mut app, "jjj ");
+        keys(&mut app, "jjj<CR>");
         assert!(matches!(&app.ws.rows[3], rows::Row::Signal(s) if app.ws.subs(s).len() == 8));
         keys(&mut app, "8j");
         assert_eq!(app.ws.bit, Some(0)); // data[0], the last bit line
@@ -504,7 +505,7 @@ mod tests {
         assert_eq!(app.ws.bit, Some(4));
         keys(&mut app, "u");
         assert!(matches!(&app.ws.rows[3], rows::Row::Signal(s) if app.ws.subs(s).len() == 8));
-        keys(&mut app, " ");
+        keys(&mut app, "<CR>");
         assert!(matches!(&app.ws.rows[3], rows::Row::Signal(s) if s.open.is_empty()) && app.ws.bit.is_none());
         keys(&mut app, "u");
         assert_eq!(app.msg.as_ref().unwrap().0, "already at oldest change");
@@ -660,7 +661,7 @@ mod tests {
         assert!(app.ws.modified());
         keys(&mut app, "u");
         assert!(!app.ws.modified());
-        keys(&mut app, "rk k 3z:30ns\n");
+        keys(&mut app, "rk<CR>k<CR>3z:30ns\n");
         keys(&mut app, &format!(":w {}\n", file.display()));
         assert_eq!(app.msg.as_ref().unwrap().0, format!("written: {}", file.display()));
         assert!(!app.ws.modified() && app.ws.session_path == file);
@@ -1378,7 +1379,7 @@ mod tests {
     fn mouse_drag_autoscroll() {
         // more lines than fit: rst added, data's bits open
         let mut app = panel_app();
-        keys(&mut app, "<Esc>jjj<Space>");
+        keys(&mut app, "<Esc>jjj<CR>");
         app.run("add top.rst").unwrap();
         keys(&mut app, "a");
         screen(&mut app, 100, Some(14));
@@ -1523,7 +1524,7 @@ mod tests {
         right(&mut app, 60, 8);
         pick(&mut app, "Open");
         assert_eq!(app.ws.subs(app.ws.rows[3].sig().unwrap()).len(), 8);
-        keys(&mut app, "<Space>");
+        keys(&mut app, "<CR>");
         screen(&mut app, 100, Some(22));
         right(&mut app, 60, 8);
         pick(&mut app, "Examine");
@@ -1726,7 +1727,7 @@ mod tests {
         let ws = workspace::Workspace::open(std::path::Path::new("tests/data/types-verilator-structs.fst")).unwrap();
         let mut app = App::new(ws);
         app.run("add types.pkt").unwrap();
-        keys(&mut app, "<Space>jjj<Space>j");
+        keys(&mut app, "<CR>jjj<CR>j");
         let s = app.ws.rows[0].sig().unwrap().clone();
         let hi = app.ws.trace.by_path["types.pkt.pair.hi"];
         assert_eq!(app.ws.probe(&s, app.ws.bit).0, hi);
@@ -1741,6 +1742,27 @@ mod tests {
         // `r` on the field cycles the field's
         keys(&mut app, "r");
         assert_eq!(radix::RADIXES[app.ws.look(app.ws.rows[0].sig().unwrap(), hi).radix].name, "sdec");
+    }
+
+    #[test]
+    fn remapped_keys() {
+        // a key moved in the config file does its action, its old key nothing, and the ? box and
+        // the menus name the new one (spec §19 "Keys")
+        let mut app = open("vcd", Some(SESSION));
+        let mut warnings = Vec::new();
+        app.keymap = tui::keys::Keymap::from_table(&"zoom_in = \"i\"\nstart = \"<C-g>\"\nfold = \"o\"".parse().unwrap(), &mut warnings);
+        assert!(warnings.is_empty(), "{warnings:?}");
+        snapshot(&mut app, 100, Some(20));
+        let cols = app.ws.view.cols;
+        keys(&mut app, "z");
+        assert_eq!(app.ws.view.cols, cols);
+        keys(&mut app, "i");
+        assert_eq!(app.ws.view.cols, cols * 2);
+        keys(&mut app, "l<C-g>");
+        assert_eq!(app.ws.view.cursor, app.ws.trace.start());
+        keys(&mut app, "?");
+        let screen = snapshot(&mut app, 100, Some(20));
+        assert!(screen.contains("i x       zoom in / out") && screen.contains("Ctrl-g G  start / end") && screen.contains("o         fold"), "{screen}");
     }
 
     #[test]
@@ -1868,7 +1890,7 @@ mod tests {
         // a field holding a time (a read's delay) shows it as a time in the value column too
         let t = trace::Trace::open("tests/data/axilite.vcd".as_ref()).unwrap();
         let mut app = App::new(workspace::Workspace::new(t, "axilite".into()));
-        keys(&mut app, ":decode bus axilite clock=aclk prefix=s_axi_\n:add bus.rd\n:fit\nw ");
+        keys(&mut app, ":decode bus axilite clock=aclk prefix=s_axi_\n:add bus.rd\n:fit\nw<CR>");
         let screen = snapshot(&mut app, 100, Some(14));
         let delay = screen.lines().find(|l| l.trim_start().starts_with("rd.delay")).unwrap_or_else(|| panic!("{screen}"));
         assert!(delay.split_whitespace().nth(1).is_some_and(|v| v.ends_with("ns")), "{screen}");
@@ -1918,7 +1940,7 @@ mod tests {
         let fg = |y: u16, ch: &str| (0..100).map(|x| &buf[(x, y)]).find(|c| c.symbol() == ch).map(|c| c.fg);
         assert_eq!(fg(4, "🮡"), Some(draw::red().fg.unwrap()));
         assert_eq!(fg(2, "🮡"), Some(draw::pal().bus));
-        keys(&mut app, ":select rx.frame\n ");
+        keys(&mut app, ":select rx.frame\n<CR>");
         insta::assert_snapshot!(snapshot(&mut app, 100, None));
         // the instance and the expanded row come back from the session
         let text = session::to_toml(&app.ws);
@@ -1941,7 +1963,7 @@ mod tests {
         keys(&mut app, ":add top.tdata\ne");
         assert_eq!(app.examine.clone(), Some(("top.tdata @ 65ns".to_string(), vec!["0xC0".to_string()])));
         keys(&mut app, "e:rm top.tdata\n:select rx.frame\n");
-        keys(&mut app, " ");
+        keys(&mut app, "<CR>");
         assert!(matches!(&app.ws.rows[0], rows::Row::Signal(s) if s.open.is_empty()) && app.ws.bit.is_none());
         // a rule's value runs to the next key, spaces and all
         keys(&mut app, ":decode stall check clock=clk bad=tvalid && !tready\n");

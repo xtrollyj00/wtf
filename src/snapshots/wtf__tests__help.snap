@@ -6,7 +6,7 @@ expression: "snapshot(&mut app, 100, Some(20))"
   Move                            Rows                            Change
   h l       cursor left / right   j k       select a row          a         add signals
   w b       next / prev change    Ctrl-f/b  a screen of rows      dd        remove
-  gg G      start / end           Space     fold a group or bus   J K       move down / up
+  gg G      start / end           Enter     fold a group or bus   J K       move down / up
   z x       zoom in / out         e         the whole value       V         select rows; Esc ends
   c         center the cursor     yy yt     copy value / time     r         next radix
   H L       screen left / right                                   u Ctrl-r  undo / redo
