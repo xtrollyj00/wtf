@@ -400,7 +400,9 @@ mod tests {
         let mut app = open("vcd", None);
         let b = |s: &str| trace::Val::Bits(s.into());
         app.ws.trace.add_computed("calc.mode", Some(4), vec![(0, b("0000")), (25, b("0011")), (55, b("1010"))]).unwrap();
-        keys(&mut app, ":add calc.mode\n:add top.clk\n");
+        // added before a key: a computed var no row or name uses is dropped after each (spec §16)
+        app.run("add calc.mode").unwrap();
+        app.run("add top.clk").unwrap();
         app.ws.sel = 0;
         keys(&mut app, " ");
         insta::assert_snapshot!(snapshot(&mut app, 80, None));
