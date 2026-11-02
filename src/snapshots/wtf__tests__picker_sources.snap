@@ -3,7 +3,7 @@ source: src/main.rs
 expression: "snapshot(&mut app, 100, Some(16))"
 ---
                    0           12ns    20ns      30ns      40ns      50ns      60ns      70ns
-    ┌─ signals  marks  records  commands  sessions  trail ─────────────────────────────────────┐───┐
+    ╭─ signals  marks  records  commands  sessions  trail ─────────────────────────────────────╮───┐
 clk │ ▸                                  3/3 │ value_at top.cpu.data 40ns                      │   └
     │────────────────────────────────────────│                                                 │
 ▾ cp│   command decode bus axilite clock=clk │ at 40ns: 0x2A                                   │
@@ -15,6 +15,6 @@ clk │ ▸                                  3/3 │ value_at top.cpu.data 40ns 
   bu│                                        │                                                 │────
     │                                        │                                                 │────
 dma.│                                        │                                                 │────
-    └────────────────────────────────────────┴───────────── Enter jump  C-s source  Esc close ─┘
+    ╰────────────────────────────────────────┴───────────── Enter jump  C-s source  Esc close ─╯
 
- signals ▸  top.clk                                                     12ns  ·  1ns/col  ·  simple
+ PICK     signals ▸  top.clk                                                 12ns  1ns/col  simple

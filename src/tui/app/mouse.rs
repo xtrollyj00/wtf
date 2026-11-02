@@ -40,6 +40,9 @@ pub struct Hit {
     /// The menu, then its second menu: where each was drawn, its items from the line under the
     /// top.
     pub menus: Vec<Rect>,
+    /// Notes to show that no card could (the screen too small, a box over them): the status
+    /// line shows the message instead.
+    pub unshown: bool,
     /// The leader menu's entries on screen, each with its key.
     pub leader: Vec<(Rect, crate::tui::keys::Key)>,
 }
@@ -188,6 +191,17 @@ impl App {
         }
         if self.records.is_some() {
             return self.records_mouse(m, at, now);
+        }
+        // `:messages`: the wheel moves, a click outside closes
+        if let Some(i) = self.messages {
+            let last = self.notes.len().saturating_sub(1);
+            match m.kind {
+                MouseEventKind::ScrollDown => self.messages = Some((i + 1).min(last)),
+                MouseEventKind::ScrollUp => self.messages = Some(i.saturating_sub(1)),
+                MouseEventKind::Down(_) if !inside(self.hit.boxed, at.0, at.1) => self.messages = None,
+                _ => {}
+            }
+            return;
         }
         if self.picker.is_some() {
             let mark = self.ws.mark();

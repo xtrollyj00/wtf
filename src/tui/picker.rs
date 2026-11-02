@@ -348,7 +348,7 @@ impl App {
 /// Draw the picker over the rows; its box and lines go to `hit` for the mouse.
 pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
     let Some(p) = &mut app.picker else { return };
-    let (bw, bh) = (w.saturating_sub(8).min(120), body.saturating_sub(2).min(30));
+    let (bw, bh) = (w.saturating_sub(8).min(120), body.saturating_sub(2).min(26));
     if bw < 30 || bh < 6 {
         return;
     }
@@ -368,7 +368,7 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
     let border = if p.source == 5 && !mono { st.fg(pal().hues[4]) } else { dim };
     // the list and the preview side by side; on a narrow screen, the list alone
     let lw = if bw >= 70 { bw * 9 / 20 } else { bw - 1 };
-    let b = gl().border;
+    let b = gl().card;
     let (tj, bj) = if b[4] == '-' { ('+', '+') } else { ('┬', '┴') };
     for y in 0..bh {
         let (l, r, fill) = match y {
@@ -394,7 +394,10 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
     // the sources in the top border, the current one in the accent
     let mut x = x0 + 2;
     for (i, s) in SOURCES.iter().enumerate() {
-        let s = if i == 2 && p.source == 2 { format!(" records {} ", p.stream.as_deref().unwrap_or("")) } else { format!(" {s} ") };
+        let s = if i == 2 && p.source == 2 { format!("records {}", p.stream.as_deref().unwrap_or("")) } else { s.to_string() };
+        // the current one with its icon (spec §14 `nerd`)
+        let ic = if i == p.source { draw::icon(source_icon(i)).map_or(String::new(), |c| format!("{c} ")) } else { String::new() };
+        let s = format!(" {ic}{s} ");
         if x + s.chars().count() < x0 + bw - 1 {
             put(buf, x, y0, &s, if i == p.source { accent } else { dim });
         }
@@ -413,7 +416,7 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
     // the query, how many match, and a rule under them
     let iw = lw - 2;
     let count = format!("{}/{}", p.shown.len(), p.entries.len());
-    put(buf, x0 + 2, y0 + 1, &format!("{} ", gl().insert), accent);
+    put(buf, x0 + 2, y0 + 1, &format!("{} ", draw::icon(draw::icon::SEARCH).unwrap_or(gl().insert)), accent);
     let q: String = p.query.chars().rev().take(iw.saturating_sub(count.len() + 4)).collect::<Vec<_>>().into_iter().rev().collect();
     put(buf, x0 + 4, y0 + 1, &q, st.add_modifier(Modifier::BOLD));
     put(buf, x0 + lw - 1 - count.len(), y0 + 1, &count, dim);
@@ -445,8 +448,13 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
             _ => " ",
         };
         put(buf, x0 + 2, y, tag, row.fg(pal().dim));
+        // its kind's icon, with the `nerd` glyphs
+        let ix = if gl().icons { 2 } else { 0 };
+        if let Some((c, col)) = kind_icon(&app.ws, &e.act) {
+            put(buf, x0 + 4, y, &c.to_string(), row.fg(col));
+        }
         let rw = if e.right.is_empty() { 0 } else { e.right.chars().count() + 1 };
-        let tw = iw.saturating_sub(2 + rw);
+        let tw = iw.saturating_sub(2 + ix + rw);
         let hits = matched(&p.query, &e.text);
         for (c, ch) in e.text.chars().enumerate().take(tw) {
             let s = if hits.contains(&(c as u32)) {
@@ -456,9 +464,9 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
             } else {
                 row
             };
-            put(buf, x0 + 4 + c, y, &ch.to_string(), if on { s.add_modifier(Modifier::BOLD) } else { s });
+            put(buf, x0 + 4 + ix + c, y, &ch.to_string(), if on { s.add_modifier(Modifier::BOLD) } else { s });
         }
-        if rw > 0 && e.text.chars().count() + rw + 1 < iw {
+        if rw > 0 && e.text.chars().count() + ix + rw + 1 < iw {
             put(buf, x0 + lw - rw, y, &e.right, row.fg(pal().dim));
         }
     }
@@ -532,6 +540,31 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
     for l in wrap(&r#where, pw) {
         line(buf, &mut y, &l, dim);
     }
+}
+
+/// A source's icon, in the top border beside its name.
+fn source_icon(i: usize) -> char {
+    use crate::draw::icon;
+    [icon::WIRE, icon::MARK, icon::RECORD, icon::CMD, icon::EYE, icon::TRAIL].get(i).copied().unwrap_or(icon::SEARCH)
+}
+
+/// An entry's icon and its colour by what it is: a wire, a bus, a stream, a mark, a record, a
+/// command, an agent, a step. None without the `nerd` glyphs.
+fn kind_icon(ws: &wtf_core::workspace::Workspace, act: &Act) -> Option<(char, ratatui::style::Color)> {
+    use crate::draw::icon;
+    let p = pal();
+    let (c, col) = match act {
+        Act::Var(v) if ws.stream_of(*v).is_some() => (icon::STREAM, p.hues[1]),
+        Act::Var(v) if ws.trace.vars[*v].width == Some(1) => (icon::WIRE, p.hues[4]),
+        Act::Var(_) => ('\u{ea8a}', p.bus),
+        Act::Mark(0) => (icon::CLOCK, p.hues[4]),
+        Act::Mark(_) => (icon::MARK, p.bus),
+        Act::Record(_) => (icon::RECORD, p.hues[1]),
+        Act::Command(_) => (icon::CMD, p.hues[5]),
+        Act::Agent(..) => (icon::AGENT, p.hues[4]),
+        Act::Step(_) => (icon::TRAIL, p.hues[4]),
+    };
+    draw::icon(c).map(|c| (c, col))
 }
 
 #[cfg(test)]

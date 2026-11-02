@@ -9,4 +9,4 @@ clk  1  └───────────────────────
 
 
 
- signals ▸  top.clk                                                15ns  ·  1ns/8col  ·  simple [+]
+ NORMAL   signals ▸  top.clk                                            15ns  1ns/8col  simple [+]

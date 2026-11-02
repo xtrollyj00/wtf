@@ -75,7 +75,7 @@ start with, in the accent.
                          ?  help
                          q  quit
 
- signals ▸                     0ns  ·  2ns/col  ·  trace.fst
+ NORMAL   signals ▸                              0ns  2ns/col  trace.fst
 ```
 
 The guide disappears once a signal is added, and comes back if all signals are removed. A click
@@ -97,7 +97,7 @@ clk    1     ───┘   └───┘   └───┘   └───┘ 
 state  0x4   ─ 0x1 ──🮧──── 0x2 ─────🮧──── 0x4 ──────
              ────────🮦───────🮦──────🮦────────🮦──────
 data   0x3A  ─ 0x43 ─🮧 0x96 ─🮧 0xE1 🮧── 0x3A ─🮧 0x7F
- signals ▸  cpu.state                  120ns  ·  2ns/col  ·  trace.fst
+ NORMAL   signals ▸  cpu.state              120ns  2ns/col  trace.fst
 ```
 
 - **Rows**: each signal takes two terminal lines (section 14). The name and value sit on the lower line.
@@ -118,12 +118,19 @@ data   0x3A  ─ 0x43 ─🮧 0x96 ─🮧 0xE1 🮧── 0x3A ─🮧 0x7F
 - **Cursor and marks**: columns down to the last row. The cursor's column is tinted warm, so the
   waveform under it stays as it is; the marks' columns are a fainter, neutral tint. Without colour
   the waveform stays too, and the column's blank cells show `┃` (marks `╎`).
-- **Status line** (bottom): on the left a button, `signals ▸` (`signals ◂` while the signal panel
-  is open), that opens and closes the panel with a click, as `a` does; then the full path
-  of the selected signal, its scope dim (or a message); on the right, a dot between each, the
-  cursor's time, then dim the zoom (time per column), the time unit an agent set for its answers
-  (`agents in ns`, section 15) if one did, and the file name, with `[+]` in the accent if the
-  session has unsaved changes. The visible time range is on the time axis.
+- **Status line** (bottom), in segments, each on its own background:
+  - on the left the mode in a badge on the accent (`NORMAL`, `SIGNALS`, `PICK`), the keys typed
+    so far (`5`, `Space a`), then a button, `signals ▸` (`signals ◂` while the signal panel is
+    open), that opens and closes the panel with a click, as `a` does;
+  - in the middle, dim: the mark at the cursor (its name or note), else the record of a stream
+    selected there (section 14), else the full path of the selected signal; a message only when
+    no card shows it (below, "Notifications");
+  - on the right: `following 41-2` when following an agent (section 15), the cursor's time in
+    the accent, the zoom (time per column), `unit ns` if an agent set the unit of its answers
+    (section 15), and the file name, with `[+]` in the accent if the session has unsaved changes.
+  When the line is too narrow, the segments least needed go first: the unit, the zoom, the
+  following, the file name. The visible time range is on the time axis. With the `nerd` glyphs
+  (section 14) the middle, the time, the following and the file name get an icon.
 
 ### Signal panel
 
@@ -141,40 +148,47 @@ the rows and their waveforms stay visible on the right, with a line marking wher
 │       busy         │
 │   ▸ stream         │
 └────────────────────┘
- signals ◂  cpu.state   0ns  ·  2ns/col  ·  trace.fst
+ SIGNALS  signals ◂  cpu.state   0ns  2ns/col  trace.fst
 ```
 
 See section 5 for the keys.
 
 ### Notifications
 
-What wtf says (an error, `copied: 0x96`, an agent joining, each of its steps) shows on the status
-line as before, and also in a card in the top right, so several stack and none is missed:
+What wtf says (an error, `copied: 0x96`, an agent joining, each of its steps) shows in a card in
+the top right, so several stack and none is missed:
 
 ```
-                                    ┌─ error ──────────────────────────────┐
+                                    ╭─ error ──────────────────────────────╮
                                     │ bad time: nope                       │
-                                    └──────────────────────────────────────┘
-                                    ┌─ 41-2 ───────────────────────────────┐
-                                    │ agent 41-2: find @clk busy  ·  20ns  │
-                                    └──────────────────────────────────────┘
+                                    ╰──────────────────────────────────────╯
+                                    ╭─ 41-2 ──────────────────────── find ─╮
+                                    │ @clk busy                            │
+                                    │ 3 matches, the first at 20ns         │
+                                    ╰──────────────────────────────────────╯
 ```
 
-- The newest on top, up to three, two fifths of the width (24 to 48 columns), the text in up to
+- The newest on top, up to three, two fifths of the width (24 to 49 columns), the text in up to
   three lines, the last cut with `…`.
-- An error's border is red with `error` in it; an agent's cyan with its id; the user's own dim,
-  without a title.
+- An error's border is red with `error` in it. An agent's step is cyan, with the agent's id as
+  the title and the tool at the right: what it asked, then its answer in green. The user's own
+  is dim; a message `word: rest` (`copied: 0x96`) has `word` as its title.
 - A card shows 4 seconds, an error 8, and fades (all of it dim) over its last second. `Esc` in
   Normal mode clears them.
-- They hide under a box, a menu, the leader menu and the picker, which have the keys.
+- They hide under a box, a menu, the leader menu and the picker, which have the keys. When no
+  card can show (under a box, or a screen too small), the status line shows the message instead,
+  red for an error.
 - What a drag's status line says while it moves (section 2, "Drags") is not a message.
-- `:messages` lists every message (the last 200) in a box like `:help <topic>`'s, each with the
-  clock time it came and who caused it, `you` or the agent's id: `14:03:05  you      error: bad
-  time: nope`.
+- `:messages` opens a panel across the bottom with every message (the last 200), the newest
+  highlighted, each with the clock time it came and who caused it, `you` or the agent's id:
+  `14:03:05  you      unknown command: bad`. `j` / `k` (or the arrows, the wheel) move,
+  `g` / `G` go to the first / last, `y` copies the message, `Enter` on an agent's step opens its
+  trail (`:pick trail`, section 15), `Esc` or `q` (or a click outside) closes it.
 
 ### Command line
 
-`:` opens the command line at the bottom, in place of the status line, as in Vim.
+`:` opens the command line at the bottom, in place of the status line, as in Vim, with a badge
+before it (`CMD`; `SEARCH` for `/`) where the screen is 40 columns or wider.
 Above it, a list of matching commands grows upward, each with a one-line description, as in Zed:
 up to ten, scrolled to the highlight, a description cut with `…` where the screen ends.
 
@@ -194,4 +208,4 @@ clk      ▁▁▁▁▔▔▔▔▁▁▁▁▔▔▔▔
 - `Enter` runs what is typed. `Esc` closes the command line.
 - The mouse: a click on a command puts it on the line as `Tab`, a double click runs it (section 2,
   "Mouse").
-- An unknown command or a bad argument shows an error on the status line.
+- An unknown command or a bad argument shows an error (above, "Notifications").

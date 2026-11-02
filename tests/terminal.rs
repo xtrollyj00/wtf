@@ -214,7 +214,8 @@ fn drag_adds_from_the_panel() {
 #[test]
 fn an_agent_joins_and_leaves() {
     // spec §15 "Joining": a window looks for agents on its trace every half second; one found
-    // joins, each new step shows on the status line, and one gone leaves
+    // joins, each new step shows in a card (its tool, what it asked, the answer), and one gone
+    // leaves
     use std::io::{BufRead, BufReader};
     use std::os::unix::net::UnixListener;
     let args = session();
@@ -241,7 +242,7 @@ fn an_agent_joins_and_leaves() {
     });
     t.wait("the agent joined", |s| s.contents().contains("agent 999-1 joined"));
     *session.lock().unwrap() = format!("version = 1\n{}", step(2));
-    t.wait("its new step", |s| s.contents().contains("agent: find step 1  ·  1 matches"));
+    t.wait("its new step", |s| s.contents().contains("999-1") && s.contents().contains("find") && s.contents().contains("│ step 1") && s.contents().contains("│ 1 matches"));
     std::fs::remove_file(&sock).unwrap();
     t.wait("the agent left", |s| s.contents().contains("agent 999-1 left"));
     // a present arrives over the window's own socket

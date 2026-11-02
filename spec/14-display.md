@@ -56,7 +56,9 @@ Four glyph sets, chosen with `glyphs` in the config file (section 19) or `--glyp
 - `ascii`: 7-bit only, for plain terminals, logs and pasting a snapshot into a mail or an issue.
   Every cell is one ASCII character.
 - `nerd`: `unicode` with icons from a Nerd Font (the codicons, `nf-cod-*`) before labels: the
-  start screen's actions and traces (section 4). For a terminal set to a Nerd Font. The other
+  start screen's actions and traces, the status line's segments, the notification cards
+  (section 4), the which-key card, the leader menu's groups (section 2) and the picker's entries
+  and sources (section 5). For a terminal set to a Nerd Font. The other
   sets draw no icons, nor a letter in their place.
 
 Each set keeps every distinction the others make, so a drawing reads the same in any of them.
@@ -78,6 +80,7 @@ Each set keeps every distinction the others make, so a drawing reads the same in
 | highlighted completion or menu item, insertion point, second menu | `▌`, `▸`, `▸` | as `unicode` | `>`, `>`, `>` |
 | what a drag adds (section 5) | `+ 3` | as `unicode` | `+ 3` |
 | panel and help borders (without colour) | `┌─┐│└┘` | as `unicode` | `+-+\|++` |
+| cards (which-key, leader, picker, notifications), what a key leads to | `╭─╮│╰╯`, `→` | as `unicode` | `+-+\|++`, `>` |
 | in text (`help · keys`, `65ns–85ns`) | `·`, `–` | as `unicode` | `-`, `-` |
 
 - In `ascii`, an edge and a bus crossing are both `+` on both lines: a 1-bit signal has one line

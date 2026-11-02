@@ -512,7 +512,8 @@ fn workspaces_and_joining() {
     assert!(followed.contains("data  0xXX") && followed.contains("1─────────── 30ns ────────────2") && followed.contains(&format!("following {pid}-1")), "{followed}");
     assert!(shot(&fst, ":follow<CR>").contains("busy"));
     assert!(shot(&simple(), ":follow<CR>:follow<CR>").contains(&format!("following {pid}-1")));
-    assert!(shot(&simple(), &format!(":follow {pid}-2<CR>")).contains(&format!("no agent {pid}-2 on this trace (agents: {pid}-1)")));
+    let err = shot(&simple(), &format!(":follow {pid}-2<CR>"));
+    assert!(err.contains(&format!("no agent {pid}-2 on this trace")) && err.contains(&format!("{pid}-1)")), "{err}");
 
     // an agent's workspace can be read over the link, not written
     let mut link = UnixStream::connect(dir.0.join(format!("wtf-{pid}-1.sock"))).unwrap();
@@ -586,12 +587,12 @@ fn present_and_user_view() {
     // the user opens the trace: the agent's file is newer than theirs (none), so it shows
     let shot = |keys: &str| String::from_utf8(wtf(&dir.0).arg(&trace).args(["--snapshot", "120", "--keys", keys]).output().unwrap().stdout).unwrap();
     let opened = shot("");
-    assert!(opened.contains("2 first busy") && opened.contains("agent: presented 1 signals, 2 cursors; :trail lists its 2 steps; u gives your own view"), "{opened}");
+    assert!(opened.contains("2 first busy") && opened.contains("agent: presented 1 signals, 2 cursors; :trail lists its 2 steps"), "{opened}");
     assert!(shot(":trail<CR>").contains("2 steps"));
     // after the user's own :w the file is only offered; :agent shows it
     std::fs::write(dir.0.join("simple.vcd.session.toml"), "version = 1\n").unwrap();
     let offered = shot("");
-    assert!(offered.contains("an agent presented this trace before your last :w; :agent shows it") && !offered.contains("first busy"), "{offered}");
+    assert!(offered.contains("an agent presented this trace before your") && offered.contains(":agent shows it") && !offered.contains("first busy"), "{offered}");
     assert!(shot(":agent<CR>").contains("2 first busy"));
     std::fs::remove_file(dir.0.join("simple.vcd.session.toml")).unwrap();
     // one without steps says none; one that doesn't read is a warning
@@ -599,7 +600,9 @@ fn present_and_user_view() {
     let opened = shot("");
     assert!(opened.contains("agent: presented 1 signals, 1 cursors; u gives your own view"), "{opened}");
     std::fs::write(&file, "rows = [").unwrap();
-    assert!(shot("").contains("simple.vcd.agent.session.toml: session: "));
+    // a card cuts a long message; :messages has all of it
+    let wide = String::from_utf8(wtf(&dir.0).arg(&trace).args(["--snapshot", "400x12", "--keys", ":messages<CR>"]).output().unwrap().stdout).unwrap();
+    assert!(wide.contains("simple.vcd.agent.session.toml: session: "), "{wide}");
     std::fs::remove_file(&file).unwrap();
 
     // a window on another trace doesn't count; one on this trace gets the workspace

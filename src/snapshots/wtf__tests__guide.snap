@@ -14,4 +14,4 @@ expression: "snapshot(&mut open(\"vcd\", None), 60, None)"
                        ?  help
                        q  quit
 
- signals ▸                         0  ·  2ns/col  ·  simple
+ NORMAL   signals ▸                     0  2ns/col  simple

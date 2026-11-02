@@ -77,7 +77,7 @@ start = "<C-g>"
 ### Leader
 
 `[leader]` adds to and changes the leader menu (section 2, "Leader"). An entry is a key and
-`["what it does", ":command"]`; a table is a group, with `name`; `""` removes the entry on a key.
+`["what it does", ":command"]`, with a third string saying what happens if that helps; a table is a group, with `name`; `""` removes the entry on a key.
 An entry replaces the one on its key, and a group merges into the group there:
 
 ```toml
@@ -126,23 +126,23 @@ n = ["name values…", ":names "]
 
 [a]
 name = "agent"
-f = ["follow…", ":follow "]
-F = ["stop following", ":follow off"]
-t = ["trail", ":pick trail"]
-j = ["join a session…", ":pick sessions"]
-s = ["the agent's session", ":agent"]
+f = ["follow…", ":follow ", "the window shows its workspace as it works"]
+F = ["stop following", ":follow off", "your own view back"]
+t = ["trail", ":pick trail", "its steps; Enter jumps to one's time"]
+j = ["join a session…", ":pick sessions", "the agents working on this machine"]
+s = ["the agent's session", ":agent", "what it left while no window was open"]
 
 [w]
 name = "session"
-w = ["save", ":w"]
-e = ["reload the trace", ":e"]
+w = ["save", ":w", "rows, marks and decodes, beside the trace"]
+e = ["reload the trace", ":e", "after the simulation ran again"]
 q = ["save and quit", ":wq"]
-Q = ["quit without saving", ":q!"]
+Q = ["quit without saving", ":q!", "unsaved changes are lost"]
 ```
 
 - A key is one key, as for `[keys]`, but not `Esc` or `Backspace` (they close and go up).
 - A bad entry is skipped and named: `config: leader.x = ["x", "q"]? (["what it does",
-  ":command"], a table for a group, or "" to remove)`.
+  ":command"] and maybe what happens, a table for a group, or "" to remove)`.
 
 ### First start
 

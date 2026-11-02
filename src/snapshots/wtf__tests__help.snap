@@ -21,4 +21,4 @@ expression: "snapshot(&mut app, 100, Some(20))"
                                                                   '2..'9    jump to a mark
   … lines 1–16 of 29  j k scroll
 
- signals ▸  top.clk                                                     12ns  ·  1ns/col  ·  simple
+ NORMAL   signals ▸  top.clk                                                 12ns  1ns/col  simple

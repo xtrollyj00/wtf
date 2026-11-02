@@ -11,4 +11,4 @@ expression: "snapshot(&mut app, 100, Some(10))"
 
 
 
- signals ▸  rx.errors                                                    0  ·  2ns/col  ·  axis [+]
+ NORMAL   signals ▸  rx.errors                                                0  2ns/col  axis [+]

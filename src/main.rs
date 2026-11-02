@@ -260,7 +260,7 @@ mod tests {
         // one an agent set shows on the status line
         app.ws.unit = Some(wtf_core::time::unit_named("ns").unwrap());
         app.msg = None;
-        assert!(snapshot(&mut app, 100, None).contains("agents in ns"));
+        assert!(snapshot(&mut app, 100, None).contains(" unit ns "));
     }
 
     #[test]
@@ -1077,12 +1077,12 @@ mod tests {
         let mut app = open("vcd", Some(SESSION));
         let t0 = Instant::now();
         let shot = snapshot(&mut app, 100, Some(22));
-        assert!(shot.lines().last().unwrap().starts_with(" signals ▸  top.clk "), "{shot}");
+        assert!(shot.lines().last().unwrap().starts_with(" NORMAL   signals ▸  top.clk "), "{shot}");
         let b = app.hit.button.unwrap();
         click(&mut app, b.x + 2, b.y, NONE, t0, 0);
         assert!(app.panel_shown());
         let shot = snapshot(&mut app, 100, Some(22));
-        assert!(shot.lines().last().unwrap().starts_with(" signals ◂ "), "{shot}");
+        assert!(shot.lines().last().unwrap().starts_with(" SIGNALS  signals ◂ "), "{shot}");
         click(&mut app, b.x + 2, b.y, NONE, t0, 1000);
         assert!(!app.panel_shown());
         assert_eq!(app.mode, app::Mode::Normal);
@@ -1868,9 +1868,19 @@ mod tests {
         let who: Vec<_> = app.notes.iter().skip(2).map(|n| (n.text.clone(), n.who.clone())).collect();
         assert_eq!(who, [("agent 41-1 joined (:follow shows its workspace)".to_string(), Some("41-1".to_string())), ("agent 41-2 joined (:follow shows its workspace)".into(), Some("41-2".into()))], "{:?}", app.notes);
         assert_eq!(app.notes.len(), 4);
+        // no room for a card: the status line says it
+        keys(&mut app, ":zoom nope\n");
+        let screen = snapshot(&mut app, 80, Some(4));
+        assert!(screen.lines().last().unwrap().contains("bad time: nope"), "{screen}");
+        assert!(!snapshot(&mut app, 80, Some(14)).lines().last().unwrap().contains("bad time"));
         keys(&mut app, ":messages\n");
+        assert_eq!(app.messages, Some(4));
+        keys(&mut app, "ky");
+        assert_eq!(app.yank.as_deref(), Some("agent 41-2 joined (:follow shows its workspace)"));
         let screen = snapshot(&mut app, 100, Some(14));
-        assert!(screen.contains("you      error: bad time: nope") && screen.contains("41-2     agent 41-2 joined"), "{screen}");
+        assert!(screen.contains("you       bad time: nope") && screen.contains("▌ 00") && screen.contains("41-1      agent 41-1 joined"), "{screen}");
+        keys(&mut app, "q");
+        assert!(app.messages.is_none());
     }
 
     #[test]
@@ -1891,7 +1901,7 @@ mod tests {
         let screen = snapshot(&mut app, 80, Some(30));
         assert!(screen.contains(" 3  ") && screen.contains("put mark N") && screen.contains("zoom in"), "{screen}");
         keys(&mut app, "<Esc>g");
-        assert!(snapshot(&mut app, 80, Some(14)).contains("g ▸ start of the trace"));
+        assert!(snapshot(&mut app, 80, Some(14)).contains("g → start of the trace"));
         keys(&mut app, "g");
         assert!(!app.which_key && app.pending().is_empty());
     }
@@ -2022,7 +2032,15 @@ mod tests {
             }
             insta::assert_snapshot!(name, text);
         }
+        // icons only with nerd: the leader's groups and the status line's clock (spec §14)
+        let icons = |t: &str| t.chars().filter(|c| ('\u{e000}'..='\u{f8ff}').contains(c)).count();
+        draw::set_glyphs(&draw::NERD);
+        keys(&mut app, "a<Space>");
+        let text = snapshot(&mut app, 120, Some(20));
+        assert!(text.contains('\u{eb31}') && text.contains('\u{eb7c}') && icons(&text) > 10, "{text}");
         draw::set_glyphs(&draw::UNICODE);
+        assert_eq!(icons(&snapshot(&mut app, 120, Some(20))), 0);
+        keys(&mut app, "<Esc>");
         assert!(Args::try_parse_from(["wtf", "--glyphs", "utf8", "x.vcd"]).err().unwrap().to_string().contains("unknown glyphs: utf8 (unicode, box, ascii, nerd)"));
     }
 
@@ -2213,7 +2231,7 @@ mod tests {
         // on the stream, the status line shows the record at the cursor; `e` all of it
         keys(&mut app, ":select rx.frame\n");
         let screen = snapshot(&mut app, 120, None);
-        assert!(screen.contains(" signals ▸  rx.frame #2  65ns–85ns  beats=0x2 len=0x8 data=c0 00 00 00 c1 00 00 00 comp…"), "{screen}");
+        assert!(screen.contains("signals ▸  rx.frame #2  65ns–85ns  beats=0x2 len=0x8 data=c0 00 00 00 c1 00 00 00 …"), "{screen}");
         keys(&mut app, "e");
         insta::assert_snapshot!(snapshot(&mut app, 100, Some(16)));
         keys(&mut app, "jl\x1b");

@@ -24,7 +24,7 @@
 | `:w [file]` | save the session (section 11) |
 | `:wq` | save the session and quit |
 | `:agent` | show the session an agent left for this trace when no window was open (`<trace>.agent.session.toml`, section 15 "Present"), as `present` shows it, its steps in `:trail` |
-| `:messages` | every message so far, the newest at the end, with its time and who caused it (section 4, "Notifications"); `j` / `k` scroll, `Esc` or `q` closes |
+| `:messages` | a panel with every message so far, the newest at the end and highlighted, with its time and who caused it (section 4, "Notifications"); `j` / `k` move, `y` copies one, `Esc` or `q` closes |
 | `:trail` | the agent's steps the window has (section 15 "Trail"), in a box like `:records`'s; `Enter` jumps to a step's time |
 | `:records <stream> [where <expr>]` | a box listing a stream's records (section 16), `#n start–end` and every field, as the `records` tool does; `where` takes the same expression. In the box `j` / `k` move, `Ctrl-f` / `Ctrl-b` a box of records, `g` / `G` go to the first / last, `Enter` jumps the cursor to the record's start (a jump, so `''` comes back) and selects the stream's row if shown, `Esc` or `q` closes it. No `group_by` or `count_only`: those are for agents |
 | `:pick [<source>]` | open the picker (section 5, "Picker") on a source: `signals` (the default), `marks`, `records [<stream>]` (the first stream without one), `commands`, `sessions`, `trail`. An empty source is an error that says why, as `:trail` and `:records` do |

@@ -71,8 +71,9 @@ command line.
 
 Keys that wait for more (a count, the first key of `gg`, `dd`, `yy`, `'1`) show beside the
 status line's `signals ▸`, in the accent (`5`, `g`, `'`). When they have waited 300 ms
-(`which_key` in the config file, section 19), a card in the bottom right lists what can follow:
-each key, `▸`, and what it does. After `'` it lists the cursors, each with its name (a mark
+(`which_key` in the config file, section 19), a card in the bottom right, titled with the keys
+and the group (`' jump to`, `y copy`, `d remove`, `g go to`), lists what can follow: each key,
+`→`, and what it does. After `'` it lists the cursors, each with its name (a mark
 without one is `mark N`, cursor 1 `cursor`) and time, and `'` back before the jump; after a count,
 the keys a count goes to. Typed quickly, `gg`, `yy` or `''` never show it. The next key goes on
 as it would without the card; `Esc` cancels.
@@ -80,19 +81,28 @@ as it would without the card; `Esc` cancels.
 ### Leader
 
 `Space` opens the leader menu at once: a card across the bottom of the screen with the entries
-of the config file's `[leader]` (section 19) in columns, each its key, `▸`, and what it does, its
+of the config file's `[leader]` (section 19) in columns, each its key, `→`, and what it does, its
 command dim at the column's right. Groups come first, in magenta with `+` (`+signals`); their key
-opens them. The status line shows the keys so far (`Space a`), the card's title the group's name.
+opens them. The status line shows the keys so far (`Space a`), the card's title the keys and the
+group's name. A group whose entries say what happens (the third string in `[leader]`) lists one
+entry a line: what it does, its command in blue, and what happens, dim:
 
 ```
-   Space
-  s ▸ +signals                                    m ▸ marks                          :pick marks
-  c ▸ +cursors                                    r ▸ records                      :pick records
-  d ▸ +decode                                     : ▸ commands                    :pick commands
-  a ▸ +agent                                      u ▸ undo                                 :undo
-  w ▸ +session                                    ? ▸ keys                                 :help
-  f ▸ find a signal                :pick signals  q ▸ quit                                    :q
-                                                                       Esc close   Backspace close
+╭─ Space a  agent ──────────────────────────────────────────────────────────────────────────────╮
+│  f → follow…                     :follow             the window shows its workspace as it works │
+│  t → trail                       :pick trail         its steps; Enter jumps to one's time       │
+╰─────────────────────────────────────────────────────────────────────── Esc close   Backspace up ─╯
+```
+
+```
+╭─ Space ──────────────────────────────────────────────────────────────────────────────────────╮
+│  s → +signals                                 m → marks                     :pick marks      │
+│  c → +cursors                                 r → records                 :pick records      │
+│  d → +decode                                  : → commands               :pick commands      │
+│  a → +agent                                   u → undo                            :undo      │
+│  w → +session                                 ? → keys                            :help      │
+│  f → find a signal           :pick signals    q → quit                               :q      │
+╰─────────────────────────────────────────────────────────────── Esc close   Backspace close ─╯
 ```
 
 - An entry runs its `:` command, as typed on the command line. A command ending in a space
@@ -183,6 +193,7 @@ What is on top takes the mouse, and a click outside it closes it, as `Esc` does:
 | the `e` and `?` boxes | the wheel scrolls, as `j` / `k` |
 | the `:records` box (section 7) | a click highlights a record, a double click jumps to it as `Enter`, the wheel moves the highlight |
 | the leader menu | a click on an entry picks it, as its key; a click elsewhere closes it |
+| the `:messages` panel (section 4) | the wheel moves the highlight; a click outside closes it |
 | the picker (section 5) | a click highlights an entry, a double click picks it as `Enter`, the wheel moves the highlight |
 | the command completions (section 4) | a click puts the command on the command line as `Tab`, a double click runs it as `Enter`, the wheel moves the highlight; a click outside closes the command line |
 | a menu | as "Menu" below |

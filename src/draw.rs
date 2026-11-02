@@ -143,6 +143,11 @@ pub struct Glyphs {
     pub insert: char,
     /// Borders: top-left, top-right, bottom-left, bottom-right, horizontal, vertical.
     pub border: [char; 6],
+    /// The cards' borders (which-key, the leader menu, notifications, the picker), as `border`
+    /// with round corners.
+    pub card: [char; 6],
+    /// Between a key and what it does: `g → start`.
+    pub arrow: char,
     /// Separators in text: `help · keys`, `65ns–85ns`.
     pub dot: char,
     pub dash: char,
@@ -172,6 +177,8 @@ pub const UNICODE: Glyphs = Glyphs {
     hl: '▌',
     insert: '▸',
     border: ['┌', '┐', '└', '┘', '─', '│'],
+    card: ['╭', '╮', '╰', '╯', '─', '│'],
+    arrow: '→',
     dot: '·',
     dash: '–',
     icons: false,
@@ -203,10 +210,44 @@ pub const ASCII: Glyphs = Glyphs {
     hl: '>',
     insert: '>',
     border: ['+', '+', '+', '+', '-', '|'],
+    card: ['+', '+', '+', '+', '-', '|'],
+    arrow: '>',
     dot: '-',
     dash: '-',
     icons: false,
 };
+
+/// Nerd Font icons (`nf-cod-*` codicons), drawn with the `nerd` glyphs only (spec §14).
+pub mod icon {
+    pub const WIRE: char = '\u{eb31}';
+    pub const CLOCK: char = '\u{eb7c}';
+    pub const MARK: char = '\u{eaa5}';
+    pub const AGENT: char = '\u{ec20}';
+    pub const ERROR: char = '\u{ea87}';
+    pub const INFO: char = '\u{ea74}';
+    pub const OK: char = '\u{eab2}';
+    pub const SEARCH: char = '\u{ea6d}';
+    pub const CMD: char = '\u{ea85}';
+    pub const HISTORY: char = '\u{ea82}';
+    pub const FILE: char = '\u{ea7b}';
+    pub const SESSION: char = '\u{ebd2}';
+    pub const EYE: char = '\u{ea70}';
+    pub const TRAIL: char = '\u{eb86}';
+    pub const BELL: char = '\u{eaa2}';
+    pub const KEYS: char = '\u{ea65}';
+    pub const PLUG: char = '\u{eb2d}';
+    pub const RECORD: char = '\u{eba7}';
+    pub const FOLDER: char = '\u{ea83}';
+    pub const STREAM: char = '\u{ea86}';
+    pub const SAVE: char = '\u{eb4b}';
+    pub const ZOOM: char = '\u{eb81}';
+    pub const EDIT: char = '\u{ea73}';
+}
+
+/// `c` with the `nerd` glyphs, none with the others.
+pub fn icon(c: char) -> Option<char> {
+    gl().icons.then_some(c)
+}
 
 /// `unicode` with Nerd Font icons (the `nf-cod-*` codicons), for terminals set to a Nerd Font.
 pub const NERD: Glyphs = Glyphs { icons: true, ..UNICODE };

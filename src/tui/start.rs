@@ -1,7 +1,7 @@
 //! The start screen (spec §4 "Start screen"): what `wtf` shows without a trace. The logo, the
 //! actions with their keys, the traces opened lately, the agents' workspaces to join.
 
-use crate::draw::{gl, pal};
+use crate::draw::{gl, icon, pal};
 use crate::history::{self, Open};
 use crate::live;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -52,16 +52,6 @@ const COL_W: usize = 54;
 const STRIP: usize = 14;
 const CELL_SECS: u64 = 12 * 3600;
 
-/// Nerd Font icons (`nf-cod-*`), drawn with the `nerd` glyphs only.
-mod icon {
-    pub const FOLDER: char = '\u{ea83}';
-    pub const AGENT: char = '\u{ec20}';
-    pub const KEYS: char = '\u{ea65}';
-    pub const QUIT: char = '\u{ea87}';
-    pub const HISTORY: char = '\u{ea82}';
-    pub const FILE: char = '\u{ea7b}';
-    pub const WTF: char = '\u{ea86}';
-}
 
 /// What the user picked.
 #[derive(Debug, PartialEq)]
@@ -194,7 +184,7 @@ impl Start {
             all => a.push((icon::AGENT, cyan, "Join an agent".into(), format!("{} workspaces", all.len()), "a")),
         }
         a.push((icon::KEYS, blue, "Keys".into(), String::new(), "?"));
-        a.push((icon::QUIT, p.dim, "Quit".into(), String::new(), "q"));
+        a.push((icon::ERROR, p.dim, "Quit".into(), String::new(), "q"));
         a
     }
 
@@ -375,7 +365,7 @@ impl Start {
             if agents > 0 {
                 foot += &format!("   {agents} agent{} on this machine", if agents == 1 { "" } else { "s" });
             }
-            let icon = if gl().icons { format!("{} ", icon::WTF) } else { String::new() };
+            let icon = if gl().icons { format!("{} ", icon::STREAM) } else { String::new() };
             let fx = w.saturating_sub(icon.chars().count() + foot.len()) / 2;
             put(fx, y, &icon, Style::new().fg(p.hues[1]));
             put(fx + icon.chars().count(), y, &foot, dim);

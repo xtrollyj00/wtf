@@ -55,6 +55,8 @@ pub struct App {
     pub notes: Vec<Note>,
     /// The message last put in `notes`, so each goes in once.
     logged: Option<Msg>,
+    /// `:messages` is open, at this note (spec §4 "Notifications").
+    pub messages: Option<usize>,
     /// Notes before this one are dismissed from the corner (`Esc`).
     pub dismissed: usize,
     /// When the corner was last drawn while a note showed, to draw again as they fade.
@@ -126,9 +128,16 @@ pub struct Note {
     pub text: String,
     pub err: bool,
     pub who: Option<String>,
+    /// An agent's step: its tool, what it asked and the answer, shown apart in the card.
+    pub step: Option<(String, String, String)>,
     /// Seconds since the epoch, for the clock time `:messages` shows.
     pub wall: u64,
     pub at: std::time::Instant,
+}
+
+/// When a note came, as the local clock showed it.
+pub fn clock_of(n: &Note) -> String {
+    clock(n.wall)
 }
 
 /// How long a note shows in the corner: an error longer; it fades over the last second.
@@ -187,6 +196,7 @@ impl App {
             msg: None,
             agent_msg: None,
             notes: Vec::new(),
+            messages: None,
             logged: None,
             dismissed: 0,
             noted: None,
@@ -293,10 +303,7 @@ impl App {
                 if self.notes.is_empty() {
                     return Err("no messages yet".into());
                 }
-                let items: Vec<_> = self.notes.iter().map(|n| (None, format!("{}  {:<8} {}{}", clock(n.wall), n.who.as_deref().unwrap_or("you"), if n.err { "error: " } else { "" }, n.text))).collect();
-                // scrolled to the newest
-                let hl = items.len().saturating_sub(1);
-                self.records = Some(Records { name: "messages".into(), stream: String::new(), title: String::new(), items, hl, top: 0, page: 1 });
+                self.messages = Some(self.notes.len() - 1);
                 None
             }
             "w" => Some(command::save(&mut self.ws, arg.trim())?),
@@ -349,9 +356,11 @@ impl App {
         // each with the agent it is about, for `:messages`
         let mut said: Vec<(String, bool)> = Vec::new();
         let mut whose: Vec<String> = Vec::new();
+        let mut steps: Vec<Option<(String, String, String)>> = Vec::new();
         for id in is.iter().filter(|id| !was.contains(id)) {
             said.push((format!("agent {id} joined (:follow shows its workspace)"), false));
             whose.push(id.clone());
+            steps.push(None);
         }
         for id in was.iter().filter(|id| !is.contains(id)) {
             if self.follow.as_ref().is_some_and(|f| &f.id == id) {
@@ -361,6 +370,7 @@ impl App {
                 said.push((format!("agent {id} left"), false));
             }
             whose.push(id.clone());
+            steps.push(None);
         }
         let several = self.agents.len() > 1;
         for (id, text) in self.agents.clone() {
@@ -384,13 +394,15 @@ impl App {
                     let who = if several { format!("agent {id}") } else { "agent".into() };
                     said.push((format!("{who}: {}", Self::step_line(s)), s.answer.starts_with("error: ")));
                     whose.push(id.clone());
+                    steps.push(Some((s.tool.clone(), s.ask.clone(), s.answer.clone())));
                 }
             }
         }
         // every one in the corner and `:messages`; the last on the status line, unless the
         // user's own message is there
-        for (m, id) in said.iter().zip(whose) {
+        for ((m, id), step) in said.iter().zip(whose).zip(steps) {
             self.log(m, Some(id));
+            self.notes.last_mut().expect("just put there").step = step;
         }
         if let Some(last) = said.pop()
             && (self.msg.is_none() || self.msg == self.agent_msg)
@@ -500,6 +512,9 @@ impl App {
         }
         if self.records.is_some() {
             return self.records_key(k);
+        }
+        if self.messages.is_some() {
+            return self.messages_key(k);
         }
         let mark = self.ws.mark();
         if self.leader.is_some() {
@@ -808,6 +823,30 @@ impl App {
         self.which_key |= self.which_delay.is_zero();
     }
 
+    /// `:messages` has the keys: `j` / `k` move, `g` / `G` to the first / last, `y` copies the
+    /// line's text, `Enter` on an agent's step opens the trail, `Esc` / `q` close.
+    fn messages_key(&mut self, k: KeyEvent) {
+        let Some(i) = self.messages else { return };
+        let last = self.notes.len().saturating_sub(1);
+        self.messages = match k.code {
+            KeyCode::Char('j') | KeyCode::Down => Some((i + 1).min(last)),
+            KeyCode::Char('k') | KeyCode::Up => Some(i.saturating_sub(1)),
+            KeyCode::Char('g') => Some(0),
+            KeyCode::Char('G') => Some(last),
+            KeyCode::Char('y') => {
+                self.yank = self.notes.get(i).map(|n| n.text.clone());
+                Some(i)
+            }
+            KeyCode::Enter if self.notes.get(i).is_some_and(|n| n.step.is_some()) => {
+                self.messages = None;
+                let r = self.run("pick trail");
+                return self.report(r);
+            }
+            KeyCode::Esc | KeyCode::Char('q') => None,
+            _ => Some(i),
+        };
+    }
+
     /// Which-key's time come: true when it starts showing, to draw again.
     pub fn which_tick(&mut self, now: std::time::Instant) -> bool {
         let due = !self.which_key && self.typed_at.is_some_and(|t| now.duration_since(t) >= self.which_delay);
@@ -818,7 +857,7 @@ impl App {
     /// Put a message in `notes`, as said by `who` (an agent's id, none for the user).
     fn log(&mut self, (text, err): &Msg, who: Option<String>) {
         let wall = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-        self.notes.push(Note { text: text.clone(), err: *err, who, wall, at: std::time::Instant::now() });
+        self.notes.push(Note { text: text.clone(), err: *err, who, step: None, wall, at: std::time::Instant::now() });
         if self.notes.len() > NOTES {
             self.notes.remove(0);
             self.dismissed = self.dismissed.saturating_sub(1);

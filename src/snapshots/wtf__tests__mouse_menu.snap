@@ -23,4 +23,4 @@ dma.state    0x0   ────────────┃──── 0x0 ─�
                                                               Previous change      b
                                                               Search value…        /
 
- signals ▸  top.cpu.data                                                12ns  ·  1ns/col  ·  simple
+ NORMAL   signals ▸  top.cpu.data                                            12ns  1ns/col  simple

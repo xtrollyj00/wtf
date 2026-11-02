@@ -65,6 +65,31 @@ pub fn completions(line: &str) -> Vec<&'static Command> {
         .collect()
 }
 
+/// A `:` command's icon, for the leader menu: by its name (spec §14 `nerd`).
+pub fn icon(line: &str) -> char {
+    use crate::draw::icon;
+    let mut words = line.trim_start_matches(':').split_whitespace();
+    match (words.next().unwrap_or(""), words.next().unwrap_or("")) {
+        ("pick", "signals") | ("add", _) | ("signal", _) => icon::WIRE,
+        ("pick", "marks") | ("cursor", _) => icon::MARK,
+        ("pick", "records") | ("records", _) => icon::RECORD,
+        ("pick", "commands") => icon::CMD,
+        ("pick", "trail") | ("trail", _) => icon::TRAIL,
+        ("pick", "sessions") | ("follow", _) => icon::EYE,
+        ("pick", _) => icon::SEARCH,
+        ("agent", _) => icon::AGENT,
+        ("decode", _) | ("protocol", _) | ("names", _) => icon::PLUG,
+        ("undo", _) | ("redo", _) => icon::HISTORY,
+        ("help", _) => icon::KEYS,
+        ("messages", _) => icon::BELL,
+        ("w", _) | ("wq", _) => icon::SAVE,
+        ("e", _) => icon::FILE,
+        ("q", _) | ("q!", _) => icon::ERROR,
+        ("fit", _) | ("zoom", _) => icon::ZOOM,
+        _ => icon::EDIT,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

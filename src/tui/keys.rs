@@ -113,8 +113,9 @@ pub struct Keymap {
 /// An entry of the leader menu: a `:` command, or a group of entries.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Entry {
-    /// What it does, and the command: run, or with a trailing space put on the command line.
-    Run { label: String, line: String },
+    /// What it does, the command (run, or with a trailing space put on the command line), and
+    /// a longer word on what happens, if any.
+    Run { label: String, line: String, why: String },
     Group { name: String, items: Vec<(Key, Entry)> },
 }
 
@@ -154,18 +155,18 @@ n = ["name values…", ":names "]
 
 [a]
 name = "agent"
-f = ["follow…", ":follow "]
-F = ["stop following", ":follow off"]
-t = ["trail", ":pick trail"]
-j = ["join a session…", ":pick sessions"]
-s = ["the agent's session", ":agent"]
+f = ["follow…", ":follow ", "the window shows its workspace as it works"]
+F = ["stop following", ":follow off", "your own view back"]
+t = ["trail", ":pick trail", "its steps; Enter jumps to one's time"]
+j = ["join a session…", ":pick sessions", "the agents working on this machine"]
+s = ["the agent's session", ":agent", "what it left while no window was open"]
 
 [w]
 name = "session"
-w = ["save", ":w"]
-e = ["reload the trace", ":e"]
+w = ["save", ":w", "rows, marks and decodes, beside the trace"]
+e = ["reload the trace", ":e", "after the simulation ran again"]
 q = ["save and quit", ":wq"]
-Q = ["quit without saving", ":q!"]
+Q = ["quit without saving", ":q!", "unsaved changes are lost"]
 "#;
 
 impl Default for Keymap {
@@ -199,12 +200,13 @@ fn merge(into: &mut Entry, table: &toml::Table, at: &str, warnings: &mut Vec<Str
             }
         };
         let i = items.iter().position(|(ik, _)| *ik == key);
-        let bad = |w: &mut Vec<String>| w.push(format!("config: {at}.{k} = {}? ([\"what it does\", \":command\"], a table for a group, or \"\" to remove)", theme::show(v)));
+        let bad = |w: &mut Vec<String>| w.push(format!("config: {at}.{k} = {}? ([\"what it does\", \":command\"] and maybe what happens, a table for a group, or \"\" to remove)", theme::show(v)));
         match v {
             toml::Value::String(t) if t.is_empty() => _ = i.map(|i| items.remove(i)),
             toml::Value::Array(a) => match a.as_slice() {
-                [toml::Value::String(label), toml::Value::String(line)] if line.starts_with(':') => {
-                    let e = Entry::Run { label: label.clone(), line: line.clone() };
+                [toml::Value::String(label), toml::Value::String(line), why @ ..] if line.starts_with(':') && why.len() <= 1 && why.iter().all(|w| w.is_str()) => {
+                    let why = why.first().and_then(|w| w.as_str()).unwrap_or("").to_string();
+                    let e = Entry::Run { label: label.clone(), line: line.clone(), why };
                     match i {
                         Some(i) => items[i].1 = e,
                         None => items.push((key, e)),
@@ -332,6 +334,16 @@ impl Keymap {
         out
     }
 
+    /// What which-key calls the keys a prefix leads to, from one of them: `' jump to`.
+    pub fn group(a: Action) -> &'static str {
+        match a {
+            Action::Jump | Action::JumpBack => "jump to",
+            Action::CopyValue | Action::CopyTime => "copy",
+            Action::Remove => "remove",
+            _ => "go to",
+        }
+    }
+
     /// What which-key says `a` does.
     pub fn desc(a: Action) -> &'static str {
         ACTIONS[a as usize].3
@@ -392,9 +404,9 @@ mod tests {
         m.set_leader(&t, &mut w);
         let k = |t: &str| keys(t);
         assert_eq!(m.leader.at(&k("u")), None);
-        assert_eq!(m.leader.at(&k("f")), Some(&Entry::Run { label: "find".into(), line: ":pick signals".into() }));
+        assert_eq!(m.leader.at(&k("f")), Some(&Entry::Run { label: "find".into(), line: ":pick signals".into(), why: String::new() }));
         assert!(matches!(m.leader.at(&k("a")), Some(Entry::Group { name, .. }) if name == "ai"));
-        assert_eq!(m.leader.at(&k("at")), Some(&Entry::Run { label: "steps".into(), line: ":trail".into() }));
+        assert_eq!(m.leader.at(&k("at")), Some(&Entry::Run { label: "steps".into(), line: ":trail".into(), why: String::new() }));
         // the rest of the agent group stays
         assert!(m.leader.at(&k("aF")).is_some());
         assert!(m.leader.at(&k("gs")).is_some());
@@ -402,7 +414,7 @@ mod tests {
             w,
             [
                 "config: leader.ab? (one key, not Esc or Backspace: \"x\", \"<C-x>\")",
-                "config: leader.x = [\"x\", \"q\"]? ([\"what it does\", \":command\"], a table for a group, or \"\" to remove)",
+                "config: leader.x = [\"x\", \"q\"]? ([\"what it does\", \":command\"] and maybe what happens, a table for a group, or \"\" to remove)",
             ]
         );
     }
