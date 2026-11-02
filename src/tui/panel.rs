@@ -30,8 +30,8 @@ pub struct Panel {
     origin: usize,
     /// First line on screen.
     pub top: usize,
-    /// How many vars of the trace the tree holds; computed ones come later (`draw` rebuilds it).
-    pub vars: usize,
+    /// The trace's `version` the tree was built from; computed vars come and go (`draw` rebuilds it).
+    pub version: u64,
     /// Signals picked with Space, in the order they were picked.
     pub marked: Vec<usize>,
     /// The other end of a `V` range.
@@ -85,7 +85,7 @@ impl Panel {
         for n in nodes.iter_mut().filter(|n| n.var.is_none()) {
             n.whole = trace.by_path.get(&n.path).copied().filter(|&v| trace.is_composite(v));
         }
-        Panel { nodes, sel: 0, query: None, pattern: String::new(), matches: Vec::new(), origin: 0, top: 0, vars: trace.vars.len(), marked: Vec::new(), anchor: None }
+        Panel { nodes, sel: 0, query: None, pattern: String::new(), matches: Vec::new(), origin: 0, top: 0, version: trace.version, marked: Vec::new(), anchor: None }
     }
 
     /// Refresh after computed signals are appended, keeping the panel's state by path.
@@ -105,8 +105,13 @@ impl Panel {
             }
         }
         drop(old);
+        // marks by path: a computed var dropped (spec §16) moves those after it
+        let path_of: HashMap<usize, &str> = self.nodes.iter().filter_map(|n| Some((n.var?, n.path.as_str()))).collect();
+        let var_of: HashMap<&str, usize> = next.nodes.iter().filter_map(|n| Some((n.path.as_str(), n.var?))).collect();
+        self.marked = self.marked.iter().filter_map(|v| var_of.get(path_of.get(v)?).copied()).collect();
+        drop((path_of, var_of));
         self.nodes = next.nodes;
-        self.vars = next.vars;
+        self.version = next.version;
         self.sel = sel;
         self.origin = origin;
         self.anchor = anchor;

@@ -306,9 +306,9 @@ mod tests {
         let mut app = open("vcd", Some(SESSION));
         keys(&mut app, "J");
         assert_eq!(names(&app), "▾ cpu,  clk,  cpu.state,  data,  busy,dma.state");
-        keys(&mut app, "jVjj:group g\n");
-        assert_eq!(app.msg.as_ref().unwrap().0, "groups can't be nested yet");
-        keys(&mut app, "\x1bjjj:group g\n");
+        keys(&mut app, "kVj:group g\n");
+        assert_eq!(app.msg.as_ref().unwrap().0, "groups can't be nested yet: the selection has a group's header");
+        keys(&mut app, "\x1bjjjj:group g\n");
         assert!(app.mode == app::Mode::Normal);
         assert_eq!(names(&app), "▾ cpu,  clk,  cpu.state,  data,  busy,▾ g,  dma.state");
         keys(&mut app, "kkr");
@@ -324,6 +324,24 @@ mod tests {
         assert!(matches!(&app.ws.rows[3], rows::Row::Signal(s) if radix::RADIXES[s.look.radix].name == "bin"));
         keys(&mut app, "\x1b");
         assert!(app.mode == app::Mode::Normal);
+    }
+
+    #[test]
+    fn group_inside_group() {
+        // rows all in one group leave it for a new group right after it; the last ones take its place
+        let mut app = open("vcd", Some(SESSION));
+        keys(&mut app, "J");
+        assert_eq!(names(&app), "▾ cpu,  clk,  cpu.state,  data,  busy,dma.state");
+        keys(&mut app, "jVj:group g\n");
+        assert_eq!(names(&app), "▾ cpu,  clk,  busy,▾ g,  cpu.state,  data,dma.state");
+        assert_eq!(app.ws.sel, 3);
+        keys(&mut app, "u");
+        assert_eq!(names(&app), "▾ cpu,  clk,  cpu.state,  data,  busy,dma.state");
+        keys(&mut app, ":select clk busy\n:group all\n");
+        assert_eq!(names(&app), "▾ all,  clk,  cpu.state,  data,  busy,dma.state");
+        assert_eq!(app.ws.sel, 0);
+        keys(&mut app, ":select busy dma.state\n:group g\n");
+        assert_eq!(app.msg.as_ref().unwrap().0, "the selection is partly in group all: select rows all in it or all outside");
     }
 
     #[test]
@@ -382,7 +400,9 @@ mod tests {
         let mut app = open("vcd", None);
         let b = |s: &str| trace::Val::Bits(s.into());
         app.ws.trace.add_computed("calc.mode", Some(4), vec![(0, b("0000")), (25, b("0011")), (55, b("1010"))]).unwrap();
-        keys(&mut app, ":add calc.mode\n:add top.clk\n");
+        // added before a key: a computed var no row or name uses is dropped after each (spec §16)
+        app.run("add calc.mode").unwrap();
+        app.run("add top.clk").unwrap();
         app.ws.sel = 0;
         keys(&mut app, " ");
         insta::assert_snapshot!(snapshot(&mut app, 80, None));
@@ -709,7 +729,7 @@ mod tests {
         keys(&mut app, ":select cpu.state data\n");
         assert_eq!((app.ws.sel, app.ws.anchor), (3, Some(2)));
         keys(&mut app, ":select top.clk dma.state\n:group edge\n");
-        assert_eq!(app.msg.as_ref().unwrap().0, "groups can't be nested yet");
+        assert_eq!(app.msg.as_ref().unwrap().0, "groups can't be nested yet: the selection has a group's header");
         keys(&mut app, ":select top.dma.state\n:group edge\n");
         assert_eq!(names(&app), "clk,▾ cpu,  cpu.state,  data,  busy,▾ edge,  dma.state");
         keys(&mut app, ":select cpu\n:radix dec\n:select rst\n");
@@ -1376,6 +1396,22 @@ mod tests {
     }
 
     #[test]
+    fn field_all_z() {
+        // a record whose field is all z draws it (0xZZ, 45ns - 55ns); before the first record, a gap
+        let mut app = open("vcd", None);
+        app.run("protocol p clock=top.clk when=!top.rst d=top.cpu.data").unwrap();
+        app.run("add p.d").unwrap();
+        app.run("50ns").unwrap();
+        let w = draw::waveform(&mut app.ws, 100);
+        let row = w.lines().find(|l| l.starts_with("d ")).unwrap();
+        assert!(row.contains("0xZZ"), "{w}");
+        app.run("0ns").unwrap();
+        let w = draw::waveform(&mut app.ws, 100);
+        let row = w.lines().find(|l| l.starts_with("d ")).unwrap();
+        assert_eq!(row.split('┃').next().unwrap().trim(), "d", "the value column is blank: {w}");
+    }
+
+    #[test]
     fn mouse_records() {
         let mut app = open("vcd", Some(SESSION));
         let t0 = Instant::now();
@@ -1721,7 +1757,7 @@ mod tests {
         keys(&mut app, ":select data\n:color blue\n");
         assert!(app.msg.is_none(), "{:?}", app.msg);
         let row = app.ws.rows[app.ws.sel].sig().unwrap().clone();
-        let cells = draw::wave(&app.ws.trace, &app.ws.view, &row, None, None, None, false, 60);
+        let cells = draw::wave(&app.ws.trace, &app.ws.view, &row, None, None, None, None, 60);
         let fgs: Vec<_> = cells.iter().map(|c| c[0].1.fg).collect();
         // its values in its colour; X and Z keep theirs
         assert!(fgs.contains(&Some(draw::pal().hues[5])) && fgs.contains(&Some(draw::pal().unknown)) && fgs.contains(&Some(draw::pal().highz)), "{fgs:?}");

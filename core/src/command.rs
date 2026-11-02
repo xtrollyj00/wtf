@@ -27,6 +27,9 @@ pub fn run(app: &mut Workspace, line: &str) -> Result<Option<Msg>, String> {
             Ok(())
         }
         "zoom" => {
+            if arg.split_whitespace().count() > 1 {
+                return Err(format!("zoom takes one time, per column (`zoom 1ns`); to show a range: fit {arg}"));
+            }
             let t = crate::time::parse(arg, fpt)?;
             if t <= 0.0 {
                 return Err("zoom must be above zero".into());

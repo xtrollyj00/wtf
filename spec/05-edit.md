@@ -14,7 +14,7 @@ match in tree order, wrapping around. A search matches a case-insensitive part o
 scopes included: `cpu.st` matches `top.cpu.state`. The search line shows the last search and which
 match the highlight is on (`2/5`).
 
-When computed signals appear, the panel keeps its highlighted signal or scope, open scopes,
+When computed signals appear or go (section 16), the panel keeps its highlighted signal or scope, open scopes,
 marks, range and search. New signals join the tree and the current search results.
 
 | Keys | Action |
@@ -155,6 +155,9 @@ a header removes the group and its signals; `J` / `K` on a header move the whole
 signal next to a group's edge move it into or out of the group.
 
 - `:group` on a selection that includes a header shows an error, since groups don't nest yet.
+- `:group` on signals all inside one group takes them out of it into the new group, placed right
+  after it, so a group is split without rebuilding it; a group left empty goes. A selection
+  partly inside a group shows an error naming the group.
 
 ### Composite rows
 

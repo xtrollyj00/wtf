@@ -372,7 +372,9 @@ impl Wtf {
     #[tool(description = "List signals with their widths; arrays and generate instances fold to one line (`gen[0..4].x`).")]
     fn signals(&self, Parameters(a): Parameters<SignalsArgs>) -> Result<String, String> {
         let w = current(self)?;
-        let app = lock(&w);
+        let mut app = lock(&w);
+        // not the slices earlier queries made (spec §16)
+        app.drop_unused();
         let p = a.pattern.to_lowercase();
         let t = &app.trace;
         let what = |v: &wtf_core::trace::Var| match v.width {

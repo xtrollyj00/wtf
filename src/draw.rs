@@ -326,10 +326,10 @@ pub fn state_style(v: &Val) -> Style {
     }
 }
 
-/// A stream field's value between records (spec §15): all `z`.
-// shortcut (#28): a record whose field really is all z draws as a gap too; give gaps their own value if that matters
-fn gap(v: &Val) -> bool {
-    matches!(v, Val::Bits(b) if !b.is_empty() && b.chars().all(|c| c == 'z'))
+/// Between a stream's records (its own var, `stream`, empty there), a field of it has no value
+/// to draw (spec §15), though its var holds z; a record's field that really is all z is drawn.
+fn gap(trace: &Trace, stream: Option<usize>, t: Tick) -> bool {
+    stream.is_some_and(|s| !matches!(trace.value_at(s, t), Some(Val::Text(r)) if !r.is_empty()))
 }
 
 /// The line a value is drawn with: X's, Z's (as `state_style` tells them), or a value's.
@@ -436,15 +436,18 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
             (format!("{indent}{}{name}", "  ".repeat(l.depth + 1)), opens.then_some(at + 2 * (l.depth + 1)))
         })
         .unzip();
-    // a stream's field between records has no value to show
-    let is_field = |var: usize| ws.streams.iter().any(|s| ws.trace.vars[var].path.strip_prefix(s.name.as_str()).is_some_and(|f| f.starts_with('.')));
+    // a stream's field, as the stream's own var: between records it has no value to show
+    let field_of = |var: usize| {
+        let s = ws.streams.iter().find(|s| ws.trace.vars[var].path.strip_prefix(s.name.as_str()).is_some_and(|f| f.starts_with('.')))?;
+        ws.trace.by_path.get(&s.name).copied()
+    };
     let (values, value_styles): (Vec<String>, Vec<Style>) = lines
         .iter()
         .zip(&shows)
         .map(|(&(i, _), l)| {
             let (s, l) = (ws.rows[i].sig()?, l.as_ref()?);
             let var = l.var;
-            let v = ws.trace.value_of(var, l.bit, ws.view.cursor).filter(|v| !(is_field(var) && gap(v)))?;
+            let v = ws.trace.value_of(var, l.bit, ws.view.cursor).filter(|_| !gap(&ws.trace, field_of(var), ws.view.cursor))?;
             let stream = ws.stream_of(var);
             let st = if stream.is_some_and(|s| s.violations) { red() } else { state_style(&v) };
             Some((label(&ws.trace, stream, &line_sig(ws, s, var), &v), st))
@@ -457,7 +460,7 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
         .rows
         .iter()
         .filter_map(|r| r.sig())
-        .filter_map(|s| ws.trace.value_at(s.var, ws.view.cursor).filter(|v| !(is_field(s.var) && gap(v))).map(|v| label(&ws.trace, ws.stream_of(s.var), s, &v)))
+        .filter_map(|s| ws.trace.value_at(s.var, ws.view.cursor).filter(|_| !gap(&ws.trace, field_of(s.var), ws.view.cursor)).map(|v| label(&ws.trace, ws.stream_of(s.var), s, &v)))
         .collect();
     let nw = width(&names, MAX_NAME).max(width(&row_names, MAX_NAME));
     let vw = width(&values, MAX_VALUE).max(width(&hidden, MAX_VALUE));
@@ -534,7 +537,7 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
                     }
                     bit_changes.as_ref().map_or(&[][..], |(_, c)| &c[b as usize][..])
                 });
-                wave(&ws.trace, &ws.view, &line, l.bit, bits, ws.stream_of(l.var), is_field(l.var), ww)
+                wave(&ws.trace, &ws.view, &line, l.bit, bits, ws.stream_of(l.var), field_of(l.var), ww)
             }
             Row::Group { collapsed: true, .. } => activity(&ws.trace, &ws.view, &rows::members(&ws.rows, i), ww),
             Row::Group { .. } => Vec::new(),
@@ -674,7 +677,7 @@ fn lines_of(v: &Option<Val>, own: Style) -> (bool, bool, Style) {
 /// var draws its records' labels, red for violations, and nothing between records; so does a
 /// stream's `field`, whose value there is all `z`.
 #[allow(clippy::too_many_arguments)]
-pub fn wave(trace: &Trace, view: &View, row: &Sig, bit: Option<u32>, bits: Option<&[Changes]>, stream: Option<&Stream>, field: bool, ww: usize) -> Vec<[(char, Style); 2]> {
+pub fn wave(trace: &Trace, view: &View, row: &Sig, bit: Option<u32>, bits: Option<&[Changes]>, stream: Option<&Stream>, field: Option<usize>, ww: usize) -> Vec<[(char, Style); 2]> {
     let var = row.var;
     let end = trace.end();
     let bus = bit.is_none() && trace.vars[var].width != Some(1);
@@ -689,7 +692,7 @@ pub fn wave(trace: &Trace, view: &View, row: &Sig, bit: Option<u32>, bits: Optio
         Some(b) => b.to_vec(),
         None => (0..ww).map(&range).map(|(a, b)| trace.changes_in(var, a, b)).collect(),
     };
-    let value = |t: Tick| trace.value_of(var, bit, t).filter(|v| !(field && gap(v)));
+    let value = |t: Tick| trace.value_of(var, bit, t).filter(|_| !gap(trace, field, t));
     let val = |c: usize| value(range(c).1 - 1);
     let blank = (' ', Style::new());
     let mut out = vec![[blank; 2]; ww];

@@ -40,6 +40,7 @@ Times accept `fs`, `ps`, `ns`, `us`, `ms`, `s`. A number without a unit means fi
 
 - `:zoom` and `:fit` keep the cursor on its time, like `z` / `x`. A zoom finer than one tick per
   column is rounded to the nearest zoom wtf can show.
+- `:zoom` with two times is an error that gives the `:fit` with them (`fit 0ns 40ns`).
 - `:e` is meant for rerunning the simulation and looking at the new result without rebuilding the view.
   It re-applies the current layout and view with the same rules as loading a session (section 11):
   missing signals are dropped and listed, cursors and the visible time past the new end move to the end.

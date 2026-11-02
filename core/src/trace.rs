@@ -146,6 +146,10 @@ pub struct Trace {
     pub fs_per_tick: Option<u128>,
     pub vars: Vec<Var>,
     pub by_path: HashMap<String, usize>,
+    /// Vars of the file and its composites; computed ones follow them.
+    pub fixed: usize,
+    /// Changes whenever computed vars are added or dropped, for views that list vars (the panel).
+    pub version: u64,
     /// Clocks' rising edges by (var, bit), worked out once (`query::edges`): every clocked search
     /// walks them.
     pub(crate) edges: std::cell::RefCell<HashMap<(usize, Option<u32>), Edges>>,
@@ -186,7 +190,7 @@ impl Trace {
             .collect();
         let mut by_path: HashMap<String, usize> = vars.iter().enumerate().map(|(i, v)| (v.path.clone(), i)).collect();
         composites(&mut vars, &mut by_path);
-        Trace { wave, fs_per_tick, vars, by_path, edges: Default::default() }
+        Trace { wave, fs_per_tick, fixed: vars.len(), vars, by_path, version: 0, edges: Default::default() }
     }
 
     pub fn end(&self) -> Tick {
@@ -313,9 +317,31 @@ impl Trace {
             None => {
                 self.vars.push(var);
                 self.by_path.insert(path.to_string(), self.vars.len() - 1);
+                self.version += 1;
                 Ok(self.vars.len() - 1)
             }
         }
+    }
+
+    /// Drop the computed vars not in `keep`. Returns where each var went (None: dropped), or None
+    /// when all are kept and nothing moved.
+    pub fn retain_computed(&mut self, keep: &std::collections::HashSet<usize>) -> Option<Vec<Option<usize>>> {
+        if (self.fixed..self.vars.len()).all(|v| keep.contains(&v)) {
+            return None;
+        }
+        let mut to: Vec<Option<usize>> = (0..self.vars.len()).map(|v| (v < self.fixed).then_some(v)).collect();
+        for (k, var) in self.vars.split_off(self.fixed).into_iter().enumerate() {
+            self.by_path.remove(&var.path);
+            if keep.contains(&(self.fixed + k)) {
+                to[self.fixed + k] = Some(self.vars.len());
+                self.by_path.insert(var.path.clone(), self.vars.len());
+                self.vars.push(var);
+            }
+        }
+        let edges = std::mem::take(self.edges.get_mut());
+        *self.edges.get_mut() = edges.into_iter().filter_map(|((v, b), e)| Some(((to[v]?, b), e))).collect();
+        self.version += 1;
+        Some(to)
     }
 
     /// When the var first has a value.

@@ -157,7 +157,8 @@ reuse wtf's own pieces:
   prepared; `view` describes it (rows, cursors with Δt, visible range).
 - **Present**: `present` shows the workspace in the user's wtf window for the same trace, if one
   is open: its layout and cursors replace the window's, as one undo step (`:undo`, or `u`, restores the
-  user's view), and the status line says `agent: presented …`. Without a window it writes a
+  user's view), and so do its named signals, protocols and decodes: those the window had and the
+  agent's session doesn't name go. The status line says `agent: presented …`. Without a window it writes a
   session file and says how to open it (`wtf -S <file> <trace>`), so headless work still ends
   in something to look at.
 - **User's view**: `user_view` reads the open window's rows, cursors, selected signal and

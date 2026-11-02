@@ -19,7 +19,7 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
     let body = h - 1;
     app.hit = crate::tui::app::Hit { body, ..Default::default() };
     // computed signals made since (`:signal`, a slice named in a search)
-    if app.panel.vars != app.ws.trace.vars.len() {
+    if app.panel.version != app.ws.trace.version {
         app.panel.refresh(&app.ws.trace);
     }
     // the signal panel takes the left of the screen; the rows are drawn beside it

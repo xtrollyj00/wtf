@@ -8,7 +8,10 @@ checks that return only violations.
 - **Computed signals are vars.** Everything in wtf names signals by var (rows, search,
   `values`, `find`, `render`, the panel), so a computed signal is a var too, after the file's.
   It is evaluated once into a list of changes (materialized), queried like a file signal, and
-  evaluated again on `:e`. Defined by an expression, anywhere a signal is named and in the
+  evaluated again on `:e`. One nothing uses any more (no row or undo step shows it, it is no named
+  signal or stream field) is dropped after the key, command or `present` that left it unused, and
+  made again when named again: a slice named once in a search, a stream's fields it no longer has
+  after `:protocol` samples it again. `signals` doesn't list those an earlier query made. Defined by an expression, anywhere a signal is named and in the
   session:
   - bit slices `tdata[63:32]` and concatenation `{a, b, c}`; a part may be a sized SV number
     (`{insn[31], 1'b0}`), and an unsized one (`0`, `'1`) is an error;

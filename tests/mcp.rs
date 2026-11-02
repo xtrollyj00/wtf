@@ -167,6 +167,9 @@ fn reading_tools() {
     assert_eq!(s.ok("signals", json!({"pattern": "top.cpu.*"})), "top.cpu.state (3 bits)\ntop.cpu.data (8 bits)\ntop.cpu.busy (1 bit)");
     assert_eq!(s.ok("signals", json!({"pattern": "STATE"})), "top.cpu.state (3 bits)\ntop.dma.state (3 bits)");
     assert_eq!(s.ok("signals", json!({"pattern": "nope"})), "no match: nope");
+    // a slice a query made isn't listed afterwards (spec §16)
+    s.ok("find", json!({"expr": "cpu.data[3:0] == 3", "count_only": true}));
+    assert_eq!(s.ok("signals", json!({"pattern": "data"})), "top.cpu.data (8 bits)");
     // array elements and generate instances of one width are one line, the indices as ranges
     s.ok("open", json!({"trace": std::fs::canonicalize("tests/data/vhdl.fst").unwrap()}));
     assert_eq!(s.ok("signals", json!({"pattern": "vhdl"})), "vhdl.clk (1 bit)\nvhdl.arr (array, 8 bits, 2 signals)\nvhdl.gen[0..1].x (1 bit, 2 signals)");

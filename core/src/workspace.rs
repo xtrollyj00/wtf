@@ -9,7 +9,7 @@ use crate::rows::{self, Look, Row, Sig};
 use crate::search;
 use crate::session;
 use crate::stream::{self, Decode, Sampler, Stream};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use crate::time::{self, Tick};
 use crate::trace::{Trace, Val};
 use crate::view::View;
@@ -134,6 +134,36 @@ impl Workspace {
         if !undid && !rows::same_layout(&m.rows, &self.rows) {
             self.undo.push((m.rows, m.sel));
             self.redo.clear();
+        }
+        self.drop_unused();
+    }
+
+    /// Drop the computed vars nothing uses any more (spec §16): not a row's, an undo step's, a
+    /// named signal or a stream's. A slice named once in a search, a stream's old fields after
+    /// sampling it again, and what a `present` left out go; one used again is made again.
+    pub fn drop_unused(&mut self) {
+        if self.trace.vars.len() == self.trace.fixed {
+            return;
+        }
+        let mut keep: HashSet<usize> = HashSet::new();
+        let layouts = std::iter::once(&self.rows).chain(self.undo.iter().chain(&self.redo).map(|(r, _)| r));
+        for s in layouts.flat_map(|rows| rows.iter().filter_map(Row::sig)) {
+            keep.insert(s.var);
+            keep.extend(&s.open);
+            keep.extend(s.looks.iter().map(|l| l.0));
+        }
+        let names = self.signals.iter().map(|(n, _)| n.clone());
+        let streams = self.streams.iter().flat_map(|s| std::iter::once(s.name.clone()).chain(s.schema.iter().map(|f| format!("{}.{}", s.name, f.name))));
+        keep.extend(names.chain(streams).filter_map(|p| self.trace.by_path.get(&p).copied()));
+        let Some(to) = self.trace.retain_computed(&keep) else { return };
+        let layouts = std::iter::once(&mut self.rows).chain(self.undo.iter_mut().chain(&mut self.redo).map(|(r, _)| r));
+        for s in layouts.flat_map(|rows| rows.iter_mut().filter_map(|r| match r {
+            Row::Signal(s) => Some(s),
+            _ => None,
+        })) {
+            s.var = to[s.var].expect("a row's var is kept");
+            s.open.iter_mut().for_each(|v| *v = to[*v].expect("kept"));
+            s.looks.iter_mut().for_each(|l| l.0 = to[l.0].expect("kept"));
         }
     }
 
@@ -526,6 +556,11 @@ impl Workspace {
         let before = (self.rows.clone(), self.sel);
         let saved = std::mem::take(&mut self.saved);
         (self.marks, self.view.cursor, self.back) = ([None; 9], 0, None);
+        // the session is all that is shown: named signals and decoding it leaves out go (§15)
+        self.signals.clear();
+        self.protocols.clear();
+        self.decodes.clear();
+        self.streams.clear();
         let warn = session::apply(self, text);
         self.saved = saved;
         let warn = warn?;
@@ -534,6 +569,7 @@ impl Workspace {
             self.redo.clear();
         }
         self.fix_sel();
+        self.drop_unused();
         let signals = self.rows.iter().filter(|r| r.sig().is_some()).count();
         let msg = format!("agent: presented {signals} signals, {} cursors", self.cursor_list().len());
         Ok(if warn.is_empty() { (msg, false) } else { (format!("{msg}; {}", warn.join("; ")), true) })
@@ -801,10 +837,9 @@ impl Workspace {
             return Err("no rows".into());
         }
         let r = self.selection();
-        rows::group(&mut self.rows, r.clone(), name)?;
+        self.sel = rows::group(&mut self.rows, r, name)?;
         self.anchor = None;
         self.bit = None;
-        self.sel = r.start;
         Ok(())
     }
 
