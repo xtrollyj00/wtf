@@ -18,6 +18,7 @@ fn view_and_cursors() {
     assert_eq!((ws.view.ticks, ws.view.cols), (2, 1));
     assert_eq!(run(&mut ws, "zoom 0ns"), Err("zoom must be above zero".into()));
     assert!(run(&mut ws, "zoom soon").is_err());
+    assert_eq!(run(&mut ws, "zoom 0ns 40ns"), Err("zoom takes one time, per column (`zoom 1ns`); to show a range: fit 0ns 40ns".into()));
     run(&mut ws, "fit").unwrap();
     assert_eq!(ws.view.start, 0);
     // cursor 3 is a mark: placed, jumped to, and left where it is when the cursor moves on
