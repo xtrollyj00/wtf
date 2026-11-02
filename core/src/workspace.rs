@@ -44,6 +44,10 @@ pub struct Workspace {
     pub marks: [Option<Tick>; 9],
     /// Each mark's name and note, by the same index (spec §9).
     pub labels: [Label; 9],
+    /// The agent's steps (spec §15 "Trail"), oldest first, at most `TRAIL`; and how many of them
+    /// the last `present` already handed over.
+    pub trail: Vec<Step>,
+    pub presented: usize,
     /// Where cursor 1 was before the last jump that moved it, for `''` (spec §9).
     pub back: Option<Tick>,
     /// The time unit of the agent's answers (`:unit`), or None for the one the fastest clock used
@@ -98,6 +102,19 @@ impl Label {
     }
 }
 
+/// One of the agent's tool calls, as the user's window shows it (spec §15 "Trail"): the tool,
+/// what it asked, the first line of the answer, and the time it is about, if any.
+#[derive(Clone, PartialEq, Debug)]
+pub struct Step {
+    pub tool: String,
+    pub ask: String,
+    pub answer: String,
+    pub time: Option<Tick>,
+}
+
+/// The most steps a trail keeps; older ones go.
+pub const TRAIL: usize = 200;
+
 /// What `Workspace::record` compares against.
 pub struct Mark {
     rows: Vec<Row>,
@@ -126,6 +143,8 @@ impl Workspace {
             view,
             marks: [None; 9],
             labels: Default::default(),
+            trail: Vec::new(),
+            presented: 0,
             back: None,
             unit: None,
             clock_unit: None,
@@ -871,6 +890,14 @@ impl Workspace {
     /// The cursor and the marks as (index, time), by number (index 0 is cursor 1).
     pub fn cursor_list(&self) -> Vec<(usize, Tick)> {
         std::iter::once((0, self.view.cursor)).chain((1..9).filter_map(|i| self.marks[i].map(|t| (i, t)))).collect()
+    }
+
+    /// Add one of the agent's steps to the trail, dropping the oldest past `TRAIL`.
+    pub fn add_step(&mut self, step: Step) {
+        self.trail.push(step);
+        let over = self.trail.len().saturating_sub(TRAIL);
+        self.trail.drain(..over);
+        self.presented = self.presented.saturating_sub(over);
     }
 
     /// The lowest numbered mark at the cursor with a name or a note, as (index, label).

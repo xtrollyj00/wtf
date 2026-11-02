@@ -113,6 +113,10 @@ rows = [
   exactly: in the largest unit that keeps them at 1 or more, with every decimal needed
   (`16.432us`, `2.595000001us`), read back to the same tick. A zoom finer than one tick per column
   is written as a fraction of a tick.
+- `[cursors]` maps each number to a time; a mark with a name or note (section 9) is an inline
+  table, `3 = { time = "200ns", name = "first bad write", note = "..." }`.
+- `[[trail]]` entries (`tool`, `ask`, `answer`, optional `time`) are the agent's steps, last in a
+  session another window takes from an agent (section 15 "Trail"); a saved session has none.
 - Unknown keys are skipped with a warning, so files with extra settings still load.
 
 ## 12. Command line

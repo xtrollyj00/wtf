@@ -21,6 +21,7 @@ use std::sync::{Arc, Mutex};
 mod args;
 mod declare;
 pub mod help;
+mod trail;
 pub use args::*;
 use declare::declared;
 
@@ -742,18 +743,24 @@ impl Wtf {
     #[tool(description = "Show the workspace to the user, in their wtf window on this trace or as a session file.")]
     fn present(&self) -> Result<String, String> {
         let w = current(self)?;
-        let app = lock(&w);
+        let mut app = lock(&w);
         if app.rows.is_empty() {
             return Err("the workspace has no signals yet: set it up with `workspace` or `command`".into());
         }
-        let text = session::to_shared_toml(&app);
+        // with the steps since the last present (spec §15 "Trail")
+        let text = session::to_presented_toml(&app);
         match live::window_on(&app.trace_path) {
-            Some(id) => live::request(&id, live::Request::Put(text)).map(|m| format!("shown in the user's window: {m}")),
+            Some(id) => {
+                let shown = live::request(&id, live::Request::Put(text)).map(|m| format!("shown in the user's window: {m}"))?;
+                app.presented = app.trail.len();
+                Ok(shown)
+            }
             None => {
                 let mut path = app.trace_path.as_os_str().to_owned();
                 path.push(".agent.session.toml");
                 let path = std::path::PathBuf::from(path);
                 session::write(&path, &text)?;
+                app.presented = app.trail.len();
                 Ok(format!("no wtf window is open on this trace; written to {0} (open it with: wtf -S {0} {1})", path.display(), app.trace_path.display()))
             }
         }
@@ -766,7 +773,11 @@ impl Wtf {
         let id = live::window_on(&app.trace_path).ok_or("no wtf window is open on this trace")?;
         let (described, toml) = live::get(&id)?;
         if a.adopt {
-            let (msg, warned) = app.present(&toml)?;
+            // the window's copy of the trail isn't the agent's own
+            let trail = (std::mem::take(&mut app.trail), app.presented);
+            let r = app.present(&toml);
+            (app.trail, app.presented) = trail;
+            let (msg, warned) = r?;
             let warn = if warned { format!("; {msg}") } else { String::new() };
             return Ok(format!("{described}\n(adopted into the workspace{warn})"));
         }
@@ -860,6 +871,25 @@ pub fn describe(app: &Workspace, unit: Option<usize>) -> String {
 
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for Wtf {
+    /// Every call as the router makes it, then a step on the current workspace's trail (spec §15
+    /// "Trail"), so the user's window can show what the agent did.
+    async fn call_tool(
+        &self,
+        request: rmcp::model::CallToolRequestParams,
+        context: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> Result<rmcp::model::CallToolResponse, rmcp::ErrorData> {
+        let (tool, args) = (request.name.to_string(), request.arguments.clone());
+        let r = self.tool_router.call(rmcp::handler::server::tool::ToolCallContext::new(self, request, context)).await;
+        if let (Ok(rmcp::model::CallToolResponse::Complete(res)), Ok(w)) = (&r, current(self)) {
+            let text: String = res.content.iter().filter_map(|c| c.as_text()).map(|t| t.text.as_str()).collect();
+            let mut app = lock(&w);
+            if let Some(step) = trail::step(&app, &tool, args.as_ref(), &text, res.is_error == Some(true)) {
+                app.add_step(step);
+            }
+        }
+        r
+    }
+
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("wtf", env!("CARGO_PKG_VERSION")))

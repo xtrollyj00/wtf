@@ -1,6 +1,6 @@
 //! App state and the keys of each mode (spec §2, §3, §4 "Command line", §5).
 
-use wtf_core::{command, query};
+use wtf_core::{command, query, session};
 use crate::draw::gl;
 use crate::tui::panel::Panel;
 use wtf_core::rows::{self, Row};
@@ -166,6 +166,12 @@ impl App {
         Ok(msg.0)
     }
 
+    /// One of the agent's steps as a line: the tool, what it asked, the answer's first line.
+    pub fn step_line(s: &wtf_core::workspace::Step) -> String {
+        let dot = format!("  {}  ", gl().dot);
+        format!("{} {}{dot}{}", s.tool, s.ask, s.answer)
+    }
+
     /// A `:` command: the window's own (`:w`, `:wq`, `:q`, `:q!`, `:help`, and `:e`, which also
     /// rebuilds the signal panel), or one on the workspace. Its message goes to the status line.
     pub fn run(&mut self, line: &str) -> Result<(), String> {
@@ -183,6 +189,16 @@ impl App {
                 let items = text.lines().map(|l| (None, l.to_string())).collect();
                 let name = format!("help {} {}", gl().dot, arg.trim().to_lowercase());
                 self.records = Some(Records { name, stream: String::new(), title: String::new(), items, hl: 0, top: 0, page: 1 });
+                None
+            }
+            // the agent's steps, newest last; Enter jumps to a step's time (spec §15 "Trail")
+            "trail" => {
+                if self.ws.trail.is_empty() {
+                    return Err("no trail yet: the agent's steps show here when you follow it (wtf --attach) or it presents".into());
+                }
+                let items: Vec<_> = self.ws.trail.iter().map(|s| (s.time, Self::step_line(s))).collect();
+                let (title, hl) = (format!("{} steps", items.len()), items.len() - 1);
+                self.records = Some(Records { name: "trail".into(), stream: String::new(), title, items, hl, top: 0, page: 1 });
                 None
             }
             "w" => Some(command::save(&mut self.ws, arg.trim())?),
@@ -241,10 +257,21 @@ impl App {
         if !f.on || f.latest == f.shown {
             return false;
         }
-        f.shown = f.latest.clone();
+        let old = std::mem::replace(&mut f.shown, f.latest.clone());
         let text = f.shown.clone();
-        let r = self.present(&text).map(drop);
-        self.report(r);
+        let before = self.ws.trail.len();
+        // a new step alone takes the steps, leaving the user's view where it is (spec §15 "Trail")
+        if session::without_trail(&old) == session::without_trail(&text) {
+            self.ws.trail = session::read_trail(&self.ws, &text);
+        } else {
+            let r = self.present(&text).map(drop);
+            self.report(r);
+        }
+        if self.ws.trail.len() != before
+            && let Some(s) = self.ws.trail.last()
+        {
+            self.msg = Some((format!("agent: {}", Self::step_line(s)), s.answer.starts_with("error: ")));
+        }
         true
     }
 

@@ -187,3 +187,25 @@ reuse wtf's own pieces:
   sessions.
 - Workspaces live as long as the server: when the agent's client exits they are gone (`present`
   first to keep one).
+
+### Trail
+
+The user sees what the agent did, not only where it ended up. Each call of a tool that queries
+the trace or changes the workspace (`find`, `records`, `values`, `value_at`, `render`, `command`,
+`workspace`) is a **step** on the current workspace's trail: the tool, what it asked (`find`'s
+expression, `records`' stream and `where`, a command's line, ...), the first line of the answer
+(`error: ...` for an error; `declared` for `workspace`, whose answer is a `view`), and the time it is about: the `time` or `from` asked, or the first
+time a `find` or `records` answer lists. Lookups (`help`, `info`, `signals`, `view`, `sessions`,
+`protocols`, `user_view`) and `open`, `use`, `reload` and `present` are no steps. A trail keeps
+the last 200 steps.
+
+- The session another window takes carries the trail as `[[trail]]` tables after everything else
+  (`tool`, `ask`, `answer`, `time`; section 11): an attached window gets all of it, `present`
+  the steps since the last `present`. A session with steps replaces the window's; one without
+  (the agent's own `workspace`, a present with no new steps) leaves them. A session file the
+  window saves (`:w`) has none.
+- A window following the agent (`--attach`) takes a new step without moving the user's view, as
+  long as the rest of the agent's session is the same, and shows it on the status line:
+  `agent: find @clk wr && addr == 0x40  ·  3 matches, first 120ns`, red for an error.
+- `:trail` (section 7) lists the steps the window has, oldest first and the newest highlighted,
+  in the box `:records` uses; `Enter` on a step with a time moves the cursor there.

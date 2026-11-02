@@ -171,6 +171,13 @@ pub fn apply(app: &mut Workspace, text: &str) -> Result<Vec<String>, String> {
             }
         }
     }
+    // the agent's steps, in a session another window shares (spec §15 "Trail")
+    // a session without steps (the agent's own `workspace`) leaves the trail as it is
+    if let Some(v) = t.remove("trail") {
+        let mut trail = Vec::new();
+        steps(app, Some(v), &mut trail, &mut warn);
+        app.trail = trail;
+    }
     unknown("", &t, &mut warn);
     Ok(warn)
 }
@@ -415,10 +422,57 @@ pub fn to_toml(app: &Workspace) -> String {
     toml(app, false)
 }
 
-/// The session as another window takes it (`present`, `wtf --attach`): with `to`, the end of the
-/// visible range, so a window of another width shows the same stretch.
+/// The session as another window takes it (`wtf --attach`): with `to`, the end of the visible
+/// range, so a window of another width shows the same stretch, and the agent's whole trail.
 pub fn to_shared_toml(app: &Workspace) -> String {
-    toml(app, true)
+    toml(app, true) + &trail_toml(app, 0)
+}
+
+/// The session `present` hands over: shared, with the steps since the last present.
+pub fn to_presented_toml(app: &Workspace) -> String {
+    toml(app, true) + &trail_toml(app, app.presented)
+}
+
+/// A shared session without its trail, which comes last: what a window following the agent
+/// compares, so a new step alone doesn't move the user's view (spec §15 "Trail").
+pub fn without_trail(text: &str) -> &str {
+    text.split_once("\n[[trail]]\n").map_or(text, |(view, _)| view)
+}
+
+/// The steps a shared session holds.
+pub fn read_trail(app: &Workspace, text: &str) -> Vec<crate::workspace::Step> {
+    let mut ws_trail = Vec::new();
+    if let Ok(mut t) = text.parse::<Table>() {
+        steps(app, t.remove("trail"), &mut ws_trail, &mut Vec::new());
+    }
+    ws_trail
+}
+
+/// `[[trail]]` tables as steps, into `out`.
+fn steps(app: &Workspace, v: Option<Value>, out: &mut Vec<crate::workspace::Step>, warn: &mut Vec<String>) {
+    let (fpt, end) = (app.trace.fs_per_tick, app.trace.end());
+    for s in v.as_ref().and_then(Value::as_array).map_or(&[][..], |a| a.as_slice()) {
+        let text = |k: &str| s.get(k).and_then(Value::as_str).map(String::from);
+        match (text("tool"), text("ask"), text("answer")) {
+            (Some(tool), Some(ask), Some(answer)) => {
+                let time = text("time").and_then(|t| time::parse(&t, fpt).ok()).map(|t| (t.max(0.0).round() as u64).min(end));
+                out.push(crate::workspace::Step { tool, ask, answer, time });
+            }
+            _ => warn.push("trail: a step needs a tool, an ask and an answer".into()),
+        }
+    }
+}
+
+/// The trail from step `from` on, as `[[trail]]` tables (spec §15 "Trail").
+fn trail_toml(app: &Workspace, from: usize) -> String {
+    let fpt = app.trace.fs_per_tick;
+    app.trail[from.min(app.trail.len())..]
+        .iter()
+        .map(|s| {
+            let time = s.time.map_or(String::new(), |t| format!("time = {}\n", quote(&time::format_exact(t, fpt))));
+            format!("\n[[trail]]\ntool = {}\nask = {}\nanswer = {}\n{time}", quote(&s.tool), quote(&s.ask), quote(&s.answer))
+        })
+        .collect()
 }
 
 fn toml(app: &Workspace, shared: bool) -> String {

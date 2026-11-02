@@ -516,6 +516,32 @@ mod tests {
     }
 
     #[test]
+    fn follow_the_trail() {
+        // spec §15 "Trail": a new step alone leaves the user's view, says the step, and `:trail`
+        // lists the steps, Enter jumping to a step's time
+        let mut app = open("vcd", None);
+        keys(&mut app, ":trail\n");
+        assert!(app.msg.as_ref().unwrap().0.starts_with("no trail yet"));
+        let mut agent = open("vcd", None);
+        keys(&mut agent, ":add top.cpu\n");
+        let step = |tool: &str, ask: &str, answer: &str, time| wtf_core::workspace::Step { tool: tool.into(), ask: ask.into(), answer: answer.into(), time };
+        agent.ws.add_step(step("command", "add top.cpu", "added 4", None));
+        let first = session::to_shared_toml(&agent.ws);
+        app.present(&first).unwrap();
+        app.follow = Some(tui::app::Follow::new("4123-1", &first));
+        keys(&mut app, "5l");
+        agent.ws.add_step(step("find", "top.cpu.busy", "1 matches, first 20ns, last 20ns", Some(20)));
+        assert!(app.agent_changed(Ok(session::to_shared_toml(&agent.ws))));
+        assert_eq!((app.ws.view.cursor, app.ws.trail.len()), (5, 2));
+        assert_eq!(app.msg.as_ref().unwrap().0, "agent: find top.cpu.busy  ·  1 matches, first 20ns, last 20ns");
+        keys(&mut app, ":trail\n");
+        let r = app.records.as_ref().unwrap();
+        assert_eq!((r.title.as_str(), r.hl, r.items[1].0), ("2 steps", 1, Some(20)));
+        keys(&mut app, "<CR>");
+        assert_eq!((app.records.is_none(), app.ws.view.cursor), (true, 20));
+    }
+
+    #[test]
     fn follow_the_agent() {
         let mut app = open("vcd", None);
         let msg = |app: &App| app.msg.as_ref().map_or(String::new(), |m| m.0.clone());

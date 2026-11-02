@@ -506,6 +506,37 @@ fn workspaces_and_attach() {
 }
 
 #[test]
+fn trail_reaches_the_window() {
+    // spec §15 "Trail": queries and changes are steps; present hands over those since the last
+    let dir = Dir::new("trail");
+    let mut s = Server::start(&dir.0);
+    let trace = dir.0.join("simple.vcd");
+    std::fs::copy("tests/data/simple.vcd", &trace).unwrap();
+    s.ok("open", json!({"trace": trace}));
+    s.ok("command", json!({"line": "add top.cpu.data"}));
+    s.ok("find", json!({"expr": "top.cpu.busy", "count_only": true}));
+    s.ok("help", json!({"topic": "times"}));
+    let _ = s.tool("value_at", json!({"signals": ["nope"], "time": "10ns"}));
+    // the agent's own declaration keeps the steps before it
+    s.ok("workspace", json!({"rows": ["top.cpu.data"]}));
+    let window = fake_window(&dir.0, "5", &trace, "version = 1\n");
+    s.ok("present", json!({}));
+    let toml = window.recv().unwrap();
+    let steps: Vec<&str> = toml.split("\n[[trail]]\n").skip(1).collect();
+    assert_eq!(steps.len(), 4, "{toml}");
+    assert!(steps[3].starts_with("tool = \"workspace\"\nask = \"1 rows, 0 cursors\"\nanswer = \"declared\"\n"), "{}", steps[3]);
+    assert_eq!(steps[0], "tool = \"command\"\nask = \"add top.cpu.data\"\nanswer = \"added 1: top.cpu.data\"\n");
+    assert!(steps[1].starts_with("tool = \"find\"\nask = \"top.cpu.busy\"\nanswer = \"1 matches, first 20ns") && steps[1].ends_with("time = \"20ns\"\n"), "{}", steps[1]);
+    assert!(steps[2].starts_with("tool = \"value_at\"\nask = \"nope at 10ns\"\nanswer = \"error: "), "{}", steps[2]);
+    // the next present carries only what came after
+    s.ok("value_at", json!({"signals": ["top.cpu.data"], "time": "30ns"}));
+    s.ok("present", json!({}));
+    let toml = window.recv().unwrap();
+    let steps: Vec<&str> = toml.split("\n[[trail]]\n").skip(1).collect();
+    assert_eq!(steps, ["tool = \"value_at\"\nask = \"top.cpu.data at 30ns\"\nanswer = \"at 30ns:\"\ntime = \"30ns\"\n"], "{toml}");
+}
+
+#[test]
 fn present_and_user_view() {
     let dir = Dir::new("present");
     let mut s = Server::start(&dir.0);
@@ -822,7 +853,7 @@ fn names_under_the_scope() {
     // cleared, the session has none; `state` is then the one the workspace shows
     s.ok("command", json!({"line": "scope"}));
     s.ok("present", json!({}));
-    assert!(!std::fs::read_to_string(dir.0.join("simple.vcd.agent.session.toml")).unwrap().contains("scope"));
+    assert!(!std::fs::read_to_string(dir.0.join("simple.vcd.agent.session.toml")).unwrap().contains("\nscope = "));
     assert!(s.ok("value_at", at).contains("state = "));
 }
 
