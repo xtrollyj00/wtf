@@ -56,6 +56,7 @@ fn fit(p: &mut Palette, bg: Rgb, rgb: bool) {
     p.panel = step(0.07);
     p.selected = step(0.10);
     p.cursor_dim = step(0.14);
+    p.mark = step(0.12);
     // the accent's yellow, a quarter of the way from the background
     let m = |x: u8, y: u8| (x as f64 + (y as f64 - x as f64) * 0.25).round() as u8;
     p.column = colour((m(bg.0, 0xe5), m(bg.1, 0xc0), m(bg.2, 0x7b)));
@@ -159,6 +160,7 @@ fn slot<'a>(p: &'a mut Palette, key: &str) -> Option<&'a mut Color> {
         "cursor_text" => &mut p.cursor_text,
         "column" => &mut p.column,
         "cursor_dim" => &mut p.cursor_dim,
+        "mark" => &mut p.mark,
         "selected" => &mut p.selected,
         "panel" => &mut p.panel,
         "hatch" => &mut p.hatch,
@@ -170,7 +172,7 @@ fn slot<'a>(p: &'a mut Palette, key: &str) -> Option<&'a mut Color> {
 }
 
 fn keys() -> String {
-    const FIELDS: [&str; 15] = ["line", "bus", "fill", "unknown", "highz", "cursor", "cursor_text", "column", "cursor_dim", "selected", "panel", "hatch", "dim", "background", "text"];
+    const FIELDS: [&str; 16] = ["line", "bus", "fill", "unknown", "highz", "cursor", "cursor_text", "column", "cursor_dim", "mark", "selected", "panel", "hatch", "dim", "background", "text"];
     FIELDS.iter().chain(COLORS.iter()).copied().collect::<Vec<_>>().join(", ")
 }
 

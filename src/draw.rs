@@ -31,6 +31,8 @@ pub struct Palette {
     pub column: Color,
     /// The other cursors' columns, fainter.
     pub cursor_dim: Color,
+    /// Behind a mark's number and name on the ruler.
+    pub mark: Color,
     /// Background behind both lines of the selected signal.
     pub selected: Color,
     /// Background of the boxes over the waveforms: the signal panel, help, completions.
@@ -62,7 +64,7 @@ impl Palette {
     /// `NO_COLOR`: the terminal's own colours everywhere.
     pub fn mono() -> Palette {
         let r = Color::Reset;
-        Palette { line: r, bus: r, fill: r, unknown: r, highz: r, cursor: r, cursor_text: r, column: r, cursor_dim: r, selected: r, panel: r, hatch: r, dim: r, hues: [r; 8], background: r, text: r, mono: true }
+        Palette { line: r, bus: r, fill: r, unknown: r, highz: r, cursor: r, cursor_text: r, column: r, cursor_dim: r, mark: r, selected: r, panel: r, hatch: r, dim: r, hues: [r; 8], background: r, text: r, mono: true }
     }
 
     /// Reversed where there is no colour: the cursor column, the selected name.
@@ -295,8 +297,9 @@ pub fn text(buf: &Buffer) -> String {
             .map(|x| {
                 let cell = &buf[(x, y)];
                 match cell.symbol() {
-                    // the column, and its head on the time axis
-                    s if (cell.bg == pal().column || cell.bg == pal().cursor && !cell.modifier.contains(Modifier::BOLD)) && !s.chars().all(char::is_alphanumeric) => cursor.as_str(),
+                    // the column, and its head on the time axis; bold is text on the accent (the
+                    // time axis pill, a mark's tab under the cursor)
+                    s if (cell.bg == pal().column || cell.bg == pal().cursor) && !cell.modifier.contains(Modifier::BOLD) && !s.chars().all(char::is_alphanumeric) => cursor.as_str(),
                     s if cell.bg == pal().cursor_dim && !s.chars().all(char::is_alphanumeric) => mark.as_str(),
                     s => s,
                 }
@@ -559,9 +562,6 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
         }
     }
     let end = y.min(body);
-    if head > 1 {
-        ruler(ws, buf, wx, ww, 1);
-    }
     // the marks first, so the cursor is on top where they share a column; down to the last row
     for (i, t) in cursors.into_iter().filter(|&(i, _)| i != 0).chain([(0, ws.view.cursor)]) {
         if let Some(c) = ws.view.col_of(t) {
@@ -577,6 +577,10 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
             }
         }
     }
+    // over the columns' tints, so a mark's tab keeps its own
+    if head > 1 {
+        ruler(ws, buf, wx, ww, 1);
+    }
     // bold: `text` shows it as it is, not as the cursor's column
     if let Some((x, t)) = pill {
         put(buf, wx + x, 0, &t, Style::new().bg(pal().cursor).fg(pal().cursor_text).add_modifier(Modifier::BOLD | pal().accent()));
@@ -584,55 +588,117 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
     drawn
 }
 
-/// The cursor ruler (spec §9): the cursor's and each mark's number at its column, the cursor highlighted, and
-/// the Δt between neighbouring cursors in time. Cursors outside the view sit at the edge (`◂1`, `3▸`).
+/// The cursor ruler (spec §9): the cursor's and each mark's number at its column, a mark's name on
+/// a tab after it, and the Δt between neighbouring cursors in time. Cursors outside the view sit at
+/// the edge (`◂3 first write`, `1▸`).
 fn ruler(ws: &Workspace, buf: &mut Buffer, wx: usize, ww: usize, y: usize) {
     let v = &ws.view;
     let dim = Style::new().fg(pal().dim);
     let mut list = ws.cursor_list();
     list.sort_by_key(|&(i, t)| (t, i));
-    let col = |t: Tick| match v.col_of(t) {
-        Some(c) => c as usize,
-        None if t < v.start => 0,
-        None => ww.saturating_sub(1),
-    };
-    for pair in list.windows(2) {
-        let (a, b) = (col(pair[0].1), col(pair[1].1));
-        let span = b.saturating_sub(a + 1);
-        put(buf, wx + a + 1, y, &gl().line.to_string().repeat(span), dim);
-        // like bus labels: only if it fits with a spare column on each side
-        let label = format!(" {} ", time::format(pair[1].1 - pair[0].1, ws.trace.fs_per_tick));
-        let len = label.chars().count();
-        if len + 2 <= span && ws.labels[pair[0].0].name.is_empty() {
-            put(buf, wx + a + 1 + (span - len) / 2, y, &label, dim);
-        }
+    // Cursors sharing a place (a column, or an edge) draw as one: the mark nearest the view, which
+    // the cursor, if there too, lends its accent (spec §9).
+    #[derive(Clone, Copy, PartialEq)]
+    enum Slot {
+        Left,
+        At(usize),
+        Right,
     }
-    // a mark's name right after its number, in place of the Δt, cut to the next cursor (spec §9)
-    for (k, &(i, t)) in list.iter().enumerate() {
-        let name = &ws.labels[i].name;
-        if name.is_empty() || v.col_of(t).is_none() {
-            continue;
-        }
-        let from = col(t) + 1;
-        let to = list.get(k + 1).map_or(ww, |n| col(n.1)).saturating_sub(1);
-        let room = to.saturating_sub(from);
-        if room >= 3 {
-            let text = format!(" {name}");
-            let text: String = if text.chars().count() > room { text.chars().take(room - 1).chain([gl().cut]).collect() } else { text };
-            put(buf, wx + from, y, &text, Style::new());
-        }
+    struct Group {
+        slot: Slot,
+        lo: usize,
+        hi: usize,
+        first: Tick,
+        last: Tick,
+        mark: Option<usize>,
+        cursor: bool,
     }
-    list.sort_by_key(|&(i, _)| i == 0);
+    let mut groups: Vec<Group> = Vec::new();
     for (i, t) in list {
-        let n = i + 1;
-        let st = match i == 0 {
-            true => Style::new().fg(pal().cursor).add_modifier(Modifier::BOLD),
-            false => Style::new(),
+        let slot = match v.col_of(t) {
+            Some(c) => Slot::At(c as usize),
+            None if t < v.start => Slot::Left,
+            None => Slot::Right,
         };
-        match v.col_of(t) {
-            Some(c) => put(buf, wx + c as usize, y, &n.to_string(), st),
-            None if t < v.start => put(buf, wx, y, &format!("{}{n}", gl().left), st),
-            None => put(buf, wx + ww.saturating_sub(2), y, &format!("{n}{}", gl().right), st),
+        if groups.last().is_none_or(|g| g.slot != slot) {
+            let (lo, hi) = match slot {
+                Slot::At(c) => (c, c),
+                Slot::Left => (0, 1),
+                Slot::Right => (ww.saturating_sub(2), ww.saturating_sub(1)),
+            };
+            groups.push(Group { slot, lo, hi, first: t, last: t, mark: None, cursor: false });
+        }
+        let g = groups.last_mut().unwrap();
+        g.last = t;
+        match i {
+            0 => g.cursor = true,
+            // in time order: the last one on the left and in a column, the first on the right
+            _ if slot != Slot::Right || g.mark.is_none() => g.mark = Some(i),
+            _ => {}
+        }
+    }
+    // (number, name) styles of a mark, with the cursor on it or not
+    let tint = |cursor: bool| match cursor {
+        true => (Style::new().bg(pal().cursor).fg(pal().cursor_text).add_modifier(Modifier::BOLD | pal().accent()), Style::new().fg(pal().cursor).bg(pal().column).add_modifier(Modifier::BOLD)),
+        false => (Style::new().fg(pal().text).bg(pal().mark).add_modifier(Modifier::BOLD), Style::new().fg(pal().text).bg(pal().mark)),
+    };
+    // a mark's name: a tab after its number (before it at the right edge) with a space on each
+    // side, up to the next cursor; cut with … there, and left out with room for under three columns
+    let mut tabs: Vec<(usize, String, Style)> = Vec::new();
+    let mut free = 0;
+    for (k, g) in groups.iter().enumerate() {
+        if let Some(i) = g.mark.filter(|&i| !ws.labels[i].name.is_empty()) {
+            let (from, to) = match g.slot {
+                Slot::Right => (free, g.lo),
+                _ => (g.hi + 1, groups.get(k + 1).map_or(ww, |n| n.lo)),
+            };
+            let room = to.saturating_sub(from).saturating_sub(2);
+            let name = &ws.labels[i].name;
+            let fit: Option<String> = match name.chars().count() {
+                n if n <= room => Some(name.clone()),
+                _ if room >= 3 => Some(name.chars().take(room - 1).chain([gl().cut]).collect()),
+                _ => None,
+            };
+            if let Some(fit) = fit {
+                let text = format!(" {fit} ");
+                let len = text.chars().count();
+                let x = if g.slot == Slot::Right { to - len } else { from };
+                free = x + len;
+                tabs.push((x, text, tint(g.cursor).1));
+            }
+        }
+        free = free.max(g.hi + 1);
+    }
+    for pair in groups.windows(2) {
+        let (a, b) = (pair[0].hi + 1, pair[1].lo);
+        let span = b.saturating_sub(a);
+        put(buf, wx + a, y, &gl().line.to_string().repeat(span), dim);
+        // like bus labels: only if it fits with a spare column on each side, and no name is there
+        let label = format!(" {} ", time::format(pair[1].first - pair[0].last, ws.trace.fs_per_tick));
+        let len = label.chars().count();
+        if len + 2 <= span && !tabs.iter().any(|t| (a..b).contains(&t.0)) {
+            put(buf, wx + a + (span - len) / 2, y, &label, dim);
+        }
+    }
+    for (x, text, st) in tabs {
+        put(buf, wx + x, y, &text, st);
+    }
+    for g in groups {
+        let (text, st) = match g.mark {
+            Some(i) => ((i + 1).to_string(), tint(g.cursor).0),
+            None => ("1".to_string(), Style::new().fg(pal().cursor).add_modifier(Modifier::BOLD)),
+        };
+        let arrow = if g.cursor { Style::new().fg(pal().cursor).add_modifier(Modifier::BOLD) } else { dim };
+        match g.slot {
+            Slot::At(c) => put(buf, wx + c, y, &text, st),
+            Slot::Left => {
+                put(buf, wx, y, &gl().left.to_string(), arrow);
+                put(buf, wx + 1, y, &text, st);
+            }
+            Slot::Right => {
+                put(buf, wx + g.lo, y, &text, st);
+                put(buf, wx + g.hi, y, &gl().right.to_string(), arrow);
+            }
         }
     }
 }

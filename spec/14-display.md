@@ -104,7 +104,7 @@ Each set keeps every distinction the others make, so a drawing reads the same in
   beside a card, and no border. Without colour they get a border instead.
 - **Without colour** (`NO_COLOR` set to anything but empty, as no-color.org says): the cursor's
   column is reversed, marks are drawn with their glyph where a cell is empty, the selected row's
-  name is reversed. Snapshots and the agents' `render` have no colours either.
+  name is reversed, a mark's tab on the ruler has no tint (section 9). Snapshots and the agents' `render` have no colours either.
 - A 1-bit signal's X and Z stretches are labelled like a bus value (`━━━ X ━━━`) where they fit,
   and drawn on both lines, each with its own line (above).
 

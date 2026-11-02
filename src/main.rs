@@ -1446,25 +1446,67 @@ mod tests {
 
     #[test]
     fn named_marks() {
-        // spec §9: a mark's name on the ruler after its number; its note on the status line while
-        // the cursor is on it
+        // spec §9: a mark's name on the ruler, a tab after its number; its note on the status line
+        // while the cursor is on it
         let mut app = open("vcd", None);
         app.run("add top.clk").unwrap();
         app.run("cursor 2 30ns name=first bad write note=AW came before W").unwrap();
         app.run("cursor 3 60ns").unwrap();
         let s = snapshot(&mut app, 100, Some(8));
-        assert!(s.contains("2 first bad write───") && !s.contains("2 first bad write:"), "{s}");
+        assert!(s.contains("2 first bad write ───") && !s.contains("2 first bad write:"), "{s}");
         keys(&mut app, "'2");
         let s = snapshot(&mut app, 100, Some(8));
         assert!(s.lines().last().unwrap().contains("2 first bad write: AW came before W"), "{s}");
         // a name too long for the gap is cut before the next mark
         app.run("cursor 2 name=a name much too long to fit between the two marks here").unwrap();
         let s = snapshot(&mut app, 100, Some(8));
-        assert!(s.contains("fi…─3"), "{s}");
+        assert!(s.contains("fi… 3"), "{s}");
         // a mark right after it leaves no room: no name
         app.run("cursor 3 31ns").unwrap();
         let s = snapshot(&mut app, 100, Some(8));
         assert!(!s.lines().nth(1).unwrap().contains("a name"), "the ruler: {s}");
+    }
+
+    #[test]
+    fn ruler_cursor_on_mark() {
+        // spec §9: the cursor on a mark leaves the mark's number on the accent, its name after it
+        let mut app = open("vcd", None);
+        app.run("add top.clk").unwrap();
+        app.run("cursor 2 30ns name=first bad write").unwrap();
+        app.run("cursor 3 60ns").unwrap();
+        keys(&mut app, "'2");
+        let buf = screen(&mut app, 100, Some(8));
+        let ruler: String = (0..100).map(|x| buf[(x, 1)].symbol().to_string()).collect();
+        assert!(ruler.contains("2 first bad write ───") && !ruler.contains('1'), "{ruler}");
+        let x = ruler.chars().position(|c| c == '2').unwrap() as u16;
+        assert_eq!((buf[(x, 1)].bg, buf[(x + 2, 1)].fg, buf[(x + 2, 1)].bg), (draw::pal().cursor, draw::pal().cursor, draw::pal().column));
+        // off it, the mark's tab is back on its tint and the cursor's 1 is drawn
+        app.run("cursor 1 55ns").unwrap();
+        let buf = screen(&mut app, 100, Some(8));
+        assert_eq!((buf[(x, 1)].bg, buf[(x + 2, 1)].bg), (draw::pal().mark, draw::pal().mark));
+        let ruler: String = (0..100).map(|x| buf[(x, 1)].symbol().to_string()).collect();
+        assert!(ruler.contains("2 first bad write ─") && ruler.contains("─1─"), "{ruler}");
+    }
+
+    #[test]
+    fn ruler_marks_off_screen() {
+        // spec §9: a mark off screen keeps its name by the edge arrow; the nearest one shows
+        let mut app = open("vcd", None);
+        app.run("add top.clk").unwrap();
+        app.run("cursor 2 5ns name=first bad write").unwrap();
+        app.run("cursor 4 2ns name=farther").unwrap();
+        app.run("cursor 3 28ns name=retry").unwrap();
+        app.run("cursor 1 15ns").unwrap();
+        app.run("fit 10ns 20ns").unwrap();
+        let s = snapshot(&mut app, 100, Some(8));
+        let ruler = s.lines().nth(1).unwrap();
+        assert!(ruler.contains("◂2 first bad write ─") && ruler.ends_with("─ retry 3▸") && !ruler.contains("farther"), "{s}");
+        insta::assert_snapshot!(s);
+        // the cursor off the same edge: the mark there takes the accent, not ◂1
+        app.run("cursor 1 7ns").unwrap();
+        app.run("fit 10ns 20ns").unwrap();
+        let s = snapshot(&mut app, 100, Some(8));
+        assert!(s.lines().nth(1).unwrap().contains("◂2 first bad write ─") && !s.contains("◂1"), "{s}");
     }
 
     #[test]

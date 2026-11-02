@@ -23,7 +23,7 @@ red = "#ff5555"         # the shade of a signal colour (section 14)
 ```
 
 - `[colors]` keys are the palette's: `line`, `bus`, `fill`, `unknown`, `highz`, `cursor`, `cursor_text`,
-  `column`, `cursor_dim`, `selected`, `panel`, `hatch`, `dim`, `background`, `text`, and the signal colours `red`, `orange`,
+  `column`, `cursor_dim`, `mark`, `selected`, `panel`, `hatch`, `dim`, `background`, `text`, and the signal colours `red`, `orange`,
   `yellow`, `green`, `cyan`, `blue`, `magenta`, `gray`. A value is `"#rrggbb"` (the nearest
   256-colour shade on terminals without truecolor), a 256-colour index, `["#rrggbb", index]` (that
   index without truecolor, for colours the nearest shade turns gray) or `"default"` (the
@@ -115,13 +115,13 @@ cursor     = ["#fabd2f", 214]
 ### The terminal's background
 
 `dark` keeps the terminal's own background and text, so its fixed shades behind cards (`panel`),
-the selected row (`selected`) and the cursor columns (`cursor_dim`, `column`) can fall too close
-to a background they weren't made for. A window (as for the first start) asks the terminal for
+the selected row (`selected`), the marks' tabs on the ruler (`mark`) and the cursor columns
+(`cursor_dim`, `column`) can fall too close to a background they weren't made for. A window (as for the first start) asks the terminal for
 its background colour once at start (OSC 11; most terminals and tmux 3.3+ answer):
 
-- `dark`'s surfaces are steps from that colour: `panel`, `selected` and `cursor_dim` 0.07, 0.10
-  and 0.14 lighter in OKLab lightness on a dark background, darker on a light one, at least 0.21
-  from black; `column` a quarter of the way toward the accent's yellow. A theme or `[colors]`
+- `dark`'s surfaces are steps from that colour: `panel`, `selected`, `mark` and `cursor_dim`
+  0.07, 0.10, 0.12 and 0.14 lighter in OKLab lightness on a dark background, darker on a light
+  one, at least 0.21 from black; `column` a quarter of the way toward the accent's yellow. A theme or `[colors]`
   that sets them still wins, and `light`, which sets its own background, is left as it is.
 - Without a `theme` in the file, a light background gets `light`; the first start selects it.
 - A terminal that doesn't answer, `NO_COLOR`, `--snapshot` and `--mcp` keep the fixed shades, so
