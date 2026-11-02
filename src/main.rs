@@ -306,9 +306,9 @@ mod tests {
         let mut app = open("vcd", Some(SESSION));
         keys(&mut app, "J");
         assert_eq!(names(&app), "▾ cpu,  clk,  cpu.state,  data,  busy,dma.state");
-        keys(&mut app, "jVjj:group g\n");
-        assert_eq!(app.msg.as_ref().unwrap().0, "groups can't be nested yet");
-        keys(&mut app, "\x1bjjj:group g\n");
+        keys(&mut app, "kVj:group g\n");
+        assert_eq!(app.msg.as_ref().unwrap().0, "groups can't be nested yet: the selection has a group's header");
+        keys(&mut app, "\x1bjjjj:group g\n");
         assert!(app.mode == app::Mode::Normal);
         assert_eq!(names(&app), "▾ cpu,  clk,  cpu.state,  data,  busy,▾ g,  dma.state");
         keys(&mut app, "kkr");
@@ -324,6 +324,24 @@ mod tests {
         assert!(matches!(&app.ws.rows[3], rows::Row::Signal(s) if radix::RADIXES[s.look.radix].name == "bin"));
         keys(&mut app, "\x1b");
         assert!(app.mode == app::Mode::Normal);
+    }
+
+    #[test]
+    fn group_inside_group() {
+        // rows all in one group leave it for a new group right after it; the last ones take its place
+        let mut app = open("vcd", Some(SESSION));
+        keys(&mut app, "J");
+        assert_eq!(names(&app), "▾ cpu,  clk,  cpu.state,  data,  busy,dma.state");
+        keys(&mut app, "jVj:group g\n");
+        assert_eq!(names(&app), "▾ cpu,  clk,  busy,▾ g,  cpu.state,  data,dma.state");
+        assert_eq!(app.ws.sel, 3);
+        keys(&mut app, "u");
+        assert_eq!(names(&app), "▾ cpu,  clk,  cpu.state,  data,  busy,dma.state");
+        keys(&mut app, ":select clk busy\n:group all\n");
+        assert_eq!(names(&app), "▾ all,  clk,  cpu.state,  data,  busy,dma.state");
+        assert_eq!(app.ws.sel, 0);
+        keys(&mut app, ":select busy dma.state\n:group g\n");
+        assert_eq!(app.msg.as_ref().unwrap().0, "the selection is partly in group all: select rows all in it or all outside");
     }
 
     #[test]
@@ -709,7 +727,7 @@ mod tests {
         keys(&mut app, ":select cpu.state data\n");
         assert_eq!((app.ws.sel, app.ws.anchor), (3, Some(2)));
         keys(&mut app, ":select top.clk dma.state\n:group edge\n");
-        assert_eq!(app.msg.as_ref().unwrap().0, "groups can't be nested yet");
+        assert_eq!(app.msg.as_ref().unwrap().0, "groups can't be nested yet: the selection has a group's header");
         keys(&mut app, ":select top.dma.state\n:group edge\n");
         assert_eq!(names(&app), "clk,▾ cpu,  cpu.state,  data,  busy,▾ edge,  dma.state");
         keys(&mut app, ":select cpu\n:radix dec\n:select rst\n");

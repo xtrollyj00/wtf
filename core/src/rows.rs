@@ -289,18 +289,35 @@ pub fn move_row(rows: &mut [Row], i: usize, down: bool) -> usize {
     }
 }
 
-/// Put the signals in `r` into a new group. Groups don't nest yet (spec §6).
-pub fn group(rows: &mut Vec<Row>, r: std::ops::Range<usize>, name: &str) -> Result<(), String> {
-    if rows[r.clone()].iter().any(|x| x.is_group() || x.grouped()) {
-        return Err("groups can't be nested yet".into());
+/// Put the signals in `r` into a new group and return its header's index. Signals all inside one
+/// group leave it for the new group, placed right after it; groups don't nest yet (spec §6).
+pub fn group(rows: &mut Vec<Row>, r: std::ops::Range<usize>, name: &str) -> Result<usize, String> {
+    if rows[r.clone()].iter().any(Row::is_group) {
+        return Err("groups can't be nested yet: the selection has a group's header".into());
     }
-    rows[r.clone()].iter_mut().for_each(|x| {
+    let inside = rows[r.clone()].iter().filter(|x| x.grouped()).count();
+    let mut start = r.start;
+    if inside == r.len() {
+        let h = header_of(rows, r.start).expect("a grouped row has a header");
+        let end = group_end(rows, h);
+        rows[r.start..end].rotate_left(r.len());
+        start = end - r.len();
+        if start == h + 1 {
+            rows.remove(h);
+            start = h;
+        }
+    } else if inside > 0 {
+        let h = header_of(rows, r.clone().find(|&i| rows[i].grouped()).unwrap()).unwrap();
+        let Row::Group { name: g, .. } = &rows[h] else { unreachable!() };
+        return Err(format!("the selection is partly in group {g}: select rows all in it or all outside"));
+    }
+    rows[start..start + r.len()].iter_mut().for_each(|x| {
         if let Row::Signal(s) = x {
             s.grouped = true;
         }
     });
-    rows.insert(r.start, Row::Group { name: name.into(), collapsed: false });
-    Ok(())
+    rows.insert(start, Row::Group { name: name.into(), collapsed: false });
+    Ok(start)
 }
 
 /// Equal apart from which groups are collapsed and which buses are expanded.

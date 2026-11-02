@@ -801,10 +801,9 @@ impl Workspace {
             return Err("no rows".into());
         }
         let r = self.selection();
-        rows::group(&mut self.rows, r.clone(), name)?;
+        self.sel = rows::group(&mut self.rows, r, name)?;
         self.anchor = None;
         self.bit = None;
-        self.sel = r.start;
         Ok(())
     }
 
