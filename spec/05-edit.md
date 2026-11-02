@@ -100,6 +100,43 @@ The panel stays open after adding.
   A scope without direct signals, or whose signals are all shown already, adds nothing and says so
   on the status line.
 
+### Picker
+
+The **picker** is another way in: one floating box over the rows that finds things by name.
+`:pick <source>` (section 7) opens it. A query line is on top, the entries it matches under it,
+best first, the matched characters in the accent (bold and underlined without colour, section 14),
+and a preview of the highlighted entry on the right. The sources are named in the box's top
+border, the current one highlighted.
+
+```
+┌─ signals  marks  records  commands  sessions  trail ─────────────────────────────┐
+│ ▸ cpust                            1/6 │ top.cpu.state                           │
+│────────────────────────────────────────│ 3 bits                                  │
+│▌  top.cpu.state                  [2:0] │                                         │
+│                                        │ at 30ns  0x2                            │
+│                                        │                                         │
+│                                        │ ───🮦─────────🮦────────┃────────🮦────── │
+│                                        │ ───🮧── 0x1 ──🮧────── 0x2 ─────🮧─ 0x4 ─ │
+│                                        │ 7ns                                53ns │
+│                                        │ Enter adds it below top.clk             │
+└────────────────────────────────────────┴── Enter add  Tab mark  C-s source  Esc ─┘
+```
+
+| Source | Entries | Preview | `Enter` |
+|---|---|---|---|
+| `signals` | every signal by full path, computed ones and streams too; `●` shown, `+` marked | its width, its value at the cursor and its waveform around the cursor, drawn as the rows draw it | adds the marked signals, or the highlighted one, below the selected row as the signal panel's `Enter` does; a shown signal is not added twice |
+| `marks` | the cursor and each mark, with its name and time | its name, time and note | jumps to it, as `'n` |
+| `records` | a stream's records, `#n` and every field | its start, end and fields | jumps to its start and selects the stream's row, as `:records` |
+| `commands` | the `:` commands | the usage and what it does | puts it on the command line, to finish and run |
+| `sessions` | the agents' workspaces on this machine (section 15) | its trace, and whether it is this one | follows it, as `:follow <id>`; an agent on another trace says to open that trace |
+| `trail` | the agent's steps, newest highlighted | what it asked and the answer | jumps to its time, as `:trail` |
+
+The picker's keys are fixed: typing edits the query, `Backspace` deletes, `Ctrl-n` / `Ctrl-p`
+or the arrows move, `PageDown` / `PageUp` a box of entries, `Tab` marks the highlighted signal
+and moves on, `Ctrl-s` goes to the next source (an empty one says why), `Enter` picks and closes,
+`Esc` closes. Adding is one undo step. A query matches its characters in order, not
+necessarily together (`cpust` matches `top.cpu.state`); a tie goes to the shorter entry.
+
 ### Rows
 
 The keys that change the rows are in section 3 with the others: `dd` removes, `J` / `K` move, `r`

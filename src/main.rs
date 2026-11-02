@@ -2075,6 +2075,83 @@ mod tests {
     }
 
     #[test]
+    fn picker_signals() {
+        // spec §5 "Picker": fuzzy over full paths, a waveform preview at the cursor, Tab marks,
+        // Enter adds below the selected row, one undo step
+        let mut app = open("vcd", None);
+        keys(&mut app, ":add top.clk top.cpu.data\n:select top.clk\n:30ns\n:pick signals\ncpust");
+        insta::assert_snapshot!(snapshot(&mut app, 100, Some(20)));
+        let rows = app.ws.rows.len();
+        keys(&mut app, "<BS><BS><BS><BS><BS>state<Tab><Tab><CR>");
+        assert!(app.picker.is_none());
+        assert_eq!(app.ws.rows.len(), rows + 2);
+        keys(&mut app, "u");
+        assert_eq!(app.ws.rows.len(), rows);
+        // a shown signal is not added twice
+        keys(&mut app, ":pick signals\ntop.clk<CR>");
+        assert_eq!((app.ws.rows.len(), app.msg.as_ref().unwrap().0.as_str()), (rows, "nothing to add: already shown"));
+        assert!(app.run("pick nope").unwrap_err().starts_with("no picker source nope"));
+        // without colour the matched characters are still told apart
+        draw::set_palette(draw::Palette::mono());
+        keys(&mut app, ":pick signals\nzzz<BS><BS><BS>state");
+        let buf = screen(&mut app, 100, Some(20));
+        draw::set_palette(theme::builtin("dark", true).unwrap());
+        let row = app.hit.records[0].0 as u16;
+        assert!((0..100).any(|x| buf[(x, row)].modifier.contains(Modifier::UNDERLINED)));
+    }
+
+    #[test]
+    fn picker_sources() {
+        let mut app = open("vcd", Some(SESSION));
+        let msg = |app: &App| app.msg.as_ref().map_or(String::new(), |m| m.0.clone());
+        let step = |tool: &str, ask: &str, answer: &str, time| wtf_core::workspace::Step { tool: tool.into(), ask: ask.into(), answer: answer.into(), time };
+        assert!(app.run("pick trail").unwrap_err().starts_with("no trail yet"));
+        app.ws.trail = vec![
+            step("command", "decode bus axilite clock=clk", "decoded 2 streams", None),
+            step("find", "@clk top.cpu.busy", "1 matches, first 20ns, last 20ns", Some(20)),
+            step("value_at", "top.cpu.data 40ns", "at 40ns: 0x2A", Some(40)),
+        ];
+        // the trail opens on the newest step; Enter jumps to its time
+        keys(&mut app, ":pick trail\n");
+        insta::assert_snapshot!(snapshot(&mut app, 100, Some(16)));
+        keys(&mut app, "<C-p><CR>");
+        assert_eq!((app.picker.is_none(), app.ws.view.cursor), (true, 20));
+        // marks: Enter jumps; Ctrl-s goes to the next source
+        keys(&mut app, ":cursor 2 60ns name=late\n:pick marks\n");
+        assert_eq!(app.picker.as_ref().unwrap().entries.len(), 2);
+        keys(&mut app, "late<CR>");
+        assert_eq!(app.ws.view.cursor, 60);
+        keys(&mut app, ":pick marks\n<C-s>");
+        let p = app.picker.as_ref().unwrap();
+        assert_eq!((p.source, p.shown.len(), p.empty.as_str()), (2, 0, "no streams yet: make one with :decode or :protocol"));
+        // commands: Enter puts it on the command line
+        keys(&mut app, "<C-s>zoo<CR>");
+        assert_eq!((app.mode, app.line.as_str()), (tui::app::Mode::Command, "zoom "));
+        keys(&mut app, "<Esc>:pick commands\n<Esc>");
+        assert!(app.picker.is_none() && msg(&app).is_empty());
+    }
+
+    #[test]
+    fn picker_mouse() {
+        let mut app = open("vcd", None);
+        let t0 = Instant::now();
+        keys(&mut app, ":pick signals\nbusy");
+        snapshot(&mut app, 100, Some(20));
+        let (y, _) = app.hit.records[0];
+        let rows = app.ws.rows.len();
+        // a click highlights, a double click picks
+        click(&mut app, 20, y as u16, NONE, t0, 0);
+        assert!(app.picker.is_some());
+        click(&mut app, 20, y as u16, NONE, t0, 100);
+        assert_eq!((app.picker.is_none(), app.ws.rows.len()), (true, rows + 1));
+        // a click outside closes it
+        keys(&mut app, ":pick signals\n");
+        snapshot(&mut app, 100, Some(20));
+        click(&mut app, 0, 0, NONE, t0, 1000);
+        assert!(app.picker.is_none());
+    }
+
+    #[test]
     fn stream_rows() {
         let t = trace::Trace::open("tests/data/axis.vcd".as_ref()).unwrap();
         let mut app = App::new(workspace::Workspace::new(t, "axis".into()));

@@ -105,6 +105,7 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
             app.hit.records = shown.enumerate().map(|(k, i)| (b.y as usize + 2 + k, i)).collect();
         }
     }
+    crate::tui::picker::draw(app, buf, w, body);
     if app.leader.is_some() {
         leader(app, buf, w, body);
     } else if app.which_key {

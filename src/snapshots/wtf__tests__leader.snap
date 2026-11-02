@@ -7,14 +7,14 @@ expression: "snapshot(&mut app, 100, Some(16))"
 clk          0     ─────┘    └─┃──┘    └────┘    └────┘    └────┘    └────┘    └────┘    └────┘    └
                                ┃
 ▾ cpu                          ┃
-                   ──────────🮦─┃───────🮦───────────────────🮦───────────────────🮦────────────────────
-  cpu.state  0x1   ── 0x0 ───🮧─┃ 0x1 ──🮧─────── 0x2 ───────🮧─────── 0x4 ───────🮧─────── 0x5 ────────
    Space
 
-  s ▸ +signals                                    w ▸ +session
-  c ▸ +cursors                                    u ▸ undo                                 :undo
-  d ▸ +decode                                     ? ▸ keys                                 :help
-  a ▸ +agent                                      q ▸ quit                                    :q
+  s ▸ +signals                                    m ▸ marks                          :pick marks
+  c ▸ +cursors                                    r ▸ records                      :pick records
+  d ▸ +decode                                     : ▸ commands                    :pick commands
+  a ▸ +agent                                      u ▸ undo                                 :undo
+  w ▸ +session                                    ? ▸ keys                                 :help
+  f ▸ find a signal                :pick signals  q ▸ quit                                    :q
 
                                                                        Esc close   Backspace close
  signals ▸   Space  top.clk                                             12ns  ·  1ns/col  ·  simple

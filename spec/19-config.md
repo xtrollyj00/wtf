@@ -82,7 +82,7 @@ An entry replaces the one on its key, and a group merges into the group there:
 
 ```toml
 [leader]
-f = ["find signal", ":pick signals"]
+b = ["bus reads", ":pick records bus.rd"]
 q = ""                  # no quit in the menu
 
 [leader.a]              # add to the agent group
@@ -92,6 +92,10 @@ t = ["steps", ":trail"]
 The defaults:
 
 ```toml
+f = ["find a signal", ":pick signals"]
+m = ["marks", ":pick marks"]
+r = ["records", ":pick records"]
+":" = ["commands", ":pick commands"]
 u = ["undo", ":undo"]
 "?" = ["keys", ":help"]
 q = ["quit", ":q"]
@@ -124,7 +128,8 @@ n = ["name values…", ":names "]
 name = "agent"
 f = ["follow…", ":follow "]
 F = ["stop following", ":follow off"]
-t = ["trail", ":trail"]
+t = ["trail", ":pick trail"]
+j = ["join a session…", ":pick sessions"]
 s = ["the agent's session", ":agent"]
 
 [w]

@@ -5,6 +5,7 @@ pub mod app;
 pub mod commands;
 pub mod keys;
 pub mod panel;
+pub mod picker;
 pub mod render;
 pub mod setup;
 pub mod start;

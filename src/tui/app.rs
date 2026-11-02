@@ -94,6 +94,8 @@ pub struct App {
     click: Option<(Target, std::time::Instant)>,
     /// The right click's menu (spec §2 "Menu").
     pub menu: Option<Menu>,
+    /// The picker (`:pick`, spec §5 "Picker").
+    pub picker: Option<crate::tui::picker::Picker>,
 }
 
 /// The agent a window follows (`:follow`, spec §15 "Following"): each change it makes to its
@@ -177,6 +179,7 @@ impl App {
             held: None,
             click: None,
             menu: None,
+            picker: None,
         }
     }
 
@@ -264,6 +267,7 @@ impl App {
             "follow" => return self.set_follow(arg.trim()),
             "agent" => return self.show_agent_file(),
             "records" => return self.open_records(arg.trim()),
+            "pick" => return self.open_picker(arg.trim()),
             // the window picks the unit that fits; `unit` is for agents' answers (spec §15)
             "unit" => return Err("unit sets the time unit of an agent's answers; the window picks what fits".into()),
             _ => command::run(&mut self.ws, line)?,
@@ -446,6 +450,7 @@ impl App {
             return self.ws.record(mark);
         }
         match self.mode {
+            _ if self.picker.is_some() => self.picker_key(k),
             Mode::Normal if self.adding => self.panel_key(k),
             Mode::Normal => self.normal_key(k),
             Mode::Command | Mode::Search => self.command_key(k),

@@ -120,6 +120,10 @@ pub enum Entry {
 
 /// The leader menu's defaults, as a `[leader]` table in the config file would write them.
 pub const LEADER: &str = r#"
+f = ["find a signal", ":pick signals"]
+m = ["marks", ":pick marks"]
+r = ["records", ":pick records"]
+":" = ["commands", ":pick commands"]
 u = ["undo", ":undo"]
 "?" = ["keys", ":help"]
 q = ["quit", ":q"]
@@ -152,7 +156,8 @@ n = ["name values…", ":names "]
 name = "agent"
 f = ["follow…", ":follow "]
 F = ["stop following", ":follow off"]
-t = ["trail", ":trail"]
+t = ["trail", ":pick trail"]
+j = ["join a session…", ":pick sessions"]
 s = ["the agent's session", ":agent"]
 
 [w]

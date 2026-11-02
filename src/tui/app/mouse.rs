@@ -189,6 +189,11 @@ impl App {
         if self.records.is_some() {
             return self.records_mouse(m, at, now);
         }
+        if self.picker.is_some() {
+            let mark = self.ws.mark();
+            self.picker_mouse(m, at, now);
+            return self.ws.record(mark);
+        }
         // the status line's button opens and closes the panel
         if m.kind == MouseEventKind::Down(MouseButton::Left) && inside(self.hit.button, at.0, at.1) {
             self.drag = None;
@@ -213,7 +218,7 @@ impl App {
     }
 
     /// A double click: the same target clicked again soon. Remembers this click otherwise.
-    fn double(&mut self, t: Target, now: Instant) -> bool {
+    pub(crate) fn double(&mut self, t: Target, now: Instant) -> bool {
         let double = self.click.is_some_and(|(c, when)| c == t && now.duration_since(when) < DOUBLE);
         self.click = if double { None } else { Some((t, now)) };
         double
@@ -829,7 +834,7 @@ impl App {
     }
 
     /// The command line opened with `text` typed, to finish and run with `Enter`.
-    fn prefill(&mut self, text: &str) {
+    pub(crate) fn prefill(&mut self, text: &str) {
         self.open_command();
         self.line = text.into();
         self.col = usize::MAX;

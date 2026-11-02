@@ -62,7 +62,7 @@ Multi-key sequences (`gg`, `dd`, `'1`) wait for their second key without a timeo
 
 These are the default keys. The config file's `[keys]` changes them (section 19, "Keys"), and
 the `?` box and the menus name the keys as changed. `Esc` and the counts stay as they are, and so
-do the keys of the start screen (section 4), the signal panel, the boxes, the menus and the
+do the keys of the start screen (section 4), the signal panel, the picker (section 5), the boxes, the menus and the
 command line.
 
 `z` / `x` sit under the left hand, so one hand zooms while the other stays on `hjkl`.
@@ -86,10 +86,12 @@ opens them. The status line shows the keys so far (`Space a`), the card's title 
 
 ```
    Space
-  s ▸ +signals                                    w ▸ +session
-  c ▸ +cursors                                    u ▸ undo                                 :undo
-  d ▸ +decode                                     ? ▸ keys                                 :help
-  a ▸ +agent                                      q ▸ quit                                    :q
+  s ▸ +signals                                    m ▸ marks                          :pick marks
+  c ▸ +cursors                                    r ▸ records                      :pick records
+  d ▸ +decode                                     : ▸ commands                    :pick commands
+  a ▸ +agent                                      u ▸ undo                                 :undo
+  w ▸ +session                                    ? ▸ keys                                 :help
+  f ▸ find a signal                :pick signals  q ▸ quit                                    :q
                                                                        Esc close   Backspace close
 ```
 
@@ -181,6 +183,7 @@ What is on top takes the mouse, and a click outside it closes it, as `Esc` does:
 | the `e` and `?` boxes | the wheel scrolls, as `j` / `k` |
 | the `:records` box (section 7) | a click highlights a record, a double click jumps to it as `Enter`, the wheel moves the highlight |
 | the leader menu | a click on an entry picks it, as its key; a click elsewhere closes it |
+| the picker (section 5) | a click highlights an entry, a double click picks it as `Enter`, the wheel moves the highlight |
 | the command completions (section 4) | a click puts the command on the command line as `Tab`, a double click runs it as `Enter`, the wheel moves the highlight; a click outside closes the command line |
 | a menu | as "Menu" below |
 
