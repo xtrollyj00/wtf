@@ -34,7 +34,7 @@ pub struct Workspace {
     /// The trace file, for `:e`, and the session file `:w` writes (spec §11).
     pub trace_path: PathBuf,
     pub session_path: PathBuf,
-    /// The layout as last saved or loaded (`session::rows_toml`); `[+]` when it differs.
+    /// The layout as last saved or loaded (`session::layout_toml`); `[+]` when it differs.
     pub saved: String,
     /// Counts `:e` reloads: a reload replaces the rows without being an undo step.
     reloads: u32,
@@ -75,10 +75,10 @@ pub struct Workspace {
     pub bit: Option<u32>,
     /// The other end of a `V` selection in Edit mode.
     pub anchor: Option<usize>,
-    /// Row layouts before each change, and after each undo (spec §5 "Undo"), each with the
-    /// selection it had, so undo returns to where the change was made.
-    undo: Vec<(Vec<Row>, usize)>,
-    redo: Vec<(Vec<Row>, usize)>,
+    /// Layouts before each change, and after each undo (spec §5 "Undo"), each with the selection
+    /// it had, so undo returns to where the change was made.
+    undo: Vec<Layout>,
+    redo: Vec<Layout>,
 }
 
 /// A mark's name and note (spec §9): what the agent (or the user) says happens there. Empty when
@@ -116,9 +116,26 @@ pub const TRAIL: usize = 200;
 
 /// What `Workspace::record` compares against.
 pub struct Mark {
-    rows: Vec<Row>,
-    sel: usize,
+    before: Layout,
     counts: (usize, usize, u32),
+}
+
+/// What an undo step restores (spec §5 "Undo"): the rows, the marks with their names and notes,
+/// and the selection the change was made on. Cursor 1, zoom and the visible time are no part of
+/// it: looking around isn't a change.
+#[derive(Clone)]
+struct Layout {
+    rows: Vec<Row>,
+    marks: [Option<Tick>; 9],
+    labels: [Label; 9],
+    sel: usize,
+}
+
+impl Layout {
+    /// The same rows (`rows::same_layout`) and the same marks.
+    fn same(&self, other: &Layout) -> bool {
+        rows::same_layout(&self.rows, &other.rows) && self.marks == other.marks && self.labels == other.labels
+    }
 }
 
 impl Workspace {
@@ -164,15 +181,26 @@ impl Workspace {
 
     /// The state an undo step would restore, taken before a change (`record`).
     pub fn mark(&self) -> Mark {
-        Mark { rows: self.rows.clone(), sel: self.sel, counts: (self.undo.len(), self.redo.len(), self.reloads) }
+        Mark { before: self.layout(), counts: (self.undo.len(), self.redo.len(), self.reloads) }
     }
 
-    /// Record one undo step if the rows changed since `mark` (unless that was an undo, redo or
-    /// reload itself).
+    fn layout(&self) -> Layout {
+        Layout { rows: self.rows.clone(), marks: self.marks, labels: self.labels.clone(), sel: self.sel }
+    }
+
+    /// Put back a layout, giving the one there was.
+    fn restore(&mut self, l: Layout) -> Layout {
+        let now = self.layout();
+        (self.rows, self.marks, self.labels, self.sel) = (l.rows, l.marks, l.labels, l.sel);
+        now
+    }
+
+    /// Record one undo step if the rows or the marks changed since `mark` (unless that was an
+    /// undo, redo or reload itself).
     pub fn record(&mut self, m: Mark) {
         let undid = (self.undo.len(), self.redo.len(), self.reloads) != m.counts;
-        if !undid && !rows::same_layout(&m.rows, &self.rows) {
-            self.undo.push((m.rows, m.sel));
+        if !undid && !m.before.same(&self.layout()) {
+            self.undo.push(m.before);
             self.redo.clear();
         }
         self.drop_unused();
@@ -186,7 +214,7 @@ impl Workspace {
             return;
         }
         let mut keep: HashSet<usize> = HashSet::new();
-        let layouts = std::iter::once(&self.rows).chain(self.undo.iter().chain(&self.redo).map(|(r, _)| r));
+        let layouts = std::iter::once(&self.rows).chain(self.undo.iter().chain(&self.redo).map(|l| &l.rows));
         for s in layouts.flat_map(|rows| rows.iter().filter_map(Row::sig)) {
             keep.insert(s.var);
             keep.extend(&s.open);
@@ -196,7 +224,7 @@ impl Workspace {
         let streams = self.streams.iter().flat_map(|s| std::iter::once(s.name.clone()).chain(s.schema.iter().map(|f| format!("{}.{}", s.name, f.name))));
         keep.extend(names.chain(streams).filter_map(|p| self.trace.by_path.get(&p).copied()));
         let Some(to) = self.trace.retain_computed(&keep) else { return };
-        let layouts = std::iter::once(&mut self.rows).chain(self.undo.iter_mut().chain(&mut self.redo).map(|(r, _)| r));
+        let layouts = std::iter::once(&mut self.rows).chain(self.undo.iter_mut().chain(&mut self.redo).map(|l| &mut l.rows));
         for s in layouts.flat_map(|rows| rows.iter_mut().filter_map(|r| match r {
             Row::Signal(s) => Some(s),
             _ => None,
@@ -596,7 +624,7 @@ impl Workspace {
     pub fn present(&mut self, text: &str, keep_decoding: bool) -> Result<Msg, String> {
         // check it reads before anything changes
         text.parse::<toml::Table>().map_err(|e| format!("session: {}", e.message()))?;
-        let before = (self.rows.clone(), self.sel);
+        let before = self.layout();
         let saved = std::mem::take(&mut self.saved);
         (self.marks, self.view.cursor, self.back) = ([None; 9], 0, None);
         self.labels = Default::default();
@@ -610,7 +638,7 @@ impl Workspace {
         let warn = session::apply(self, text);
         self.saved = saved;
         let warn = warn?;
-        if !rows::same_layout(&before.0, &self.rows) {
+        if !before.same(&self.layout()) {
             self.undo.push(before);
             self.redo.clear();
         }
@@ -624,7 +652,7 @@ impl Workspace {
 
     /// The layout differs from the session file: `[+]`, and `:q` refuses.
     pub fn modified(&self) -> bool {
-        session::rows_toml(self) != self.saved
+        session::layout_toml(self) != self.saved
     }
 
 
@@ -708,18 +736,18 @@ impl Workspace {
 
 
     pub fn undo(&mut self) -> Result<(), String> {
-        let (rows, sel) = self.undo.pop().ok_or("already at oldest change")?;
-        self.redo.push((std::mem::replace(&mut self.rows, rows), self.sel));
-        self.sel = sel;
+        let l = self.undo.pop().ok_or("already at oldest change")?;
+        let now = self.restore(l);
+        self.redo.push(now);
         self.fix_sel();
         Ok(())
     }
 
 
     pub fn redo(&mut self) -> Result<(), String> {
-        let (rows, sel) = self.redo.pop().ok_or("already at newest change")?;
-        self.undo.push((std::mem::replace(&mut self.rows, rows), self.sel));
-        self.sel = sel;
+        let l = self.redo.pop().ok_or("already at newest change")?;
+        let now = self.restore(l);
+        self.undo.push(now);
         self.fix_sel();
         Ok(())
     }

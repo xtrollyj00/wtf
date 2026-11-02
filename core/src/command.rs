@@ -275,7 +275,7 @@ fn fit(app: &mut Workspace, arg: &str) -> Result<(), String> {
 pub fn save(app: &mut Workspace, arg: &str) -> Result<Msg, String> {
     let path = if arg.is_empty() { app.session_path.clone() } else { arg.into() };
     session::write(&path, &session::to_toml(app))?;
-    app.saved = session::rows_toml(app);
+    app.saved = session::layout_toml(app);
     let msg = format!("written: {}", path.display());
     app.session_path = path;
     Ok((msg, false))

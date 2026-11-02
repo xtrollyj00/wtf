@@ -1331,11 +1331,17 @@ mod tests {
         screen(&mut app, 100, Some(22));
         let x2 = x(&app);
         ev(&mut app, down, x2, 1, 300);
+        ev(&mut app, drag, x2 + 5, 1, 305);
         ev(&mut app, drag, x2 + 10, 1, 310);
         let t = app.ws.view.col_start(x2 as u64 + 10 - app.wave_x as u64);
         assert_eq!((app.ws.marks[1], app.msg.as_ref().unwrap().0.starts_with("mark 2 at ")), (Some(t), true));
         ev(&mut app, up, x2 + 10, 1, 320);
         assert_eq!((app.ws.marks[1], app.ws.view.cursor), (Some(t), m2));
+        // the drag is one undo step (spec §5 "Undo")
+        keys(&mut app, "u");
+        assert_eq!(app.ws.marks[1], Some(m2));
+        keys(&mut app, "<C-r>");
+        assert_eq!(app.ws.marks[1], Some(t));
         screen(&mut app, 100, Some(22));
         let x3 = x(&app);
         ev(&mut app, down, x3, 1, 400);

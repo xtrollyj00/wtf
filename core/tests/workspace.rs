@@ -171,7 +171,7 @@ fn value_search() {
 #[test]
 fn presents_a_session() {
     let mut ws = with(&["top.clk"]);
-    ws.saved = wtf_core::session::rows_toml(&ws);
+    ws.saved = wtf_core::session::layout_toml(&ws);
     let text = "[cursors]\n2 = \"30ns\"\n[[rows]]\nsignal = \"top.cpu.data\"\n[[rows]]\nsignal = \"top.nope\"\n";
     let (msg, warned) = ws.present(text, false).unwrap();
     assert_eq!((msg.as_str(), warned), ("agent: presented 1 signals, 2 cursors; not in trace: top.nope", true));
@@ -515,4 +515,32 @@ fn first_value_after_the_start_is_a_change() {
     // the clock's value at 0 is its initial value, not a change
     let clk = t.by_path["top.aclk"];
     assert_eq!(t.changes_in(clk, 0, 1), wtf_core::trace::Changes::None);
+}
+
+#[test]
+fn undo_covers_marks() {
+    // spec §5 "Undo": placing, moving, naming and removing marks are changes; moving the cursor isn't
+    let mut ws = with(&["top.clk"]);
+    let cmd = |ws: &mut wtf_core::workspace::Workspace, l: &str| ws.undoable(|ws| wtf_core::command::run(ws, l)).unwrap();
+    cmd(&mut ws, "cursor 2 30ns");
+    cmd(&mut ws, "cursor 2 name=first");
+    cmd(&mut ws, "cursor 2 40ns");
+    cmd(&mut ws, "50ns");
+    assert!(ws.modified());
+    ws.undo().unwrap();
+    assert_eq!((ws.marks[1], ws.labels[1].name.as_str(), ws.view.cursor), (Some(30), "first", 50));
+    ws.undo().unwrap();
+    assert_eq!((ws.marks[1], ws.labels[1].name.as_str()), (Some(30), ""));
+    ws.undo().unwrap();
+    assert_eq!(ws.marks[1], None);
+    ws.redo().unwrap();
+    ws.redo().unwrap();
+    assert_eq!((ws.marks[1], ws.labels[1].name.as_str()), (Some(30), "first"));
+    // a present replaces the marks; undoing it brings them back
+    let mut agent = with(&["top.cpu.data"]);
+    wtf_core::command::run(&mut agent, "cursor 3 60ns name=bug").unwrap();
+    ws.present(&wtf_core::session::to_shared_toml(&agent), false).unwrap();
+    assert_eq!((ws.marks[1], ws.marks[2], ws.labels[2].name.as_str()), (None, Some(60), "bug"));
+    ws.undo().unwrap();
+    assert_eq!((ws.marks[1], ws.marks[2], ws.labels[1].name.as_str()), (Some(30), None, "first"));
 }

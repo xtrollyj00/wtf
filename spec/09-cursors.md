@@ -50,6 +50,8 @@ A mark can say what happens there, so the evidence an agent presents explains it
   cut at the end if long. A message on the status line comes first.
 - A mark moved (`Nm`, `:cursor N <time>`, dragging it) keeps its name and note; a new mark has
   none, and removing a mark removes them. Cursor 1 moves all the time, so it has neither.
+- Placing, moving, naming and removing a mark can be undone (`u`, section 5 "Undo"), and the
+  marks are part of `[+]`; moving cursor 1 isn't a change.
 - Names and notes are one line each: line breaks and runs of spaces become one space.
 
 ### Cursor ruler

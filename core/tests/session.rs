@@ -29,9 +29,9 @@ fn round_trip() {
     assert_eq!(back.scope.as_deref(), Some("top.cpu"));
     assert!(text.contains("unit = \"ps\"\n"), "{text}");
     assert_eq!(back.unit, ws.unit);
-    // what was loaded is what `modified` compares with
-    assert!(!back.modified());
-    assert_eq!(session::rows_toml(&back), back.saved);
+    // what was loaded is what `modified` compares with; a mark named since is a change (§5 "Undo")
+    assert!(!again.modified() && back.modified());
+    assert_eq!(session::layout_toml(&again), again.saved);
 }
 
 /// A struct or array row keeps its open levels, named from the row's name

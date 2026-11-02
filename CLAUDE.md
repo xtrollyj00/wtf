@@ -81,8 +81,9 @@ Ideas that span files:
   functions `pair`, `join`, and `check`) stack on streams. SPI and UART sample by time: a `Changes`
   step feeds a signal's changes to their decoder, so they take no clock. Instances (`Decode`) are
   kept in the workspace and re-run on `:e`.
-- **Undo** covers row layout only: `Workspace::undoable` / `mark` + `record` compare rows.
-  Cursors, zoom and view are not undo steps and don't mark the session modified.
+- **Undo** covers the rows and the marks (2-9, with their names and notes): `Workspace::undoable`
+  / `mark` + `record` compare a `Layout`. Cursor 1, zoom and the view are looking around: not undo
+  steps, and they don't mark the session modified.
 - **Times** are `Tick`s (u64) everywhere in the core, durations too (a `Field` with `time: true`,
   e.g. a pair's `delay`). The core never picks a display unit: `time::format_as(t, fpt, unit,
   decimals)` is the one formatter and the interfaces pass the unit (the TUI: what fits; MCP: the

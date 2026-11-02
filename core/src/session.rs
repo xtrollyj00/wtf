@@ -114,7 +114,6 @@ pub fn apply(app: &mut Workspace, text: &str) -> Result<Vec<String>, String> {
     app.trace.load(&vars);
     app.rows = rows;
     app.sel = 0;
-    app.saved = rows_toml(app);
     if !missing.is_empty() {
         warn.push(format!("not in trace: {}", missing.join(", ")));
     }
@@ -187,6 +186,8 @@ pub fn apply(app: &mut Workspace, text: &str) -> Result<Vec<String>, String> {
         app.trail = trail;
     }
     unknown("", &t, &mut warn);
+    // after the marks: `[+]` compares them too
+    app.saved = layout_toml(app);
     Ok(warn)
 }
 
@@ -362,6 +363,12 @@ pub fn open_var(app: &Workspace, row: usize, name: &str) -> Option<usize> {
         return None;
     }
     app.trace.by_path.get(&format!("{base}{rest}")).copied()
+}
+
+/// What `[+]` compares (spec §5 "Undo"): the rows and the marks, as the session writes them.
+pub fn layout_toml(app: &Workspace) -> String {
+    let marks: String = app.cursor_list().into_iter().filter(|c| c.0 > 0).map(|(i, t)| format!("{i} {t} {:?}\n", app.labels[i])).collect();
+    rows_toml(app) + &marks
 }
 
 /// The layout part of a session. `[+]` compares it with the one last saved or loaded; it names
