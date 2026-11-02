@@ -183,6 +183,11 @@ fn presents_a_session() {
     // a session that doesn't read changes nothing
     assert!(ws.present("rows = [", false).unwrap_err().starts_with("session: "));
     assert_eq!(names(&ws), ["clk"]);
+    // nor does one from a newer wtf: the marks and decoding stay
+    wtf_core::command::run(&mut ws, "cursor 2 30ns name=mine").unwrap();
+    wtf_core::command::run(&mut ws, "protocol p clock=top.clk when=top.cpu.busy d=top.cpu.data").unwrap();
+    assert!(ws.present("version = 99\n", false).unwrap_err().contains("newer than this wtf supports"));
+    assert_eq!((ws.marks[1], ws.labels[1].name.as_str(), ws.streams.len()), (Some(30), "mine", 1));
 }
 
 #[test]

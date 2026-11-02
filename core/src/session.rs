@@ -24,14 +24,21 @@ pub fn agent_path(trace: &std::path::Path) -> std::path::PathBuf {
     p.into()
 }
 
-/// Apply a session to a freshly opened app. Returns warnings for the status line.
-pub fn apply(app: &mut Workspace, text: &str) -> Result<Vec<String>, String> {
+/// A session's text as a table, if it reads and this wtf supports its version: the errors that
+/// refuse a whole session, checked before anything changes.
+pub fn read(text: &str) -> Result<Table, String> {
     let mut t: Table = text.parse().map_err(|e: toml::de::Error| format!("session: {}", e.message()))?;
-    let mut warn = Vec::new();
     let version = t.remove("version").map_or(Ok(VERSION), |v| v.as_integer().ok_or("session: version must be a number"))?;
     if version > VERSION {
         return Err(format!("session version {version} is newer than this wtf supports ({VERSION})"));
     }
+    Ok(t)
+}
+
+/// Apply a session to a freshly opened app. Returns warnings for the status line.
+pub fn apply(app: &mut Workspace, text: &str) -> Result<Vec<String>, String> {
+    let mut t = read(text)?;
+    let mut warn = Vec::new();
 
     // the scope first: the names after it resolve under it
     if let Some(scope) = t.remove("scope") {

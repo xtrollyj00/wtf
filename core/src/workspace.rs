@@ -622,8 +622,8 @@ impl Workspace {
     /// `workspace`, `user_view` adopt). Returns the status message, `agent: presented …` (an error
     /// if parts didn't fit).
     pub fn present(&mut self, text: &str, keep_decoding: bool) -> Result<Msg, String> {
-        // check it reads before anything changes
-        text.parse::<toml::Table>().map_err(|e| format!("session: {}", e.message()))?;
+        // a session refused whole changes nothing
+        session::read(text)?;
         let before = self.layout();
         let saved = std::mem::take(&mut self.saved);
         (self.marks, self.view.cursor, self.back) = ([None; 9], 0, None);
