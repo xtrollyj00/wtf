@@ -2157,6 +2157,19 @@ mod tests {
         assert!(delay.split_whitespace().nth(2).is_some_and(|v| v.ends_with("ns")), "{screen}");
     }
 
+    /// The site's keys and commands page is written from the tables the window reads; a change
+    /// to them needs `UPDATE_SITE=1 cargo test site_keys`.
+    #[test]
+    fn site_keys() {
+        let page = tui::reference::keys_page(&mut open("vcd", None));
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("site/content/keys.md");
+        if std::env::var_os("UPDATE_SITE").is_some() {
+            std::fs::write(&path, &page).unwrap();
+        }
+        let have = std::fs::read_to_string(&path).unwrap_or_default();
+        assert!(have == page, "site/content/keys.md is out of date: UPDATE_SITE=1 cargo test site_keys");
+    }
+
     #[test]
     fn records_named_as_decode() {
         // spec §5 "Records": a pair's stream has the decode's name, so `all` names its sets one by one

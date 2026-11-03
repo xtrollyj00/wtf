@@ -69,6 +69,7 @@ pub struct FindArgs {
     pub from: Option<String>,
     /// Stop at this time (with `backward`, down to it); default the end.
     pub to: Option<String>,
+    /// Search toward the start: the latest matches first.
     #[serde(default)]
     pub backward: bool,
     /// How many lines to list; default 20.

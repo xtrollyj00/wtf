@@ -1,0 +1,161 @@
+# The screens the site shows, made by `tools/screens.py`: each is `wtf <trace> --snapshot <size>
+# --ansi --glyphs nerd [--keys <keys>]`, run with an empty home of its own, then drawn as SVG.
+# `copy` puts the trace there under that home first (as `~/<copy>`), without its session.
+
+[[screen]]
+name = "hero"
+trace = "docs/demo.vcd"
+size = "110x30"
+label = "wtf showing an AXI4-Lite write: the decoded write, its handshake signals, and marks timing the address phase"
+
+[[screen]]
+name = "start"
+trace = "docs/demo.vcd"
+copy = "tour.vcd"
+size = "100x27"
+keys = "<Esc>"
+label = "wtf opening a trace for the first time: the logo, the trace, and where to start, with one interface found"
+
+[[screen]]
+name = "records"
+trace = "docs/demo.vcd"
+copy = "tour.vcd"
+size = "108x13"
+keys = "<Esc> dd<CR><Esc>:records s_axi<CR>"
+label = "The records browser on the decoded bus: writes, reads and errors in one table"
+
+[[screen]]
+name = "search"
+trace = "docs/demo.vcd"
+size = "110x26"
+# the demo's marks off, the toast closed, the search recalled to show it
+keys = "2M3Mgg/@aclk s_axi_awvalid && !s_axi_awready<CR><Esc>/<C-p>"
+label = "A search sampled at the clock, stopped at the cycle where the address waits for ready, the expression on the command line"
+
+[[screen]]
+name = "leader"
+trace = "docs/demo.vcd"
+size = "110x26"
+keys = " "
+label = "The Space menu: groups of commands, each with its key"
+
+# The tour (content/tour.md), on a copy of the demo trace: no saved session
+
+[[screen]]
+name = "tour-start"
+trace = "docs/demo.vcd"
+copy = "tour.vcd"
+size = "100x27"
+keys = "<Esc>"
+label = "wtf opening the tour trace: what to do first, with one interface found"
+
+[[screen]]
+name = "tour-interfaces"
+trace = "docs/demo.vcd"
+copy = "tour.vcd"
+size = "110x26"
+keys = "<Esc> dd"
+label = "The interfaces picker: the AXI4-Lite port wtf found, with the signal each role takes"
+
+[[screen]]
+name = "tour-records"
+trace = "docs/demo.vcd"
+copy = "tour.vcd"
+size = "100x14"
+keys = "<Esc> dd<CR><Esc>:records s_axi<CR>/resp != 0<CR>"
+label = "The records browser on the decode, filtered to the read answered with an error"
+
+[[screen]]
+name = "tour-jump"
+trace = "docs/demo.vcd"
+copy = "tour.vcd"
+size = "100x23"
+keys = "<Esc> dd<CR><Esc>:records s_axi<CR>/resp != 0<CR><CR><Esc><CR>c"
+label = "The decoded rows with the cursor on the failing read, its fields unfolded: resp is 0x2"
+
+[[screen]]
+name = "tour-find"
+trace = "docs/demo.vcd"
+copy = "tour.vcd"
+size = "100x16"
+keys = "<Esc> dd<CR><Esc>:records s_axi<CR>/resp != 0<CR><CR><Esc> fs_axi_ar<Tab><Tab><Tab>"
+label = "Find a signal: three read address signals marked, a preview of the highlighted one"
+
+[[screen]]
+name = "tour-marks"
+trace = "docs/demo.vcd"
+copy = "tour.vcd"
+size = "100x22"
+keys = "<Esc> dd<CR><Esc>:records s_axi<CR>/resp != 0<CR><CR><Esc> fs_axi_ar<Tab><Tab><Tab><CR>m/@aclk s_axi_rvalid && s_axi_rready<CR>z<Esc>"
+label = "Mark 2 on the read address, the cursor on the read data, 20 ns between them on the ruler"
+
+# How it works (content/how-it-works.md)
+
+[[screen]]
+name = "how-rows"
+trace = "docs/demo.vcd"
+copy = "demo.vcd"
+size = "100x14"
+keys = "<Esc>:add top.aclk<CR>:add top.s_axi_aw*<CR>kkVjj:group write<CR>:cursor 2 45ns<CR>:cursor 3 65ns<CR>:80ns<CR>z<Esc>"
+label = "Three address signals grouped as write under the clock, marks 2 and 3 with 20 ns between them on the ruler"
+
+[[screen]]
+name = "how-stream"
+trace = "docs/demo.vcd"
+copy = "demo.vcd"
+size = "100x18"
+keys = "<Esc>:add top.aclk<CR>:decode bus axilite clock=top.aclk prefix=top.s_axi_<CR>:add bus.wr<CR><CR>:60ns<CR>z<Esc>"
+label = "The decoded write stream unfolded into a row per field, each with its value at the cursor"
+
+# The recipes (content/recipes.md)
+
+[[screen]]
+name = "recipe-errors"
+trace = "docs/demo.vcd"
+size = "100x14"
+keys = ":records bus<CR>/resp != 0<CR>"
+label = "The records browser on the decoded AXI4-Lite bus, filtered to the one read answered with an error"
+
+[[screen]]
+name = "recipe-protocol"
+trace = "tests/data/reqresp.vcd"
+size = "100x19"
+keys = ":protocol hs roles=valid,id when=valid id=id<CR>:decode req hs clock=clk valid=req_valid id=req_id<CR>:decode resp hs clock=clk valid=resp_valid id=resp_id<CR>:add top<CR>:add req resp<CR><Esc>"
+label = "Requests and responses of a design's own handshake, decoded into records under the signals"
+
+[[screen]]
+name = "recipe-latency"
+trace = "tests/data/reqresp.vcd"
+size = "100x13"
+keys = ":protocol hs roles=valid,id when=valid id=id<CR>:decode req hs clock=clk valid=req_valid id=req_id<CR>:decode resp hs clock=clk valid=resp_valid id=resp_id<CR>:decode lat pair request=req response=resp id=id<CR>:add top<CR><Esc>:records lat lat.unmatched<CR>"
+label = "Requests paired with their responses by id, each with its delay, and the two left unmatched"
+
+[[screen]]
+name = "pair"
+trace = "tests/data/reqresp.vcd"
+size = "100x19"
+keys = ":protocol hs roles=valid,id when=valid id=id<CR>:decode req hs clock=clk valid=req_valid id=req_id<CR>:decode resp hs clock=clk valid=resp_valid id=resp_id<CR>:decode lat pair request=req response=resp id=id<CR>:add top<CR>:add req resp lat<CR>:22ns<CR><Esc>"
+label = "A design's own handshake decoded: requests and responses as records under their signals, and lat pairing them by id, each with its delay"
+
+[[screen]]
+name = "recipe-dropped"
+trace = "tests/data/handshake.vcd"
+size = "100x16"
+keys = ":add top<CR>:decode c check clock=clk dropped=fell(valid) && !past(ready)<CR>:add c<CR>:85ns<CR><Esc>"
+label = "A check decode marks the cycle where valid fell before ready took the data"
+
+[[screen]]
+name = "recipe-struct"
+trace = "tests/data/types-verilator-structs.fst"
+size = "80x12"
+keys = ":add types.pkt<CR><Esc><CR>"
+label = "A packed struct opened one level: valid, state and pair under pkt, with pkt's value 0x5A5"
+
+# An agent's session on the demo trace over `wtf --mcp`: each call and its answer, in order.
+[agent]
+trace = "docs/demo.vcd"
+calls = [
+  { tool = "open", args = { trace = "sim/axi_tb.vcd" } },
+  { tool = "command", args = { line = "decode bus axilite clock=top.aclk prefix=top.s_axi_" } },
+  { tool = "records", args = { stream = "bus" } },
+]

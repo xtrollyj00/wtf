@@ -1,0 +1,19 @@
+{# A screen from site/screens (tools/screens.py), for content: {{ <screen name="recipe-errors" caption="..." /> }} #}
+{% component screen(name, caption="") %}
+<figure class="screen">
+  <div class="term">{{ load_data(path="screens/" ~ name ~ ".svg", format="plain") | safe }}</div>
+  {%- if caption %}
+  <figcaption>{{ caption | markdown(inline=true) | safe }}</figcaption>
+  {%- endif %}
+</figure>
+{% endcomponent %}
+
+{# The agent benchmark, drawn by docs/agents.py --site (tools/screens.py runs it) #}
+{% component bench(caption="") %}
+<figure class="chart">
+  {{ load_data(path="screens/bench.svg", format="plain") | safe }}
+  {%- if caption %}
+  <figcaption>{{ caption | markdown(inline=true) | safe }}</figcaption>
+  {%- endif %}
+</figure>
+{% endcomponent %}

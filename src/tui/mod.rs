@@ -7,6 +7,8 @@ pub mod commands;
 pub mod keys;
 pub mod panel;
 pub mod picker;
+#[cfg(test)]
+pub mod reference;
 pub mod render;
 pub mod setup;
 pub mod start;

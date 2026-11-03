@@ -960,3 +960,79 @@ fn spi_and_uart_with_command() {
     assert_eq!(s.ok("records", json!({"stream": "console.byte"})), "4 of 4\nn\tstart\tend\tdata\n0\t1us\t12us\t0x55\n1\t13us\t24us\t0xA3\n2\t25us\t36us\t0xF\n3\t37us\t48us\t0x81");
     assert_eq!(s.ok("records", json!({"stream": "console.errors"})), "2 of 2\nn\tstart\tend\trule\n0\t25us\t36us\tparity\n1\t37us\t48us\tframing");
 }
+
+/// A help topic as Markdown: what Markdown would read as markup outside `code` escaped, and an
+/// example line on its own (indented after a `:`, no code in it) as code.
+fn markdown(text: &str) -> String {
+    let mut out = Vec::new();
+    let (mut prev, mut code) = ("", false);
+    for line in text.lines() {
+        if prev.ends_with(':') && line.starts_with("  ") && !line.contains('`') {
+            out.push(format!("\n```\n{}\n```\n", line.trim()));
+        } else {
+            // a code span can run on to the next line
+            let parts: Vec<String> = line.split('`').enumerate().map(|(k, p)| match (k % 2 == 1) != code {
+                false => p.chars().map(|c| if "\\*_<>[]".contains(c) { format!("\\{c}") } else { c.to_string() }).collect(),
+                true => p.to_string(),
+            }).collect();
+            code ^= parts.len().is_multiple_of(2);
+            out.push(parts.join("`"));
+        }
+        prev = line;
+    }
+    out.join("\n")
+}
+
+/// The site's agent tools page (`site/content/tools.md`) and reference (`reference.md`), written
+/// from what the server tells an agent: each tool's description and arguments, and the `help`
+/// topics. `UPDATE_SITE=1` rewrites them.
+#[test]
+fn site_tools() {
+    let dir = Dir::new("site");
+    let mut s = Server::start(&dir.0);
+    let cell = |v: &Value| v.as_str().unwrap_or("").replace('\n', " ").replace('|', "\\|");
+    let mut out = String::from(
+        "+++\ntitle = \"Agent tools\"\ndescription = \"The tools wtf --mcp gives an agent.\"\n+++\n\n\
+         <!-- Written by `UPDATE_SITE=1 cargo test --test mcp site_tools` from what wtf --mcp tells an agent; don't edit. -->\n\n\
+         What `wtf --mcp` tells an agent, word for word: each tool's description and arguments. See [For agents](@/agents.md) for setting it up.\n\n## Tools\n\n",
+    );
+    let list = s.call("tools/list", json!({}));
+    for t in list["tools"].as_array().unwrap() {
+        out.push_str(&format!("### `{}`\n\n{}\n\n", t["name"].as_str().unwrap(), t["description"].as_str().unwrap()));
+        let props = t["inputSchema"]["properties"].as_object();
+        if let Some(props) = props.filter(|p| !p.is_empty()) {
+            let required: Vec<&str> = t["inputSchema"]["required"].as_array().map_or(vec![], |r| r.iter().filter_map(|v| v.as_str()).collect());
+            out.push_str("| Argument | Means |\n|---|---|\n");
+            for (name, p) in props {
+                let need = if required.contains(&name.as_str()) { " (required)" } else { "" };
+                out.push_str(&format!("| `{name}`{need} | {} |\n", cell(&p["description"])));
+            }
+            out.push('\n');
+        }
+    }
+    out.push_str("The `help` topics they point to are the [reference](@/reference.md).\n");
+    // the help topics: the same texts the window shows with `:help <topic>`
+    let mut reference = String::from(
+        "+++\ntitle = \"Reference\"\ndescription = \"Names, times, radixes, search expressions, decoders, records and commands, as wtf explains them.\"\n+++\n\n\
+         <!-- Written by `UPDATE_SITE=1 cargo test --test mcp site_tools` from wtf's help topics; don't edit. -->\n\n\
+         One topic per concept, word for word as wtf explains it: `:help <topic>` shows one in the \
+         window, and an agent reads it with the `help` tool. The [tour](@/get-started.md) and the \
+         [recipes](@/recipes.md) show them at work.\n\n",
+    );
+    let topics = s.ok("help", json!({}));
+    for line in topics.lines().skip(1) {
+        let Some((topic, what)) = line.split_once(": ") else { continue };
+        reference.push_str(&format!("## {topic}\n\n*{}{}.*\n\n{}\n\n", what[..1].to_uppercase(), &what[1..], markdown(&s.ok("help", json!({"topic": topic})))));
+    }
+    for (name, page) in [("tools", out), ("reference", reference)] {
+        let page = page.trim_end().to_string() + "\n";
+        // Zola runs content through Tera
+        assert!(!page.contains("{{") && !page.contains("{%") && !page.contains("{#"), "{name}: Tera syntax in a text: wrap it in raw");
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("site/content/{name}.md"));
+        if std::env::var_os("UPDATE_SITE").is_some() {
+            std::fs::write(&path, &page).unwrap();
+        }
+        let have = std::fs::read_to_string(&path).unwrap_or_default();
+        assert!(have == page, "site/content/{name}.md is out of date: UPDATE_SITE=1 cargo test --test mcp site_tools");
+    }
+}

@@ -1,0 +1,10 @@
+# The wtf site (Zola). Make the screens first: python3 site/tools/screens.py; then, here, zola
+# serve or zola build. See site/README.md.
+base_url = "https://xtrollyj00.github.io/wtf"
+title = "wtf waveform viewer"
+description = "A waveform viewer for the terminal: VCD and FST, Vim keys, AXI, SPI and UART decoded into transactions, and an MCP server for AI agents."
+compile_sass = false
+build_search_index = false
+generate_feeds = false
+
+[markdown]

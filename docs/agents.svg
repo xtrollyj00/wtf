@@ -1,70 +1,70 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="820" height="334" viewBox="0 0 820 334" font-family="system-ui, -apple-system, Segoe UI, sans-serif" role="img" aria-labelledby="t d">
-<title id="t">Haiku fixing three failing RTL testbenches, with and without wtf</title>
-<desc id="d">eth-parser-headers: with wtf 5 of 5 right, 134 s, $0.029; without 2 of 5, 270 s, $0.058; eth-parser-stall: with wtf 5 of 5 right, 76 s, $0.014; without 5 of 5, 136 s, $0.024; head-trimmer-boundary: with wtf 5 of 5 right, 85 s, $0.012; without 3 of 5, 203 s, $0.024; axil2mi-stale-addr: with wtf 2 of 5 right, 62 s, $0.015; without 1 of 5, 57 s, $0.015</desc>
-<rect width="820" height="334" rx="8" fill="#fcfcfb"/>
-<text x="20" y="32" font-size="17" font-weight="600" fill="#0b0b0b">An agent fixing failing RTL testbenches, with and without wtf</text>
-<text x="20" y="54" font-size="13" fill="#52514e">Every run fixed its bug either way; with wtf, 18 of 20 had every answer right (4 without), mostly sooner and cheaper.</text>
-<rect x="20" y="70" width="12" height="12" rx="3" fill="#2a78d6"/>
-<text x="38" y="80.5" font-size="12.5" fill="#52514e">with wtf</text>
-<rect x="119.6" y="70" width="12" height="12" rx="3" fill="#898781"/>
-<text x="137.6" y="80.5" font-size="12.5" fill="#52514e">without wtf (logs, prints, reruns)</text>
-<text x="20" y="135.0" font-size="12.5" fill="#0b0b0b">eth-parser-headers</text>
-<text x="20" y="179.0" font-size="12.5" fill="#0b0b0b">eth-parser-stall</text>
-<text x="20" y="223.0" font-size="12.5" fill="#0b0b0b">head-trimmer-boundary</text>
-<text x="20" y="267.0" font-size="12.5" fill="#0b0b0b">axil2mi-stale-addr</text>
-<text x="170" y="104" font-size="12.5" font-weight="600" fill="#52514e">Every answer right (runs of 5)</text>
-<line x1="170" y1="114" x2="170" y2="280" stroke="#c3c2b7" stroke-width="1"/>
-<path d="M170.0,118.0 h134.0 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-134.0 z" fill="#2a78d6"/>
-<text x="313.0" y="128.0" font-size="11.5" fill="#52514e">5</text>
-<path d="M170.0,132.0 h51.2 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-51.2 z" fill="#898781"/>
-<text x="230.2" y="142.0" font-size="11.5" fill="#52514e">2</text>
-<path d="M170.0,162.0 h134.0 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-134.0 z" fill="#2a78d6"/>
-<text x="313.0" y="172.0" font-size="11.5" fill="#52514e">5</text>
-<path d="M170.0,176.0 h134.0 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-134.0 z" fill="#898781"/>
-<text x="313.0" y="186.0" font-size="11.5" fill="#52514e">5</text>
-<path d="M170.0,206.0 h134.0 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-134.0 z" fill="#2a78d6"/>
-<text x="313.0" y="216.0" font-size="11.5" fill="#52514e">5</text>
-<path d="M170.0,220.0 h78.8 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-78.8 z" fill="#898781"/>
-<text x="257.8" y="230.0" font-size="11.5" fill="#52514e">3</text>
-<path d="M170.0,250.0 h51.2 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-51.2 z" fill="#2a78d6"/>
-<text x="230.2" y="260.0" font-size="11.5" fill="#52514e">2</text>
-<path d="M170.0,264.0 h23.6 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-23.6 z" fill="#898781"/>
-<text x="202.6" y="274.0" font-size="11.5" fill="#52514e">1</text>
-<text x="380" y="104" font-size="12.5" font-weight="600" fill="#52514e">Time to the fix, median</text>
-<line x1="380" y1="114" x2="380" y2="280" stroke="#c3c2b7" stroke-width="1"/>
-<path d="M380.0,118.0 h62.0 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-62.0 z" fill="#2a78d6"/>
-<text x="451.0" y="128.0" font-size="11.5" fill="#52514e">134 s</text>
-<path d="M380.0,132.0 h129.1 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-129.1 z" fill="#898781"/>
-<text x="518.1" y="142.0" font-size="11.5" fill="#52514e">270 s</text>
-<path d="M380.0,162.0 h33.5 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-33.5 z" fill="#2a78d6"/>
-<text x="422.5" y="172.0" font-size="11.5" fill="#52514e">76 s</text>
-<path d="M380.0,176.0 h63.0 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-63.0 z" fill="#898781"/>
-<text x="452.0" y="186.0" font-size="11.5" fill="#52514e">136 s</text>
-<path d="M380.0,206.0 h37.9 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-37.9 z" fill="#2a78d6"/>
-<text x="426.9" y="216.0" font-size="11.5" fill="#52514e">85 s</text>
-<path d="M380.0,220.0 h96.0 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-96.0 z" fill="#898781"/>
-<text x="485.1" y="230.0" font-size="11.5" fill="#52514e">203 s</text>
-<path d="M380.0,250.0 h26.6 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-26.6 z" fill="#2a78d6"/>
-<text x="415.6" y="260.0" font-size="11.5" fill="#52514e">62 s</text>
-<path d="M380.0,264.0 h24.1 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-24.1 z" fill="#898781"/>
-<text x="413.1" y="274.0" font-size="11.5" fill="#52514e">57 s</text>
-<text x="590" y="104" font-size="12.5" font-weight="600" fill="#52514e">Cost per run, median</text>
-<line x1="590" y1="114" x2="590" y2="280" stroke="#c3c2b7" stroke-width="1"/>
-<path d="M590.0,118.0 h62.7 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-62.7 z" fill="#2a78d6"/>
-<text x="661.7" y="128.0" font-size="11.5" fill="#52514e">$0.029</text>
-<path d="M590.0,132.0 h129.4 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-129.4 z" fill="#898781"/>
-<text x="728.4" y="142.0" font-size="11.5" fill="#52514e">$0.058</text>
-<path d="M590.0,162.0 h28.2 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-28.2 z" fill="#2a78d6"/>
-<text x="627.2" y="172.0" font-size="11.5" fill="#52514e">$0.014</text>
-<path d="M590.0,176.0 h51.2 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-51.2 z" fill="#898781"/>
-<text x="650.2" y="186.0" font-size="11.5" fill="#52514e">$0.024</text>
-<path d="M590.0,206.0 h23.6 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-23.6 z" fill="#2a78d6"/>
-<text x="622.6" y="216.0" font-size="11.5" fill="#52514e">$0.012</text>
-<path d="M590.0,220.0 h51.2 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-51.2 z" fill="#898781"/>
-<text x="650.2" y="230.0" font-size="11.5" fill="#52514e">$0.024</text>
-<path d="M590.0,250.0 h30.5 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-30.5 z" fill="#2a78d6"/>
-<text x="629.5" y="260.0" font-size="11.5" fill="#52514e">$0.015</text>
-<path d="M590.0,264.0 h30.5 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-30.5 z" fill="#898781"/>
-<text x="629.5" y="274.0" font-size="11.5" fill="#52514e">$0.015</text>
-<text x="20" y="316" font-size="11.5" fill="#898781">claude-haiku-5-5, wtf ef0ae14, 5 runs per task and arm, at most 3 simulations each; wtf-bench agent, spec §18 has the table (2026-10-25)</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="850" height="334" viewBox="0 0 850 334" font-family="system-ui, -apple-system, Segoe UI, sans-serif" role="img" aria-labelledby="bt bd">
+<title id="bt">An agent fixing failing RTL testbenches, with and without wtf</title>
+<desc id="bd">eth-parser-headers: with wtf 5 of 5 runs with every answer right, 134 s, $0.029; without 2 of 5, 270 s, $0.058; eth-parser-stall: with wtf 5 of 5 runs with every answer right, 76 s, $0.014; without 5 of 5, 136 s, $0.024; head-trimmer-boundary: with wtf 5 of 5 runs with every answer right, 85 s, $0.012; without 3 of 5, 203 s, $0.024; axil2mi-stale-addr: with wtf 2 of 5 runs with every answer right, 62 s, $0.015; without 1 of 5, 57 s, $0.015</desc>
+<rect width="850" height="334" rx="8" fill="#eef0f3"/>
+<text x="20" y="32" font-size="17" font-weight="600" fill="#14161b">An agent fixing failing RTL testbenches, with and without wtf</text>
+<text x="20" y="54" font-size="13" fill="#576070">Every run fixed its bug either way. With wtf, 17 of 20 runs also had every answer right, against 11 without.</text>
+<rect x="20" y="70" width="12" height="12" rx="3" fill="#a86e00"/>
+<text x="38" y="80.5" font-size="13" fill="#576070">with wtf</text>
+<rect x="119.6" y="70" width="12" height="12" rx="3" fill="#4a78c8"/>
+<text x="137.6" y="80.5" font-size="13" fill="#576070">without wtf: logs, prints, reruns</text>
+<text x="20" y="135.0" font-size="13" fill="#14161b">eth-parser-headers</text>
+<text x="20" y="179.0" font-size="13" fill="#14161b">eth-parser-stall</text>
+<text x="20" y="223.0" font-size="13" fill="#14161b">head-trimmer-boundary</text>
+<text x="20" y="267.0" font-size="13" fill="#14161b">axil2mi-stale-addr</text>
+<text x="196" y="104" font-size="13" font-weight="600" fill="#576070">Every answer right, runs of 5</text>
+<line x1="196" y1="114" x2="196" y2="280" stroke="#c3c8d0" stroke-width="1"/>
+<path d="M196.0,118.0 h138.0 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-138.0 z" fill="#a86e00"><title>eth-parser-headers, with wtf: 5</title></path>
+<text x="343.0" y="128.0" font-size="12" fill="#576070">5</text>
+<path d="M196.0,132.0 h52.8 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-52.8 z" fill="#4a78c8"><title>eth-parser-headers, without wtf: 2</title></path>
+<text x="257.8" y="142.0" font-size="12" fill="#576070">2</text>
+<path d="M196.0,162.0 h138.0 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-138.0 z" fill="#a86e00"><title>eth-parser-stall, with wtf: 5</title></path>
+<text x="343.0" y="172.0" font-size="12" fill="#576070">5</text>
+<path d="M196.0,176.0 h138.0 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-138.0 z" fill="#4a78c8"><title>eth-parser-stall, without wtf: 5</title></path>
+<text x="343.0" y="186.0" font-size="12" fill="#576070">5</text>
+<path d="M196.0,206.0 h138.0 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-138.0 z" fill="#a86e00"><title>head-trimmer-boundary, with wtf: 5</title></path>
+<text x="343.0" y="216.0" font-size="12" fill="#576070">5</text>
+<path d="M196.0,220.0 h81.2 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-81.2 z" fill="#4a78c8"><title>head-trimmer-boundary, without wtf: 3</title></path>
+<text x="286.2" y="230.0" font-size="12" fill="#576070">3</text>
+<path d="M196.0,250.0 h52.8 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-52.8 z" fill="#a86e00"><title>axil2mi-stale-addr, with wtf: 2</title></path>
+<text x="257.8" y="260.0" font-size="12" fill="#576070">2</text>
+<path d="M196.0,264.0 h24.4 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-24.4 z" fill="#4a78c8"><title>axil2mi-stale-addr, without wtf: 1</title></path>
+<text x="229.4" y="274.0" font-size="12" fill="#576070">1</text>
+<text x="410" y="104" font-size="13" font-weight="600" fill="#576070">Time to the fix, median</text>
+<line x1="410" y1="114" x2="410" y2="280" stroke="#c3c8d0" stroke-width="1"/>
+<path d="M410.0,118.0 h64.0 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-64.0 z" fill="#a86e00"><title>eth-parser-headers, with wtf: 134 s</title></path>
+<text x="483.0" y="128.0" font-size="12" fill="#576070">134 s</text>
+<path d="M410.0,132.0 h132.9 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-132.9 z" fill="#4a78c8"><title>eth-parser-headers, without wtf: 270 s</title></path>
+<text x="551.9" y="142.0" font-size="12" fill="#576070">270 s</text>
+<path d="M410.0,162.0 h34.5 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-34.5 z" fill="#a86e00"><title>eth-parser-stall, with wtf: 76 s</title></path>
+<text x="453.5" y="172.0" font-size="12" fill="#576070">76 s</text>
+<path d="M410.0,176.0 h65.0 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-65.0 z" fill="#4a78c8"><title>eth-parser-stall, without wtf: 136 s</title></path>
+<text x="484.0" y="186.0" font-size="12" fill="#576070">136 s</text>
+<path d="M410.0,206.0 h39.1 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-39.1 z" fill="#a86e00"><title>head-trimmer-boundary, with wtf: 85 s</title></path>
+<text x="458.1" y="216.0" font-size="12" fill="#576070">85 s</text>
+<path d="M410.0,220.0 h99.0 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-99.0 z" fill="#4a78c8"><title>head-trimmer-boundary, without wtf: 203 s</title></path>
+<text x="518.0" y="230.0" font-size="12" fill="#576070">203 s</text>
+<path d="M410.0,250.0 h27.4 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-27.4 z" fill="#a86e00"><title>axil2mi-stale-addr, with wtf: 62 s</title></path>
+<text x="446.4" y="260.0" font-size="12" fill="#576070">62 s</text>
+<path d="M410.0,264.0 h24.9 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-24.9 z" fill="#4a78c8"><title>axil2mi-stale-addr, without wtf: 57 s</title></path>
+<text x="443.9" y="274.0" font-size="12" fill="#576070">57 s</text>
+<text x="624" y="104" font-size="13" font-weight="600" fill="#576070">Cost per run, median</text>
+<line x1="624" y1="114" x2="624" y2="280" stroke="#c3c8d0" stroke-width="1"/>
+<path d="M624.0,118.0 h64.6 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-64.6 z" fill="#a86e00"><title>eth-parser-headers, with wtf: $0.029</title></path>
+<text x="697.6" y="128.0" font-size="12" fill="#576070">$0.029</text>
+<path d="M624.0,132.0 h133.3 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-133.3 z" fill="#4a78c8"><title>eth-parser-headers, without wtf: $0.058</title></path>
+<text x="766.3" y="142.0" font-size="12" fill="#576070">$0.058</text>
+<path d="M624.0,162.0 h29.1 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-29.1 z" fill="#a86e00"><title>eth-parser-stall, with wtf: $0.014</title></path>
+<text x="662.1" y="172.0" font-size="12" fill="#576070">$0.014</text>
+<path d="M624.0,176.0 h52.8 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-52.8 z" fill="#4a78c8"><title>eth-parser-stall, without wtf: $0.024</title></path>
+<text x="685.8" y="186.0" font-size="12" fill="#576070">$0.024</text>
+<path d="M624.0,206.0 h24.4 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-24.4 z" fill="#a86e00"><title>head-trimmer-boundary, with wtf: $0.012</title></path>
+<text x="657.4" y="216.0" font-size="12" fill="#576070">$0.012</text>
+<path d="M624.0,220.0 h52.8 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-52.8 z" fill="#4a78c8"><title>head-trimmer-boundary, without wtf: $0.024</title></path>
+<text x="685.8" y="230.0" font-size="12" fill="#576070">$0.024</text>
+<path d="M624.0,250.0 h31.5 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-31.5 z" fill="#a86e00"><title>axil2mi-stale-addr, with wtf: $0.015</title></path>
+<text x="664.5" y="260.0" font-size="12" fill="#576070">$0.015</text>
+<path d="M624.0,264.0 h31.5 a4,4 0 0 1 4,4 v4.0 a4,4 0 0 1 -4,4 h-31.5 z" fill="#4a78c8"><title>axil2mi-stale-addr, without wtf: $0.015</title></path>
+<text x="664.5" y="274.0" font-size="12" fill="#576070">$0.015</text>
+<text x="20" y="316" font-size="11.5" fill="#576070">claude-haiku-5-5, wtf d0ebd30, 5 runs per task and arm, at most 3 simulations each; wtf-bench agent, 2026-10-25. bench/RESULTS.md has the table.</text>
 </svg>

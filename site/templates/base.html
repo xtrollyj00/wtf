@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}{{ config.title }}{% endblock %}</title>
+<meta name="description" content="{% block description %}{{ config.description }}{% endblock %}">
+<link rel="icon" href="{{ get_url(path="favicon.svg") }}" type="image/svg+xml">
+<link rel="stylesheet" href="{{ get_url(path="site.css") }}">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="wrap">
+  <nav class="top" aria-label="Site">
+    <a class="mark" href="{{ config.base_url }}/" aria-label="wtf home"><span class="wt">wt</span><span class="bar" aria-hidden="true"></span><span class="f">f</span></a>
+    <ul>
+      <li><a href="{{ get_url(path="@/get-started.md") }}"{% if current_path == "/get-started/" %} aria-current="page"{% endif %}>Get started</a></li>
+      <li><a href="{{ get_url(path="@/how-it-works.md") }}"{% if current_path == "/how-it-works/" %} aria-current="page"{% endif %}>How it works</a></li>
+      <li><a href="{{ get_url(path="@/recipes.md") }}"{% if current_path == "/recipes/" %} aria-current="page"{% endif %}>Recipes</a></li>
+      <li><a href="{{ get_url(path="@/keys.md") }}"{% if current_path == "/keys/" %} aria-current="page"{% endif %}>Keys</a></li>
+      <li><a href="{{ get_url(path="@/agents.md") }}"{% if current_path == "/agents/" or current_path == "/tools/" %} aria-current="page"{% endif %}>Agents</a></li>
+      <li><a href="https://github.com/xtrollyj00/wtf">GitHub</a></li>
+    </ul>
+  </nav>
+  <main id="main">
+{% block body %}{% endblock %}
+  </main>
+  <footer>
+    <span>MIT or Apache-2.0</span>
+    <span>Linux and macOS</span>
+    <a href="https://github.com/xtrollyj00/wtf/releases">Releases</a>
+    <a href="{{ get_url(path="@/configuration.md") }}">Configuration</a>
+    <a href="{{ get_url(path="@/troubleshooting.md") }}">Troubleshooting</a>
+  </footer>
+</div>
+{% block script %}{% endblock %}
+</body>
+</html>

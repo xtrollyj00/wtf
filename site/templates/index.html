@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block body %}
+
+  <header class="hero">
+    <h1>See the transactions on your bus.</h1>
+    <p class="lede">wtf is a waveform viewer for the terminal. It opens VCD, FST and GHW traces where your simulations run, moves like Vim, and <b>decodes AXI, SPI and UART into transactions</b> you can filter, count and measure.</p>
+    <div class="install">
+      <div class="cmd"><span class="p">$</span><span class="t" id="install-cmd">curl -fsSL https://raw.githubusercontent.com/xtrollyj00/wtf/main/install.sh | sh</span><button type="button" id="copy-install">Copy</button></div>
+      <span class="try">To try it, in a clone of the repository: <code>cp docs/demo.vcd tour.vcd &amp;&amp; wtf tour.vcd</code></span>
+    </div>
+    <figure class="screen">
+      <div class="term">{{ load_data(path="screens/hero.svg", format="plain") | safe }}</div>
+      <figcaption>An AXI4-Lite write in <code>docs/demo.vcd</code>: the decoded write on top, the handshake under it, marks 2 and 3 timing the address phase. This is wtf's own output, drawn as text with its Nerd Font icons.</figcaption>
+    </figure>
+  </header>
+
+  <div id="tour">
+    <section class="step">
+      <div>
+        <div class="at">0ns</div>
+        <h2>Open a trace</h2>
+        <p><code>wtf tour.vcd</code>, or a trace of your own. With no session saved yet, wtf shows where to start. It has already looked for interfaces a built-in protocol can decode.</p>
+        <p>Next time it opens to the rows, marks and decodes you left.</p>
+      </div>
+      <figure class="screen">
+        <div class="term">{{ load_data(path="screens/start.svg", format="plain") | safe }}</div>
+      </figure>
+    </section>
+
+    <section class="step">
+      <div>
+        <div class="at">20ns</div>
+        <h2>Decode the bus</h2>
+        <p><kbd>Space</kbd> <kbd>d</kbd> <kbd>d</kbd> picks the interface and decodes it. The writes, the reads and the protocol errors become rows, and <code>:records s_axi</code> lists them in one table, in time order.</p>
+        <p>Type a filter like <code>resp != 0</code> to keep the bad ones, <kbd>=</kbd> to count each value, <kbd>Enter</kbd> to jump there.</p>
+      </div>
+      <figure class="screen">
+        <div class="term">{{ load_data(path="screens/records.svg", format="plain") | safe }}</div>
+      </figure>
+    </section>
+
+    <section class="step">
+      <div>
+        <div class="at">40ns</div>
+        <h2>Find the cycle</h2>
+        <p>Search with an expression, sampled at a clock: <code>/@aclk s_axi_awvalid &amp;&amp; !s_axi_awready</code> stops at each cycle where the address waits. <kbd>n</kbd> goes to the next one.</p>
+        <p><code>rose</code>, <code>fell</code> and <code>past</code> write protocol checks the same way.</p>
+      </div>
+      <figure class="screen">
+        <div class="term">{{ load_data(path="screens/search.svg", format="plain") | safe }}</div>
+      </figure>
+    </section>
+
+    <section class="step">
+      <div>
+        <div class="at">60ns</div>
+        <h2>Keys you already know</h2>
+        <p>Time runs along the line, so Vim's motions move the cursor. <kbd>Space</kbd> opens a menu of the rest, and every entry shows its key.</p>
+        <ul class="keys">
+          <li><span><kbd>w</kbd> <kbd>b</kbd></span><span>next and previous change</span></li>
+          <li><span><kbd>gg</kbd> <kbd>G</kbd></span><span>start and end</span></li>
+          <li><span><kbd>:2us</kbd></span><span>go to a time</span></li>
+          <li><span><kbd>m2</kbd> <kbd>'2</kbd></span><span>set and jump to a mark</span></li>
+          <li><span><kbd>u</kbd></span><span>undo any change to the rows</span></li>
+        </ul>
+      </div>
+      <figure class="screen">
+        <div class="term">{{ load_data(path="screens/leader.svg", format="plain") | safe }}</div>
+      </figure>
+    </section>
+
+    <section class="step">
+      <div>
+        <div class="at">80ns</div>
+        <h2>Your own protocol</h2>
+        <p>Most handshakes in a design have no standard. Describe one in a line, sampled at its clock: <code>:protocol hs roles=valid,id when=valid id=id</code>, then decode each side with it.</p>
+        <p>Its records get the same table, search and rows as AXI's, and <code>pair</code> matches requests with responses to time each one.</p>
+      </div>
+      <figure class="screen">
+        <div class="term">{{ load_data(path="screens/pair.svg", format="plain") | safe }}</div>
+      </figure>
+    </section>
+  </div>
+
+  <section class="local">
+    <h2>Stays on your machine</h2>
+    <p>wtf reads your traces where they are and opens no network connections: nothing is uploaded, nothing is reported. Its sessions are TOML files next to the trace.</p>
+    <p>If you use an AI coding agent, wtf has an optional server that gives it the same decoders and records, and shows you what it found. It does nothing unless you set it up: <a href="{{ get_url(path="@/agents.md") }}">for agents</a>.</p>
+  </section>
+
+  <nav class="next" aria-labelledby="next">
+    <h2 id="next">Where next</h2>
+    <ul>
+      <li><a href="{{ get_url(path="@/get-started.md") }}">Get started</a><span>Install, then five minutes on a demo trace: decode the bus, find the failing read, time it.</span></li>
+      <li><a href="{{ get_url(path="@/how-it-works.md") }}">How it works</a><span>Rows, decodes and records, search and sessions: the model on one page.</span></li>
+      <li><a href="{{ get_url(path="@/recipes.md") }}">Recipes</a><span>Count bus errors, measure latency, catch a dropped valid, decode a protocol of your own.</span></li>
+      <li><a href="{{ get_url(path="@/keys.md") }}">Keys and commands</a><span>Every key and <code>:</code> command, and how to move them.</span></li>
+      <li><a href="{{ get_url(path="@/reference.md") }}">Reference</a><span>Names, times, radixes, search expressions, decoders and records.</span></li>
+      <li><a href="{{ get_url(path="@/agents.md") }}">For agents</a><span>Set up <code>wtf --mcp</code>, watch the agent work, take over from what it shows.</span></li>
+      <li><a href="{{ get_url(path="@/configuration.md") }}">Configuration</a><span>The config file, themes, your own keys, and every flag.</span></li>
+      <li><a href="{{ get_url(path="@/troubleshooting.md") }}">Troubleshooting</a><span>Boxes instead of lines, odd colours, big traces.</span></li>
+    </ul>
+  </nav>
+
+{% endblock %}
+{% block script %}
+<script>
+document.getElementById('copy-install').addEventListener('click', function () {
+  var btn = this, text = document.getElementById('install-cmd').textContent;
+  var done = function () { btn.textContent = 'Copied'; setTimeout(function () { btn.textContent = 'Copy'; }, 1600); };
+  try {
+    navigator.clipboard.writeText(text).then(done, function () { select(); });
+  } catch (e) { select(); }
+  function select() {
+    var r = document.createRange(); r.selectNodeContents(document.getElementById('install-cmd'));
+    var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+    btn.textContent = 'Press Ctrl-C';
+  }
+});
+</script>
+{% endblock %}

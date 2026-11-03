@@ -234,14 +234,14 @@ fn panel(app: &mut App, buf: &mut Buffer, pw: usize, body: usize) -> Option<(u16
 }
 
 /// Sections of the `?` box: a heading, then each key and what it does.
-type Section = (&'static str, Vec<(String, &'static str)>);
+pub(crate) type Section = (&'static str, Vec<(String, &'static str)>);
 type Keys<'a> = &'a [Section];
-type Examples = &'static [(&'static str, &'static str)];
+pub(crate) type Examples = &'static [(&'static str, &'static str)];
 
 /// The keys for the `?` box, the panel's while it is open: its title, the keys under section
 /// headings, and a few things to type, each with what it does. Normal mode's keys are the
 /// keymap's, so a key changed in the config file shows here (spec §19 "Keys").
-fn help_text(app: &App) -> (&'static str, Vec<Section>, &'static str, Examples) {
+pub(crate) fn help_text(app: &App) -> (&'static str, Vec<Section>, &'static str, Examples) {
     let fixed = |keys: &[(&str, &'static str)]| keys.iter().map(|&(k, d)| (k.to_string(), d)).collect::<Vec<_>>();
     if app.panel_shown() {
         let keys = vec![

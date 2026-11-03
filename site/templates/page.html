@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}{{ page.title }} · {{ config.title }}{% endblock %}
+{% block description %}{{ page.description | default(value=config.description) }}{% endblock %}
+{% block body %}
+  <div class="doc">
+    <aside>
+      <h1>{{ page.title }}</h1>
+      {% if page.toc %}<nav class="toc" aria-label="On this page"><ul>{% for h in page.toc %}<li><a href="{{ h.permalink | safe }}">{{ h.title }}</a></li>{% endfor %}</ul></nav>{% endif %}
+    </aside>
+    <article>
+      {{ page.content | safe }}
+    </article>
+  </div>
+{% endblock %}
