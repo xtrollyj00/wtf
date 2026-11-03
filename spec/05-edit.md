@@ -126,7 +126,7 @@ border, the current one highlighted.
 |---|---|---|---|
 | `signals` | every signal by full path, computed ones and streams too; `●` shown, `+` marked | its width, its value at the cursor and its waveform around the cursor, drawn as the rows draw it | adds the marked signals, or the highlighted one, below the selected row as the signal panel's `Enter` does; a shown signal is not added twice |
 | `marks` | the cursor and each mark, with its name and time | its name, time and note | jumps to it, as `'n` |
-| `records` | a stream's records, `#n` and every field | its start, end and fields | jumps to its start and selects the stream's row, as `:records` |
+| `records` | a stream's records, `#n` and every field; every stream's, in time order and named by their stream (`bus.rd #3`), unless one is named or selected | its start, end and fields | jumps to its start and selects the stream's row, as `:records` |
 | `commands` | the `:` commands | the usage and what it does | puts it on the command line, to finish and run |
 | `sessions` | the agents' workspaces on this machine (section 15) | its trace, and whether it is this one | follows it, as `:follow <id>`; an agent on another trace says to open that trace |
 | `trail` | the agent's steps, newest highlighted | what it asked and the answer | jumps to its time, as `:trail` |

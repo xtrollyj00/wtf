@@ -513,7 +513,7 @@ impl App {
     /// The command line: a click on a completion completes it as `Tab`, a double click runs it;
     /// the wheel moves the highlight; a click elsewhere closes the line.
     fn line_mouse(&mut self, m: MouseEvent, (_, y): (usize, usize), now: Instant) {
-        let n = crate::tui::commands::completions(&self.line).len();
+        let n = crate::tui::commands::complete(&self.line, self).items.len();
         match m.kind {
             // the list grows upward: up is the next item
             MouseEventKind::ScrollUp if n > 0 && self.mode == Mode::Command => self.hl = (self.hl + 1) % n,

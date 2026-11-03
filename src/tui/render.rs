@@ -78,8 +78,18 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
         app.hit.boxed = help(app, buf, w, body, &mut scroll);
         app.scroll = scroll;
     }
-    if let Some((title, lines)) = &app.examine {
-        app.hit.boxed = boxed(buf, w, body, title, &plain(lines), " Esc e close ", &mut app.scroll);
+    if let Some(ex) = &app.examine {
+        // as a hover: beside the cursor, under the selected row
+        let x = app.wave_x + app.ws.view.col_of(app.ws.view.cursor).map_or(0, |c| c as usize);
+        let y = app.hit.lines.iter().find(|(_, (r, b), _)| *r == app.ws.sel && *b == app.ws.bit).map(|l| l.0);
+        let nw = ex.lines.iter().map(|(n, _)| n.chars().count()).max().unwrap_or(0);
+        let name = Style::new().fg(pal().hues[5]);
+        let lines: Vec<Line> = ex.lines.iter().map(|(n, v)| match n.is_empty() {
+            true => vec![(v.clone(), Style::new())],
+            false => vec![(format!("{n:<nw$}  "), name), (v.clone(), Style::new())],
+        }).collect();
+        let ic = if ex.record { draw::icon::STREAM } else { draw::icon::WIRE };
+        app.hit.boxed = boxed(buf, w, body, &float_title(ic, &ex.title), &format!("{}{}", icon_text(draw::icon::CLOCK), ex.at), &lines, "e Esc close", &mut app.scroll, y.map(|y| (x, y)));
     }
     if let Some(r) = &mut app.records {
         // the title line and a blank, then as many lines as fit; records scroll to show the
@@ -104,7 +114,7 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
             });
         }
         let shown = (r.top..r.items.len()).take(r.page);
-        app.hit.boxed = boxed(buf, w, body, &r.name, &plain(&lines), if text { " j k scroll  Esc close " } else { " Enter jump  Esc close " }, &mut 0);
+        app.hit.boxed = boxed(buf, w, body, &float_title(if text { draw::icon::INFO } else { draw::icon::RECORD }, &r.name), "", &plain(&lines), if text { "j k scroll  Esc close" } else { "Enter jump  Esc close" }, &mut 0, None);
         if let Some(b) = app.hit.boxed.filter(|_| !text) {
             // under the title line
             app.hit.records = shown.enumerate().map(|(k, i)| (b.y as usize + 2 + k, i)).collect();
@@ -367,64 +377,48 @@ fn help(app: &App, buf: &mut Buffer, w: usize, body: usize, scroll: &mut usize) 
             }
         }
     }
-    boxed(buf, w, body, &format!("help {} {title}", gl().dot), &lines, " Esc ? close ", scroll)
+    boxed(buf, w, body, &float_title(draw::icon::KEYS, &format!("help {} {title}", gl().dot)), "", &lines, "? Esc close", scroll, None)
 }
 
-/// A box over the middle of the screen: a title, lines, and how to close it. Lines it can't hold
-/// end in `… n more lines`. Returns where it was drawn.
-fn boxed(buf: &mut Buffer, w: usize, body: usize, title: &str, lines: &[Line], close: &str, top: &mut usize) -> Option<Rect> {
+/// A float (spec §2 `e`, `?`): a card with the title and `right` in its top border, the keys in
+/// its bottom one; under the row line at `at` (screen x, y), or above it where there is no room,
+/// else in the middle. Too long for the screen it takes the whole width and scrolls from `top`,
+/// its bottom border saying which lines show. Returns where it was drawn.
+#[allow(clippy::too_many_arguments)]
+fn boxed(buf: &mut Buffer, w: usize, body: usize, title: &[(String, Style)], right: &str, lines: &[Line], keys: &str, top: &mut usize, at: Option<(usize, usize)>) -> Option<Rect> {
     let all = lines.len();
     let room = body.saturating_sub(2);
-    // too long for the screen: the lines from `top`, and where they are on the last line
-    let full = all > room && room > 1;
+    let full = all > room && room > 0;
     let mut lines = lines.to_vec();
+    let mut footer = keys.to_string();
     if full {
-        *top = (*top).min(all - (room - 1));
-        lines = lines[*top..*top + room - 1].to_vec();
-        let at = format!("{} lines {}{}{} of {all}  j k scroll", gl().cut, *top + 1, gl().dash, *top + room - 1);
-        lines.push(vec![(at, Style::new().fg(pal().dim))]);
+        *top = (*top).min(all - room);
+        lines = lines[*top..*top + room].to_vec();
+        footer = format!("{}{}{} of {all}  j k scroll  {keys}", *top + 1, gl().dash, *top + room);
     } else {
         *top = 0;
     }
     let len = |l: &Line| l.iter().map(|(s, _)| s.chars().count()).sum::<usize>();
-    let top = format!(" {title} ");
-    // the title and how to close it share the top line
-    let widest = lines.iter().map(len).max().unwrap_or(0).max(top.chars().count() + close.chars().count() + 1);
+    let head = title.iter().map(|(t, _)| t.chars().count()).sum::<usize>() + right.chars().count() + 8;
+    let widest = lines.iter().map(len).max().unwrap_or(0).max(head).max(footer.chars().count() + 6);
     // margins too narrow to read what is under them, or too long for the screen: the whole width
     let inner = if widest + 4 + 12 > w || full { w.saturating_sub(4) } else { widest };
     let (bw, bh) = (inner + 4, lines.len() + 2);
-    if bw > w || bh > body || bw < close.chars().count() + 3 {
+    if bw > w || bh > body || bh < 3 {
         return None;
     }
-    let (x0, y0) = ((w - bw) / 2, (body - bh) / 2);
-    // opaque: the waveforms and cursor columns must not show through
-    let st = Style::new().bg(pal().panel).fg(Color::Reset);
-    let dim = st.fg(pal().dim);
-    let top: String = top.chars().take(bw - 2).collect();
-    if pal().mono {
-        // no background to tell the box by: a border
-        put(buf, x0, y0, &format!("{}{top}{}{}", gl().border[0], gl().border[4].to_string().repeat(bw - 2 - top.chars().count()), gl().border[1]), dim);
-        put(buf, x0, y0 + bh - 1, &format!("{}{}{close}{}{}", gl().border[2], gl().border[4].to_string().repeat(bw - 3 - close.chars().count()), gl().border[4], gl().border[3]), dim);
-    } else {
-        // a card: its own background, the title in bold, how to close it dim across from it; two
-        // columns cleared on each side, so no stub of a waveform is left beside it (their
-        // background stays, so a selected row's band isn't cut)
-        let (cx, cw) = (x0.saturating_sub(2), (bw + 4).min(w - x0.saturating_sub(2)));
-        for y in 0..bh {
-            for x in cx..cx + cw {
-                buf[(x as u16, (y0 + y) as u16)].set_char(' ');
-            }
-            put(buf, x0, y0 + y, &" ".repeat(bw), st);
+    let below = |y: usize| y + draw::ROW_LINES;
+    let (x0, y0) = match at.filter(|_| !full) {
+        Some((x, y)) if below(y) + bh <= body || y >= bh => {
+            let x0 = if x + 2 + bw <= w { x + 2 } else { x.saturating_sub(bw + 1) }.min(w - bw);
+            (x0, if below(y) + bh <= body { below(y) } else { y - bh })
         }
-        put(buf, x0 + 1, y0, &top, st.add_modifier(Modifier::BOLD));
-        put(buf, x0 + bw - 1 - close.chars().count(), y0, close, dim);
-    }
+        _ => ((w - bw) / 2, (body - bh) / 2),
+    };
+    let r = Rect::new(x0 as u16, y0 as u16, bw as u16, bh as u16);
+    card_frame(buf, r, pal().dim, title, right, &footer);
+    let st = card_style();
     for (i, l) in lines.iter().enumerate() {
-        if pal().mono {
-            put(buf, x0, y0 + 1 + i, &format!("{} ", gl().border[5]), dim);
-            put(buf, x0 + bw - 2, y0 + 1 + i, &format!(" {}", gl().border[5]), dim);
-        }
-        put(buf, x0 + 2, y0 + 1 + i, &" ".repeat(inner), st);
         let mut x = 0;
         for (text, s) in l {
             let text: String = text.chars().take(inner - x).collect();
@@ -432,7 +426,12 @@ fn boxed(buf: &mut Buffer, w: usize, body: usize, title: &str, lines: &[Line], c
             x += text.chars().count();
         }
     }
-    Some(Rect::new(x0 as u16, y0 as u16, bw as u16, bh as u16))
+    Some(r)
+}
+
+/// A float's title: an icon and the name in the accent.
+fn float_title(ic: char, name: &str) -> Vec<(String, Style)> {
+    vec![(format!("{}{name}", icon_text(ic)), Style::new().fg(pal().cursor).add_modifier(Modifier::BOLD))]
 }
 
 /// The right click's menu (spec §2 "Menu"), with its corner at the pointer moved to fit, and
@@ -979,12 +978,29 @@ fn command_line(app: &mut App, buf: &mut Buffer, w: usize, h: usize) -> Option<(
     }
     let line = format!("{}{}", if search { '/' } else { ':' }, app.line);
     put(buf, bw, y, &line, Style::new());
-    let items = if search { Vec::new() } else { crate::tui::commands::completions(&app.line) };
-    // up to ten, scrolled to the highlight; the usages in a column up to 40% of the width (a
+    let comp = (!search).then(|| crate::tui::commands::complete(&app.line, app));
+    let items = comp.as_ref().map_or(&[][..], |c| &c.items[..]);
+    // what the highlighted item adds, dim after the line, when the cursor is at its end
+    if let Some(c) = &comp
+        && app.cursor() == app.line.chars().count()
+    {
+        let x = bw + line.chars().count();
+        put(buf, x, y, &c.ghost(&app.line, app.hl).chars().take(w.saturating_sub(x)).collect::<String>(), Style::new().fg(pal().dim));
+    }
+    // up to ten, scrolled to the highlight; the labels in a column up to 40% of the width (a
     // longer one is cut: the description says it again), the descriptions dim after them
     let shown = items.len().min(10).min(y);
     let first = app.hl.saturating_sub(shown.saturating_sub(1));
-    let uw = items.iter().map(|c| c.usage.chars().count()).max().unwrap_or(0).min(w * 2 / 5).max(4);
+    // the highlighted item's docs in a card at the right, where it leaves the list 40 columns
+    let label_w = |lw: usize| items.iter().map(|c| c.label.chars().count()).max().unwrap_or(0).min(lw * 2 / 5).max(4);
+    let doc = match items.get(app.hl) {
+        Some(it) if !it.doc.is_empty() => it.doc.as_str(),
+        Some(it) if 3 + label_w(w) + 3 + it.desc.chars().count() > w => it.desc.as_str(),
+        _ => "",
+    };
+    let dw = if doc.is_empty() || w < 90 { 0 } else { (w * 2 / 5).clamp(44, 76) };
+    let lw = w - dw;
+    let uw = label_w(lw);
     let cut = |s: &str, n: usize| if s.chars().count() > n { s.chars().take(n.saturating_sub(1)).chain([gl().cut]).collect() } else { s.to_string() };
     for (k, c) in items.iter().enumerate().skip(first).take(shown) {
         let ly = y - 1 - (k - first);
@@ -992,9 +1008,31 @@ fn command_line(app: &mut App, buf: &mut Buffer, w: usize, h: usize) -> Option<(
         // opaque: the cursor column and the selection must not show through
         let st = Style::new().bg(if k == app.hl { pal().selected } else { pal().panel }).fg(Color::Reset);
         let mark = if k == app.hl { format!(" {} ", gl().hl) } else { "   ".to_string() };
-        put(buf, 0, ly, &format!("{mark:<w$}"), st);
-        put(buf, 3, ly, &cut(c.usage, uw), if k == app.hl { st.add_modifier(Modifier::BOLD) } else { st });
-        put(buf, 3 + uw + 2, ly, &cut(c.desc, w.saturating_sub(3 + uw + 2)), st.fg(pal().dim));
+        put(buf, 0, ly, &format!("{mark:<lw$}"), st);
+        put(buf, 3, ly, &cut(&c.label, uw), if k == app.hl { st.add_modifier(Modifier::BOLD) } else { st });
+        put(buf, 3 + uw + 2, ly, &cut(&c.desc, lw.saturating_sub(3 + uw + 3)), st.fg(pal().dim));
+    }
+    if dw > 0 && shown > 0 {
+        let it = &items[app.hl];
+        let tw = dw - 4;
+        // each line of the docs wrapped on its own, keeping its indent
+        let mut lines: Vec<String> = Vec::new();
+        for l in doc.lines() {
+            let indent = l.len() - l.trim_start().len();
+            let wrapped = wrap_text(l, tw.saturating_sub(indent).max(8), usize::MAX);
+            lines.extend(if wrapped.is_empty() { vec![String::new()] } else { wrapped.into_iter().map(|t| format!("{}{t}", " ".repeat(indent))).collect() });
+        }
+        let bh = (lines.len() + 2).min(y);
+        if bh >= 3 {
+            let r = Rect::new(lw as u16, (y - bh) as u16, dw as u16, bh as u16);
+            let what = comp.as_ref().map_or("", |c| c.what);
+            card_frame(buf, r, pal().dim, &[(it.label.clone(), Style::new().fg(pal().cursor).add_modifier(Modifier::BOLD))], what, "Tab takes it");
+            let st = card_style();
+            for (i, l) in lines.iter().take(bh - 2).enumerate() {
+                let found = l.starts_with("This trace:");
+                put(buf, lw + 2, y - bh + 1 + i, &cut(l, tw), if found { st.fg(pal().hues[3]) } else { st });
+            }
+        }
     }
     // without a background, a rule between the list and the waveforms above it
     if let Some(ry) = y.checked_sub(shown + 1).filter(|_| shown > 0 && pal().mono) {

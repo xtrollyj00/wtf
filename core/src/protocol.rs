@@ -286,7 +286,7 @@ fn channels<const N: usize>(given: &Given, channels: [(&'static str, &[(&str, &s
 }
 
 /// The generic protocols on streams: name, one line, and the rest of `protocols <name>`.
-const ON_STREAMS: &[(&str, &str, &str)] = &[
+pub const ON_STREAMS: &[(&str, &str, &str)] = &[
     (
         "frame",
         "records of a stream grouped into frames, by a last flag, a gap or a select",

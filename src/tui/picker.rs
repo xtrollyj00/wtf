@@ -165,24 +165,37 @@ impl App {
             }
             2 => {
                 let names: Vec<&str> = self.ws.streams.iter().map(|s| s.name.as_str()).collect();
-                let name = p.stream.get_or_insert_with(|| names.first().map_or(String::new(), |s| s.to_string()));
-                let Some(st) = self.ws.streams.iter().find(|s| s.name == *name) else {
-                    return Err(match names.is_empty() {
-                        true => "no streams yet: make one with :decode or :protocol".into(),
-                        false => format!("unknown stream: {name} (streams: {})", names.join(", ")),
-                    });
+                if names.is_empty() {
+                    return Err("no streams yet: make one with :decode or :protocol".into());
+                }
+                // the stream asked for, else the selected row's (or its field's), else them all
+                if p.stream.is_none()
+                    && let Some(rows::Row::Signal(r)) = self.ws.rows.get(self.ws.sel)
+                {
+                    let path = &self.ws.trace.vars[r.var].path;
+                    p.stream = names.iter().filter(|n| path == *n || path.strip_prefix(**n).is_some_and(|f| f.starts_with('.'))).max_by_key(|n| n.len()).map(|n| n.to_string());
+                }
+                let streams: Vec<&wtf_core::stream::Stream> = match &p.stream {
+                    Some(name) => vec![self.ws.streams.iter().find(|s| s.name == *name).ok_or_else(|| format!("unknown stream: {name} (streams: {})", names.join(", ")))?],
+                    None => self.ws.streams.iter().collect(),
                 };
-                (0..st.records.len())
-                    .map(|i| {
+                let all = streams.len() > 1;
+                let mut out: Vec<(u64, Entry)> = Vec::new();
+                for st in streams {
+                    out.extend((0..st.records.len()).map(|i| {
                         let r = &st.records[i];
                         let fields = st.fields_text(i, fpt);
-                        let n = format!("#{i} ");
+                        // with every stream listed, each record says whose it is
+                        let n = if all { format!("{} #{i} ", st.name) } else { format!("#{i} ") };
                         let text = format!("{n}{}", fields.iter().map(|(n, v)| format!("{n}={v}")).collect::<Vec<_>>().join(" "));
                         let mut preview = vec![format!("{} #{i}", st.name), format!("{}{}{}", fmt(r.start), gl().dash, fmt(r.end)), String::new()];
                         preview.extend(fields.iter().map(|(n, v)| format!("{n} = {v}")));
-                        Entry { head: n.chars().count(), text, right: fmt(r.start), act: Act::Record(r.start), preview }
-                    })
-                    .collect()
+                        (r.start, Entry { head: n.chars().count(), text, right: fmt(r.start), act: Act::Record(r.start), preview })
+                    }));
+                }
+                // in time order, as they happened across the streams
+                out.sort_by_key(|e| e.0);
+                out.into_iter().map(|e| e.1).collect()
             }
             3 => crate::tui::commands::COMMANDS
                 .iter()
@@ -394,7 +407,7 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
     // the sources in the top border, the current one in the accent
     let mut x = x0 + 2;
     for (i, s) in SOURCES.iter().enumerate() {
-        let s = if i == 2 && p.source == 2 { format!("records {}", p.stream.as_deref().unwrap_or("")) } else { s.to_string() };
+        let s = if i == 2 && p.source == 2 { format!("records {}", p.stream.as_deref().unwrap_or("")).trim_end().to_string() } else { s.to_string() };
         // the current one with its icon (spec §14 `nerd`)
         let ic = if i == p.source { draw::icon(source_icon(i)).map_or(String::new(), |c| format!("{c} ")) } else { String::new() };
         let s = format!(" {ic}{s} ");

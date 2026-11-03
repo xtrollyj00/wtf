@@ -531,7 +531,12 @@ mod tests {
         keys(&mut app, "k<CR>kkke");
         assert_eq!(
             app.examine.clone(),
-            Some(("types.pkt @ 10ns".to_string(), ["0x101A5", "", "valid  1", "state  busy", "pair", "  hi   0xA", "  lo   0x5"].map(String::from).to_vec()))
+            Some(app::Examine {
+                title: "types.pkt".into(),
+                at: "10ns".into(),
+                lines: [("", "0x101A5"), ("", ""), ("valid", "1"), ("state", "busy"), ("pair", ""), ("  hi", "0xA"), ("  lo", "0x5")].map(|(n, v)| (n.to_string(), v.to_string())).to_vec(),
+                record: false,
+            })
         );
         keys(&mut app, "e<CR>je");
         insta::assert_snapshot!("composite_examine_pkts", snapshot(&mut app, 80, Some(24)));
@@ -1487,7 +1492,7 @@ mod tests {
         let zoom = (app.ws.view.ticks, app.ws.view.cols);
         keys(&mut app, ":fi");
         screen(&mut app, 100, Some(22));
-        let &(y, _) = app.hit.completions.iter().find(|&&(_, k)| commands::completions("fi")[k].name == "fit").unwrap();
+        let &(y, _) = app.hit.completions.iter().find(|&&(_, k)| commands::complete("fi", &app).items[k].label.starts_with(":fit")).unwrap();
         click(&mut app, 5, y as u16, NONE, t0, 2000);
         assert_eq!(app.line, "fit ");
         click(&mut app, 5, y as u16, NONE, t0, 2100);
@@ -1590,14 +1595,14 @@ mod tests {
         app.run("records beat").unwrap();
         screen(&mut app, 100, Some(22));
         let &(y, k) = app.hit.records.last().unwrap();
-        click(&mut app, 30, y as u16, NONE, t0, 0);
+        click(&mut app, 40, y as u16, NONE, t0, 0);
         assert_eq!(app.records.as_ref().unwrap().hl, k);
-        app.mouse(at(MouseEventKind::ScrollUp, 30, 5, NONE));
+        app.mouse(at(MouseEventKind::ScrollUp, 40, 5, NONE));
         assert_eq!(app.records.as_ref().unwrap().hl, k - 1);
         // a double click jumps to the record's start
         let start = app.records.as_ref().unwrap().items[k].0.unwrap();
-        click(&mut app, 30, y as u16, NONE, t0, 1000);
-        click(&mut app, 30, y as u16, NONE, t0, 1100);
+        click(&mut app, 40, y as u16, NONE, t0, 1000);
+        click(&mut app, 40, y as u16, NONE, t0, 1100);
         assert!(app.records.is_none());
         assert_eq!(app.ws.view.cursor, start);
         app.run("records beat").unwrap();
@@ -1878,7 +1883,7 @@ mod tests {
         keys(&mut app, "ky");
         assert_eq!(app.yank.as_deref(), Some("agent 41-2 joined (:follow shows its workspace)"));
         let screen = snapshot(&mut app, 100, Some(14));
-        assert!(screen.contains("you       bad time: nope") && screen.contains("▌ 00") && screen.contains("41-1      agent 41-1 joined"), "{screen}");
+        assert!(screen.contains("you       bad time: nope") && screen.lines().any(|l| l.starts_with("▌ ") && l.contains("agent 41-2 joined")) && screen.contains("41-1      agent 41-1 joined"), "{screen}");
         keys(&mut app, "q");
         assert!(app.messages.is_none());
     }
@@ -1968,7 +1973,7 @@ mod tests {
         assert!(!app.help && !app.quit);
         // too long for a small screen: the whole width, scrolled by j k, G to the end
         keys(&mut app, "?");
-        assert!(snapshot(&mut app, 60, Some(20)).contains("lines 1–16 of "));
+        assert!(snapshot(&mut app, 60, Some(20)).contains(" 1–17 of "));
         keys(&mut app, "G");
         let screen = snapshot(&mut app, 60, Some(20));
         assert!(screen.contains("sampled at clk") && !screen.contains("cursor left / right"), "{screen}");
@@ -2005,7 +2010,7 @@ mod tests {
         let mut buf = Buffer::empty(area);
         render::draw(&mut app, area, &mut buf);
         // ten of them, the highlight nearest the line
-        assert!(commands::completions("").len() > 10);
+        assert!(commands::complete("", &app).items.len() > 10);
         for y in 19..29 {
             let bg = if y == 28 { draw::pal().selected } else { draw::pal().panel };
             assert!((0..100).all(|x| buf[(x, y)].bg == bg), "line {y}");
@@ -2181,6 +2186,29 @@ mod tests {
     }
 
     #[test]
+    fn picker_records() {
+        // without a stream named: every stream's records in time order, or the selected stream's
+        let t = trace::Trace::open("tests/data/axilite.vcd".as_ref()).unwrap();
+        let mut app = App::new(workspace::Workspace::new(t, "axilite".into()));
+        app.run("decode bus axilite clock=aclk prefix=s_axi_").unwrap();
+        app.run("add bus.rd").unwrap();
+        app.run("add top.aclk").unwrap();
+        app.run("select aclk").unwrap();
+        app.open_picker("records").unwrap();
+        let p = app.picker.as_ref().unwrap();
+        assert!(p.stream.is_none());
+        assert!(p.entries.iter().any(|e| e.text.starts_with("bus.aw #0")) && p.entries.iter().any(|e| e.text.starts_with("bus.rd #0")));
+        let times: Vec<u64> = p.entries.iter().filter_map(|e| match e.act { tui::picker::Act::Record(t) => Some(t), _ => None }).collect();
+        assert!(times.windows(2).all(|w| w[0] <= w[1]));
+        app.picker = None;
+        keys(&mut app, ":select bus.rd\n");
+        app.open_picker("records").unwrap();
+        let p = app.picker.as_ref().unwrap();
+        assert_eq!(p.stream.as_deref(), Some("bus.rd"));
+        assert!(p.entries.iter().all(|e| e.text.starts_with('#')));
+    }
+
+    #[test]
     fn picker_mouse() {
         let mut app = open("vcd", None);
         let t0 = Instant::now();
@@ -2238,7 +2266,7 @@ mod tests {
         assert!(app.examine.is_none() && app.ws.view.cursor == 65); // the box takes no other keys
         // any other signal: its value in the row's radix
         keys(&mut app, ":add top.tdata\ne");
-        assert_eq!(app.examine.clone(), Some(("top.tdata @ 65ns".to_string(), vec!["0xC0".to_string()])));
+        assert_eq!(app.examine.clone().map(|e| (e.title, e.at, e.lines)), Some(("top.tdata".to_string(), "65ns".to_string(), vec![(String::new(), "0xC0".to_string())])));
         keys(&mut app, "e:rm top.tdata\n:select rx.frame\n");
         keys(&mut app, "<CR>");
         assert!(matches!(&app.ws.rows[0], rows::Row::Signal(s) if s.open.is_empty()) && app.ws.bit.is_none());
@@ -2297,13 +2325,13 @@ signal = "stall"
             seen
         };
         let c0 = examine(&mut app, "c0", "35ns");
-        assert_eq!((c0.0.as_str(), &c0.1[2..]), ("c0 #0", &["op   0x1".to_string(), "arg  0x1".to_string()][..]));
+        assert_eq!((c0.title.as_str(), &c0.lines[..]), ("c0 #0", &[("op".to_string(), "0x1".to_string()), ("arg".to_string(), "0x1".to_string())][..]));
         let burst = examine(&mut app, "burst", "35ns");
-        assert_eq!(burst.0, "burst #0"); // `data` stays out of the label
-        assert!(burst.1.contains(&"data      01 03".to_string()), "{burst:?}");
+        assert_eq!(burst.title, "burst #0"); // `data` stays out of the label
+        assert!(burst.lines.contains(&("data".to_string(), "01 03".to_string())), "{burst:?}");
         let first = app.ws.streams.iter().find(|s| s.name == "stall").unwrap().records[0].start;
         let stall = examine(&mut app, "stall", &format!("{first}ns"));
-        assert!(stall.0.starts_with("stall #0 waiting") && stall.1.contains(&"rule  waiting".to_string()), "{stall:?}");
+        assert!(stall.title.starts_with("stall #0 waiting") && stall.lines.contains(&("rule".to_string(), "waiting".to_string())), "{stall:?}");
     }
 
     #[test]

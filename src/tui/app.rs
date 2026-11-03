@@ -82,7 +82,7 @@ pub struct App {
     /// The `?` box with the keys of the current mode is open.
     pub help: bool,
     /// The `e` box: a title and the full value of the selected signal at the cursor.
-    pub examine: Option<(String, Vec<String>)>,
+    pub examine: Option<Examine>,
     /// The `:records` list, or a `:help <topic>` text.
     pub records: Option<Records>,
     /// Text `yy` / `yt` copied, for the terminal's clipboard (OSC 52).
@@ -153,6 +153,17 @@ pub type Stamp = Option<(std::time::SystemTime, u64)>;
 
 pub fn stamp(path: &std::path::Path) -> Stamp {
     std::fs::metadata(path).ok().and_then(|m| Some((m.modified().ok()?, m.len())))
+}
+
+/// The `e` float (spec §2): what is examined and when, and its lines, (field name, value); a
+/// line without a name is the value alone.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Examine {
+    pub title: String,
+    pub at: String,
+    pub lines: Vec<(String, String)>,
+    /// A stream's record, not a signal's value.
+    pub record: bool,
 }
 
 /// `:records`: a stream's records, one a line, to pick one and jump to it. `:help <topic>`
@@ -640,34 +651,35 @@ impl App {
         };
         if let Some((st, i)) = self.ws.record_at(s.var) {
             let r = &st.records[i];
-            let mut lines = vec![format!("{} {} {} ({})", time::format(r.start, fpt), gl().dash, time::format(r.end, fpt), time::format(r.end - r.start, fpt)), String::new()];
-            let fields = st.fields_text(i, fpt);
-            let nw = fields.iter().map(|f| f.0.chars().count()).max().unwrap_or(0);
-            for (name, v) in fields {
+            let at = format!("{} {} {}  {}", time::format(r.start, fpt), gl().dash, time::format(r.end, fpt), time::format(r.end - r.start, fpt));
+            let mut lines = Vec::new();
+            for (name, v) in st.fields_text(i, fpt) {
                 for (k, part) in wrap(&v).into_iter().enumerate() {
-                    lines.push(format!("{:<nw$}  {part}", if k == 0 { name } else { "" }));
+                    // a long value's further lines under its first
+                    lines.push((if k == 0 { name.to_string() } else { " ".to_string() }, part));
                 }
             }
-            return self.examine = Some((format!("{} {}", st.name, st.label(i, fpt)), lines));
+            return self.examine = Some(Examine { title: format!("{} {}", st.name, st.label(i, fpt)), at, lines, record: true });
         }
         let (var, bit) = self.ws.probe(s, self.ws.bit);
         let name = self.ws.trace.probe_path((var, bit));
         let line = crate::draw::line_sig(&self.ws, s, var);
-        let mut value = match self.ws.trace.value_of(var, bit, self.ws.view.cursor) {
+        let value = match self.ws.trace.value_of(var, bit, self.ws.view.cursor) {
             Some(_) if self.ws.stream_of(var).is_some() => vec!["no record here".into()],
             Some(v) => wrap(&rows::label(&self.ws.trace.vars[var], &line.look, &v)),
             None => vec!["no value here".into()],
         };
+        let mut lines: Vec<(String, String)> = value.into_iter().map(|v| (String::new(), v)).collect();
         if bit.is_none() && self.ws.trace.is_composite(var) {
-            value.push(String::new());
-            value.extend(self.fields(var));
+            lines.push(Default::default());
+            lines.extend(self.fields(var));
         }
-        self.examine = Some((format!("{name} @ {}", time::format(self.ws.view.cursor, fpt)), value));
+        self.examine = Some(Examine { title: name, at: time::format(self.ws.view.cursor, fpt), lines, record: false });
     }
 
     /// A struct's or array's fields at the cursor, a line each, nested ones indented under their
     /// struct, an array's elements by index (spec §2 `e`).
-    fn fields(&self, var: usize) -> Vec<String> {
+    fn fields(&self, var: usize) -> Vec<(String, String)> {
         fn walk(app: &App, var: usize, depth: usize, out: &mut Vec<(String, Option<String>)>) {
             let t = &app.ws.trace;
             for &c in &t.vars[var].children {
@@ -689,8 +701,7 @@ impl App {
         }
         let mut lines = Vec::new();
         walk(self, var, 0, &mut lines);
-        let nw = lines.iter().filter(|l| l.1.is_some()).map(|l| l.0.chars().count()).max().unwrap_or(0);
-        lines.into_iter().map(|(n, v)| v.map_or(n.clone(), |v| format!("{n:<nw$}  {v}"))).collect()
+        lines.into_iter().map(|(n, v)| (n, v.unwrap_or_default())).collect()
     }
 
     /// A value search (spec §8) that says where the match is: `match 3 of 157`.
@@ -1331,11 +1342,10 @@ impl App {
             KeyCode::Char('n') if ctrl => self.move_hl(false),
             KeyCode::Tab if search => {}
             KeyCode::Tab => {
-                if let Some(c) = crate::tui::commands::completions(&self.line).get(self.hl)
-                    && !c.name.starts_with('<')
-                {
-                    self.line = if c.args { format!("{} ", c.name) } else { c.name.to_string() };
+                if let Some(line) = crate::tui::commands::complete(&self.line, self).take(&self.line, self.hl) {
+                    self.line = line;
                     self.col = usize::MAX;
+                    self.hl = 0;
                 }
             }
             KeyCode::Char(ch) if !ctrl => {
@@ -1384,7 +1394,7 @@ impl App {
             self.col = usize::MAX;
             return;
         }
-        let n = crate::tui::commands::completions(&self.line).len();
+        let n = crate::tui::commands::complete(&self.line, self).items.len();
         if n > 0 {
             // the list grows upward, so "up" moves to the next item
             self.hl = if up { (self.hl + 1) % n } else { (self.hl + n - 1) % n };

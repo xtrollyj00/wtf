@@ -199,9 +199,35 @@ clk      ▁▁▁▁▔▔▔▔▁▁▁▁▔▔▔▔
 :q_
 ```
 
-- Typing filters the list by fuzzy match on the command name.
-- `↑` / `↓` or `Ctrl-p` / `Ctrl-n` move the highlight, `Tab` completes the highlighted command.
-  On an empty line they go through earlier commands instead.
+- Typing filters the list by fuzzy match on the command name. Once a command and a space are
+  typed, the list completes its argument at the end of the line instead:
+
+  | Command | Completes |
+  |---|---|
+  | `:add`, `:rm` | signal paths |
+  | `:signal <name> =`, `:names` | signal paths |
+  | `:protocol <name>` | `clock=`, `when=`, `roles=`; after `clock=` or a field's `=` a signal path, and in `when=`'s expression the signal at the end, after any `!` or `(` |
+  | `:radix`, `:color`, `:help` | radix names, colours, topics |
+  | `:records` | streams, then `where`, then in its expression the stream's fields |
+  | `:pick` | sources, and after `records` the streams |
+  | `:scope` | scopes |
+  | `:select` | the rows' names |
+  | `:cursor` | marks 1-9, each with its time and name; then `off`, `name=`, `note=` |
+  | `:fit` | the marks put, as `'2` |
+  | `:follow` | the agents on this trace, and `off` |
+  | `:w` | session files (`.toml`) and directories |
+  | `:decode <name>` | protocols, each with what it makes; first the interfaces found in the trace (section 15, `info`), each with its whole line (`axilite  top.s_axi_  found here: clock=top.aclk prefix=top.s_axi_`) |
+  | `:decode <name> <protocol>` | its roles and params, as `role=`; after `prefix=` the prefixes found, after another role a signal path |
+
+- `↑` / `↓` or `Ctrl-p` / `Ctrl-n` move the highlight, `Tab` puts the highlighted item in place of
+  the word being typed. On an empty line they go through earlier commands instead.
+- **Ghost text**: with the cursor at the end of the line, what the highlighted item would add
+  shows dim after it, then what is still to type: `:zo` shows `om <time>`, `:decode bus ax`
+  shows `ilite clock=<clk> prefix=<prefix>`.
+- **Docs**: a card at the right of the list, 90 columns wide or more, says more about the
+  highlighted item: a protocol's roles, params and streams (as the `protocols` tool, section 15),
+  for an interface found in the trace its line first (`This trace: decode s_axi axilite ...`) in
+  green; a command's description where the list cuts it.
 - Editing works as on Vim's command line: `←` / `→` move the cursor, `Home` / `End` or `Ctrl-b` / `Ctrl-e`
   go to the start / end, `Backspace` / `Delete` remove the character before / under the cursor,
   `Ctrl-w` the word before it and `Ctrl-u` everything before it. The value search line (`/`) edits the same way.
