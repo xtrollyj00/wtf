@@ -194,6 +194,9 @@ impl App {
         if self.help || self.examine.is_some() {
             return self.box_mouse(m, at);
         }
+        if self.browser.is_some() {
+            return self.browser_mouse(m, at, now);
+        }
         if self.records.is_some() {
             return self.records_mouse(m, at, now);
         }
@@ -496,7 +499,7 @@ impl App {
         }
     }
 
-    /// The `:records` box: a click highlights, a double click jumps, the wheel moves.
+    /// The `:trail` box: a click highlights, a double click jumps, the wheel moves.
     fn records_mouse(&mut self, m: MouseEvent, (x, y): (usize, usize), now: Instant) {
         match m.kind {
             MouseEventKind::ScrollDown => self.records_key(key(KeyCode::Char('j'), KeyModifiers::NONE)),

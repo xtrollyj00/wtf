@@ -126,17 +126,51 @@ border, the current one highlighted.
 |---|---|---|---|
 | `signals` | every signal by full path, computed ones and streams too; `●` shown, `+` marked | its width, the decodes it is in, under a dim `decodes` heading, a line each with the decode, its protocol and the signal's role there (`bus  axilite  awvalid`: its records may be what is wanted), its value at the cursor and its waveform around the cursor, drawn as the rows draw it; a signal not read from the file yet is read once the highlight has rested on it 120 ms (`…` till then), so holding `j` over a big trace doesn't read every signal it passes | adds the marked signals, or the highlighted one, below the selected row as the signal panel's `Enter` does; a shown signal is not added twice |
 | `marks` | the cursor and each mark, with its name and time | its name, time and note | jumps to it, as `'n` |
-| `records` | a stream's records, `#n` and every field; every stream's, in time order and named by their stream (`bus.rd #3`), unless one is named or selected | its start, end and fields | jumps to its start and selects the stream's row, as `:records` |
+| `records` | a stream's records, `#n` and every field; every stream's, in time order and named by their stream (`bus.rd #3`), unless one is named or selected | its start, end and fields | jumps to its start and selects the stream's row, as the records browser does |
 | `commands` | the `:` commands | the usage and what it does | puts it on the command line, to finish and run |
 | `sessions` | the agents' workspaces on this machine (section 15) | its trace, and whether it is this one | follows it, as `:follow <id>`; an agent on another trace says to open that trace |
 | `trail` | the agent's steps, newest highlighted | what it asked and the answer | jumps to its time, as `:trail` |
-| `interfaces` | the interfaces built-in protocols decode in the trace (section 16, as the agents' `open` lists them), each its name and prefix, the protocol at the right (`→ bus` once decoded) | its `:decode` line, each role and the signal it takes, the clock (or that none was found) | decodes it, named after its prefix (`s_axi`, a number after a name taken), and adds its streams below the selected row as a group of that name; without a clock found, puts the line on the command line to name it; decoded already, shows its records (`:records`) |
+| `interfaces` | the interfaces built-in protocols decode in the trace (section 16, as the agents' `open` lists them), each its name and prefix, the protocol at the right (`→ bus` once decoded) | its `:decode` line, each role and the signal it takes, the clock (or that none was found) | decodes it, named after its prefix (`s_axi`, a number after a name taken), and adds its streams below the selected row as a group of that name; without a clock found, puts the line on the command line to name it; decoded already, opens the records browser on its first stream |
 
 The picker's keys are fixed: typing edits the query, `Backspace` deletes, `Ctrl-n` / `Ctrl-p`
 or the arrows move, `PageDown` / `PageUp` a box of entries, `Tab` marks the highlighted signal
 and moves on, `Ctrl-s` goes to the next source (an empty one says why), `Enter` picks and closes,
 `Esc` closes. Adding is one undo step. A query matches its characters in order, not
 necessarily together (`cpust` matches `top.cpu.state`); a tie goes to the shorter entry.
+
+### Records
+
+`:records <stream> [where <expr>]` (section 7) opens the records browser: a card over the
+waveforms with a stream's records as a table, as the agents' `records` tool gives them, for a
+person to look through.
+
+```
+╭─ records · rx.frame ──────────────────────────────────────────── 2 of 4 ─╮
+│ ▸ where len >= 8                                                          │
+│───────────────────────────────────────────────────────────────────────────│
+│   n    start    length    beats    len    data                complete    │
+│   #0   15ns     40ns      0x3      0xA    a0 00 00 00 a1 00…  1           │
+│▌  #2   65ns     20ns      0x2      0x8    c0 00 00 00 c1 00…  1           │
+╰──────────────── Enter jump  / filter  s S sort  = group  Tab stream  Esc close ─╯
+```
+
+- **Columns**: `n`, `start`, `length`, then a column per field, each as wide as its widest value
+  up to 24 characters (a longer value is cut, `…`). A record of a violations stream is red.
+- **Filter**: `/` edits the `where` expression (section 16, the `records` tool's), applied as
+  typed; `Enter` or `Esc` stops editing, `Ctrl-u` clears it. An expression that doesn't parse
+  keeps the records shown and says why at the right of its line. The top border counts the
+  records kept of all.
+- **Sort**: `s` sorts by the next column, `S` reverses; the sorted column's name is in the
+  accent. Fields sort by value (a signed field as signed); values with `x` or `z` bits and text
+  after numbers, by their text; a record without the field last.
+- **Group**: `=`, sorted by a field, groups the records kept by its value: a line per value with
+  its count and first and last start, the commonest first. `Enter` on a group keeps its records
+  (adds `field == value` to the filter); `=` again ungroups. Sorted by `n`, `start` or `length`,
+  `=` says to sort by a field first.
+- **Keys**: `j` / `k`, `Ctrl-f` / `Ctrl-b`, `g` / `G` move; `Enter` on a record jumps the cursor
+  to its start (a jump, so `''` comes back), selects the stream's row if shown and closes;
+  `Tab` / `Shift-Tab` go to the next / previous stream, its filter and sort fresh; `Esc` or `q`
+  closes. The mouse: section 2.
 
 ### Rows
 

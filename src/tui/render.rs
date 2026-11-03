@@ -70,7 +70,7 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
         put(buf, x, y, &text, Style::new().bg(pal().cursor).fg(pal().cursor_text).add_modifier(Modifier::BOLD));
     }
     // under what has the keys, so they don't show around its edges
-    let covered = app.help || app.examine.is_some() || app.records.is_some() || app.messages.is_some() || app.menu.is_some() || app.leader.is_some() || app.picker.is_some();
+    let covered = app.help || app.examine.is_some() || app.records.is_some() || app.browser.is_some() || app.messages.is_some() || app.menu.is_some() || app.leader.is_some() || app.picker.is_some();
     app.hit.notes = if covered { Vec::new() } else { notes(app, buf, w, body) };
     let drawn = app.hit.notes.len();
     app.hit.unshown = drawn == 0 && !app.shown_notes(std::time::Instant::now()).is_empty();
@@ -124,6 +124,7 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
             app.hit.records = shown.enumerate().map(|(k, i)| (b.y as usize + 2 + k, i)).collect();
         }
     }
+    crate::tui::browser::draw(app, buf, w, body);
     messages(app, buf, w, body);
     crate::tui::picker::draw(app, buf, w, body);
     if app.leader.is_some() {
@@ -673,12 +674,12 @@ fn faded(c: Color, f: f32, bg: bool) -> Color {
 }
 
 /// A card's inside: the panel's colour (none without colour, where the border tells it).
-fn card_style() -> Style {
+pub(super) fn card_style() -> Style {
     if pal().mono { Style::new() } else { Style::new().bg(pal().panel).fg(Color::Reset) }
 }
 
 /// An icon and a space before a label, with the `nerd` glyphs (spec §14); nothing with the others.
-fn icon_text(c: char) -> String {
+pub(super) fn icon_text(c: char) -> String {
     draw::icon(c).map_or(String::new(), |c| format!("{c} "))
 }
 

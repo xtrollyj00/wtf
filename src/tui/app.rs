@@ -94,6 +94,8 @@ pub struct App {
     pub examine: Option<Examine>,
     /// The `:records` list, or a `:help <topic>` text.
     pub records: Option<Records>,
+    /// `:records`: a stream's records as a table (spec §5 "Records").
+    pub browser: Option<crate::tui::browser::Browser>,
     /// Text `yy` / `yt` copied, for the terminal's clipboard (OSC 52).
     pub yank: Option<String>,
     /// The agents working on this trace (spec §15 "Joining"), by id, with the session each had
@@ -189,8 +191,6 @@ pub struct Examine {
 pub struct Records {
     /// The box's title.
     pub name: String,
-    /// The stream whose row `Enter` selects.
-    pub stream: String,
     /// The line above the list: how many records, of how many; none for a text.
     pub title: String,
     /// Each record's start and its line.
@@ -243,6 +243,7 @@ impl App {
             help: false,
             examine: None,
             records: None,
+            browser: None,
             yank: None,
             agents: Vec::new(),
             follow: None,
@@ -318,7 +319,7 @@ impl App {
                 let text = crate::mcp::help::answer(Some(arg)).map_err(|_| format!("no help topic {}; topics: {}", arg.trim(), topics()))?;
                 let items = text.lines().map(|l| (None, l.to_string())).collect();
                 let name = format!("help {} {}", gl().dot, arg.trim().to_lowercase());
-                self.records = Some(Records { name, stream: String::new(), title: String::new(), items, hl: 0, top: 0, page: 1 });
+                self.records = Some(Records { name, title: String::new(), items, hl: 0, top: 0, page: 1 });
                 None
             }
             // the agent's steps, newest last; Enter jumps to a step's time (spec §15 "Trail")
@@ -328,7 +329,7 @@ impl App {
                 }
                 let items: Vec<_> = self.ws.trail.iter().map(|s| (s.time, Self::step_line(s))).collect();
                 let (title, hl) = (format!("{} steps", items.len()), items.len() - 1);
-                self.records = Some(Records { name: "trail".into(), stream: String::new(), title, items, hl, top: 0, page: 1 });
+                self.records = Some(Records { name: "trail".into(), title, items, hl, top: 0, page: 1 });
                 None
             }
             // every message, with its time and who caused it (spec §4 "Notifications")
@@ -354,7 +355,7 @@ impl App {
             "e" => return self.reload(),
             "follow" => return self.set_follow(arg.trim()),
             "agent" => return self.show_agent_file(),
-            "records" => return self.open_records(arg.trim()),
+            "records" => return self.open_browser(arg.trim()),
             "pick" => return self.open_picker(arg.trim()),
             // the window picks the unit that fits; `unit` is for agents' answers (spec §15)
             "unit" => return Err("unit sets the time unit of an agent's answers; the window picks what fits".into()),
@@ -545,6 +546,9 @@ impl App {
             }
             return;
         }
+        if self.browser.is_some() {
+            return self.browser_key(k);
+        }
         if self.records.is_some() {
             return self.records_key(k);
         }
@@ -572,48 +576,8 @@ impl App {
     }
 
 
-    /// `:records <stream> [where <expr>]`: open the list of a stream's records (spec §7).
-    pub(crate) fn open_records(&mut self, arg: &str) -> Result<(), String> {
-        let (name, filter) = match arg.split_once(" where ") {
-            Some((n, f)) => (n.trim(), Some(f.trim())),
-            None => (arg, None),
-        };
-        let fpt = self.ws.trace.fs_per_tick;
-        let Some(st) = self.ws.streams.iter().find(|s| s.name == name) else {
-            let names: Vec<&str> = self.ws.streams.iter().map(|s| s.name.as_str()).collect();
-            return Err(match names.len() {
-                0 => "no streams yet: make one with :decode or :protocol".into(),
-                _ if name.is_empty() => format!("records of which stream? ({})", names.join(", ")),
-                _ => format!("unknown stream: {name} (streams: {})", names.join(", ")),
-            });
-        };
-        let (numbers, of) = st.select(0, self.ws.trace.end(), filter, fpt)?;
-        if numbers.is_empty() {
-            return Err(if filter.is_some() { format!("no matching records, of {of}") } else { "no records".into() });
-        }
-        // the numbers and the times padded to the widest, so the fields line up
-        let heads: Vec<(String, String)> = numbers.iter().map(|&i| (format!("#{i}"), format!("{}{}{}", time::format(st.records[i].start, fpt), gl().dash, time::format(st.records[i].end, fpt)))).collect();
-        let nw = heads.iter().map(|(n, _)| n.chars().count()).max().unwrap_or(0);
-        let tw = heads.iter().map(|(_, t)| t.chars().count()).max().unwrap_or(0);
-        let items = numbers
-            .iter()
-            .zip(heads)
-            .map(|(&i, (n, t))| {
-                let fields: Vec<String> = st.fields_text(i, fpt).into_iter().map(|(n, v)| format!("{n}={v}")).collect();
-                (Some(st.records[i].start), format!("{n:<nw$}  {t:<tw$}  {}", fields.join(" ")))
-            })
-            .collect();
-        let title = match filter {
-            Some(_) => format!("{} matching records, of {of}", numbers.len()),
-            None => format!("{} records", numbers.len()),
-        };
-        let name = format!("records {} {}", gl().dot, st.name);
-        self.records = Some(Records { name, stream: st.name.clone(), title, items, hl: 0, top: 0, page: 1 });
-        Ok(())
-    }
-
-    /// The records list has the keys: `j` / `k` and `Ctrl-f` / `Ctrl-b` move, `Enter` jumps to
-    /// the record and selects its stream's row, `Esc` / `q` close.
+    /// The `:help <topic>` and `:trail` box has the keys: `j` / `k` and `Ctrl-f` / `Ctrl-b` move,
+    /// `Enter` jumps to a line's time, `Esc` / `q` close.
     fn records_key(&mut self, k: KeyEvent) {
         let Some(r) = &mut self.records else { return };
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
@@ -627,12 +591,8 @@ impl App {
             KeyCode::Char('G') => r.hl = last,
             KeyCode::Char('g') => r.hl = 0,
             KeyCode::Enter => {
-                let (Some(t), name) = (r.items[r.hl].0, r.stream.clone()) else { return };
+                let Some(t) = r.items[r.hl].0 else { return };
                 self.records = None;
-                let row = self.ws.rows.iter().position(|row| matches!(row, Row::Signal(s) if self.ws.trace.vars[s.var].path == name));
-                if let Some(i) = row {
-                    (self.ws.sel, self.ws.bit) = (i, None);
-                }
                 self.ws.jump(t, false);
             }
             _ => {}

@@ -399,7 +399,7 @@ impl App {
                 Ok(())
             }
             Act::Step(None) => Err("this step is about no time".into()),
-            Act::Decode { done: Some(d), .. } => self.open_records(&self.first_stream(&d)),
+            Act::Decode { done: Some(d), .. } => self.open_browser(&self.first_stream(&d)),
             Act::Decode { line, ready: false, .. } => {
                 self.prefill(&line);
                 Ok(())

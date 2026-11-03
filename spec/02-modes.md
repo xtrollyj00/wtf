@@ -24,7 +24,7 @@
 | `w` / `b` | next / previous transition of the selected signal |
 | `j` / `k` | select the next / previous signal |
 | `Enter` | collapse / expand the selected group (section 6), or expand a bus into its bits, a stream into its fields, or a struct, record or array one level into its fields or elements (section 6, "Composite rows") / fold them |
-| `e` | examine, as a hover: a float under the selected row beside the cursor (above it where there is no room), the name in its top border and the cursor's time at the right, with the selected signal's whole value at the cursor; on a stream, its record there (times and every field, a frame's `data` 16 bytes a line); on a struct, record or array, without opening it, one line per field, nested fields indented, an array's elements by index (`pkt`: `valid 1`, `state BUSY`, `pair`, `  hi 0xA`, `  lo 0x5`; `pkts`: `[0]` and `[1]`, each with its fields); field names in blue; `Esc`, `q` or `e` closes it. A float longer than the screen takes its whole width in the middle and scrolls: `j` / `k`, `Ctrl-d` / `Ctrl-u`, `g` / `G`, its bottom border saying which lines show (`1–17 of 49`). The `?` box, `:help <topic>` and `:records` are the same float in the middle of the screen |
+| `e` | examine, as a hover: a float under the selected row beside the cursor (above it where there is no room), the name in its top border and the cursor's time at the right, with the selected signal's whole value at the cursor; on a stream, its record there (times and every field, a frame's `data` 16 bytes a line); on a struct, record or array, without opening it, one line per field, nested fields indented, an array's elements by index (`pkt`: `valid 1`, `state BUSY`, `pair`, `  hi 0xA`, `  lo 0x5`; `pkts`: `[0]` and `[1]`, each with its fields); field names in blue; `Esc`, `q` or `e` closes it. A float longer than the screen takes its whole width in the middle and scrolls: `j` / `k`, `Ctrl-d` / `Ctrl-u`, `g` / `G`, its bottom border saying which lines show (`1–17 of 49`). The `?` box, `:help <topic>` and `:trail` are the same float in the middle of the screen |
 | `gg` / `G` | time cursor to the start / end of the simulation |
 | `Ctrl-d` / `Ctrl-u` | move the screen half its width right / left, the cursor the same distance (at the start or end of the simulation the cursor still moves) |
 | `H` / `L` | move the screen half its width left / right; the cursor keeps its time, even off screen, and the next cursor move scrolls back to it |
@@ -191,7 +191,7 @@ What is on top takes the mouse, and a click outside it closes it, as `Esc` does:
 |---|---|
 | the signal panel | as section 5, "Signal panel"; a click on the rows side closes the panel, a drag from the panel drops there |
 | the `e` and `?` floats | the wheel scrolls, as `j` / `k` |
-| the `:records` box (section 7) | a click highlights a record, a double click jumps to it as `Enter`, the wheel moves the highlight |
+| the records browser (section 5) | a click highlights a line, a double click acts on it as `Enter`, the wheel moves the highlight, a click outside closes it |
 | the leader menu | a click on an entry picks it, as its key; a click elsewhere closes it |
 | the `:messages` panel (section 4) | the wheel moves the highlight; a click outside closes it |
 | the picker (section 5) | a click highlights an entry, a double click picks it as `Enter`, the wheel moves the highlight |

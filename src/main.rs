@@ -1631,19 +1631,20 @@ mod tests {
         screen(&mut app, 100, Some(22));
         let &(y, k) = app.hit.records.last().unwrap();
         click(&mut app, 40, y as u16, NONE, t0, 0);
-        assert_eq!(app.records.as_ref().unwrap().hl, k);
+        assert_eq!(app.browser.as_ref().unwrap().hl, k);
         app.mouse(at(MouseEventKind::ScrollUp, 40, 5, NONE));
-        assert_eq!(app.records.as_ref().unwrap().hl, k - 1);
+        assert_eq!(app.browser.as_ref().unwrap().hl, k - 1);
         // a double click jumps to the record's start
-        let start = app.records.as_ref().unwrap().items[k].0.unwrap();
+        let b = app.browser.as_ref().unwrap();
+        let start = app.ws.streams.iter().find(|s| s.name == "beat").unwrap().records[b.rows[k]].start;
         click(&mut app, 40, y as u16, NONE, t0, 1000);
         click(&mut app, 40, y as u16, NONE, t0, 1100);
-        assert!(app.records.is_none());
+        assert!(app.browser.is_none());
         assert_eq!(app.ws.view.cursor, start);
         app.run("records beat").unwrap();
         screen(&mut app, 100, Some(22));
         click(&mut app, 0, 0, NONE, t0, 2000);
-        assert!(app.records.is_none());
+        assert!(app.browser.is_none());
     }
 
     /// Run the open menu's item `label`: `j` down to it, then `Enter`.
@@ -2158,6 +2159,7 @@ mod tests {
 
     #[test]
     fn records_list() {
+        // spec §5 "Records": the browser filters as typed, sorts, groups, and Enter jumps
         let t = trace::Trace::open("tests/data/axis.vcd".as_ref()).unwrap();
         let mut app = App::new(workspace::Workspace::new(t, "axis".into()));
         let msg = |app: &App| app.msg.as_ref().map_or(String::new(), |m| m.0.clone());
@@ -2166,20 +2168,51 @@ mod tests {
         keys(&mut app, ":decode rx axis clock=clk tvalid=tvalid tready=tready tdata=tdata tlast=tlast tkeep=tkeep\n");
         keys(&mut app, ":records rx.fram\n");
         assert_eq!(msg(&app), "unknown stream: rx.fram (streams: rx.beat, rx.errors, rx.frame)");
+        keys(&mut app, ":records rx.frame where len ==\n");
+        assert!(app.browser.is_none() && !msg(&app).is_empty());
         keys(&mut app, ":records rx.frame where len == 99\n");
-        assert_eq!(msg(&app), "no matching records, of 4");
-        keys(&mut app, ":add rx.frame rx.errors\n:fit\n:select rx.errors\n");
+        assert!(snapshot(&mut app, 100, Some(16)).contains("no records match"));
+        keys(&mut app, "\x1b:add rx.frame rx.errors\n:fit\n:select rx.errors\n");
         keys(&mut app, ":records rx.frame where len >= 8\nj");
-        insta::assert_snapshot!(snapshot(&mut app, 100, Some(10)));
+        insta::assert_snapshot!(snapshot(&mut app, 100, Some(16)));
+        // typing filters at once; a filter that does not parse keeps the rows it had (all, once
+        // cleared) and says why
+        keys(&mut app, "/<C-u>len <");
+        let b = app.browser.as_ref().unwrap();
+        assert!(b.error.is_some() && b.rows.len() == 4, "{:?}", b.error);
+        keys(&mut app, " 8<CR>");
+        let b = app.browser.as_ref().unwrap();
+        assert!(b.error.is_none() && !b.typing && b.rows.len() == 2 && b.total == 4);
+        // s sorts by the next column, S reverses
+        keys(&mut app, "/<C-u><CR>ssS");
+        let b = app.browser.as_ref().unwrap();
+        assert_eq!(b.sort, (2, true));
+        let st = app.ws.streams.iter().find(|s| s.name == "rx.frame").unwrap();
+        let lens: Vec<_> = b.rows.iter().map(|&i| st.records[i].end - st.records[i].start).collect();
+        assert!(lens.windows(2).all(|w| w[0] >= w[1]), "{lens:?}");
+        // = groups by a field; Enter keeps a group's records
+        keys(&mut app, "=");
+        assert_eq!(msg(&app), "= groups by the sorted column, a field: s sorts by one");
+        keys(&mut app, "s=");
+        let b = app.browser.as_ref().unwrap();
+        assert!(b.group && !b.groups.is_empty());
+        let count = b.groups[0].count;
+        keys(&mut app, "<CR>");
+        let b = app.browser.as_ref().unwrap();
+        assert!(!b.group && b.rows.len() == count && b.filter.contains("=="), "{}", b.filter);
+        // Tab goes to the next stream
+        keys(&mut app, "<Tab>");
+        assert_eq!(app.browser.as_ref().unwrap().stream, "rx.beat");
+        keys(&mut app, "\x1b");
         // Enter jumps to the highlighted record and selects its stream's row
-        keys(&mut app, "\n");
-        assert!(app.records.is_none());
+        keys(&mut app, ":records rx.frame where len >= 8\nj\n");
+        assert!(app.browser.is_none());
         assert_eq!(app.ws.view.cursor, 65); // the third frame, 8 bytes
         assert_eq!(app.ws.sel, 0);
         keys(&mut app, "''");
         assert_eq!(app.ws.view.cursor, 0);
         keys(&mut app, ":records rx.frame\nGk\x1b");
-        assert!(app.records.is_none());
+        assert!(app.browser.is_none());
         assert_eq!(app.ws.view.cursor, 0);
     }
 
@@ -2234,7 +2267,7 @@ mod tests {
         keys(&mut app, "<Space>dd");
         assert!(app.picker.as_ref().unwrap().entries[0].preview.iter().any(|l| l.starts_with("decoded already as s_axi")));
         keys(&mut app, "<CR>");
-        assert!(app.records.is_some(), "{:?}", app.msg);
+        assert!(app.browser.is_some(), "{:?}", app.msg);
     }
 
     #[test]

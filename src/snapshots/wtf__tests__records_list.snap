@@ -1,14 +1,20 @@
 ---
 source: src/main.rs
-expression: "snapshot(&mut app, 100, Some(10))"
+expression: "snapshot(&mut app, 100, Some(16))"
 ---
 Name        │ Value      │ 0               50ns             100ns            150ns
-            │            │ ┃    🮣────────────🮦──🮦──────🮢                🮣──🮢
-▸ rx.fr ╭─ records · rx.frame ─────────────────────────────────────────────────────────────╮
-        │ 2 matching records, of 4                                                         │
-▸ rx.er │   #0  15ns–55ns  beats=0x3 len=0xA data=a0 00 00 00 a1 00 00 00 a2 00 complete=1 │
-        │ ▌ #2  65ns–85ns  beats=0x2 len=0x8 data=c0 00 00 00 c1 00 00 00 complete=1       │
-        ╰────────────────────────────────────────────────────────── Enter jump  Esc close ─╯
-            │            │
+  ╭─ records · rx.frame ──────────────────────────────────────────────────────────────── 2 of 4 ─╮
+▸ │ ▸ where len >= 8                                                                             │
+  │──────────────────────────────────────────────────────────────────────────────────────────────│
+▸ │   n    start    length    beats    len    data                      complete                 │
+  │   #0   15ns     40ns      0x3      0xA    a0 00 00 00 a1 00 00 00…  1                        │
+  │▌  #2   65ns     20ns      0x2      0x8    c0 00 00 00 c1 00 00 00   1                        │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  ╰───────────────────────────── Enter jump  / filter  s S sort  = group  Tab stream  Esc close ─╯
             │            │
  NORMAL   signals ▸  rx.errors                                                0  3ns/col  axis [+]
