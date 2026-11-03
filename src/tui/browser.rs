@@ -23,6 +23,8 @@ pub struct Browser {
     /// The sets `Tab` goes through (a decode's name, then its streams), and the one shown.
     pub tabs: Vec<String>,
     pub tab: usize,
+    /// The decode's `all` set: its name, or its results one by one when a stream has its name.
+    pub all: Option<String>,
     /// The decode the tabs are of, its name cut from the streams' (`wr` for `s_axi.wr`).
     pub decode: Option<String>,
     /// The `where` expression, as typed; empty for every record.
@@ -58,13 +60,21 @@ impl Browser {
         // the decode every stream named is of
         let of = |i: usize| ws.decodes.iter().find(|d| ws.streams_of_decode(&d.name).contains(&i)).map(|d| d.name.clone());
         let decode = of(streams[0]).filter(|d| streams.iter().all(|&i| of(i).as_deref() == Some(d)));
+        let mut all = None;
         let tabs = match &decode {
             Some(d) => {
                 // all, its results, its violations, then the streams they are made from
                 let mut each = ws.results(d);
                 let rest: Vec<usize> = ws.streams_of_decode(d).into_iter().filter(|i| !each.contains(i)).collect();
                 each.extend(rest);
-                std::iter::once(d.clone()).chain(each.into_iter().map(|i| ws.streams[i].name.clone())).collect()
+                // a stream named as its decode (`pair`, `check`, `frame`) is that stream alone, so
+                // the results are then named one by one
+                let a = match ws.streams.iter().any(|s| &s.name == d) {
+                    true => ws.results(d).iter().map(|&i| ws.streams[i].name.as_str()).collect::<Vec<_>>().join(" "),
+                    false => d.clone(),
+                };
+                all = Some(a.clone());
+                std::iter::once(a).chain(each.into_iter().map(|i| ws.streams[i].name.clone())).collect()
             }
             None => vec![names.to_string()],
         };
@@ -75,7 +85,7 @@ impl Browser {
         }
         // by start, as `select` gives them
         let sort = (1 + (streams.len() > 1) as usize, false);
-        Browser { tabs, tab, decode, filter: filter.into(), typing: false, error: None, sort, group: false, streams, rows: Vec::new(), groups: Vec::new(), total: 0, widths: Vec::new(), left: 0, hl: 0, top: 0, page: 1 }
+        Browser { tabs, tab, all, decode, filter: filter.into(), typing: false, error: None, sort, group: false, streams, rows: Vec::new(), groups: Vec::new(), total: 0, widths: Vec::new(), left: 0, hl: 0, top: 0, page: 1 }
     }
 
     fn len(&self) -> usize {
@@ -368,7 +378,7 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
     if b.tabs.len() > 1 {
         let mut x = ix;
         for (k, t) in b.tabs.iter().enumerate() {
-            let label = if b.decode.as_ref() == Some(t) { "all".to_string() } else { b.short(t).to_string() };
+            let label = if b.all.as_ref() == Some(t) { "all".to_string() } else { b.short(t).to_string() };
             if x + label.chars().count() + 1 >= ix + iw {
                 put(buf, x, y, &gl().cut.to_string(), dim);
                 break;
@@ -383,7 +393,12 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
     put(buf, ix, y, &prompt, if b.typing { st_card.patch(acc) } else { dim });
     let px = ix + prompt.chars().count();
     match (b.filter.is_empty(), b.typing) {
-        (true, false) => put(buf, px, y, "/ filters: resp != 0 && addr >= 0x40", dim),
+        (true, false) => {
+            // the set's own fields, so the hint never names one it hasn't
+            let fields: Vec<&str> = set.columns.iter().map(|c| c.name.as_str()).collect();
+            let hint = format!("/ filters on {}", if fields.is_empty() { "n, start".into() } else { fields.join(", ") });
+            put(buf, px, y, &hint.chars().take(iw.saturating_sub(prompt.chars().count())).collect::<String>(), dim)
+        }
         _ => put(buf, px, y, &b.filter.chars().take(iw.saturating_sub(prompt.len())).collect::<String>(), st_card),
     }
     if let Some(e) = &b.error {

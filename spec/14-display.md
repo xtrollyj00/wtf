@@ -59,7 +59,8 @@ Four glyph sets, chosen with `glyphs` in the config file (section 19) or `--glyp
   `nf-md-*`) before labels: the start screen's actions and traces, the status line's segments,
   the notification cards (section 4), the which-key card, the leader menu's groups (section 2),
   the picker's entries and sources (section 5), the rows' names, the signal panel's nodes and
-  the `e` float's title (below, "Icons"). For a terminal set to a Nerd Font. The other
+  the `e` float's title (below, "Icons"). For a terminal set to a Nerd Font, 3.4 or newer: every
+  icon is in that release (the agent's is `cod-sparkle`, not the newer `cod-robot`). The other
   sets draw no icons, nor a letter in their place.
 
 Each set keeps every distinction the others make, so a drawing reads the same in any of them.

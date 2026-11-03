@@ -5,7 +5,7 @@ expression: "snapshot(&mut app, 110, Some(16))"
 Name                   │ Value         │ 0             100ns         200ns         300ns          400ns
   ╭─ records · s_axi ───────────────────────────────────────────────────────────────────────── 13 records ─╮
 ▾ │ all  wr  rd  errors  wr.unmatched  rd.unmatched  aw  w  b  ar  r                                       │
-  │ ▸ where / filters: resp != 0 && addr >= 0x40                                                           │
+  │ ▸ where / filters on delay, addr, data, strb, resp, rule, kind                                         │
   │────────────────────────────────────────────────────────────────────────────────────────────────────────│
   │   stream        n    start    length    delay    addr    data        strb    resp    rule        kind  │
   │▌  wr            #0   30ns     20ns      10ns     0x10    0x11111111  0xF     0x0                       │

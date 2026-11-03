@@ -41,7 +41,8 @@ checks that return only violations.
   alone as rows, and a decode's name in `records` means them.
 - **Records of a set.** `records` (the tool and `:records`) reads a set of streams: a stream
   (`bus.rd`), a decode's name (`bus`: its results, then its violations), a glob (`bus.*`), or
-  several of these separated by spaces. A set of several is one table, its records in order of
+  several of these separated by spaces. A stream's name comes first: a `pair` `lat` is its
+  stream `lat`, and `lat lat.unmatched` its results and violations. A set of several is one table, its records in order of
   start with a `stream` column. Fields share a column when name and kind (width, sign, time or
   text) are the same, in order of first appearance; a name with two kinds is a column per stream,
   `<stream>.<field>`, so `data` as bytes never mixes with `data` as a number. A record of a

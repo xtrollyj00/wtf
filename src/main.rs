@@ -2158,6 +2158,18 @@ mod tests {
     }
 
     #[test]
+    fn records_named_as_decode() {
+        // spec §5 "Records": a pair's stream has the decode's name, so `all` names its sets one by one
+        let mut app = App::new(workspace::Workspace::new(trace::Trace::open("tests/data/reqresp.vcd".as_ref()).unwrap(), "rr".into()));
+        keys(&mut app, ":protocol hs roles=valid,id when=valid id=id\n:decode req hs clock=clk valid=req_valid id=req_id\n");
+        keys(&mut app, ":decode resp hs clock=clk valid=resp_valid id=resp_id\n:decode lat pair request=req response=resp id=id\n:records lat\n");
+        let b = app.browser.as_ref().unwrap();
+        assert_eq!((b.tabs.clone(), b.tab, b.all.clone()), (vec!["lat lat.unmatched".into(), "lat".into(), "lat.unmatched".into()], 1, Some("lat lat.unmatched".into())));
+        keys(&mut app, "<Esc>:records lat lat.unmatched\n");
+        assert_eq!(app.browser.as_ref().unwrap().tab, 0);
+    }
+
+    #[test]
     fn records_list() {
         // spec §5 "Records": the browser filters as typed, sorts, groups, and Enter jumps
         let t = trace::Trace::open("tests/data/axis.vcd".as_ref()).unwrap();

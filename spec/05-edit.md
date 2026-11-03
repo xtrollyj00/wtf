@@ -148,7 +148,7 @@ person to look through.
 ```
 ╭─ records · s_axi ───────────────────────────────────────────────── 13 records ─╮
 │ all  wr  rd  errors  wr.unmatched  rd.unmatched  aw  w  b  ar  r               │
-│ ▸ where / filters: resp != 0 && addr >= 0x40                                   │
+│ ▸ where / filters on delay, addr, data, strb, resp, rule, kind                 │
 │────────────────────────────────────────────────────────────────────────────────│
 │   stream  n    start    length    delay    addr    data        strb    resp    │
 │▌  wr      #0   30ns     20ns      10ns     0x10    0x11111111  0xF     0x0     │
@@ -158,7 +158,8 @@ person to look through.
 ```
 
 - **Sets**: when the streams are a decode's, the line under the title lists its sets, `all`
-  (its results and violations) then each stream, results first and the streams they are made
+  (its results and violations, named one by one when a stream has the decode's name, as a
+  `pair`'s) then each stream, results first and the streams they are made
   from last, named without the decode's name. `Tab` / `Shift-Tab` go to the next / previous, its
   filter and sort fresh.
 - **Columns**: `stream` (a set of several), `n`, `start`, `length`, then a column per field
@@ -166,7 +167,7 @@ person to look through.
   `…`). `h` / `l` scroll the columns after `stream` and `n`, which stay. A record of a
   violations stream is red.
 - **Filter**: `/` edits the `where` expression (section 16, the `records` tool's), applied as
-  typed; `Enter` or `Esc` stops editing, `Ctrl-u` clears it. An expression that doesn't parse
+  typed; empty, the line names the set's fields. `Enter` or `Esc` stops editing, `Ctrl-u` clears it. An expression that doesn't parse
   keeps the records shown and says why at the right of its line. The top border counts the
   records kept of all.
 - **Sort**: in order of start at first; `s` sorts by the next column, `S` reverses; the sorted

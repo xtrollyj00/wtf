@@ -240,7 +240,8 @@ pub mod icon {
     pub const WIRE: char = '\u{eb31}';
     pub const CLOCK: char = '\u{eb7c}';
     pub const MARK: char = '\u{eaa5}';
-    pub const AGENT: char = '\u{ec20}';
+    // cod-sparkle: in Nerd Fonts 3.4 too; cod-robot (U+EC20) only came with 3.5
+    pub const AGENT: char = '\u{ec10}';
     pub const ERROR: char = '\u{ea87}';
     pub const INFO: char = '\u{ea74}';
     pub const OK: char = '\u{eab2}';
