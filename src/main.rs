@@ -1574,7 +1574,8 @@ mod tests {
     fn field_all_z() {
         // a record whose field is all z draws it (0xZZ, 45ns - 55ns); before the first record, a gap
         let mut app = open("vcd", None);
-        app.run("protocol p clock=top.clk when=!top.rst d=top.cpu.data").unwrap();
+        app.run("protocol t roles=rst,data when=!rst d=data").unwrap();
+        app.run("decode p t clock=top.clk rst=top.rst data=top.cpu.data").unwrap();
         app.run("add p.d").unwrap();
         app.run("50ns").unwrap();
         let w = draw::waveform(&mut app.ws, 100);
@@ -1590,7 +1591,8 @@ mod tests {
     fn mouse_records() {
         let mut app = open("vcd", Some(SESSION));
         let t0 = Instant::now();
-        app.run("protocol beat clock=top.clk when=top.cpu.busy").unwrap();
+        app.run("protocol b roles=busy when=busy").unwrap();
+        app.run("decode beat b clock=top.clk busy=top.cpu.busy").unwrap();
         app.run("add beat").unwrap();
         app.run("records beat").unwrap();
         screen(&mut app, 100, Some(22));

@@ -75,15 +75,20 @@ fn sampling_errors() {
     assert_eq!(wtf_core::stream::sample(&ws.trace, "rx", &q, &[]).err().unwrap(), "rx: a stream samples at a clock (@clk ...)");
 }
 
-fn sampler(name: &str, when: &str, fields: &[(&str, &str)]) -> wtf_core::stream::Sampler {
+/// A protocol on roles named as the handshake's signals, `<name>_p`, put on them at clk as `name`.
+fn sample(ws: &mut Workspace, name: &str, when: &str, fields: &[(&str, &str)]) -> Result<usize, String> {
     let fields = fields.iter().map(|&(f, s)| (f.to_string(), s.to_string())).collect();
-    wtf_core::stream::Sampler { name: name.into(), clock: "clk".into(), when: when.into(), fields, roles: vec![] }
+    let roles: Vec<String> = ["valid", "ready", "data"].map(String::from).to_vec();
+    let protocol = format!("{name}_p");
+    ws.add_protocol(wtf_core::stream::Sampler { name: protocol.clone(), when: when.into(), fields, roles: roles.clone() })?;
+    let signals = roles.iter().map(|r| (r.clone(), r.clone())).collect();
+    ws.add_decode(wtf_core::stream::Decode { name: name.into(), protocol, clock: "clk".into(), signals, params: vec![] })
 }
 
 #[test]
 fn streams_are_signals() {
     let mut ws = handshake();
-    let rx = ws.add_protocol(sampler("rx.beat", "valid && ready", &[("tdata", "data")])).unwrap().unwrap();
+    let rx = sample(&mut ws, "rx.beat", "valid && ready", &[("tdata", "data")]).unwrap();
     let tdata = var(&ws, "rx.beat.tdata");
     assert_eq!((var(&ws, "rx.beat"), ws.trace.vars[tdata].width, ws.trace.vars[rx].width), (rx, Some(8), None));
     // the stream: its record's number while it lasts; a field: its value, z between records
@@ -101,13 +106,13 @@ fn streams_are_signals() {
     ws.search("@clk tdata == 0x11 && rx.beat == #0", true, 1).unwrap();
     assert_eq!(ws.view.cursor, 35);
     // records back to back: the number changes, an unchanged field doesn't
-    let v = ws.add_protocol(sampler("v", "valid", &[("d", "data")])).unwrap().unwrap();
+    let v = sample(&mut ws, "v", "valid", &[("d", "data")]).unwrap();
     let mut budget = 99;
     assert_eq!(wtf_core::query::changes(&mut ws.trace, (v, None), 0, 60, &mut budget).0, [15, 25, 35, 45]);
     let d = var(&ws, "v.d");
     assert_eq!(wtf_core::query::changes(&mut ws.trace, (d, None), 0, 60, &mut budget).0, [15, 45]);
     // sampled again by name: replaced in place
-    assert_eq!(ws.add_protocol(sampler("v", "valid && ready", &[("d", "data")])), Ok(Some(v)));
+    assert_eq!(sample(&mut ws, "v", "valid && ready", &[("d", "data")]), Ok(v));
     assert_eq!((ws.streams.len(), ws.protocols.len(), ws.streams[1].records.len()), (2, 2, 2));
     // :e samples them again; the rows stay
     assert_eq!(ws.reload(), Ok(("reloaded".into(), false)));
@@ -118,31 +123,36 @@ fn streams_are_signals() {
 #[test]
 fn stream_errors() {
     let mut ws = handshake();
-    assert_eq!(ws.add_protocol(sampler("a b", "valid", &[])), Err("not a protocol name: a b".into()));
-    assert_eq!(ws.add_protocol(sampler("rx", "valid", &[("d", "nope")])), Err("rx.d: unknown signal: nope".into()));
+    assert_eq!(sample(&mut ws, "a b", "valid", &[]), Err("not a protocol name: a b_p".into()));
+    // a protocol names its roles only, never a signal
+    assert_eq!(sample(&mut ws, "rx", "valid", &[("d", "clk")]), Err("rx: rx.d: clk is no role: rx_p names only its roles (valid, ready, data) and fields".into()));
+    assert!(sample(&mut ws, "rx", "valid && clk", &[]).unwrap_err().contains("clk is no role"));
+    // and needs roles to name
+    let none = wtf_core::stream::Sampler { name: "none".into(), when: "1".into(), fields: vec![], roles: vec![] };
+    assert!(ws.add_protocol(none).unwrap_err().starts_with("none: needs roles"));
     // a field can't take a signal of the file, and then nothing is added
     let n = ws.trace.vars.len();
-    assert_eq!(ws.add_protocol(sampler("top", "valid", &[("clk", "data")])), Err("top.clk is a signal of the file".into()));
+    assert_eq!(sample(&mut ws, "top", "valid", &[("clk", "data")]), Err("top: top.clk is a signal of the file".into()));
     assert_eq!((ws.trace.vars.len(), ws.streams.len()), (n, 0));
 }
 
 #[test]
 fn sessions_keep_streams() {
     let mut ws = handshake();
-    ws.add_protocol(sampler("rx", "valid && ready", &[("tdata", "data"), ("low", "data[3:0]")])).unwrap();
+    sample(&mut ws, "rx", "valid && ready", &[("tdata", "data"), ("low", "data[3:0]")]).unwrap();
     wtf_core::command::run(&mut ws, "add rx.low rx").unwrap();
     // fields in their order, before the rows that show them
     let toml = wtf_core::session::to_toml(&ws);
-    assert!(toml.contains("[[protocol]]\nname = \"rx\"\nclock = \"top.clk\"\nwhen = \"valid && ready\"\nfields = { tdata = \"data\", low = \"data[3:0]\" }\n\n[[rows]]"), "{toml}");
+    assert!(toml.contains("[[protocol]]\nname = \"rx_p\"\nroles = [\"valid\", \"ready\", \"data\"]\nwhen = \"valid && ready\"\nfields = { tdata = \"data\", low = \"data[3:0]\" }\n"), "{toml}");
     let mut other = handshake();
     assert_eq!(wtf_core::session::apply(&mut other, &toml), Ok(vec![]));
     assert_eq!((names(&other), wtf_core::session::to_toml(&other)), (names(&ws), toml));
     assert_eq!(other.streams[0].schema.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["tdata", "low"]);
     // bad entries are warnings
-    let bad = "[[protocol]]\nname = \"e\"\nclock = \"clk\"\nwhen = \"nope\"\n[[protocol]]\nname = \"f\"\n[[protocol]]\nname = \"g\"\nclock = \"clk\"\nwhen = \"valid\"\nfields = { \"a b\" = \"data\" }\n";
+    let bad = "[[protocol]]\nname = \"e\"\nclock = \"clk\"\nroles = [\"v\"]\nwhen = \"v\"\n[[protocol]]\nname = \"f\"\n[[protocol]]\nname = \"g\"\nroles = [\"v\"]\nwhen = \"v\"\nfields = { \"a b\" = \"v\" }\n";
     assert_eq!(wtf_core::session::apply(&mut other, bad), Ok(vec![
-        "protocol e: unknown signal: nope".to_string(),
-        "protocol: needs a name, a clock (or roles), a when, fields as a table and roles as a list".to_string(),
+        "protocol e: a protocol has no clock; its [[decode]] gives it".to_string(),
+        "protocol: needs a name, roles as a list, a when and fields as a table".to_string(),
         "protocol g: g: not a field name: a b".to_string(),
     ]));
 }
@@ -155,14 +165,14 @@ fn decode(name: &str, protocol: &str, clock: &str, signals: &[(&str, &str)]) -> 
 /// `cmd`: a user-defined protocol, its signals given by each instance.
 fn cmd() -> wtf_core::stream::Sampler {
     let fields = vec![("op".into(), "cmd[3:0]".into()), ("arg".into(), "cmd[7:4]".into())];
-    wtf_core::stream::Sampler { name: "cmd".into(), clock: String::new(), when: "valid && ready".into(), fields, roles: vec!["valid".into(), "ready".into(), "cmd".into()] }
+    wtf_core::stream::Sampler { name: "cmd".into(), when: "valid && ready".into(), fields, roles: vec!["valid".into(), "ready".into(), "cmd".into()] }
 }
 
 #[test]
 fn protocols_put_on_signals() {
     let mut ws = handshake();
     // a protocol with roles is a type: no stream until an instance puts it on signals
-    assert_eq!(ws.add_protocol(cmd()), Ok(None));
+    assert_eq!(ws.add_protocol(cmd()), Ok(()));
     assert!(ws.streams.is_empty());
     let c0 = ws.add_decode(decode("c0", "cmd", "clk", &[("valid", "top.valid"), ("ready", "ready"), ("cmd", "data")])).unwrap();
     let c0s = &ws.streams[0];
@@ -172,18 +182,18 @@ fn protocols_put_on_signals() {
     assert_eq!(rec, [(35, vec![bits("0001"), bits("0001")]), (105, vec![bits("0011"), bits("0011")])]);
     ws.search("c0.op == 3", true, 1).unwrap();
     assert_eq!(ws.view.cursor, 105);
-    // another instance of a protocol whose clock it has: roles in `past` and functions too
+    // roles in `past` and functions too
     let mut drop = cmd();
-    (drop.name, drop.clock, drop.when, drop.fields, drop.roles) = ("drop".into(), "clk".into(), "fell(v) && !past(r)".into(), vec![], vec!["v".into(), "r".into()]);
+    (drop.name, drop.when, drop.fields, drop.roles) = ("drop".into(), "fell(v) && !past(r)".into(), vec![], vec!["v".into(), "r".into()]);
     ws.add_protocol(drop).unwrap();
-    ws.add_decode(decode("err", "drop", "", &[("v", "valid"), ("r", "ready")])).unwrap();
+    ws.add_decode(decode("err", "drop", "clk", &[("v", "valid"), ("r", "ready")])).unwrap();
     assert_eq!(starts(&ws.streams[1]), [85]);
     // roles played by signals of each other's names: `ready` is top.valid, 1 at 15ns where
     // top.ready is 0
     let mut both = cmd();
-    (both.name, both.clock, both.when, both.fields, both.roles) = ("both".into(), "clk".into(), "valid || ready".into(), vec![("b".into(), "ready".into())], vec!["valid".into(), "ready".into()]);
+    (both.name, both.when, both.fields, both.roles) = ("both".into(), "valid || ready".into(), vec![("b".into(), "ready".into())], vec!["valid".into(), "ready".into()]);
     ws.add_protocol(both).unwrap();
-    ws.add_decode(decode("sw", "both", "", &[("valid", "ready"), ("ready", "valid")])).unwrap();
+    ws.add_decode(decode("sw", "both", "clk", &[("valid", "ready"), ("ready", "valid")])).unwrap();
     let sw = ws.streams.last().unwrap();
     assert_eq!((sw.records[0].start, &sw.records[0].fields[0]), (15, &bits("1")));
     // the roles are gone after it: `cmd` is no signal
@@ -193,7 +203,7 @@ fn protocols_put_on_signals() {
     let toml = wtf_core::session::to_toml(&ws);
     assert!(toml.contains("[[protocol]]\nname = \"cmd\"\nroles = [\"valid\", \"ready\", \"cmd\"]\nwhen = \"valid && ready\"\nfields = { op = \"cmd[3:0]\", arg = \"cmd[7:4]\" }\n"), "{toml}");
     assert!(toml.contains("[[decode]]\nname = \"c0\"\nprotocol = \"cmd\"\nclock = \"top.clk\"\nsignals = { valid = \"top.valid\", ready = \"top.ready\", cmd = \"top.data\" }\n"), "{toml}");
-    assert!(toml.contains("[[decode]]\nname = \"err\"\nprotocol = \"drop\"\nsignals = { v = \"top.valid\", r = \"top.ready\" }\n"), "{toml}");
+    assert!(toml.contains("[[decode]]\nname = \"err\"\nprotocol = \"drop\"\nclock = \"top.clk\"\nsignals = { v = \"top.valid\", r = \"top.ready\" }\n"), "{toml}");
     let mut other = handshake();
     assert_eq!(wtf_core::session::apply(&mut other, &toml), Ok(vec![]));
     assert_eq!((names(&other), wtf_core::session::to_toml(&other)), (names(&ws), toml));
@@ -206,7 +216,7 @@ fn protocols_put_on_signals() {
     assert_eq!(schema(&ws, "pq"), ["delay", "req_op", "req_arg"]);
     let mut wider = cmd();
     wider.fields = vec![("all".into(), "cmd".into())];
-    assert_eq!(ws.add_protocol(wider), Ok(None));
+    assert_eq!(ws.add_protocol(wider), Ok(()));
     assert_eq!(ws.streams[0].schema.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["all"]);
     assert_eq!(schema(&ws, "pq"), ["delay", "req_all"]);
     // the fields it lost hold no records
@@ -224,14 +234,12 @@ fn instance_errors_at_once() {
     ws.add_protocol(cmd()).unwrap();
     assert_eq!(ws.add_decode(decode("x", "nope", "clk", &[])), Err("x: unknown protocol: nope (protocols: axis, axilite, axi4, spi, uart, frame, pair, check, cmd; `protocols <name>` describes one)".into()));
     let bad = decode("x", "cmd", "", &[("valid", "valid"), ("cmd", "nope"), ("last", "valid")]);
-    assert_eq!(ws.add_decode(bad), Err("x: no signal for ready; cmd: unknown signal: nope; cmd has no role last; no clock (the protocol has none either)".into()));
-    // a protocol without roles has nothing to put on signals; roles must be names
-    ws.add_protocol(sampler("plain", "valid", &[])).unwrap();
-    assert_eq!(ws.add_decode(decode("y", "plain", "", &[])), Err("y: protocol plain has no roles to put on signals".into()));
+    assert_eq!(ws.add_decode(bad), Err("x: no signal for ready; cmd: unknown signal: nope; cmd has no role last; no clock".into()));
+    // roles must be names
     let mut odd = cmd();
     odd.roles.push("a b".into());
     assert_eq!(ws.add_protocol(odd), Err("cmd: not a role name: a b".into()));
-    assert_eq!((ws.decodes.len(), ws.streams.len()), (0, 1));
+    assert_eq!((ws.decodes.len(), ws.streams.len()), (0, 0));
     // in a session they are warnings
     let warn = wtf_core::session::apply(&mut ws, "[[decode]]\nname = \"z\"\nprotocol = \"cmd\"\nclock = \"clk\"\nsignals = { valid = \"valid\" }\n[[decode]]\nname = \"w\"\n");
     assert_eq!(warn, Ok(vec!["decode z: no signal for ready, cmd".to_string(), "decode: needs a name, a protocol, signals and params as tables".to_string()]));

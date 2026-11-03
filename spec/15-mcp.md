@@ -99,9 +99,10 @@ reuse wtf's own pieces:
   `radix` sets the radix of every number field (`dec`; a time or text field is skipped), or of
   some (`addr:dec, strb:bin`), in the table and in `group_by`. Naming a time or text field is an
   error. Streams are declared in `workspace` with
-  `protocols`: `{"name": "rx", "clock": "aclk", "when": "tvalid && tready", "fields": ["tdata =
-  tdata", "op = cmd[7:0]"]}` (with `roles`, a type), `decode` puts types on signals: `{"name":
-  "c0", "protocol": "cmd", "clock": "clk", "signals": ["valid = cmd_valid", "cmd = cmd"]}`, and
+  `protocols`: `{"name": "cmd", "roles": ["valid", "ready", "cmd"], "when": "valid && ready",
+  "fields": ["op = cmd[7:0]"]}` (definitions on roles, no clock), `decode` puts them on signals:
+  `{"name": "c0", "protocol": "cmd", "clock": "clk", "signals": ["valid = cmd_valid", "ready =
+  cmd_ready", "cmd = cmd"]}`, and
   `signals` names computed signals: `["op = cmd[7:0]"]`.
 - `workspace` declares the whole workspace in JSON, replacing it as one undo step, so the agent
   writes the state it wants instead of editing toward it:
@@ -142,11 +143,13 @@ reuse wtf's own pieces:
   signal in the scope), the server's instructions put decoding before `find`, `find`'s
   description and `help expressions` point to the decoders, and `decode` answers that `pair`
   matches a stream with another. A `find` with a clock and `show` is a table of events, which is
-  what `protocol` makes: its answer ends with the line that makes it (`as records (help decode):
-  protocol s clock=clk when=valid && ready addr=addr`), as `info` gives the `decode` lines. A field
-  takes its signal's last name; when two shown signals share one, each takes its scope's name too
-  (`cpu_state=cpu.state dma_state=dma.state`), and a number is appended if they still match
-  (`data_0=data[7:4] data_1=data[3:0]`).
+  what a sampled protocol makes: its answer ends with the two lines that make it, the protocol on
+  roles and the decode putting it on the signals (`as records (help decode): protocol ev
+  roles=valid,ready,addr when=valid && ready addr=addr then decode s ev clock=clk valid=valid
+  ready=ready addr=addr`), as `info` gives the `decode` lines. Each signal `when` names and each
+  shown one is a role, named as its signal's last name; when two share one, each takes its
+  scope's name too (`cpu_state=cpu.state dma_state=dma.state`). A field is named as its role,
+  with a number appended where two are alike (`data_0=data[7:4] data_1=data[3:0]`).
 - `command` decodes without touching the rows (`decode`, `protocol`, `signal`). `decode` answers
   with the streams it made and their records, violations apart (`bus: records bus.aw 2, ...;
   violations bus.errors 2, bus.wr.unmatched 1, ...`), then where to read more; the window shows

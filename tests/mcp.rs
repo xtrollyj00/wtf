@@ -264,7 +264,7 @@ fn enum_names() {
         "state:\n  20ns WRITE\n  30ns DONE\n  40ns 0x5\n  50ns 0xX\nstate:\n  20ns 0x2\n  30ns 0x3\n  40ns 0x5\n  50ns 0xX\n"
     );
     // the cycle whose ending edge (25ns) samples WRITE
-    assert_eq!(s.ok("find", json!({"expr": "@clk state == write", "show": ["state", "count"]})), "time\tstate\tcount\n15ns\tWRITE\t0x2\nas records (`help decode`): `protocol s clock=clk when=state == write state=state count=count`");
+    assert_eq!(s.ok("find", json!({"expr": "@clk state == write", "show": ["state", "count"]})), "time\tstate\tcount\n15ns\tWRITE\t0x2\nas records (`help decode`): `protocol ev roles=state,count when=state == write state=state count=count` then `decode s ev clock=clk state=state count=count`");
     assert_eq!(s.tool("values", json!({"signals": ["count:enum"], "from": "0ns", "to": "10ns"})), Err("enum: the file names no values of count".into()));
 }
 
@@ -280,11 +280,13 @@ fn find_runs_values_and_counts() {
     assert_eq!(s.ok("find", json!({"expr": "@clk !busy", "count_only": true})), "5 matches in 2 runs of consecutive cycles, first 5ns, last 65ns");
     assert_eq!(s.ok("find", json!({"expr": "@clk busy", "count_only": true})), "2 matches in 1 run of consecutive cycles, first 15ns, last 25ns");
     // values as the ending edge samples them: data changes at 20ns and 30ns, just after the cycles start
-    assert_eq!(s.ok("find", json!({"expr": "@clk busy", "show": ["data", "cpu.state"]})), "time\tdata\tcpu.state\n15ns\t0x96\t0x2\n25ns\t0xE1\t0x2\nas records (`help decode`): `protocol s clock=clk when=busy data=data state=cpu.state`");
+    assert_eq!(s.ok("find", json!({"expr": "@clk busy", "show": ["data", "cpu.state"]})), "time\tdata\tcpu.state\n15ns\t0x96\t0x2\n25ns\t0xE1\t0x2\nas records (`help decode`): `protocol ev roles=busy,data,state when=busy data=data state=state` then `decode s ev clock=clk busy=busy data=data state=cpu.state`");
     // two signals of one last name: each field takes its scope, a slice of one a number
     let mut line = |show: Value| s.ok("find", json!({"expr": "@clk busy", "show": show, "count": 1})).lines().last().unwrap().to_string();
-    assert!(line(json!(["cpu.state", "dma.state"])).ends_with("when=busy cpu_state=cpu.state dma_state=dma.state`"));
-    assert!(line(json!(["data[7:4]", "data[3:0]"])).ends_with("when=busy data_0=data[7:4] data_1=data[3:0]`"));
+    let two = line(json!(["cpu.state", "dma.state"]));
+    assert!(two.ends_with("`protocol ev roles=busy,cpu_state,dma_state when=busy cpu_state=cpu_state dma_state=dma_state` then `decode s ev clock=clk busy=busy cpu_state=cpu.state dma_state=dma.state`"), "{two}");
+    let slices = line(json!(["data[7:4]", "data[3:0]"]));
+    assert!(slices.ends_with("`protocol ev roles=busy,data when=busy data_0=data[7:4] data_1=data[3:0]` then `decode s ev clock=clk busy=busy data=data`"), "{slices}");
     // without a clock, at the match
     assert_eq!(s.ok("find", json!({"expr": "data == 0x40", "show": ["data:dec", "busy"]})), "time\tdata\tbusy\n60ns\t64\t0");
     // a window of the trace, and a unit of the agent's
@@ -379,7 +381,8 @@ fn workspace_in_one_call() {
     let bad = s.tool("workspace", json!({"signals": ["x = nope", "y"], "rows": ["x"]}));
     assert_eq!(bad, Err("signal x: unknown signal: nope\nsignals: y: not `name = expr`\nunknown signal: x".into()));
     // decoding made with `command` before stays: the declaration adds to it (spec §15)
-    s.ok("command", json!({"line": "protocol beat clock=top.clk when=top.cpu.busy d=top.cpu.data"}));
+    s.ok("command", json!({"line": "protocol b roles=busy,data when=busy d=data"}));
+    s.ok("command", json!({"line": "decode beat b clock=top.clk busy=top.cpu.busy data=top.cpu.data"}));
     s.ok("workspace", json!({"rows": ["top.clk"]}));
     assert!(s.ok("records", json!({"stream": "beat", "count_only": true})).starts_with("2 records"), "the decode survived");
 }
@@ -631,8 +634,12 @@ fn records_of_a_declared_stream() {
     // valid 15 - 45 (data 0x11), 65 - 85 (0x22, 0x23 from 75), 105 - 115 (0x33); ready 35 - 45, 105 - 115
     let decl = json!({
         "protocols": [
-            {"name": "rx", "clock": "clk", "when": "valid && ready", "fields": ["tdata = data", "low = data[3:0]"]},
-            {"name": "v", "clock": "clk", "when": "valid", "fields": ["d = data"]},
+            {"name": "beat", "roles": ["valid", "ready", "data"], "when": "valid && ready", "fields": ["tdata = data", "low = data[3:0]"]},
+            {"name": "any", "roles": ["valid", "data"], "when": "valid", "fields": ["d = data"]},
+        ],
+        "decode": [
+            {"name": "rx", "protocol": "beat", "clock": "clk", "signals": ["valid = valid", "ready = ready", "data = data"]},
+            {"name": "v", "protocol": "any", "clock": "clk", "signals": ["valid = valid", "data = data"]},
         ],
         "rows": ["rx", "rx.tdata"],
     });
@@ -655,20 +662,27 @@ fn records_of_a_declared_stream() {
     assert!(s.ok("workspace", decl).starts_with("rows (> selected):\n> op  c0.op  hex\n"));
     assert_eq!(s.ok("records", json!({"stream": "c0"})), "2 of 2\nn\tstart\tend\top\n0\t35ns\t45ns\t0x1\n1\t105ns\t115ns\t0x3");
     let bad = s.tool("workspace", json!({"decode": [{"name": "c1", "protocol": "cmd", "signals": ["valid = valid", "x"]}], "rows": []}));
-    assert_eq!(bad, Err("decode c1: x: not `name = signal`\ndecode c1: no signal for ready, cmd; no clock (the protocol has none either)".into()));
-    // mistakes come back with the rest, and nothing changes
-    let bad = s.tool("workspace", json!({"protocols": [{"name": "e", "clock": "clk", "when": "valid", "fields": ["x = nope", "y"]}], "rows": ["nope2"]}));
-    assert_eq!(bad, Err("protocol e: y: not `name = signal`\nprotocol e: e.x: unknown signal: nope\nunknown signal: nope2".into()));
+    assert_eq!(bad, Err("decode c1: x: not `name = signal`\ndecode c1: no signal for ready, cmd; no clock".into()));
+    // mistakes come back with the rest, and nothing changes; a protocol names its roles only
+    let decl = json!({
+        "protocols": [{"name": "e", "roles": ["v"], "when": "v", "fields": ["x = nope", "y"]}],
+        "decode": [{"name": "e0", "protocol": "e", "clock": "clk", "signals": ["v = valid"]}],
+        "rows": ["nope2"],
+    });
+    let bad = s.tool("workspace", decl);
+    assert_eq!(bad, Err("protocol e: y: not `name = signal`\ndecode e0: e0.x: nope is no role: e names only its roles (v) and fields\nunknown signal: nope2".into()));
 }
 
-/// A stream without roles needs its clock, named as the error says; with roles, an instance gives it.
+/// A protocol is a definition on roles: it needs them, and its decode gives the signals and clock.
 #[test]
-fn protocol_without_roles_needs_a_clock() {
-    let dir = Dir::new("protocol-clock");
+fn protocol_needs_roles_and_no_clock() {
+    let dir = Dir::new("protocol-roles");
     let mut s = Server::start(&dir.0);
     s.ok("open", json!({"trace": std::fs::canonicalize("tests/data/handshake.vcd").unwrap()}));
-    let bad = s.tool("workspace", json!({"protocols": [{"name": "ret", "when": "valid && ready", "fields": ["d = data"]}], "rows": []}));
-    assert_eq!(bad, Err("protocol ret: needs a clock (`clock`: the signal it samples at)".into()));
+    let bad = s.tool("workspace", json!({"protocols": [{"name": "ret", "roles": [], "when": "valid && ready", "fields": ["d = data"]}], "rows": []}));
+    assert!(bad.unwrap_err().starts_with("protocol ret: ret: needs roles"));
+    let bad = s.tool("command", json!({"line": "protocol ret roles=v clock=clk when=v"})).unwrap_err();
+    assert!(bad.starts_with("a protocol names no signals, its clock neither: :decode gives it"), "{bad}");
 }
 
 #[test]
@@ -748,9 +762,10 @@ fn decode_with_command() {
     assert_eq!(s.ok("find", json!({"expr": "bus.rd.resp == 2", "show": ["bus.rd.addr"]})), "time\tbus.rd.addr\n170ns\t0x20");
     // an empty check is its answer
     assert_eq!(s.ok("records", json!({"stream": "bus.rd.unmatched"})), "no records: no violations");
-    s.ok("command", json!({"line": "protocol rd clock=aclk when=s_axi_rvalid && s_axi_rready data=s_axi_rdata"}));
+    s.ok("command", json!({"line": "protocol beat roles=valid,ready,data when=valid && ready data=data"}));
+    s.ok("command", json!({"line": "decode rd beat clock=aclk valid=s_axi_rvalid ready=s_axi_rready data=s_axi_rdata"}));
     assert_eq!(s.ok("records", json!({"stream": "rd", "count_only": true})), "8 records, first 150ns, last 420ns");
-    assert!(s.tool("command", json!({"line": "protocol x clock=aclk data=s_axi_rdata"})).unwrap_err().starts_with("usage: :protocol"));
+    assert!(s.tool("command", json!({"line": "protocol x roles=data data=data"})).unwrap_err().starts_with("usage: :protocol"));
 }
 
 /// `protocols` lists what can be decoded and describes each, before a trace is open too.
@@ -787,9 +802,9 @@ fn protocols_describe_themselves() {
     assert_eq!(s.tool("protocols", json!({"name": "axi"})), Err("unknown protocol: axi (protocols: axis, axilite, axi4, spi, uart, frame, pair, check; `protocols <name>` describes one)".into()));
     // and the workspace's own, with how to put them on signals
     s.ok("open", json!({"trace": std::fs::canonicalize("tests/data/handshake.vcd").unwrap()}));
-    s.ok("command", json!({"line": "protocol hs clock=clk roles=v,r when=v && r"}));
+    s.ok("command", json!({"line": "protocol hs roles=v,r when=v && r"}));
     let all = s.ok("protocols", json!({}));
-    assert!(all.contains("in this session (protocol <name> ...):\n  hs       roles v, r: a record where v && r at top.clk"), "{all}");
+    assert!(all.contains("in this session (protocol <name> ...):\n  hs       roles v, r: a record where v && r at the instance's clock"), "{all}");
     assert!(s.ok("protocols", json!({"name": "hs"})).ends_with("example: decode x hs clock=<clk> v=<signal> r=<signal>"));
     let err = s.tool("command", json!({"line": "decode x hz v=valid"})).unwrap_err();
     assert!(err.contains("unknown protocol: hz (protocols: axis, axilite, axi4, spi, uart, frame, pair, check, hs;"), "{err}");
@@ -805,8 +820,9 @@ fn records_compare_fields_and_pick_by_number() {
     let dir = Dir::new("reqresp");
     let mut s = Server::start(&dir.0);
     s.ok("open", json!({"trace": std::fs::canonicalize("tests/data/reqresp.vcd").unwrap()}));
-    s.ok("command", json!({"line": "protocol req clock=clk when=req_valid id=req_id"}));
-    s.ok("command", json!({"line": "protocol resp clock=clk when=resp_valid id=resp_id"}));
+    s.ok("command", json!({"line": "protocol hs roles=valid,id when=valid id=id"}));
+    s.ok("command", json!({"line": "decode req hs clock=clk valid=req_valid id=req_id"}));
+    s.ok("command", json!({"line": "decode resp hs clock=clk valid=resp_valid id=resp_id"}));
     s.ok("command", json!({"line": "decode o pair request=req response=resp"}));
     let o = |w: &str| json!({"stream": "o", "where": w});
     assert_eq!(s.ok("records", o("req_id > resp_id")), "2 of 2 matching, of 3\nn\tstart\tend\tdelay\treq_id\tresp_id\n1\t25ns\t65ns\t30ns\t0x2\t0x1\n2\t45ns\t95ns\t40ns\t0x3\t0x0");
@@ -814,11 +830,13 @@ fn records_compare_fields_and_pick_by_number() {
     assert_eq!(s.ok("records", o("n == 0 || past(resp_id) == req_id")), "2 of 2 matching, of 3\nn\tstart\tend\tdelay\treq_id\tresp_id\n0\t15ns\t45ns\t20ns\t0x1\t0x2\n1\t25ns\t65ns\t30ns\t0x2\t0x1");
     // the number counts from the stream's start, not from `from`
     assert_eq!(s.ok("records", json!({"stream": "o", "from": "40ns", "where": "n == 2", "count_only": true})), "1 matching records, of 1, first 45ns, last 45ns");
-    // a signal compares with a signal; a table of events offers its `protocol` line, which works
+    // a signal compares with a signal; a table of events offers its `protocol` and `decode` lines, which work
     let table = s.ok("find", json!({"expr": "@clk req_valid && req_id != resp_id", "show": ["req_id", "resp_id"]}));
-    assert_eq!(table, "time\treq_id\tresp_id\n15ns\t0x1\t0x0\n25ns\t0x2\t0x0\n45ns\t0x3\t0x2\nas records (`help decode`): `protocol s clock=clk when=req_valid && req_id != resp_id req_id=req_id resp_id=resp_id`");
-    let line = table.lines().last().unwrap().split('`').nth(3).unwrap().to_string();
-    assert_eq!(s.ok("command", json!({"line": line})), "done");
+    assert_eq!(table, "time\treq_id\tresp_id\n15ns\t0x1\t0x0\n25ns\t0x2\t0x0\n45ns\t0x3\t0x2\nas records (`help decode`): `protocol ev roles=req_valid,req_id,resp_id when=req_valid && req_id != resp_id req_id=req_id resp_id=resp_id` then `decode s ev clock=clk req_valid=req_valid req_id=req_id resp_id=resp_id`");
+    let last = table.lines().last().unwrap();
+    for line in [last.split('`').nth(3).unwrap(), last.split('`').nth(5).unwrap()] {
+        s.ok("command", json!({"line": line}));
+    }
     assert_eq!(s.ok("records", json!({"stream": "s", "count_only": true})), "3 records, first 15ns, last 45ns");
     // `@rising(clk)` names the clock inside
     assert_eq!(s.tool("find", json!({"expr": "@rising(clk) req_valid"})), Err("@ takes the clock signal itself, as its rising edges: @clk".into()));
@@ -831,7 +849,8 @@ fn arithmetic_in_fields_and_where() {
     let dir = Dir::new("arith");
     let mut s = Server::start(&dir.0);
     s.ok("open", json!({"trace": std::fs::canonicalize("tests/data/reqresp.vcd").unwrap()}));
-    s.ok("command", json!({"line": "protocol p clock=clk when=req_valid id=req_id next=req_id + 1 back=resp_id - req_id"}));
+    s.ok("command", json!({"line": "protocol pp roles=valid,req,resp when=valid id=req next=req + 1 back=resp - req"}));
+    s.ok("command", json!({"line": "decode p pp clock=clk valid=req_valid req=req_id resp=resp_id"}));
     let mut p = |w: &str| s.ok("records", json!({"stream": "p", "where": w}));
     let all = "n\tstart\tend\tid\tnext\tback\n0\t15ns\t25ns\t0x1\t0x2\t-1\n1\t25ns\t35ns\t0x2\t0x3\t-2\n2\t45ns\t55ns\t0x3\t0x4\t-1";
     assert_eq!(p("next == id + 1"), format!("3 of 3 matching, of 3\n{all}"));
@@ -839,9 +858,11 @@ fn arithmetic_in_fields_and_where() {
     assert_eq!(p("back < -1"), "1 of 1 matching, of 3\nn\tstart\tend\tid\tnext\tback\n1\t25ns\t35ns\t0x2\t0x3\t-2");
     assert_eq!(p("back < id && (id & 1) == 1 && id << 2 == 12"), "1 of 1 matching, of 3\nn\tstart\tend\tid\tnext\tback\n2\t45ns\t55ns\t0x3\t0x4\t-1");
     // a field names its value for the fields after it and for `when`
-    s.ok("command", json!({"line": "protocol q clock=clk when=req_valid && odd == 1'b1 id=req_id odd=id[0:0] twice=id * 2"}));
+    s.ok("command", json!({"line": "protocol qq roles=valid,req when=valid && odd == 1'b1 id=req odd=id[0:0] twice=id * 2"}));
+    s.ok("command", json!({"line": "decode q qq clock=clk valid=req_valid req=req_id"}));
     assert_eq!(s.ok("records", json!({"stream": "q"})), "2 of 2\nn\tstart\tend\tid\todd\ttwice\n0\t15ns\t25ns\t0x1\t1\t0x2\n1\t45ns\t55ns\t0x3\t1\t0x6");
-    assert_eq!(s.tool("command", json!({"line": "protocol r clock=clk when=req_valid x=nope"})), Err("protocol r not made: r.x: unknown signal: nope".into()));
+    s.ok("command", json!({"line": "protocol r roles=valid when=valid x=req_id"}));
+    assert_eq!(s.tool("command", json!({"line": "decode r0 r clock=clk valid=req_valid"})), Err("r0: r0.x: req_id is no role: r names only its roles (valid) and fields".into()));
     // a field's bits, and ! as an operand
     assert_eq!(s.ok("records", json!({"stream": "p", "where": "id[1] == 1 && id[0:0] == !1", "count_only": true})), "1 matching records, of 3, first 25ns, last 25ns");
     assert_eq!(s.tool("records", json!({"stream": "p", "where": "id & 1 == 1"})), Err("id & 1 == 1: & and == need parentheses: (id & 1) == 1 or id & (1 == 1)".into()));
@@ -855,9 +876,10 @@ fn times_in_the_clocks_unit() {
     s.ok("open", json!({"trace": std::fs::canonicalize("tests/data/skew.vcd").unwrap()}));
     let data = json!({"signals": ["data"], "from": "0ns", "to": "70ns"});
     assert_eq!(s.ok("values", data.clone()), "data:\n  0ns 0x0\n  20.000002ns 0x5\n  30.000002ns 0x6\n");
-    assert_eq!(s.ok("find", json!({"expr": "@clk valid && ready", "show": ["data"]})), "time\tdata\n20ns\t0x5\n30ns\t0x6\nas records (`help decode`): `protocol s clock=clk when=valid && ready data=data`");
+    assert_eq!(s.ok("find", json!({"expr": "@clk valid && ready", "show": ["data"]})), "time\tdata\n20ns\t0x5\n30ns\t0x6\nas records (`help decode`): `protocol ev roles=valid,ready,data when=valid && ready data=data` then `decode s ev clock=clk valid=valid ready=ready data=data`");
     assert_eq!(s.ok("values", data.clone()), "data:\n  0ns 0x0\n  20ns 0x5\n  30ns 0x6\n");
-    s.ok("command", json!({"line": "protocol rx clock=clk when=valid && ready d=data"}));
+    s.ok("command", json!({"line": "protocol beat roles=valid,ready,data when=valid && ready d=data"}));
+    s.ok("command", json!({"line": "decode rx beat clock=clk valid=valid ready=ready data=data"}));
     assert_eq!(s.ok("records", json!({"stream": "rx"})), "2 of 2\nn\tstart\tend\td\n0\t20ns\t30ns\t0x5\n1\t30ns\t40ns\t0x6");
     // a rounded time stands for every tick that prints as it: read after them, a change among them said
     assert_eq!(s.ok("value_at", json!({"signals": ["data", "ready"], "time": "20ns"})), "at 20ns:\ndata = 0x5 (0x0 earlier in 20ns)\nready = 1");

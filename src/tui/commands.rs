@@ -20,7 +20,7 @@ pub const COMMANDS: &[Command] = &[
     Command { name: "rm", usage: ":rm [path|pattern]...", desc: "Remove matching rows, or the selected row; :rm ** removes all", args: true },
     Command { name: "signal", usage: ":signal <name> = <signal>", desc: "Name a computed signal, e.g. :signal op = cmd[7:0] or :signal hdr = {a, b}", args: true },
     Command { name: "decode", usage: ":decode <name> <protocol> <role>=<signal>...", desc: "Decode a protocol into streams, e.g. :decode rx axis clock=clk tvalid=rx_tvalid tready=rx_tready tdata=rx_tdata tlast=rx_tlast", args: true },
-    Command { name: "protocol", usage: ":protocol <name> clock=<clk> when=<expr> <field>=<signal>...", desc: "Sample a stream where when holds, e.g. :protocol cmd clock=clk when=valid && ready op=cmd[7:0]; roles=a,b makes a type for :decode", args: true },
+    Command { name: "protocol", usage: ":protocol <name> roles=<a,b> when=<expr> <field>=<expr>...", desc: "Define a protocol on its roles, a record per cycle where when holds, e.g. :protocol cmd roles=valid,ready,data when=valid && ready op=data[7:0]; :decode puts it on signals", args: true },
     Command { name: "names", usage: ":names <signal> <value>=<name>...", desc: "Name a signal's values, shown by the enum radix and searched by name, e.g. :names state 0=IDLE 1=BUSY; off removes them", args: true },
     Command { name: "records", usage: ":records <stream> [where <expr>]", desc: "List a stream's records, e.g. :records bus.wr where resp != 0; Enter jumps to one", args: true },
     Command { name: "scope", usage: ":scope [path]", desc: "Resolve names under a scope first, e.g. :scope top.cpu makes state top.cpu.state; none without a path", args: true },
@@ -210,20 +210,21 @@ fn arguments(c: &Command, line: &str, app: &crate::tui::app::App) -> Completion 
         ("pick", 2) if line.split_whitespace().nth(1) == Some("records") => ("stream", fuzzy(word, ws.streams.iter().map(|s| s.name.as_str())).into_iter().map(|s| item(s, "")).collect()),
         ("w", 1) => ("file", files(word)),
         ("protocol", 2..) => {
-            // inside `when=`'s expression until the next key: its signals, after any `!` or `(`
-            let in_when = line[..at].split_whitespace().rev().find(|w| key(w).is_some()).is_some_and(|w| w.starts_with("when="));
+            // a definition names only its roles: in when= and the fields, the roles given so far
+            let roles: Vec<String> = line.split_whitespace().find_map(|w| w.strip_prefix("roles=")).map_or(Vec::new(), |r| r.split(',').filter(|r| !r.is_empty()).map(String::from).collect());
+            let in_expr = line[..at].split_whitespace().rev().find(|w| key(w).is_some()).is_some_and(|w| !w.starts_with("roles="));
             let (k, v, from) = match key(word) {
                 Some(k) => (Some(k), &word[k.len() + 1..], start + k.chars().count() + 1),
                 None => (None, word, start),
             };
-            match (k, in_when) {
+            match (k, in_expr) {
                 (Some("roles"), _) => ("", Vec::new()),
                 (Some(_), _) | (None, true) => {
                     let skip = v.len() - v.trim_start_matches(['!', '(', '~']).len();
-                    let items = signals(&v[skip..]).into_iter().map(|mut it| { it.text = format!("{}{} ", &v[..skip], it.text); it }).collect();
-                    return Completion { what: "signal", start: from, items };
+                    let items = fuzzy(&v[skip..], roles.iter().map(String::as_str)).into_iter().map(|r| item(format!("{}{r} ", &v[..skip]), "role")).collect();
+                    return Completion { what: "role", start: from, items };
                 }
-                (None, false) => ("key", fuzzy(word, ["clock=", "when=", "roles="]).into_iter().map(|k| item(k, "")).collect()),
+                (None, false) => ("key", fuzzy(word, ["roles=", "when="]).into_iter().map(|k| item(k, "")).collect()),
             }
         }
         ("decode", _) => {
@@ -366,11 +367,11 @@ mod tests {
         assert_eq!((c.what, c.start), ("signal", "decode bus axilite awvalid=".len()));
         // :protocol: its keys, a key's signal, and the signals of when='s expression
         assert_eq!(names("protocol cmd wh"), ["when="]);
-        assert!(names("protocol cmd clock=acl")[0].ends_with("aclk "));
-        let c = complete("protocol cmd clock=aclk when=s_axi_awvalid && !s_axi_awr", &app);
-        assert_eq!(c.what, "signal");
-        assert!(c.items[0].text.starts_with("!") && c.items[0].text.contains("awready"), "{}", c.items[0].text);
-        assert!(complete("protocol cmd when=a==b", &app).items.iter().all(|i| !i.text.starts_with("when")));
+        // its expressions name its roles, never signals
+        let c = complete("protocol cmd roles=valid,ready,data when=valid && !re", &app);
+        assert_eq!((c.what, c.items.iter().map(|i| i.text.as_str()).collect::<Vec<_>>()), ("role", vec!["!ready "]));
+        assert_eq!(names("protocol cmd roles=valid,data when=valid op=da"), ["data "]);
+        assert!(complete("protocol cmd roles=a when=a==b", &app).items.iter().all(|i| !i.text.starts_with("when")));
         assert_eq!(names("scope to"), ["top"]);
         assert_eq!(names("cursor "), ["1 ", "2 ", "3 ", "4 ", "5 ", "6 ", "7 ", "8 ", "9 "]);
         assert_eq!(names("cursor 2 n"), ["name=", "note="]);

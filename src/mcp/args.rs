@@ -129,19 +129,15 @@ pub struct WorkspaceArgs {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 pub struct ProtocolSpec {
-    /// The stream's name, e.g. `rx`.
+    /// The protocol's name, e.g. `cmd`, for `decode`.
     pub name: String,
-    /// The clock; with roles, each instance may give it.
-    #[serde(default)]
-    pub clock: String,
-    /// When to make a record: an expression without the clock, `tvalid && tready`.
+    /// The names its expressions use, which `decode` puts on signals: `["valid", "ready", "data"]`.
+    pub roles: Vec<String>,
+    /// When to make a record, on the roles: `valid && ready`; the clock is the decode's.
     pub when: String,
-    /// Fields in order, `["tdata = tdata", "op = cmd[7:0]"]`.
+    /// Fields in order, on the roles: `["op = data[7:0]"]`.
     #[serde(default)]
     pub fields: Vec<String>,
-    /// Role names, making it a type for `decode`.
-    #[serde(default)]
-    pub roles: Vec<String>,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -150,7 +146,7 @@ pub struct DecodeSpec {
     pub name: String,
     /// The protocol: `axis`, `axilite`, `frame`, `pair`, `check`, ... (`protocols`).
     pub protocol: String,
-    /// The clock, if not the protocol's.
+    /// The clock it samples at (not for `spi`, `uart`, `frame`, `pair`).
     #[serde(default)]
     pub clock: String,
     /// Each role's signal, `["tvalid = rx_tvalid"]`; streams for `frame` / `pair`.

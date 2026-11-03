@@ -569,7 +569,7 @@ impl Wtf {
         Ok(budget(format!("at {}:\n{}", show(&app, t, u), lines.join("\n"))))
     }
 
-    #[tool(description = "The times a search expression matches, as a table. With `@clk ` first, a match is a clock cycle whose ending edge samples it true, reported at the cycle's starting edge; without, where the expression becomes true, so back-to-back handshakes are one match. `show` adds values (and the `protocol` line making them records), `count_only` counts (`help expressions`). For a bus, decode it instead (`help decode`).")]
+    #[tool(description = "The times a search expression matches, as a table. With `@clk ` first, a match is a clock cycle whose ending edge samples it true, reported at the cycle's starting edge; without, where the expression becomes true, so back-to-back handshakes are one match. `show` adds values (and the `protocol` and `decode` lines making them records), `count_only` counts (`help expressions`). For a bus, decode it instead (`help decode`).")]
     fn find(&self, Parameters(a): Parameters<FindArgs>) -> Result<String, String> {
         let w = current(self)?;
         let mut app = lock(&w);
@@ -629,20 +629,66 @@ impl Wtf {
         if let (Some(_), Some((clock, when))) = (q.clock, a.expr.trim().strip_prefix('@').and_then(|e| e.split_once(char::is_whitespace)))
             && !shown.is_empty()
         {
-            // a field is its signal's last name; two alike take their scope's (`cpu_state`), then a number
+            // the signals `when` names (words that are signals, not functions, numbers or value
+            // names), then those shown: each a role of a protocol, then put on them by a decode
+            let ident = |c: char| c.is_alphanumeric() || "_.$".contains(c);
+            let mut words: Vec<(usize, &str)> = Vec::new();
+            let mut at = 0;
+            for piece in when.split(|c: char| !ident(c) && c != '[') {
+                let w = piece.split('[').next().unwrap_or("");
+                let next = when[at + piece.len()..].trim_start();
+                if !w.is_empty() && !w.starts_with(|c: char| c.is_ascii_digit()) && !next.starts_with('(') && !when[..at].ends_with('\'') {
+                    words.push((at, w));
+                }
+                at += piece.len() + 1;
+            }
+            let mut sigs: Vec<String> = Vec::new();
+            for (_, w) in &words {
+                if app.resolve(w).is_ok() && !sigs.contains(&w.to_string()) {
+                    sigs.push(w.to_string());
+                }
+            }
+            for (n, _, _) in &shown {
+                let base = n.split('[').next().unwrap_or(n).to_string();
+                if !sigs.contains(&base) {
+                    sigs.push(base);
+                }
+            }
+            // a role is its signal's last name; two alike take their scope's (`cpu_state`), then a number
             let word = |s: &str| -> String { s.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect() };
-            let mut fields: Vec<String> = shown.iter().map(|(n, _, _)| word(n.rsplit('.').next().unwrap_or(n))).collect();
-            let alike = |fields: &[String]| -> Vec<usize> { (0..fields.len()).filter(|&k| fields.iter().filter(|f| **f == fields[k]).count() > 1).collect() };
-            for k in alike(&fields) {
-                let mut parts = shown[k].0.rsplit('.');
+            let mut roles: Vec<String> = sigs.iter().map(|n| word(n.rsplit('.').next().unwrap_or(n))).collect();
+            let alike = |roles: &[String]| -> Vec<usize> { (0..roles.len()).filter(|&k| roles.iter().filter(|f| **f == roles[k]).count() > 1).collect() };
+            for k in alike(&roles) {
+                let mut parts = sigs[k].rsplit('.');
                 let (last, scope) = (parts.next().unwrap_or(""), parts.next().map(word).unwrap_or_default());
-                fields[k] = if scope.is_empty() { word(last) } else { format!("{scope}_{}", word(last)) };
+                roles[k] = if scope.is_empty() { word(last) } else { format!("{scope}_{}", word(last)) };
             }
-            for k in alike(&fields) {
-                fields[k] = format!("{}_{k}", fields[k]);
+            for k in alike(&roles) {
+                roles[k] = format!("{}_{k}", roles[k]);
             }
-            let fields: Vec<String> = fields.iter().zip(&shown).map(|(f, (n, _, _))| format!("{f}={n}")).collect();
-            lines.push(format!("as records (`help decode`): `protocol s clock={clock} when={} {}`", when.trim(), fields.join(" ")));
+            let role = |sig: &str| sigs.iter().position(|s| s == sig).map(|k| roles[k].clone()).unwrap_or_default();
+            // `when` with each signal's name its role's, from the end so the places stay
+            let mut on_roles = when.to_string();
+            for (at, w) in words.iter().rev().filter(|(_, w)| sigs.iter().any(|s| s == w)) {
+                on_roles.replace_range(*at..at + w.len(), &role(w));
+            }
+            // a field is named as its signal's role; two alike (slices of one) take a number
+            let mut names: Vec<String> = shown.iter().map(|(n, _, _)| role(n.split('[').next().unwrap_or(n))).collect();
+            for k in alike(&names) {
+                names[k] = format!("{}_{k}", names[k]);
+            }
+            let fields: Vec<String> = shown.iter().zip(&names).map(|((n, _, _), f)| {
+                let base = n.split('[').next().unwrap_or(n);
+                format!("{f}={}", n.replacen(base, &role(base), 1))
+            }).collect();
+            let bound: Vec<String> = sigs.iter().zip(&roles).map(|(s, r)| format!("{r}={s}")).collect();
+            lines.push(format!(
+                "as records (`help decode`): `protocol ev roles={} when={} {}` then `decode s ev clock={clock} {}`",
+                roles.join(","),
+                on_roles.trim(),
+                fields.join(" "),
+                bound.join(" ")
+            ));
         }
         Ok(budget(lines.join("\n")))
     }

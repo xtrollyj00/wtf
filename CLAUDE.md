@@ -75,7 +75,8 @@ Ideas that span files:
 - **Search expressions** (`search.rs`) parse to `Expr`, evaluated by `search::holds` over a value
   function; `query.rs` finds matches (runs of clock cycles with `@clk`). `records` `where` reuses
   the same parser on a stream's fields.
-- **Decoding**: stateless `Sampler`s (`[[protocol]]`) sample at a clock; Rust protocols
+- **Decoding**: stateless `Sampler`s (`[[protocol]]`), defined on roles only, sample at their
+  instance's clock; Rust protocols
   (`protocol.rs`: `axis`, `axilite`, `axi4`, `spi`, `uart`) are lists of `Step`s, with params of
   their own; stateful `Decoder`s (`decode.rs`, registry `make`: `frame`, `spi`, `uart`; plus the
   functions `pair`, `join`, and `check`) stack on streams. SPI and UART sample by time: a `Changes`

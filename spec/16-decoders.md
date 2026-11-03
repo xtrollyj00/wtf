@@ -68,17 +68,26 @@ checks that return only violations.
   levels do). An SPI bit lasts to the next sampling edge, the last of a transfer to sclk's next
   edge. UART checks every stop bit; the line low for a whole frame is a `break`, with no byte.
 - **Protocols come in three kinds:**
-  - **Sampled protocols**, defined in the session without Rust (`[[protocol]]`, `:protocol`): a
-    clock, a predicate and fields as expressions. With `roles` one is a type, put on signals by
-    instances; without, it is its own single stream. Defining a type again (`:protocol`) samples
-    its instances again at once, with the instances made after them (which may stack on their
-    streams), in order; if one fails, the type stays defined and the error says which failed.
+  - **Sampled protocols**, defined in the session without Rust (`[[protocol]]`, `:protocol`):
+    roles, a predicate and fields as expressions of the roles. A definition names no signal and
+    no clock, as a built-in's doesn't: an instance (`:decode`) puts it on signals at its clock.
+    While an instance samples, a name that is no role, nor a field before it, nor the instance's
+    clock is an error, so a protocol can't reach for a signal its instances don't give.
+    Defining one again (`:protocol`) samples its instances again at once, with the instances
+    made after them (which may stack on their streams), in order; if one fails, the protocol
+    stays defined and the error says which failed.
     ```toml
     [[protocol]]
     name = "cmd"
-    clock = "top.clk"
-    when = "cmd_valid && cmd_ready"
+    roles = ["valid", "ready", "cmd"]
+    when = "valid && ready"
     fields = { op = "cmd[7:0]", addr = "cmd[39:8]" }
+
+    [[decode]]
+    name = "host"
+    protocol = "cmd"
+    clock = "top.clk"
+    signals = { valid = "top.cmd_valid", ready = "top.cmd_ready", cmd = "top.cmd" }
     ```
   - **Built-in protocols** (`axis`, `axilite`, `axi4`, `spi`, `uart`), written in Rust as a list
     of steps: sample a stream, feed a signal's changes, run a decoder on a stream, join or check

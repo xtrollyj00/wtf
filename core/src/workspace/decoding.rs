@@ -31,13 +31,9 @@ impl Workspace {
         Ok((self.query(&format!("@{clock} {when}"))?, probes))
     }
 
-    /// Add a protocol, replacing one of that name. Without roles it is sampled into a stream of
-    /// its own name, whose var is returned; with roles it waits for instances (`add_decode`).
-    pub fn add_protocol(&mut self, mut p: Sampler) -> Result<Option<usize>, String> {
-        // by full path, as an instance's (`add_decode`)
-        if !p.clock.is_empty() {
-            p.clock = self.full_path(&p.clock).unwrap_or(p.clock);
-        }
+    /// Define a protocol, replacing one of that name: names only, its roles, which instances put
+    /// on signals (`add_decode`).
+    pub fn add_protocol(&mut self, p: Sampler) -> Result<(), String> {
         let name = &p.name;
         if name.is_empty() || !name.chars().all(|c| c.is_alphanumeric() || "_.$".contains(c)) {
             return Err(format!("not a protocol name: {name}"));
@@ -53,10 +49,9 @@ impl Workspace {
         if let Some(r) = p.roles.iter().find(|r| !plain(r)) {
             return Err(format!("{name}: not a role name: {r}"));
         }
-        let var = match p.roles.is_empty() {
-            true => Some(self.make_stream(name, &p.clock, &p)?),
-            false => None,
-        };
+        if p.roles.is_empty() {
+            return Err(format!("{name}: needs roles, the names its expressions use (roles=valid,ready,data); :decode puts them on signals"));
+        }
         // a type defined again: its instances sampled again, and those after them, which may stack on them
         let first = self.decodes.iter().position(|d| d.protocol == p.name);
         let name = name.clone();
@@ -71,7 +66,7 @@ impl Workspace {
                 return Err(format!("{name} defined, but instances failed: {}", failed.join("; ")));
             }
         }
-        Ok(var)
+        Ok(())
     }
 
     /// Put a protocol on signals (or `frame` / `pair` on streams): the streams it makes, named after
@@ -171,20 +166,19 @@ impl Workspace {
     fn decode_user(&mut self, d: &Decode) -> Result<usize, String> {
         let p = self.protocols.iter().find(|p| p.name == d.protocol).cloned().ok_or_else(|| protocol::unknown(&d.protocol, &self.protocols))?;
         let mut errors = Vec::new();
-        if p.roles.is_empty() {
-            errors.push(format!("protocol {} has no roles to put on signals", p.name));
-        }
         let roles: Vec<&str> = p.roles.iter().map(String::as_str).collect();
         self.bind(d, &roles, &[], &[], &mut errors);
-        let clock = if d.clock.is_empty() { &p.clock } else { &d.clock };
-        if clock.is_empty() {
-            errors.push("no clock (the protocol has none either)".into());
+        if d.clock.is_empty() {
+            errors.push("no clock".into());
         }
         if !errors.is_empty() {
             self.roles.clear();
             return Err(errors.join("; "));
         }
-        let var = self.make_stream(&d.name, &clock.clone(), &p);
+        // its expressions name roles and its own fields, never a signal
+        self.only_roles = Some((format!("{} names only its roles ({}) and fields", p.name, p.roles.join(", ")), d.clock.clone()));
+        let var = self.make_stream(&d.name, &d.clock, &p);
+        self.only_roles = None;
         self.roles.clear();
         var
     }
@@ -223,7 +217,7 @@ impl Workspace {
                     }
                 }
                 protocol::Step::Sample { name, when, fields } => {
-                    let p = Sampler { name: name.into(), clock: d.clock.clone(), when, fields, roles: vec![] };
+                    let p = Sampler { name: name.into(), when, fields, roles: vec![] };
                     self.make_stream(&format!("{}.{name}", d.name), &d.clock, &p)
                 }
                 protocol::Step::Check { name, rules } => self.check(&format!("{}.{name}", d.name), &d.clock, &rules).and_then(|s| self.add_signals(s)),

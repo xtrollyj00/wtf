@@ -39,15 +39,12 @@ pub struct Stream {
 /// A signal made from a stream: path, width, values in time order.
 pub type Signal = (String, Option<u32>, Vec<(Tick, Val)>);
 
-/// A stateless protocol (`[[protocol]]`): a record per cycle of `clock` where `when` holds, with
-/// `fields` (field, signal) sampled with it; signals named as in a search. Without roles it is a
-/// stream of its own, on the signals it names; with roles (names its expressions use) it is a type,
-/// put on signals by a `Decode`. Kept to sample again on `:e`.
+/// A stateless protocol (`[[protocol]]`), defined on its roles alone: a record per cycle of the
+/// instance's clock where `when` holds, with `fields` (field, expression) sampled with it. Its
+/// expressions name only roles; a `Decode` puts it on signals. Kept to sample again on `:e`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Sampler {
     pub name: String,
-    /// Empty: each instance gives it.
-    pub clock: String,
     pub when: String,
     pub fields: Vec<(String, String)>,
     pub roles: Vec<String>,

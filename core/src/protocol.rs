@@ -331,8 +331,7 @@ pub fn list(session: &[Sampler]) -> String {
 }
 
 fn sampler_line(p: &Sampler) -> String {
-    let roles = if p.roles.is_empty() { String::new() } else { format!("roles {}: ", p.roles.join(", ")) };
-    format!("{roles}a record where {} at {}", p.when, if p.clock.is_empty() { "the instance's clock" } else { &p.clock })
+    format!("roles {}: a record where {} at the instance's clock", p.roles.join(", "), p.when)
 }
 
 /// `protocols <name>`: its roles, params, and the streams it makes with their fields.
@@ -364,10 +363,7 @@ pub fn describe(name: &str, session: &[Sampler]) -> Result<String, String> {
     if let Some(p) = session.iter().find(|p| p.name == name) {
         let fields: Vec<String> = p.fields.iter().map(|(f, sig)| format!("{f}={sig}")).collect();
         let mut out = vec![format!("{name}: in this session, {}", sampler_line(p)), format!("fields: {}", fields.join(" "))];
-        out.push(match p.roles.is_empty() {
-            true => format!("the stream {name} (a protocol without roles samples its own signals)"),
-            false => format!("example: decode x {name} clock=<clk> {}", p.roles.iter().map(|r| format!("{r}=<signal>")).collect::<Vec<_>>().join(" ")),
-        });
+        out.push(format!("example: decode x {name} clock=<clk> {}", p.roles.iter().map(|r| format!("{r}=<signal>")).collect::<Vec<_>>().join(" ")));
         return Ok(out.join("\n"));
     }
     Err(unknown(name, session))

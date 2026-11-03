@@ -77,15 +77,15 @@ rows = [
   saved: it comes back as decodes run again.
 - `version` is the format version. A file with a newer version than wtf knows is refused
   with an error instead of being misread.
-- `[[protocol]]` entries (after `[[signal]]`, before the rows) sample streams: `name`, `clock`,
-  `when` and `fields` in their order (section 16). Each stream is a signal, and so is
-  each of its fields (`rx.tdata`), so rows can show them; they are sampled again on `:e`. One that
-  can't be is reported and kept, to try again on the next `:e`. Named signals, protocols and
-  instances are made in passes, so one that uses one listed after it is made too.
-  A protocol with `roles = ["valid", "ready", "cmd"]` is a type instead: its `when` and `fields`
-  name the roles, its `clock` may be left out, and `[[decode]]` entries (`name`, `protocol`,
-  optional `clock`, `signals = { valid = "top.cmd_valid", ... }`) put it on signals, each making
-  the stream of its name. All of an instance's mistakes are reported at once.
+- `[[protocol]]` entries (after `[[signal]]`, before the rows) define protocols, names only:
+  `name`, `roles = ["valid", "ready", "cmd"]`, `when` and `fields` in their order, all naming
+  the roles (section 16). A protocol has no `clock` and no signals; one with a `clock` is
+  reported and left out. `[[decode]]` entries (`name`, `protocol`, `clock`, `signals = { valid =
+  "top.cmd_valid", ... }`) put it on signals, each making the stream of its name. Each stream is
+  a signal, and so is each of its fields (`rx.tdata`), so rows can show them; they are sampled
+  again on `:e`. One that can't be is reported and kept, to try again on the next `:e`. Named
+  signals, protocols and instances are made in passes, so one that uses one listed after it is
+  made too. All of an instance's mistakes are reported at once.
   `[[decode]]` also puts built-in protocols on signals (`protocol = "axis"`, making
   `rx.beat`, `rx.frame`, `rx.errors`), and the protocols on streams, with
   `params`: `frame` (`signals = { input = "c0" }`, `params = { last = "last" }`, or `gap`,

@@ -125,19 +125,23 @@ fn decode(app: &mut Workspace, arg: &str) -> Result<String, String> {
     Ok(format!("{name}: {}", parts.join("; ")))
 }
 
-/// `:protocol name when=expr field=signal...`: a stateless protocol (`[[protocol]]`); `clock=` is
-/// its clock, `roles=a,b,c` makes it a type for `:decode`, the other keys are its fields in order.
+/// `:protocol name roles=a,b when=expr field=expr...`: defines a sampled protocol (`[[protocol]]`)
+/// on its roles, no signals; `:decode` puts it on signals at a clock. The other keys are its
+/// fields in order.
 fn protocol(app: &mut Workspace, arg: &str) -> Result<(), String> {
-    let usage = "usage: :protocol <name> [clock=<clk>] when=<expr> [roles=<a,b>] <field>=<signal>...";
+    let usage = "usage: :protocol <name> roles=<a,b> when=<expr> <field>=<expr>...";
     let (name, rest) = word(arg);
     if name.is_empty() {
         return Err(usage.into());
     }
     let mut fields = key_values(rest).ok_or(usage)?;
     let mut take = |k: &str| fields.iter().position(|p| p.0 == k).map(|i| fields.remove(i).1);
-    let (clock, when, roles) = (take("clock").unwrap_or_default(), take("when").ok_or(usage)?, take("roles"));
-    let roles = roles.map_or(Vec::new(), |r| r.split(',').map(|r| r.trim().to_string()).filter(|r| !r.is_empty()).collect());
-    let p = crate::stream::Sampler { name: name.into(), clock, when, fields, roles };
+    if let Some(c) = take("clock") {
+        return Err(format!("a protocol names no signals, its clock neither: :decode gives it (:decode x {name} clock={c} ...)"));
+    }
+    let (when, roles) = (take("when").ok_or(usage)?, take("roles").ok_or(usage)?);
+    let roles = roles.split(',').map(|r| r.trim().to_string()).filter(|r| !r.is_empty()).collect();
+    let p = crate::stream::Sampler { name: name.into(), when, fields, roles };
     app.add_protocol(p).map(drop).map_err(|e| format!("protocol {name} not made: {e}"))
 }
 

@@ -117,7 +117,7 @@ fn builtin_instance_errors() {
     assert_eq!(err(&mut ws, decode("rx", "axis", "", &[("tvalid", "tvalid"), ("tuser", "tdata"), ("tdata", "nope")], &[("x", "1")])),
         "rx: no signal for tready (the file has: decode rx axis clock=top.clk prefix=top.); axis has no role tuser; tdata: unknown signal: nope; axis has no param x (params: prefix); no clock");
     // its names are taken
-    let p = Sampler { name: "axis".into(), clock: "clk".into(), when: "tvalid".into(), fields: vec![], roles: vec![] };
+    let p = Sampler { name: "axis".into(), when: "tvalid".into(), fields: vec![], roles: vec!["tvalid".into()] };
     assert_eq!(ws.add_protocol(p), Err("axis is a built-in protocol".into()));
     assert!(ws.streams.is_empty() && ws.decodes.is_empty());
 }
@@ -126,9 +126,10 @@ fn builtin_instance_errors() {
 /// resp_id) 2 at 35, 1 at 55, 0 at 85.
 fn reqresp() -> Workspace {
     let mut ws = open("reqresp.vcd");
+    // one protocol, put on each side
+    ws.add_protocol(Sampler { name: "hs".into(), when: "valid".into(), fields: pairs(&[("id", "id")]), roles: vec!["valid".into(), "id".into()] }).unwrap();
     for (name, v, id) in [("req", "req_valid", "req_id"), ("resp", "resp_valid", "resp_id")] {
-        let fields = pairs(&[("id", id)]);
-        ws.add_protocol(Sampler { name: name.into(), clock: "clk".into(), when: v.into(), fields, roles: vec![] }).unwrap();
+        ws.add_decode(Decode { name: name.into(), protocol: "hs".into(), clock: "clk".into(), signals: pairs(&[("valid", v), ("id", id)]), params: vec![] }).unwrap();
     }
     ws
 }
@@ -182,7 +183,7 @@ fn chained_frame_and_their_errors() {
 fn instance_names_signals_in_full() {
     let mut ws = open("simple.vcd");
     let add = |ws: &mut Workspace, p: Sampler| ws.add_protocol(p).unwrap();
-    add(&mut ws, Sampler { name: "busy".into(), clock: String::new(), when: "b".into(), fields: pairs(&[("s", "s")]), roles: vec!["b".into(), "s".into()] });
+    add(&mut ws, Sampler { name: "busy".into(), when: "b".into(), fields: pairs(&[("s", "s")]), roles: vec!["b".into(), "s".into()] });
     let state = ws.var_named("top.cpu.state").unwrap();
     ws.add_rows(&[state]);
     assert!(ws.resolve("state").is_ok() && ws.resolve("dma.state").is_ok());
