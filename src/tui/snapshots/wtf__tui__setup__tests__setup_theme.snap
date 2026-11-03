@@ -1,22 +1,20 @@
 ---
 source: src/tui/setup.rs
+assertion_line: 249
 expression: screen(&mut s)
 ---
 
-  wtf · first start
+  wtf · first start                                                     2 of 2
 
   Dark or light?
   Pick the one that suits your terminal's background.
 
-                       │       │   ┌──┐ ┌──┐ ┌──┃ ┌──┐ ┌──┐
-                  clk  │ 0     │ ──┘  └─┘  └─┘  ┃─┘  └─┘  └
-  ▌ 1 dark             │       │ ━━━━━┬─────────┃────┬─────
-                  data │ 0x3C  │ ━━━━━┴─ 0xA5 ──┃────┴─────
-
-                       │       │   ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌──┐
-                  clk  │ 0     │ ──┘  └─┘  └─┘  └─┘  └─┘  └
-    2 light            │       │ ━━━━━┬─────────┬────┬─────
-                  data │ 0x3C  │ ━━━━━┴─ 0xA5 ──┴────┴─────
+  ╭─ 1 dark ──────────────────────────╮  ╭─ 2 light ─────────────────────────╮
+  │      │       │   ┌──┐ ┌──┃ ┌──┐ ┌ │  │      │       │   ┌──┐ ┌──┐ ┌──┐ ┌ │
+  │ clk  │ 0     │ ──┘  └─┘  ┃─┘  └─┘ │  │ clk  │ 0     │ ──┘  └─┘  └─┘  └─┘ │
+  │      │       │ ━━━━━┬────┃────┬── │  │      │       │ ━━━━━┬─────────┬── │
+  │ data │ 0xA5  │ ━━━━━┴─ 0xA5 ──┴── │  │ data │ 0xA5  │ ━━━━━┴─ 0xA5 ──┴── │
+  ╰───────────────────────────────────╯  ╰───────────────────────────────────╯
 
 
 
@@ -24,4 +22,7 @@ expression: screen(&mut s)
 
 
 
-  1–2 or j k, Enter to pick · Esc for the defaults · wtf --setup asks again
+
+
+
+  1–2 pick   j k move   Enter pick   Esc the defaults   wtf --setup asks again

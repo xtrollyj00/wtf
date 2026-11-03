@@ -59,6 +59,10 @@ pub struct App {
     pub messages: Option<usize>,
     /// Notes before this one are dismissed from the corner (`Esc`).
     pub dismissed: usize,
+    /// Drawn for plain text (`--snapshot` without `--ansi`): the guide's logo in plain characters.
+    pub plain: bool,
+    /// How long the picker's highlight rests before its preview reads a signal (spec §5).
+    pub preview_wait: std::time::Duration,
     /// Where the mouse was last, to hold a notification under it (spec §4 "Notifications").
     pub pointer: Option<(usize, usize)>,
     /// When the corner was last drawn while a note showed, to draw again as they fade.
@@ -241,6 +245,8 @@ impl App {
             changed: None,
             hit: Hit::default(),
             pointer: None,
+            plain: false,
+            preview_wait: crate::tui::picker::PREVIEW_WAIT,
             drag: None,
             held: None,
             click: None,
@@ -921,6 +927,12 @@ impl App {
             self.noted = (!self.shown_notes(now).is_empty()).then_some(now);
         }
         due
+    }
+
+    /// The picker's highlight has rested long enough for its preview to read the signal: true
+    /// once, to draw it.
+    pub fn picker_tick(&self, now: std::time::Instant) -> bool {
+        self.picker.as_ref().and_then(|p| p.rest).is_some_and(|(_, since, drawn)| !drawn && now.duration_since(since) >= self.preview_wait)
     }
 
     /// A notification under the pointer doesn't fade: it is put back to full colour, a second

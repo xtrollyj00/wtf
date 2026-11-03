@@ -159,7 +159,7 @@ fn start_screen_opens_a_trace() {
     t.send("otests/data/nope.vcd\r");
     t.wait("the error", |s| s.contents().contains("nope.vcd") && !s.contents().contains("open tests"));
     t.send("otests/data/simple.vcd\r");
-    t.wait("the window", |s| s.contents().contains("add signals"));
+    t.wait("the window", |s| s.contents().contains("Browse the signals"));
     t.send(":q!\r");
     assert!(t.child.wait().unwrap().success());
     let history = std::fs::read_to_string(t.dir.join("wtf/history")).unwrap();

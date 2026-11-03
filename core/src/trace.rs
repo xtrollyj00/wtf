@@ -224,6 +224,20 @@ impl Trace {
         }
     }
 
+    /// Whether `var`'s values are read already (`load`): drawing it costs no reading then.
+    pub fn loaded(&self, var: usize) -> bool {
+        let mut all = vec![var];
+        let mut i = 0;
+        while i < all.len() {
+            all.extend_from_slice(&self.vars[all[i]].children);
+            i += 1;
+        }
+        all.iter().all(|&v| match self.vars[v].source {
+            Source::File(s) => self.wave.get_signal(s).is_some(),
+            _ => true,
+        })
+    }
+
     /// A composite's value from its children's (spec §6 "Composite rows"), worked out when asked,
     /// so a big array costs nothing until shown, and then only what is asked: their bits joined, the first the most
     /// significant, or with a text field an SV aggregate, `'{valid:1, state:busy, pair:'{hi:A,

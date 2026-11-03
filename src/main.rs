@@ -92,6 +92,7 @@ fn run(args: Args) -> Result<(), String> {
             }
             // keys come with no time between them: which-key shows at once
             app.which_delay = std::time::Duration::ZERO;
+            app.plain = !args.ansi;
             // drawn before each key, as the window is: what a key does can depend on the width
             for k in tui::app::parse_keys(args.keys.as_deref().unwrap_or(""))? {
                 screen(&mut app, w, h);
@@ -209,6 +210,7 @@ fn screen(app: &mut App, w: u16, h: Option<u16>) -> Buffer {
 
 #[cfg(test)]
 fn snapshot(app: &mut App, w: u16, h: Option<u16>) -> String {
+    app.plain = true;
     draw::text(&screen(app, w, h))
 }
 
@@ -2181,7 +2183,14 @@ mod tests {
         // Enter adds below the selected row, one undo step
         let mut app = open("vcd", None);
         keys(&mut app, ":add top.clk top.cpu.data\n:select top.clk\n:30ns\n:pick signals\ncpust");
+        // a signal not read yet: what it is at once, its values once the highlight rests
+        let first = snapshot(&mut app, 100, Some(20));
+        assert!(first.contains("│ 3 bits") && first.contains("│ … ") && !first.contains("at 30ns"), "{first}");
+        let now = Instant::now();
+        assert!(!app.picker_tick(now) && app.picker_tick(now + tui::picker::PREVIEW_WAIT));
+        app.preview_wait = Duration::ZERO;
         insta::assert_snapshot!(snapshot(&mut app, 100, Some(20)));
+        assert!(!app.picker_tick(now + tui::picker::PREVIEW_WAIT), "drawn whole: no more ticks");
         let rows = app.ws.rows.len();
         keys(&mut app, "<BS><BS><BS><BS><BS>state<Tab><Tab><CR>");
         assert!(app.picker.is_none());

@@ -59,21 +59,27 @@ isn't an open; one that can't be written changes nothing else.
 
 ### At launch
 
-No signals are shown yet. The screen is empty except for a short guide in the middle: a small
-wordmark in the accent colour, the file's name in bold, what is in it (dim), and the keys to
-start with, in the accent.
+No signals are shown yet. The screen is a dashboard of the trace in the start screen's look
+("Start screen" above): its logo with the bus under it where it fits (else `w t f` on one
+line), the trace's whole path (the directory dim, `~` for the home directory, cut at the left
+with `…` where it doesn't fit; the file name bold) with what is in it dim under it, then what to do first, a
+line each with its icon (`nerd` glyphs), label and key at the right in the accent. The keys are
+the keymap's and the leader menu's (section 19), so a moved key shows moved, and an entry the
+leader menu no longer has is left out. With the signal panel open, its keys instead (search,
+mark, add, add as a group, close).
 
 ```
-                             w t f
-                   waveform terminal frontend
+                              w t ┃ f
 
-                           trace.fst
-                    42 signals  ·  0ns–1.2us
+   ~/proj/sim/trace.fst
+   42 signals  ·  0ns–1.2us
 
-                         a  add signals
-                         :  commands
-                         ?  help
-                         q  quit
+   Find a signal                                  Space f
+   Browse the signals                                   a
+   Decode an interface                          Space d d
+   Everything else                                  Space
+   Keys                                                 ?
+   Quit                                                 q
 
  NORMAL   signals ▸                              0ns  2ns/col  trace.fst
 ```

@@ -149,11 +149,17 @@ Q = ["quit without saving", ":q!", "unsaved changes are lost"]
 When wtf opens a window in a terminal (stdin and stdout both one; not `--snapshot` or `--mcp`) and there is no config file, it first asks two questions, each with samples
 of a clock and a bus drawn as wtf draws them:
 
-1. Which glyph set the terminal draws cleanly: `unicode`, `box`, `ascii` and `nerd` side by
-   side. Fonts without the legacy computing glyphs show boxes in the first; lines that don't
+1. Which glyph set the terminal draws cleanly: `unicode`, `box`, `ascii` and `nerd`, each a
+   card (section 14) titled with its key and name, the sample inside, the card's frame too in
+   that set. Fonts without the legacy computing glyphs show boxes in the first; lines that don't
    join up mean box drawing is missing too; `nerd` shows an icon by its name, a box without a
-   Nerd Font. The samples go without blank lines between them where they wouldn't all fit.
-2. Dark or light: the samples in each theme, in the chosen glyphs. Not asked with `NO_COLOR`.
+   Nerd Font.
+2. Dark or light: a card per theme, the sample in it, in the chosen glyphs. Not asked with
+   `NO_COLOR`.
+
+The cards go two a row where each gets 34 columns, one a row else, without blank lines between
+rows where they wouldn't all fit; the highlighted one's border is in the accent (`▌` before its
+title without colour). The top line says which question it is (`1 of 2`), the bottom the keys.
 
 `1`-`4` (or `j` / `k` and `Enter`) answer; `Esc` takes the defaults (`unicode`, and the theme
 that suits the terminal's background, below) for what is left; `Ctrl-c` leaves without writing, so the next start asks again. The answers are written

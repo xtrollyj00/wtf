@@ -14,7 +14,7 @@ reuse wtf's own pieces:
 | `values(signals, from, to, radix, unit)` | the value at `from`, then each change up to `to`, as `time value` lines |
 | `value_at(signals, time, radix, unit)` | values at one time; a struct, record or array its whole value, then a line per signal in it (`pkt.valid = 1`, `pkt.pair.hi = 0xA`) |
 | `find(expr, from, to, backward, count, show, count_only, unit)` | match times of a search expression (section 8), `@clk` included, as a table |
-| `render(signals, from, to, width, unit)` | the signals drawn as text, as on the screen (`--snapshot`); without signals, the workspace |
+| `render(signals, from, to, width, unit)` | the signals drawn as text, as on the screen (`--snapshot`); without signals, the workspace. The name and value columns keep their default widest (30, 20): the server reads no config file, so an answer doesn't depend on the user's |
 | `workspace(scope, signals, protocols, decode, rows, cursors, range)` | set up the whole workspace in one call |
 | `protocols(name)` | what can be decoded and how; for one protocol its roles, params and streams |
 | `records(stream, from, to, where, group_by, count, count_only, unit)` | a stream's records as a table |

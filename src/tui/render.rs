@@ -619,7 +619,7 @@ fn wrap_text(text: &str, width: usize, max: usize) -> Vec<String> {
 /// A card (which-key, the leader menu, notifications): its background, a round border in
 /// `edge`, the title's parts set in the top border at the left, `right` dim in it at the right,
 /// `footer` dim in the bottom border at the right; a column cleared on each side.
-fn card_frame(buf: &mut Buffer, r: Rect, edge: Color, title: &[(String, Style)], right: &str, footer: &str) {
+pub(super) fn card_frame(buf: &mut Buffer, r: Rect, edge: Color, title: &[(String, Style)], right: &str, footer: &str) {
     let (x0, y0, bw, bh) = (r.x as usize, r.y as usize, r.width as usize, r.height as usize);
     let st = card_style();
     let b = gl().card;
@@ -860,44 +860,120 @@ fn plain(lines: &[String]) -> Vec<Line> {
     lines.iter().map(|l| vec![(l.clone(), Style::new())]).collect()
 }
 
-/// The launch guide: a small wordmark, the trace's name and what is in it, the keys to start with.
+/// The launch guide, before any row (spec §4): the start screen's look, a dashboard of the
+/// trace. The one-line logo, the trace's name and what is in it, then what to do first, each
+/// with its key as the keymap and the leader menu have it; with the signal panel open, its keys.
 fn guide(app: &App, buf: &mut Buffer, w: usize, body: usize) {
-    let keys: &[(&str, &str)] = if app.panel_shown() {
-        // the panel is open: how to add from it
-        &[("/", "search"), ("Space", "mark"), ("Enter", "add"), ("Ctrl-g", "add as a group"), ("Esc", "close")]
-    } else {
-        &[("a", "add signals"), (":", "commands"), ("?", "help"), ("q", "quit")]
-    };
+    use crate::tui::start::{action_rows, big_logo, small_logo, BIG_LOGO};
+    let actions = guide_actions(app);
     let t = &app.ws.trace;
     let fpt = t.fs_per_tick;
     let signals = (0..t.vars.len()).filter(|&v| !t.is_computed(v)).count();
     let facts = format!("{signals} signals  {}  {}{}{}", gl().dot, time::format(t.start(), fpt), gl().dash, time::format(t.end(), fpt));
-    let (dim, bold) = (Style::new().fg(pal().dim), Style::new().add_modifier(Modifier::BOLD));
-    let centred: [(String, Style); 6] = [
-        ("w t f".into(), bold.fg(pal().cursor)),
-        ("waveform terminal frontend".into(), dim),
-        (String::new(), dim),
-        (app.ws.file_name.clone(), bold),
-        (facts, dim),
-        (String::new(), dim),
-    ];
-    let kw = keys.iter().map(|(k, _)| k.chars().count()).max().unwrap_or(0);
-    let bw = keys.iter().map(|(_, d)| kw + 2 + d.chars().count()).max().unwrap_or(0);
-    let y0 = body.saturating_sub(centred.len() + keys.len()) / 2;
-    for (i, (l, st)) in centred.iter().enumerate().filter(|(i, _)| y0 + i < body) {
-        put(buf, w.saturating_sub(l.chars().count()) / 2, y0 + i, l, *st);
+    let area = Rect::new(0, 0, w as u16, body as u16);
+    let cw = 54.min(w.saturating_sub(2));
+    let x = w.saturating_sub(cw) / 2;
+    // the start screen's big logo where it fits with the rest, else on one line
+    let small = 5 + actions.len();
+    let big = w >= BIG_LOGO.1 && body >= BIG_LOGO.0 + small;
+    let logo_h = if big { BIG_LOGO.0 - 1 } else { 0 };
+    let y0 = body.saturating_sub(logo_h + small) / 2;
+    if big {
+        big_logo(buf, area, y0 + 1, app.plain);
     }
-    // the keys as a block
-    for (i, (k, d)) in keys.iter().enumerate().filter(|(i, _)| y0 + centred.len() + i < body) {
-        let (x, y) = (w.saturating_sub(bw) / 2, y0 + centred.len() + i);
-        put(buf, x, y, k, bold.fg(pal().cursor));
-        put(buf, x + kw + 2, y, d, Style::new());
+    let y0 = y0 + logo_h;
+    if !big {
+        small_logo(buf, area, w.saturating_sub(7) / 2, y0);
     }
+    // the trace's whole path, the directory dim and the file bold, cut at the left to fit;
+    // what is in it under it
+    let (dir, file) = match app.ws.trace_path.as_os_str().is_empty() {
+        // a workspace made without a file (tests): its name
+        true => (String::new(), app.ws.file_name.clone()),
+        false => trace_path(&app.ws.trace_path),
+    };
+    let len = dir.chars().count() + file.chars().count();
+    let dir: String = match len > cw {
+        true => std::iter::once(gl().cut).chain(dir.chars().skip((len + 1 - cw).min(dir.chars().count()))).collect(),
+        false => dir,
+    };
+    put(buf, x, y0 + 2, &dir, Style::new().fg(pal().dim));
+    put(buf, x + dir.chars().count(), y0 + 2, &file.chars().take(cw.saturating_sub(dir.chars().count())).collect::<String>(), Style::new().add_modifier(Modifier::BOLD));
+    put(buf, x, y0 + 3, &facts, Style::new().fg(pal().dim));
+    action_rows(buf, area, x, y0 + 5, cw, &actions);
+}
+
+/// A trace's whole path as the guide shows it: its directory (`~` for the home directory, with
+/// the `/` after it) and its file name.
+fn trace_path(path: &std::path::Path) -> (String, String) {
+    let full = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let file = full.file_name().map_or(String::new(), |f| f.to_string_lossy().into_owned());
+    let mut dir = full.parent().map_or(String::new(), |d| d.to_string_lossy().into_owned());
+    if let Some(home) = std::env::var_os("HOME").map(|h| h.to_string_lossy().into_owned()).filter(|h| !h.is_empty())
+        && let Some(rest) = dir.strip_prefix(&home)
+        && (rest.is_empty() || rest.starts_with('/'))
+    {
+        dir = format!("~{rest}");
+    }
+    if !dir.ends_with('/') {
+        dir.push('/');
+    }
+    (dir, file)
+}
+
+/// The guide's actions: with the signal panel open, its keys; else what to do first. An entry
+/// the user's leader menu no longer has is left out.
+fn guide_actions(app: &App) -> Vec<crate::tui::start::Action> {
+    use crate::tui::keys::Action as K;
+    use draw::icon;
+    let p = pal();
+    let (blue, purple) = (p.hues[5], p.hues[6]);
+    let a = |ic: char, c: Color, label: &str, key: String| (ic, c, label.to_string(), String::new(), key);
+    if app.panel_shown() {
+        return vec![
+            a(icon::SEARCH, blue, "Search", "/".into()),
+            a(icon::MARK, blue, "Mark", "Space".into()),
+            a(icon::WIRE, blue, "Add", "Enter".into()),
+            a(icon::GROUP, blue, "Add as a group", "Ctrl-g".into()),
+            a(icon::ERROR, p.dim, "Close", "Esc".into()),
+        ];
+    }
+    let keys = &app.keymap;
+    let mut out = Vec::new();
+    if let Some(k) = leader_key(app, ":pick signals") {
+        out.push(a(icon::SEARCH, blue, "Find a signal", k));
+    }
+    out.push(a(icon::FOLDER, blue, "Browse the signals", keys.show(K::Panel)));
+    if let Some(k) = leader_key(app, ":decode ") {
+        out.push(a(icon::PLUG, blue, "Decode an interface", k));
+    }
+    out.push(a(icon::CMD, purple, "Everything else", keys.show(K::Leader)));
+    out.push(a(icon::KEYS, blue, "Keys", keys.show(K::Help)));
+    out.push(a(icon::ERROR, p.dim, "Quit", keys.show(K::Quit)));
+    out
+}
+
+/// The keys of the leader menu's entry that runs `line`, as typed: `Space f`.
+fn leader_key(app: &App, line: &str) -> Option<String> {
+    use crate::tui::keys::Entry;
+    fn find(e: &Entry, line: &str, path: &mut Vec<String>) -> bool {
+        let Entry::Group { items, .. } = e else { return false };
+        for (k, e) in items {
+            path.push(k.show());
+            if matches!(e, Entry::Run { line: l, .. } if l == line) || find(e, line, path) {
+                return true;
+            }
+            path.pop();
+        }
+        false
+    }
+    let mut path = vec![app.keymap.show(crate::tui::keys::Action::Leader)];
+    find(&app.keymap.leader, line, &mut path).then(|| path.join(" "))
 }
 
 /// Lines the launch guide takes, with a blank above and below.
 pub fn guide_height(app: &App) -> u16 {
-    if app.panel_shown() { 13 } else { 12 }
+    (5 + guide_actions(app).len() + 2) as u16
 }
 
 fn zoom_text(v: &View, fpt: Option<u128>) -> String {
@@ -1098,6 +1174,14 @@ fn command_line(app: &mut App, buf: &mut Buffer, w: usize, h: usize) -> Option<(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn trace_path_splits() {
+        // the whole path, its directory with the `/` after it, the file apart
+        let (dir, file) = trace_path(std::path::Path::new("tests/data/simple.vcd"));
+        assert!(dir.ends_with("/tests/data/") && (dir.starts_with('/') || dir.starts_with('~')), "{dir}");
+        assert_eq!(file, "simple.vcd");
+    }
 
     #[test]
     fn fades_to_the_screen() {

@@ -61,7 +61,14 @@ pub struct Picker {
     pub page: usize,
     /// Signals marked with `Tab`, in the order marked.
     pub marked: Vec<usize>,
+    /// The entry highlighted, since when, and whether its preview was drawn whole: a signal not
+    /// read yet is read only once the highlight rests on it (`PREVIEW_WAIT`), so holding `j`
+    /// over a big trace doesn't read every signal it passes.
+    pub rest: Option<(usize, std::time::Instant, bool)>,
 }
+
+/// How long the highlight rests on a signal not read yet before its preview reads it.
+pub const PREVIEW_WAIT: std::time::Duration = std::time::Duration::from_millis(120);
 
 impl Picker {
     /// Rank the entries by the query, best first; on a tie the shorter, then the source's order.
@@ -119,7 +126,7 @@ impl App {
         let name = if name.is_empty() { "signals" } else { name };
         let source = SOURCES.iter().position(|s| *s == name).ok_or_else(|| format!("no picker source {name} ({})", SOURCES.join(", ")))?;
         let stream = Some(rest.trim().to_string()).filter(|s| !s.is_empty());
-        let mut p = Picker { source, stream, query: String::new(), entries: Vec::new(), shown: Vec::new(), empty: String::new(), hl: 0, top: 0, page: 1, marked: Vec::new() };
+        let mut p = Picker { source, stream, query: String::new(), entries: Vec::new(), shown: Vec::new(), empty: String::new(), hl: 0, top: 0, page: 1, marked: Vec::new(), rest: None };
         p.entries = self.entries(&mut p)?;
         p.filter();
         // the trail opens on its newest step, as `:trail`
@@ -490,7 +497,13 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
     }
     // the preview, right of the list
     let (px, pw) = (x0 + lw + 2, bw - lw - 4);
-    let Some(e) = p.shown.get(p.hl).map(|&i| &p.entries[i]) else { return };
+    let Some(&ei) = p.shown.get(p.hl) else { return };
+    let e = &p.entries[ei];
+    let now = std::time::Instant::now();
+    if p.rest.is_none_or(|r| r.0 != ei) {
+        p.rest = Some((ei, now, false));
+    }
+    let since = p.rest.map_or(now, |r| r.1);
     let mut y = y0 + 1;
     let line = |buf: &mut Buffer, y: &mut usize, s: &str, style: Style| {
         if *y < y0 + bh - 1 {
@@ -504,9 +517,16 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
         }
         return;
     };
-    // a signal: its value at the cursor and its waveform around it, drawn as the rows are
+    // a signal: its value at the cursor and its waveform around it, drawn as the rows are, once
+    // it is read; what it is and its decodes need no reading
+    let whole = app.ws.trace.loaded(v) || now.duration_since(since) >= app.preview_wait;
+    if let Some(r) = app.picker.as_mut().and_then(|p| p.rest.as_mut()) {
+        r.2 |= whole;
+    }
     let ws = &mut app.ws;
-    ws.trace.load(&[v]);
+    if whole {
+        ws.trace.load(&[v]);
+    }
     let var = &ws.trace.vars[v];
     let t = ws.view.cursor;
     let fpt = ws.trace.fs_per_tick;
@@ -541,6 +561,10 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
         }
     }
     y += 1;
+    if !whole {
+        line(buf, &mut y, gl().cut.to_string().as_str(), dim);
+        return;
+    }
     let value = ws.trace.value_at(v, t).map_or("none".to_string(), |val| rows::label(var, &Look::of(var), &val));
     line(buf, &mut y, &format!("at {}  {value}", time::format(t, fpt)), st);
     y += 1;
@@ -606,7 +630,7 @@ mod tests {
     #[test]
     fn ranks() {
         let paths = ["top.s_axi_rdata", "top.s_axi_rready", "top.bus.rd", "top.cpu.state"];
-        let mut p = Picker { source: 0, stream: None, query: "rd".into(), entries: Vec::new(), shown: Vec::new(), empty: String::new(), hl: 0, top: 0, page: 1, marked: Vec::new() };
+        let mut p = Picker { source: 0, stream: None, query: "rd".into(), entries: Vec::new(), shown: Vec::new(), empty: String::new(), hl: 0, top: 0, page: 1, marked: Vec::new(), rest: None };
         p.entries = paths.iter().enumerate().map(|(i, s)| Entry { text: s.to_string(), head: 0, right: String::new(), act: Act::Var(i), preview: Vec::new() }).collect();
         p.filter();
         // a word boundary first; state has no r then d

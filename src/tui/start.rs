@@ -174,17 +174,17 @@ impl Start {
     }
 
     /// The actions: icon, its colour, label, a dim note, key.
-    fn actions(&self) -> Vec<(char, Color, String, String, &'static str)> {
+    fn actions(&self) -> Vec<Action> {
         let p = pal();
         let (blue, cyan) = (p.hues[5], p.hues[4]);
-        let mut a = vec![(icon::FOLDER, blue, "Open a trace".to_string(), String::new(), "o")];
+        let mut a = vec![(icon::FOLDER, blue, "Open a trace".to_string(), String::new(), "o".to_string())];
         match self.agents.as_slice() {
             [] => {}
-            [s] => a.push((icon::AGENT, cyan, format!("Join {}", s.id), format!("on {}", name(&s.trace)), "a")),
-            all => a.push((icon::AGENT, cyan, "Join an agent".into(), format!("{} workspaces", all.len()), "a")),
+            [s] => a.push((icon::AGENT, cyan, format!("Join {}", s.id), format!("on {}", name(&s.trace)), "a".into())),
+            all => a.push((icon::AGENT, cyan, "Join an agent".into(), format!("{} workspaces", all.len()), "a".into())),
         }
-        a.push((icon::KEYS, blue, "Keys".into(), String::new(), "?"));
-        a.push((icon::ERROR, p.dim, "Quit".into(), String::new(), "q"));
+        a.push((icon::KEYS, blue, "Keys".into(), String::new(), "?".into()));
+        a.push((icon::ERROR, p.dim, "Quit".into(), String::new(), "q".into()));
         a
     }
 
@@ -212,7 +212,7 @@ impl Start {
         let dim = Style::new().fg(p.dim);
         let big = h >= BIG_H && w >= BIG_W;
         // the logo, a blank, the bus (the big logo's), a blank
-        let logo_h = if big { LOGO_H + 1 + 2 + 1 } else { 2 };
+        let logo_h = if big { BIG_LOGO.0 } else { 2 };
         let actions = self.actions();
         // the footer and the blank above it
         let fixed = logo_h + actions.len() + 2;
@@ -220,67 +220,24 @@ impl Start {
         let n = self.list_len().min(h.saturating_sub(fixed + 2));
         let list_h = if n > 0 { n + 2 } else { 0 };
         let y0 = h.saturating_sub(fixed + list_h) / 2;
-        let mut put = |x: usize, y: usize, s: &str, st: Style| {
-            if x < w && y < h {
-                buf.set_stringn(area.x + x as u16, area.y + y as u16, s, w - x, st);
-            }
-        };
-
-        // the logo: amber up to the cursor, unknown (red, as an X is drawn) after it
-        let lx = w.saturating_sub(LOGO_W) / 2;
         if big {
-            logo(&mut put, lx, y0, self.plain || gl().line.is_ascii() || p.mono);
-            let by = y0 + LOGO_H + 1;
-            // a bus under it carrying the letters' codes, unknown from the cursor on
-            let segs = [(0, SPLIT, "0x77", p.bus, gl().line), (SPLIT, CURSOR, "0x74", p.bus, gl().line), (CURSOR, INK_W, "0xXX", p.unknown, gl().unknown)];
-            for (i, (a, b, label, c, ln)) in segs.into_iter().enumerate() {
-                let st = Style::new().fg(c);
-                if i > 0 {
-                    put(lx + a, by, &gl().crossing[0].to_string(), st);
-                    put(lx + a, by + 1, &gl().crossing[1].to_string(), st);
-                }
-                let x0 = a + (i > 0) as usize;
-                let (n, label) = (b - x0, format!(" {label} "));
-                let pad = n - label.len();
-                let line = |k: usize| ln.to_string().repeat(k);
-                put(lx + x0, by, &line(n), st);
-                put(lx + x0, by + 1, &format!("{}{label}{}", line(pad / 2), line(pad - pad / 2)), st);
-            }
+            big_logo(buf, area, y0, self.plain);
         } else {
-            let x = w.saturating_sub(7) / 2;
-            put(x, y0, "w t", accent);
-            put(x + 6, y0, "f", Style::new().fg(p.unknown).add_modifier(Modifier::BOLD));
+            small_logo(buf, area, w.saturating_sub(7) / 2, y0);
         }
-        let cx = if big { lx + CURSOR } else { w.saturating_sub(7) / 2 + 4 };
-        // the cursor's column, through the logo and its bus
-        let (top, bottom) = if big { (y0.saturating_sub(1), y0 + LOGO_H + 3) } else { (y0, y0 + 1) };
-        for y in (top..bottom).filter(|&y| y < h && cx < w) {
-            let cell = &mut buf[(area.x + cx as u16, area.y + y as u16)];
-            cell.set_bg(p.column);
-            if cell.symbol() == " " {
-                cell.set_char(gl().cursor).set_fg(p.cursor);
-            }
-        }
-        let mut put = |x: usize, y: usize, s: &str, st: Style| {
-            if x < w && y < h {
-                buf.set_stringn(area.x + x as u16, area.y + y as u16, s, w - x, st);
-            }
-        };
 
         // the actions, a column with the keys at its right
         let cw = COL_W.min(w.saturating_sub(2));
         let x = w.saturating_sub(cw) / 2;
         let ix = if gl().icons { 3 } else { 0 };
         let mut y = y0 + logo_h;
-        for (ic, c, label, note, key) in &actions {
-            if gl().icons {
-                put(x, y, &ic.to_string(), Style::new().fg(*c));
+        action_rows(buf, area, x, y, cw, &actions);
+        y += actions.len();
+        let mut put = |x: usize, y: usize, s: &str, st: Style| {
+            if x < w && y < h {
+                buf.set_stringn(area.x + x as u16, area.y + y as u16, s, w - x, st);
             }
-            put(x + ix, y, label, Style::new());
-            put(x + ix + label.chars().count() + 1, y, note, dim);
-            put(x + cw - key.len(), y, key, accent);
-            y += 1;
-        }
+        };
 
         // the list: Recent, the agents to join, or the keys
         if n > 0 {
@@ -383,6 +340,88 @@ const KEYS: [(&str, &str); 5] = [
     ("? Esc", "these keys, and back"),
     ("q", "quit"),
 ];
+
+/// An action of a dashboard (this screen, and the trace's before any row): icon, its colour,
+/// label, a dim note after it, key.
+pub type Action = (char, Color, String, String, String);
+
+/// The actions in a column `cw` wide at (`x`, `y`) of `area`: the icon (with the `nerd` glyphs),
+/// the label, its note dim, the key at the right in the accent.
+pub fn action_rows(buf: &mut Buffer, area: Rect, x: usize, y: usize, cw: usize, actions: &[Action]) {
+    let (w, h) = (area.width as usize, area.height as usize);
+    let accent = Style::new().fg(pal().cursor).add_modifier(Modifier::BOLD);
+    let mut put = |x: usize, y: usize, s: &str, st: Style| {
+        if x < w && y < h {
+            buf.set_stringn(area.x + x as u16, area.y + y as u16, s, w - x, st);
+        }
+    };
+    let ix = if gl().icons { 3 } else { 0 };
+    for (k, (ic, c, label, note, key)) in actions.iter().enumerate() {
+        if gl().icons {
+            put(x, y + k, &ic.to_string(), Style::new().fg(*c));
+        }
+        put(x + ix, y + k, label, Style::new());
+        put(x + ix + label.chars().count() + 1, y + k, note, Style::new().fg(pal().dim));
+        put((x + cw).saturating_sub(key.chars().count()), y + k, key, accent);
+    }
+}
+
+/// Lines the big logo takes with its bus and the blank under each, and the width it needs.
+pub const BIG_LOGO: (usize, usize) = (LOGO_H + 1 + 2 + 1, BIG_W);
+
+/// The pixel logo centred in `area` from line `y`, the bus under it carrying the letters' codes
+/// (unknown from the cursor on), the cursor's column through both. `plain` (and the `ascii`
+/// glyphs, and no colour) draw it in plain characters.
+pub fn big_logo(buf: &mut Buffer, area: Rect, y: usize, plain: bool) {
+    let (w, h) = (area.width as usize, area.height as usize);
+    let p = pal();
+    let mut put = |x: usize, y: usize, s: &str, st: Style| {
+        if x < w && y < h {
+            buf.set_stringn(area.x + x as u16, area.y + y as u16, s, w - x, st);
+        }
+    };
+    // amber up to the cursor, unknown (red, as an X is drawn) after it
+    let lx = w.saturating_sub(LOGO_W) / 2;
+    logo(&mut put, lx, y, plain || gl().line.is_ascii() || p.mono);
+    let by = y + LOGO_H + 1;
+    let segs = [(0, SPLIT, "0x77", p.bus, gl().line), (SPLIT, CURSOR, "0x74", p.bus, gl().line), (CURSOR, INK_W, "0xXX", p.unknown, gl().unknown)];
+    for (i, (a, b, label, c, ln)) in segs.into_iter().enumerate() {
+        let st = Style::new().fg(c);
+        if i > 0 {
+            put(lx + a, by, &gl().crossing[0].to_string(), st);
+            put(lx + a, by + 1, &gl().crossing[1].to_string(), st);
+        }
+        let x0 = a + (i > 0) as usize;
+        let (n, label) = (b - x0, format!(" {label} "));
+        let pad = n - label.len();
+        let line = |k: usize| ln.to_string().repeat(k);
+        put(lx + x0, by, &line(n), st);
+        put(lx + x0, by + 1, &format!("{}{label}{}", line(pad / 2), line(pad - pad / 2)), st);
+    }
+    for y in (y.saturating_sub(1)..y + LOGO_H + 3).filter(|&y| y < h && lx + CURSOR < w) {
+        cursor_cell(buf, area, lx + CURSOR, y);
+    }
+}
+
+/// The logo on one line, `w t` in the accent and `f` unknown, the cursor's column between them.
+pub fn small_logo(buf: &mut Buffer, area: Rect, x: usize, y: usize) {
+    if x + 7 > area.width as usize || y >= area.height as usize {
+        return;
+    }
+    let bold = Style::new().add_modifier(Modifier::BOLD);
+    buf.set_string(area.x + x as u16, area.y + y as u16, "w t", bold.fg(pal().cursor));
+    buf.set_string(area.x + (x + 6) as u16, area.y + y as u16, "f", bold.fg(pal().unknown));
+    cursor_cell(buf, area, x + 4, y);
+}
+
+/// A cell of the cursor's column, as a waveform's: tinted, `┃` where it is blank.
+fn cursor_cell(buf: &mut Buffer, area: Rect, x: usize, y: usize) {
+    let cell = &mut buf[(area.x + x as u16, area.y + y as u16)];
+    cell.set_bg(pal().column);
+    if cell.symbol() == " " {
+        cell.set_char(gl().cursor).set_fg(pal().cursor);
+    }
+}
 
 /// The pixel logo at (`x`, `y`): ▀ ▄ in the accent before the cursor's column and in the unknown
 /// colour after, with a shadow; or in plain characters (`plain`), without the shadow.
