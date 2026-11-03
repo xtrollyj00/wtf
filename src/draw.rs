@@ -242,6 +242,51 @@ pub mod icon {
     pub const SAVE: char = '\u{eb4b}';
     pub const ZOOM: char = '\u{eb81}';
     pub const EDIT: char = '\u{ea73}';
+    // what a row is (spec §14 "Glyphs"), Material Design icons of the Nerd Font
+    pub const CLOCK_WAVE: char = '\u{f147b}';
+    pub const BUS: char = '\u{f0688}';
+    pub const ENUM: char = '\u{f04fc}';
+    pub const REAL: char = '\u{f095b}';
+    pub const TEXT: char = '\u{f027e}';
+    pub const STRUCT: char = '\u{f0169}';
+    pub const ARRAY: char = '\u{f0168}';
+    pub const COMPUTED: char = '\u{f0871}';
+    pub const RECORDS: char = '\u{f066c}';
+    pub const FIELD: char = '\u{f0316}';
+    pub const VIOLATION: char = '\u{f0029}';
+    pub const GROUP: char = '\u{f0256}';
+    pub const GROUP_OPEN: char = '\u{f0dcf}';
+    pub const SCOPE: char = '\u{f061a}';
+}
+
+/// The name and value columns' headers, on the time axis' line (spec §4).
+const NAME_HEAD: &str = "Name";
+const VALUE_HEAD: &str = "Value";
+
+/// What a var is, as its icon and colour (spec §14): a clock (some decode's), a 1-bit signal or
+/// a bit of a bus, a bus, one with value names, a real, text, a struct or an array, a computed
+/// signal, a stream (its violations apart) or a stream's field. None without the `nerd` glyphs.
+pub fn kind(ws: &Workspace, var: usize, bit: Option<u32>) -> Option<(char, Color)> {
+    gl().icons.then_some(())?;
+    let (t, p) = (&ws.trace, pal());
+    let v = &t.vars[var];
+    let stream = ws.stream_of(var);
+    let field = ws.streams.iter().any(|s| v.path.strip_prefix(s.name.as_str()).is_some_and(|f| f.starts_with('.')));
+    Some(match () {
+        _ if bit.is_some() => (icon::WIRE, p.line),
+        _ if stream.is_some_and(|s| s.violations) => (icon::VIOLATION, p.unknown),
+        _ if stream.is_some() => (icon::RECORDS, p.hues[5]),
+        _ if field => (icon::FIELD, p.hues[5]),
+        _ if t.is_composite(var) && t.is_array(var) => (icon::ARRAY, p.bus),
+        _ if t.is_composite(var) => (icon::STRUCT, p.bus),
+        _ if ws.decodes.iter().any(|d| d.clock == v.path) => (icon::CLOCK_WAVE, p.line),
+        _ if t.is_computed(var) => (icon::COMPUTED, p.dim),
+        _ if v.real => (icon::REAL, p.bus),
+        _ if v.width.is_none() => (icon::TEXT, p.bus),
+        _ if v.names.is_some() => (icon::ENUM, p.bus),
+        _ if v.width == Some(1) => (icon::WIRE, p.line),
+        _ => (icon::BUS, p.bus),
+    })
 }
 
 /// `c` with the `nerd` glyphs, none with the others.
@@ -505,6 +550,28 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
         })
         .map(Option::unwrap_or_default)
         .unzip();
+    // each line's icon (spec §14), in two columns after its `▸` / `▾` or its indent
+    let icons: Vec<Option<(usize, char, Color)>> = lines
+        .iter()
+        .zip(&shows)
+        .zip(names.iter().zip(&markers))
+        .map(|((&(i, _), l), (n, m))| {
+            let (c, col) = match (&ws.rows[i], l) {
+                (Row::Group { collapsed, .. }, _) => (if *collapsed { icon::GROUP } else { icon::GROUP_OPEN }, pal().cursor),
+                (_, Some(l)) => kind(ws, l.var, l.bit)?,
+                _ => return None,
+            };
+            gl().icons.then_some((m.map_or(n.len() - n.trim_start().len(), |m| m + 2), c, col))
+        })
+        .collect();
+    let names: Vec<String> = names
+        .into_iter()
+        .zip(&icons)
+        .map(|(n, ic)| match ic {
+            Some((at, ..)) => n.chars().take(*at).chain("  ".chars()).chain(n.chars().skip(*at)).collect(),
+            None => n,
+        })
+        .collect();
     let width = |v: &[String], max| v.iter().map(|s| s.chars().count()).max().unwrap_or(0).min(max);
     // hidden rows count too, so collapsing a group doesn't shift the waveforms
     let hidden: Vec<String> = ws
@@ -513,10 +580,11 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
         .filter_map(|r| r.sig())
         .filter_map(|s| ws.trace.value_at(s.var, ws.view.cursor).filter(|_| !gap(&ws.trace, field_of(s.var), ws.view.cursor)).map(|v| label(&ws.trace, ws.stream_of(s.var), s, &v)))
         .collect();
-    let nw = width(&names, MAX_NAME).max(width(&row_names, MAX_NAME));
-    let vw = width(&values, MAX_VALUE).max(width(&hidden, MAX_VALUE));
-    // name, value, wave, with a gap of two between them
-    let (vx, wx) = (nw + 2, nw + 2 + vw + 2);
+    // at least as wide as the headers on the time axis' line
+    let nw = width(&names, MAX_NAME).max(width(&row_names, MAX_NAME)).max(NAME_HEAD.len());
+    let vw = width(&values, MAX_VALUE).max(width(&hidden, MAX_VALUE)).max(VALUE_HEAD.len());
+    // name, value, wave, a dim line in the gap of three between them (spec §4)
+    let (vx, wx) = (nw + 3, nw + 3 + vw + 3);
     ws.view.set_width(w.saturating_sub(wx) as u64);
     let ww = w.saturating_sub(wx);
 
@@ -534,6 +602,14 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
         if c >= free && c + len <= ww && clear {
             put(buf, wx + c, 0, &t, dim);
             free = c + len + 2;
+        }
+    }
+
+    put(buf, 0, 0, NAME_HEAD, dim);
+    put(buf, vx, 0, VALUE_HEAD, dim);
+    for x in [nw + 1, vx + vw + 1] {
+        for y in 0..body {
+            put(buf, x, y, &gl().border[5].to_string(), Style::new().fg(pal().hatch));
         }
     }
 
@@ -572,6 +648,9 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
             put(buf, 0, yb, &name[..leaf], Style::new().fg(pal().dim));
             // a column, not a byte: a marker before the name (`▸`) is one column of three bytes
             put(buf, name[..leaf].chars().count(), yb, &name[leaf..], Style::new());
+        }
+        if let Some((at, c, col)) = icons[l].filter(|ic| ic.0 < nw) {
+            put(buf, at, yb, &c.to_string(), Style::new().fg(col));
         }
         let value: String = values[l].chars().take(vw).collect();
         put(buf, vx, yb, &value, value_styles[l]);

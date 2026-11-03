@@ -162,8 +162,8 @@ pub struct Examine {
     pub title: String,
     pub at: String,
     pub lines: Vec<(String, String)>,
-    /// A stream's record, not a signal's value.
-    pub record: bool,
+    /// The var and bit examined, for its kind's icon (a stream's for a record).
+    pub of: (usize, Option<u32>),
 }
 
 /// `:records`: a stream's records, one a line, to pick one and jump to it. `:help <topic>`
@@ -659,7 +659,7 @@ impl App {
                     lines.push((if k == 0 { name.to_string() } else { " ".to_string() }, part));
                 }
             }
-            return self.examine = Some(Examine { title: format!("{} {}", st.name, st.label(i, fpt)), at, lines, record: true });
+            return self.examine = Some(Examine { title: format!("{} {}", st.name, st.label(i, fpt)), at, lines, of: (s.var, None) });
         }
         let (var, bit) = self.ws.probe(s, self.ws.bit);
         let name = self.ws.trace.probe_path((var, bit));
@@ -674,7 +674,7 @@ impl App {
             lines.push(Default::default());
             lines.extend(self.fields(var));
         }
-        self.examine = Some(Examine { title: name, at: time::format(self.ws.view.cursor, fpt), lines, record: false });
+        self.examine = Some(Examine { title: name, at: time::format(self.ws.view.cursor, fpt), lines, of: (var, bit) });
     }
 
     /// A struct's or array's fields at the cursor, a line each, nested ones indented under their
@@ -1396,8 +1396,7 @@ impl App {
         }
         let n = crate::tui::commands::complete(&self.line, self).items.len();
         if n > 0 {
-            // the list grows upward, so "up" moves to the next item
-            self.hl = if up { (self.hl + 1) % n } else { (self.hl + n - 1) % n };
+            self.hl = if up { (self.hl + n - 1) % n } else { (self.hl + 1) % n };
         }
     }
 }

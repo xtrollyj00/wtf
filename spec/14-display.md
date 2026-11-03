@@ -55,10 +55,11 @@ Four glyph sets, chosen with `glyphs` in the config file (section 19) or `--glyp
   that show the legacy computing glyphs as boxes or question marks.
 - `ascii`: 7-bit only, for plain terminals, logs and pasting a snapshot into a mail or an issue.
   Every cell is one ASCII character.
-- `nerd`: `unicode` with icons from a Nerd Font (the codicons, `nf-cod-*`) before labels: the
-  start screen's actions and traces, the status line's segments, the notification cards
-  (section 4), the which-key card, the leader menu's groups (section 2) and the picker's entries
-  and sources (section 5). For a terminal set to a Nerd Font. The other
+- `nerd`: `unicode` with icons from a Nerd Font (codicons `nf-cod-*` and Material Design
+  `nf-md-*`) before labels: the start screen's actions and traces, the status line's segments,
+  the notification cards (section 4), the which-key card, the leader menu's groups (section 2),
+  the picker's entries and sources (section 5), the rows' names, the signal panel's nodes and
+  the `e` float's title (below, "Icons"). For a terminal set to a Nerd Font. The other
   sets draw no icons, nor a letter in their place.
 
 Each set keeps every distinction the others make, so a drawing reads the same in any of them.
@@ -79,6 +80,7 @@ Each set keeps every distinction the others make, so a drawing reads the same in
 | group open / closed, signal shown (panel) | `▾`, `▸`, `●` | as `unicode` | `v`, `>`, `*` |
 | highlighted completion or menu item, insertion point, second menu | `▌`, `▸`, `▸` | as `unicode` | `>`, `>`, `>` |
 | what a drag adds (section 5) | `+ 3` | as `unicode` | `+ 3` |
+| between the name, value and waveform columns (dim) | `│` | as `unicode` | `\|` |
 | panel and help borders (without colour) | `┌─┐│└┘` | as `unicode` | `+-+\|++` |
 | cards (which-key, leader, picker, notifications, the `e` and `?` floats), what a key leads to | `╭─╮│╰╯`, `→` | as `unicode` | `+-+\|++`, `>` |
 | in text (`help · keys`, `65ns–85ns`) | `·`, `–` | as `unicode` | `-`, `-` |
@@ -87,6 +89,28 @@ Each set keeps every distinction the others make, so a drawing reads the same in
   on each side of it, a bus two, so they don't mix up. `X` is never a glyph, only a value.
 - Busy columns (`####`) and a stream's labels (`#3 64B`) both use `#`; a label always has a
   number after it.
+
+### Icons
+
+With the `nerd` glyphs, a row's name, a signal panel's node, a picker's signal and the `e` float's
+title have an icon telling what the signal is, in a colour of its kind. The first that holds:
+
+| What | Icon | Colour |
+|---|---|---|
+| a bit of a bus, a 1-bit signal | `nf-cod-pulse` | line |
+| a stream's violations (section 16) | `nf-md-alert_octagon` | X |
+| a stream | `nf-md-chart_gantt` | accent |
+| a stream's field | `nf-md-label_outline` | accent |
+| an array | `nf-md-code_array` | bus |
+| a struct or record | `nf-md-code_braces` | bus |
+| the clock of a decode | `nf-md-square_wave` | line |
+| a computed signal (slice, concatenation, `:signal`) | `nf-md-function_variant` | dim |
+| a real | `nf-md-sine_wave` | bus |
+| text | `nf-md-format_quote_close` | bus |
+| a bus with value names (an enum) | `nf-md-tag_outline` | bus |
+| a bus | `nf-md-reorder_horizontal` | bus |
+
+A group has `nf-md-folder_outline` (`nf-md-folder_open_outline` while open), a scope in the panel `nf-md-chip`.
 
 ### Colours
 

@@ -37,6 +37,8 @@ pub struct Hit {
     pub records: Vec<(usize, usize)>,
     /// The command completions on screen: screen line and item.
     pub completions: Vec<(usize, usize)>,
+    /// The card the completions are in.
+    pub completion_card: Option<Rect>,
     /// The menu, then its second menu: where each was drawn, its items from the line under the
     /// top.
     pub menus: Vec<Rect>,
@@ -512,13 +514,12 @@ impl App {
 
     /// The command line: a click on a completion completes it as `Tab`, a double click runs it;
     /// the wheel moves the highlight; a click elsewhere closes the line.
-    fn line_mouse(&mut self, m: MouseEvent, (_, y): (usize, usize), now: Instant) {
+    fn line_mouse(&mut self, m: MouseEvent, (x, y): (usize, usize), now: Instant) {
         let n = crate::tui::commands::complete(&self.line, self).items.len();
         match m.kind {
-            // the list grows upward: up is the next item
-            MouseEventKind::ScrollUp if n > 0 && self.mode == Mode::Command => self.hl = (self.hl + 1) % n,
-            MouseEventKind::ScrollDown if n > 0 && self.mode == Mode::Command => self.hl = (self.hl + n - 1) % n,
-            MouseEventKind::Down(MouseButton::Left) => match self.hit.completions.iter().find(|(ly, _)| *ly == y) {
+            MouseEventKind::ScrollUp if n > 0 && self.mode == Mode::Command => self.hl = (self.hl + n - 1) % n,
+            MouseEventKind::ScrollDown if n > 0 && self.mode == Mode::Command => self.hl = (self.hl + 1) % n,
+            MouseEventKind::Down(MouseButton::Left) => match self.hit.completions.iter().find(|(ly, _)| *ly == y).filter(|_| inside(self.hit.completion_card, x, y)) {
                 Some(&(_, k)) => {
                     if self.double(Target::Completion(y), now) {
                         return self.command_key(key(KeyCode::Enter, KeyModifiers::NONE));

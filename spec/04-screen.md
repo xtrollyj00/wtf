@@ -85,18 +85,18 @@ the cursor.
 
 ### Normal mode
 
-Only the waveforms, a name column, a value column and the status line. No panels, no borders,
-no lines between the columns.
+Only the waveforms, a name column, a value column and the status line. No panels, no borders;
+a dim line between the columns, as an editor's splits.
 
 ```
-             60ns      80ns      100ns     120ns
-             1─────── 40ns ──────3── 20ns ─2
-                ┌───┐   ┌───┐   ┌───┐   ┌───┐   ┌───
-clk    1     ───┘   └───┘   └───┘   └───┘   └───┘
-             ────────🮦──────────────🮦────────────────
-state  0x4   ─ 0x1 ──🮧──── 0x2 ─────🮧──── 0x4 ──────
-             ────────🮦───────🮦──────🮦────────🮦──────
-data   0x3A  ─ 0x43 ─🮧 0x96 ─🮧 0xE1 🮧── 0x3A ─🮧 0x7F
+Name  │ Value │ 60ns      80ns      100ns     120ns
+      │       │ 1─────── 40ns ──────3── 20ns ─2
+      │       │    ┌───┐   ┌───┐   ┌───┐   ┌───┐   ┌───
+clk   │ 1     │ ───┘   └───┘   └───┘   └───┘   └───┘
+      │       │ ────────🮦──────────────🮦────────────────
+state │ 0x4   │ ─ 0x1 ──🮧──── 0x2 ─────🮧──── 0x4 ──────
+      │       │ ────────🮦───────🮦──────🮦────────🮦──────
+data  │ 0x3A  │ ─ 0x43 ─🮧 0x96 ─🮧 0xE1 🮧── 0x3A ─🮧 0x7F
  NORMAL   signals ▸  cpu.state              120ns  2ns/col  trace.fst
 ```
 
@@ -106,12 +106,15 @@ data   0x3A  ─ 0x43 ─🮧 0x96 ─🮧 0xE1 🮧── 0x3A ─🮧 0x7F
   writes a struct as a module, so there it is the leaf). If two shown signals share a name, enough
   of their scope is added to tell them apart (`cpu.state`, `dma.state`). That scope
   is greyed, so the leaf names stand out.
+  With the `nerd` glyphs an icon before the name (after a `▸`) tells what the row is (section 14, "Icons").
   It is as wide as the longest name, up to a limit. The selected signal's name is bold in the accent colour,
   and both of its lines get a background across the whole width.
 - **Time axis**: the top line shows times at round steps above the waveforms, and the cursor's
   time in the accent colour at its column (kept on screen at the right edge); labels it would
   touch are left out. No grid runs down from them: in the gaps of the waveforms it read as specks.
-- **Columns**: the names, the values and the waveforms, two spaces apart.
+- **Columns**: the names, the values and the waveforms, a dim `│` between them (section 14's
+  glyphs) from the time axis down, with a space on each side. On the time axis' line, dim, the headers `Name`
+  and `Value`; the columns are at least as wide as them.
 - **Value column**: each signal's value at the cursor, so all values can be read at once
   even where a segment is too narrow for its label. Empty for group headers.
 - **Cursor ruler**: a line above the waveforms, shown only when there is more than one cursor (section 9).
@@ -189,14 +192,20 @@ the top right, so several stack and none is missed:
 
 `:` opens the command line at the bottom, in place of the status line, as in Vim, with a badge
 before it (`CMD`; `SEARCH` for `/`) where the screen is 40 columns or wider.
-Above it, a list of matching commands grows upward, each with a one-line description, as in Zed:
-up to ten, scrolled to the highlight, a description cut with `…` where the screen ends.
+Above it, a card lists what can be typed there: titled with what it lists (`command`,
+`protocol`, `signal`), at the word being completed, each item with a short description dim after
+it, the first at the top and highlighted, up to ten, scrolled to the highlight; `Tab accept` in
+its bottom border. With the `nerd` glyphs each item has an icon: a command's own, a protocol's
+plug, a check for an interface found in the trace.
 
 ```
-clk      ▁▁▁▁▔▔▔▔▁▁▁▁▔▔▔▔
-   :<time>          Move the cursor to a time, e.g. :2000ns
- ▌ :q               Quit
-:q_
+         ╭─ protocol ──────────────────────────────────╮╭─ axilite  top.s_axi_ ───────────────╮
+         │▌✓ axilite  top.s_axi_  found here: clock=…  ││ This trace: clock=top.aclk prefix=…  │
+         │   axis                 AXI4-Stream: beats…  ││                                      │
+         │   axilite              AXI4-Lite: write a…  ││ decode <name> axilite clock=<clk>    │
+         │   axi4                 AXI4: write and re…  ││ ...                                  │
+         ╰─────────────────────────────── Tab accept ─╯╰──────────────────────────────────────╯
+ CMD  :decode bus axilite clock=top.aclk prefix=top.s_axi_
 ```
 
 - Typing filters the list by fuzzy match on the command name. Once a command and a space are
@@ -219,15 +228,16 @@ clk      ▁▁▁▁▔▔▔▔▁▁▁▁▔▔▔▔
   | `:decode <name>` | protocols, each with what it makes; first the interfaces found in the trace (section 15, `info`), each with its whole line (`axilite  top.s_axi_  found here: clock=top.aclk prefix=top.s_axi_`) |
   | `:decode <name> <protocol>` | its roles and params, as `role=`; after `prefix=` the prefixes found, after another role a signal path |
 
-- `↑` / `↓` or `Ctrl-p` / `Ctrl-n` move the highlight, `Tab` puts the highlighted item in place of
+- `↓` / `Ctrl-n` move the highlight down to the next item, `↑` / `Ctrl-p` up, `Tab` puts the highlighted item in place of
   the word being typed. On an empty line they go through earlier commands instead.
 - **Ghost text**: with the cursor at the end of the line, what the highlighted item would add
   shows dim after it, then what is still to type: `:zo` shows `om <time>`, `:decode bus ax`
   shows `ilite clock=<clk> prefix=<prefix>`.
-- **Docs**: a card at the right of the list, 90 columns wide or more, says more about the
-  highlighted item: a protocol's roles, params and streams (as the `protocols` tool, section 15),
-  for an interface found in the trace its line first (`This trace: decode s_axi axilite ...`) in
-  green; a command's description where the list cuts it.
+- **Docs**: a card beside the list, where the screen leaves it 40 columns, says more about the
+  highlighted item, briefly: for a protocol its `decode` line, what it makes, its roles and
+  streams, then `Tab takes it.  :help decode has the rest.` dim; for an interface found in the
+  trace its arguments first, in green (`This trace: clock=top.aclk prefix=top.s_axi_`); for a
+  command its description where the list cuts it.
 - Editing works as on Vim's command line: `←` / `→` move the cursor, `Home` / `End` or `Ctrl-b` / `Ctrl-e`
   go to the start / end, `Backspace` / `Delete` remove the character before / under the cursor,
   `Ctrl-w` the word before it and `Ctrl-u` everything before it. The value search line (`/`) edits the same way.

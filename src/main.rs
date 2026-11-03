@@ -506,7 +506,7 @@ mod tests {
         keys(&mut app, ":add gen(0).p gen(1).p\n");
         let screen = snapshot(&mut app, 80, None);
         let line = screen.lines().find(|l| l.starts_with("▸ gen[0]")).unwrap_or_else(|| panic!("{screen}"));
-        assert!(line.starts_with("▸ gen[0].p  0x0 "), "{line}");
+        assert!(line.starts_with("▸ gen[0].p │ 0x0 "), "{line}");
         keys(&mut app, ":rm gen(0).p gen(1).p\n");
         insta::assert_snapshot!("composite_folded", snapshot(&mut app, 80, None));
         // grid opens into its rows, grid[1] into its elements; the selection stays on grid[1]
@@ -535,7 +535,7 @@ mod tests {
                 title: "types.pkt".into(),
                 at: "10ns".into(),
                 lines: [("", "0x101A5"), ("", ""), ("valid", "1"), ("state", "busy"), ("pair", ""), ("  hi", "0xA"), ("  lo", "0x5")].map(|(n, v)| (n.to_string(), v.to_string())).to_vec(),
-                record: false,
+                of: (app.ws.trace.vars.iter().position(|v| v.path == "types.pkt").unwrap(), None),
             })
         );
         keys(&mut app, "e<CR>je");
@@ -1388,6 +1388,7 @@ mod tests {
         // the time axis' menu
         app.run("fit").unwrap();
         screen(&mut app, 100, Some(22));
+        let v = app.ws.view.clone();
         right(&mut app, 50, 0);
         let labels = |app: &App| app.menu.as_ref().unwrap().items.iter().map(|i| i.label.clone()).collect::<Vec<_>>();
         assert_eq!(labels(&app), ["Zoom to fit", "Zoom in", "Zoom out"]);
@@ -1430,6 +1431,7 @@ mod tests {
         assert_eq!(app.ws.marks[1], None);
         // a waveform's menu has the time keys: Next change is w
         screen(&mut app, 100, Some(22));
+        app.ws.view.cursor = 10;
         right(&mut app, 60, 8);
         let k = labels(&app).iter().position(|l| l == "Next change").unwrap();
         keys(&mut app, &format!("{}<CR>", "j".repeat(k + 1)));
@@ -1584,7 +1586,7 @@ mod tests {
         app.run("0ns").unwrap();
         let w = draw::waveform(&mut app.ws, 100);
         let row = w.lines().find(|l| l.starts_with("d ")).unwrap();
-        assert_eq!(row.split('┃').next().unwrap().trim(), "d", "the value column is blank: {w}");
+        assert_eq!(row.split('┃').next().unwrap().replace('│', "").trim(), "d", "the value column is blank: {w}");
     }
 
     #[test]
@@ -2011,13 +2013,17 @@ mod tests {
         let area = Rect::new(0, 0, 100, 30);
         let mut buf = Buffer::empty(area);
         render::draw(&mut app, area, &mut buf);
-        // ten of them, the highlight nearest the line
+        // ten of them in a card over the line, top down, the first highlighted
         assert!(commands::complete("", &app).items.len() > 10);
-        for y in 19..29 {
-            let bg = if y == 28 { draw::pal().selected } else { draw::pal().panel };
-            assert!((0..100).all(|x| buf[(x, y)].bg == bg), "line {y}");
+        let r = app.hit.completion_card.unwrap();
+        assert_eq!((r.y, r.height), (17, 12));
+        for y in r.y + 1..r.y + 11 {
+            let bg = if y == r.y + 1 { draw::pal().selected } else { draw::pal().panel };
+            assert!((r.x + 1..r.right() - 1).all(|x| buf[(x, y)].bg == bg), "line {y}");
         }
-        assert!(buf[(0, 18)].bg != draw::pal().panel);
+        // Ctrl-n (Down) goes to the next, Ctrl-p (Up) back (on an empty line, the history)
+        keys(&mut app, "e<C-n><C-n><C-p>");
+        assert_eq!(app.hl, 1);
         keys(&mut app, "\x1b");
         assert!(app.mode == app::Mode::Normal);
     }
@@ -2100,7 +2106,7 @@ mod tests {
         keys(&mut app, ":decode bus axilite clock=aclk prefix=s_axi_\n:add bus.rd\n:fit\nw<CR>");
         let screen = snapshot(&mut app, 100, Some(14));
         let delay = screen.lines().find(|l| l.trim_start().starts_with("rd.delay")).unwrap_or_else(|| panic!("{screen}"));
-        assert!(delay.split_whitespace().nth(1).is_some_and(|v| v.ends_with("ns")), "{screen}");
+        assert!(delay.split_whitespace().nth(2).is_some_and(|v| v.ends_with("ns")), "{screen}");
     }
 
     #[test]

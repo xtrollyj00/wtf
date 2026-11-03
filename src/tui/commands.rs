@@ -255,6 +255,24 @@ fn arguments(c: &Command, line: &str, app: &crate::tui::app::App) -> Completion 
     Completion { what, start, items }
 }
 
+/// The icon before a completion (spec §14 `nerd`): a command's own, a protocol's plug, an
+/// interface found in the trace a check.
+pub fn item_icon(what: &str, it: &Item) -> char {
+    use crate::draw::icon as ic;
+    match what {
+        "command" => self::icon(&it.text),
+        "protocol" if it.desc.starts_with("found here") => ic::OK,
+        "protocol" => ic::PLUG,
+        "signal" | "role" => ic::WIRE,
+        "stream" => ic::STREAM,
+        "mark" => ic::MARK,
+        "agent" => ic::AGENT,
+        "file" => ic::FILE,
+        "scope" | "row" => ic::FOLDER,
+        _ => ic::CMD,
+    }
+}
+
 /// Files and directories starting with what is typed, for `:w`: the session files (`.toml`) and
 /// directories to go into.
 fn files(word: &str) -> Vec<Item> {
@@ -293,13 +311,13 @@ fn protocols(word: &str, ws: &wtf_core::workspace::Workspace) -> Vec<Item> {
     let names: Vec<&str> = protocol::BUILTINS.iter().copied().chain(protocol::ON_STREAMS.iter().map(|g| g.0)).chain(ws.protocols.iter().map(|p| p.name.as_str())).collect();
     let (mut items, mut rest) = (Vec::new(), Vec::new());
     for n in fuzzy(word, names) {
-        let doc = protocol::describe(n, &ws.protocols).unwrap_or_default();
+        let doc = protocol::brief(n, &ws.protocols).unwrap_or_default() + "\n\nTab takes it.  :help decode has the rest.";
         for f in found.iter().filter(|f| f.protocol == n) {
             // the line `decode_line` gives, from the protocol on
             let line = f.decode_line();
             let args = line.splitn(3, ' ').nth(2).unwrap_or("").to_string();
             let rest = args.strip_prefix(n).unwrap_or(&args).trim();
-            items.push(Item { label: format!("{n}  {}", f.prefix), desc: format!("found here: {rest}"), text: format!("{args} "), then: String::new(), doc: format!("This trace: {line}\n\n{doc}") });
+            items.push(Item { label: format!("{n}  {}", f.prefix), desc: format!("found here: {rest}"), text: format!("{args} "), then: String::new(), doc: format!("This trace: {rest}\n\n{doc}") });
         }
         let then = match protocol::builtin(n) {
             Some(b) if b.clocked => "clock=<clk> prefix=<prefix>",
@@ -359,7 +377,7 @@ mod tests {
         assert_eq!(c.what, "protocol");
         assert!(c.items[0].text.starts_with("axilite clock="), "{}", c.items[0].text);
         assert!(complete("decode bus ax", &app).items[0].text.starts_with("axilite clock="));
-        assert!(c.items[0].doc.contains("This trace: decode"));
+        assert!(c.items[0].doc.starts_with("This trace: clock="), "{}", c.items[0].doc);
         assert_eq!(c.take("decode bus axil", 1).unwrap(), "decode bus axilite ");
         assert_eq!(c.ghost("decode bus axil", 1), "ite clock=<clk> prefix=<prefix>");
         assert_eq!(complete("decode bus axilite awv", &app).items[0].text, "awvalid=");

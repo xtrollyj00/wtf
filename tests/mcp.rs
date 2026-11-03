@@ -249,7 +249,7 @@ fn struct_fields() {
     let view = s.ok("workspace", json!({"rows": [{"signal": "pkt", "open": ["pkt", "pkt.pair"], "fields": ["pkt.pair.hi:dec:red", "pkt.state:green"]}]}));
     assert!(view.contains("pkt  types.pkt  hex  (open: pkt, pkt.pair)  (fields: pkt.pair.hi:dec:red, pkt.state:enum:green)"), "{view}");
     let r = s.ok("render", json!({"width": 60}));
-    assert!(r.contains("    hi    0     ┃──── 0 ──────🮧──────────── 10 ─"), "the field in dec, lo in hex: {r}");
+    assert!(r.contains("    hi   │ 0     │ ┃──── 0 ─────🮧─────────── 10 ─"), "the field in dec, lo in hex: {r}");
 }
 
 /// Enum names from the file (spec §10): tests/data/enum.fst, as in core/tests/enums.rs.
@@ -512,7 +512,7 @@ fn workspaces_and_joining() {
     // a window on the trace follows the agent working on it (spec §15 "Following")
     let shot = |trace: &Path, keys: &str| String::from_utf8(wtf(&dir.0).arg(trace).args(["--snapshot", "120", "--keys", keys]).output().unwrap().stdout).unwrap();
     let followed = shot(&simple(), ":follow<CR>");
-    assert!(followed.contains("data  0xXX") && followed.contains("1─────────── 30ns ────────────2") && followed.contains(&format!("following {pid}-1")), "{followed}");
+    assert!(followed.contains("data │ 0xXX") && followed.contains("1─────────── 30ns ────────────2") && followed.contains(&format!("following {pid}-1")), "{followed}");
     assert!(shot(&fst, ":follow<CR>").contains("busy"));
     assert!(shot(&simple(), ":follow<CR>:follow<CR>").contains(&format!("following {pid}-1")));
     let err = shot(&simple(), &format!(":follow {pid}-2<CR>"));

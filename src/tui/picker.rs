@@ -561,15 +561,13 @@ fn source_icon(i: usize) -> char {
     [icon::WIRE, icon::MARK, icon::RECORD, icon::CMD, icon::EYE, icon::TRAIL].get(i).copied().unwrap_or(icon::SEARCH)
 }
 
-/// An entry's icon and its colour by what it is: a wire, a bus, a stream, a mark, a record, a
+/// An entry's icon and its colour by what it is: a signal's kind (`draw::kind`), a mark, a record, a
 /// command, an agent, a step. None without the `nerd` glyphs.
 fn kind_icon(ws: &wtf_core::workspace::Workspace, act: &Act) -> Option<(char, ratatui::style::Color)> {
     use crate::draw::icon;
     let p = pal();
     let (c, col) = match act {
-        Act::Var(v) if ws.stream_of(*v).is_some() => (icon::STREAM, p.hues[1]),
-        Act::Var(v) if ws.trace.vars[*v].width == Some(1) => (icon::WIRE, p.hues[4]),
-        Act::Var(_) => ('\u{ea8a}', p.bus),
+        Act::Var(v) => return draw::kind(ws, *v, None),
         Act::Mark(0) => (icon::CLOCK, p.hues[4]),
         Act::Mark(_) => (icon::MARK, p.bus),
         Act::Record(_) => (icon::RECORD, p.hues[1]),

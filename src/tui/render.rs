@@ -88,8 +88,11 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
             true => vec![(v.clone(), Style::new())],
             false => vec![(format!("{n:<nw$}  "), name), (v.clone(), Style::new())],
         }).collect();
-        let ic = if ex.record { draw::icon::STREAM } else { draw::icon::WIRE };
-        app.hit.boxed = boxed(buf, w, body, &float_title(ic, &ex.title), &format!("{}{}", icon_text(draw::icon::CLOCK), ex.at), &lines, "e Esc close", &mut app.scroll, y.map(|y| (x, y)));
+        let title = match draw::kind(&app.ws, ex.of.0, ex.of.1) {
+            Some((c, col)) => vec![(format!("{c} "), Style::new().fg(col)), (ex.title.clone(), Style::new().fg(pal().cursor).add_modifier(Modifier::BOLD))],
+            None => float_title(' ', &ex.title),
+        };
+        app.hit.boxed = boxed(buf, w, body, &title, &format!("{}{}", icon_text(draw::icon::CLOCK), ex.at), &lines, "e Esc close", &mut app.scroll, y.map(|y| (x, y)));
     }
     if let Some(r) = &mut app.records {
         // the title line and a blank, then as many lines as fit; records scroll to show the
@@ -201,7 +204,13 @@ fn panel(app: &mut App, buf: &mut Buffer, pw: usize, body: usize) -> Option<(u16
             Some(v) if app.panel.marked.contains(&v) => " +".into(),
             _ => String::new(),
         };
-        let text = format!("{}{mark} {}{whole}", " ".repeat(2 * n.depth), n.name);
+        // with the `nerd` glyphs, a scope's chip or the signal's kind after the mark
+        let kind = match n.var {
+            None => draw::icon(draw::icon::SCOPE).map(|c| (c, pal().dim)),
+            Some(v) => draw::kind(&app.ws, v, None),
+        };
+        let ic = kind.map_or(String::new(), |(c, _)| format!("{c} "));
+        let text = format!("{}{mark} {ic}{}{whole}", " ".repeat(2 * n.depth), n.name);
         // too long: keep the end, where the leaf name is
         let len = text.chars().count();
         let text = if len > inner - 1 { format!("{}{}", gl().cut, text.chars().skip(len + 2 - inner).collect::<String>()) } else { text };
@@ -213,6 +222,9 @@ fn panel(app: &mut App, buf: &mut Buffer, pw: usize, body: usize) -> Option<(u16
         };
         let st = if range.contains(&i) { st.bg(pal().selected) } else { st };
         put(buf, 1, y, &format!(" {text:<w$}", w = inner - 1), st);
+        if let Some((c, col)) = kind.filter(|_| len < inner) {
+            put(buf, 4 + 2 * n.depth, y, &c.to_string(), st.fg(col));
+        }
     }
     let q = app.panel.query.as_ref()?;
     Some(((3 + q.chars().count()).min(pw - 2) as u16, 1))
@@ -987,33 +999,54 @@ fn command_line(app: &mut App, buf: &mut Buffer, w: usize, h: usize) -> Option<(
         let x = bw + line.chars().count();
         put(buf, x, y, &c.ghost(&app.line, app.hl).chars().take(w.saturating_sub(x)).collect::<String>(), Style::new().fg(pal().dim));
     }
-    // up to ten, scrolled to the highlight; the labels in a column up to 40% of the width (a
-    // longer one is cut: the description says it again), the descriptions dim after them
-    let shown = items.len().min(10).min(y);
-    let first = app.hl.saturating_sub(shown.saturating_sub(1));
-    // the highlighted item's docs in a card at the right, where it leaves the list 40 columns
-    let label_w = |lw: usize| items.iter().map(|c| c.label.chars().count()).max().unwrap_or(0).min(lw * 2 / 5).max(4);
-    let doc = match items.get(app.hl) {
-        Some(it) if !it.doc.is_empty() => it.doc.as_str(),
-        Some(it) if 3 + label_w(w) + 3 + it.desc.chars().count() > w => it.desc.as_str(),
-        _ => "",
-    };
-    let dw = if doc.is_empty() || w < 90 { 0 } else { (w * 2 / 5).clamp(44, 76) };
-    let lw = w - dw;
-    let uw = label_w(lw);
-    let cut = |s: &str, n: usize| if s.chars().count() > n { s.chars().take(n.saturating_sub(1)).chain([gl().cut]).collect() } else { s.to_string() };
-    for (k, c) in items.iter().enumerate().skip(first).take(shown) {
-        let ly = y - 1 - (k - first);
-        app.hit.completions.push((ly, k));
-        // opaque: the cursor column and the selection must not show through
-        let st = Style::new().bg(if k == app.hl { pal().selected } else { pal().panel }).fg(Color::Reset);
-        let mark = if k == app.hl { format!(" {} ", gl().hl) } else { "   ".to_string() };
-        put(buf, 0, ly, &format!("{mark:<lw$}"), st);
-        put(buf, 3, ly, &cut(&c.label, uw), if k == app.hl { st.add_modifier(Modifier::BOLD) } else { st });
-        put(buf, 3 + uw + 2, ly, &cut(&c.desc, lw.saturating_sub(3 + uw + 3)), st.fg(pal().dim));
+    // a card over the line at the word being completed, up to ten, scrolled to the highlight: each
+    // label, its description dim after it; the docs of the highlighted one in a card beside it
+    let shown = items.len().min(10).min(y.saturating_sub(2));
+    if shown == 0 {
+        return Some(((bw + 1 + app.cursor()).min(w.saturating_sub(1)) as u16, y as u16));
     }
-    if dw > 0 && shown > 0 {
-        let it = &items[app.hl];
+    let first = app.hl.saturating_sub(shown - 1);
+    let cut = |s: &str, n: usize| if s.chars().count() > n { s.chars().take(n.saturating_sub(1)).chain([gl().cut]).collect() } else { s.to_string() };
+    let what = comp.as_ref().map_or("", |c| c.what);
+    let ix = if gl().icons { 2 } else { 0 };
+    let uw = items.iter().map(|c| c.label.chars().count()).max().unwrap_or(0).min(36);
+    let dw0 = items.iter().map(|c| c.desc.chars().count()).max().unwrap_or(0).min(26);
+    // as wide as it needs, the descriptions cut at 26; half the screen at most, the docs beside it
+    let lw = (2 + ix + uw + if dw0 > 0 { 2 + dw0 } else { 0 } + 3).max(what.chars().count() + 18).min((w / 2).max(40)).min(w);
+    let start = comp.as_ref().map_or(0, |c| c.start);
+    let lx = (bw + 1 + start).saturating_sub(3).min(w - lw);
+    let bh = shown + 2;
+    let ly0 = y - bh;
+    let r = Rect::new(lx as u16, ly0 as u16, lw as u16, bh as u16);
+    let acc = Style::new().fg(pal().cursor).add_modifier(Modifier::BOLD);
+    card_frame(buf, r, pal().dim, &[(what.to_string(), acc)], "", "Tab accept");
+    app.hit.completion_card = Some(r);
+    let st = card_style();
+    for (k, c) in items.iter().enumerate().skip(first).take(shown) {
+        // top down under the title, as a menu reads
+        let ly = ly0 + 1 + (k - first);
+        app.hit.completions.push((ly, k));
+        let row = if k == app.hl { st.bg(pal().selected) } else { st };
+        put(buf, lx + 1, ly, &" ".repeat(lw - 2), row);
+        if k == app.hl {
+            put(buf, lx + 1, ly, &gl().hl.to_string(), row.fg(pal().cursor));
+        }
+        if let Some(ic) = draw::icon(crate::tui::commands::item_icon(what, c)) {
+            put(buf, lx + 2, ly, &ic.to_string(), row.fg(pal().hues[5]));
+        }
+        let x = lx + 2 + ix;
+        put(buf, x, ly, &cut(&c.label, uw), if k == app.hl { row.add_modifier(Modifier::BOLD) } else { row });
+        put(buf, x + uw + 2, ly, &cut(&c.desc, (lx + lw).saturating_sub(x + uw + 4)), row.fg(pal().dim));
+    }
+    // the docs: what the highlighted item is, where the screen leaves it 40 columns
+    let it = &items[app.hl.min(items.len() - 1)];
+    let doc = match it.doc.as_str() {
+        "" if 2 + ix + uw + 2 + it.desc.chars().count() + 3 > lw => it.desc.as_str(),
+        d => d,
+    };
+    let room = w.saturating_sub(lx + lw);
+    if !doc.is_empty() && room >= 40 {
+        let dw = room.min(62);
         let tw = dw - 4;
         // each line of the docs wrapped on its own, keeping its indent
         let mut lines: Vec<String> = Vec::new();
@@ -1022,21 +1055,16 @@ fn command_line(app: &mut App, buf: &mut Buffer, w: usize, h: usize) -> Option<(
             let wrapped = wrap_text(l, tw.saturating_sub(indent).max(8), usize::MAX);
             lines.extend(if wrapped.is_empty() { vec![String::new()] } else { wrapped.into_iter().map(|t| format!("{}{t}", " ".repeat(indent))).collect() });
         }
-        let bh = (lines.len() + 2).min(y);
-        if bh >= 3 {
-            let r = Rect::new(lw as u16, (y - bh) as u16, dw as u16, bh as u16);
-            let what = comp.as_ref().map_or("", |c| c.what);
-            card_frame(buf, r, pal().dim, &[(it.label.clone(), Style::new().fg(pal().cursor).add_modifier(Modifier::BOLD))], what, "Tab takes it");
-            let st = card_style();
-            for (i, l) in lines.iter().take(bh - 2).enumerate() {
-                let found = l.starts_with("This trace:");
-                put(buf, lw + 2, y - bh + 1 + i, &cut(l, tw), if found { st.fg(pal().hues[3]) } else { st });
+        let dh = (lines.len() + 2).min(y);
+        if dh >= 3 {
+            let dx = lx + lw;
+            card_frame(buf, Rect::new(dx as u16, (y - dh) as u16, dw as u16, dh as u16), pal().dim, &[(it.label.clone(), acc)], "", "");
+            for (i, l) in lines.iter().take(dh - 2).enumerate() {
+                let green = l.starts_with("This trace:");
+                let dim = l.starts_with("Tab takes it");
+                put(buf, dx + 2, y - dh + 1 + i, &cut(l, tw), if green { st.fg(pal().hues[3]) } else if dim { st.fg(pal().dim) } else { st });
             }
         }
-    }
-    // without a background, a rule between the list and the waveforms above it
-    if let Some(ry) = y.checked_sub(shown + 1).filter(|_| shown > 0 && pal().mono) {
-        put(buf, 0, ry, &gl().border[4].to_string().repeat(w), Style::new().fg(pal().dim).bg(Color::Reset));
     }
     Some(((bw + 1 + app.cursor()).min(w.saturating_sub(1)) as u16, y as u16))
 }
