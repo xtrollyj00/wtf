@@ -455,3 +455,19 @@ fn spi_last_bit_at_cs() {
     assert_eq!(table(stream(&ws, "s.bit")), [row(20, 50, &["1"])]);
 }
 
+
+#[test]
+fn decodes_of_a_signal() {
+    // a signal's decodes and roles: the clock, one by the prefix, one given apart, a stream taken
+    let mut ws = open("axilite.vcd");
+    ws.add_decode(decode("s", "axilite", "aclk", &[("wdata", "s_axi_wdata")], &[("prefix", "s_axi_")])).unwrap();
+    ws.add_decode(decode("t", "axilite", "aclk", &[], &[("prefix", "s_axi_")])).unwrap();
+    let of = |ws: &Workspace, path: &str| {
+        let v = ws.trace.vars.iter().position(|v| v.path == path).unwrap();
+        ws.decodes_of(v).into_iter().map(|(d, r)| format!("{d} {r}")).collect::<Vec<_>>()
+    };
+    assert_eq!(of(&ws, "top.aclk"), ["s clock", "t clock"]);
+    assert_eq!(of(&ws, "top.s_axi_awvalid"), ["s awvalid", "t awvalid"]);
+    assert_eq!(of(&ws, "top.s_axi_wdata"), ["s wdata", "t wdata"]);
+    assert!(of(&ws, "s.aw").is_empty());
+}

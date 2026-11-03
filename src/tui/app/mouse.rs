@@ -42,6 +42,8 @@ pub struct Hit {
     /// The menu, then its second menu: where each was drawn, its items from the line under the
     /// top.
     pub menus: Vec<Rect>,
+    /// The notification cards on screen, each with its note's time (`Note::at`).
+    pub notes: Vec<(Rect, Instant)>,
     /// Notes to show that no card could (the screen too small, a box over them): the status
     /// line shows the message instead.
     pub unshown: bool,
@@ -165,6 +167,7 @@ impl App {
     /// The mouse at time `now` (double clicks): whatever is on top takes it.
     pub fn mouse_at(&mut self, m: MouseEvent, now: Instant) {
         let at = (m.column as usize, m.row as usize);
+        self.pointer = Some(at);
         if self.menu.is_some() {
             return self.menu_mouse(m, at, now);
         }

@@ -11,6 +11,8 @@ optional; without it wtf uses the defaults.
 ```toml
 glyphs = "box"          # unicode (default), box, ascii, nerd (section 14)
 which_key = 300         # ms keys wait before which-key shows what can follow (section 2); 0 at once
+name_width = 30         # the name column's widest, 4-200 (section 4)
+value_width = 20        # the value column's widest, 5-200 (section 4)
 theme = "light"         # dark, light, or one of the user's (below); default: the one that
                         # suits the terminal's background
 
@@ -190,7 +192,9 @@ cursor     = ["#fabd2f", 214]
 `dark` keeps the terminal's own background and text, so its fixed shades behind cards (`panel`),
 the selected row (`selected`), the marks' tabs on the ruler (`mark`) and the cursor columns
 (`cursor_dim`, `column`) can fall too close to a background they weren't made for. A window (as for the first start) asks the terminal for
-its background colour once at start (OSC 11; most terminals and tmux 3.3+ answer):
+its background and text colours once at start (OSC 11 and 10; most terminals and tmux 3.3+
+answer). The text colour is what the terminal's own text fades from in a notification (section
+4). With the background:
 
 - `dark`'s surfaces are steps from that colour: `panel`, `selected`, `mark` and `cursor_dim`
   0.07, 0.10, 0.12 and 0.14 lighter in OKLab lightness on a dark background, darker on a light

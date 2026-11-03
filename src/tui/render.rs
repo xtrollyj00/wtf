@@ -71,7 +71,8 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
     }
     // under what has the keys, so they don't show around its edges
     let covered = app.help || app.examine.is_some() || app.records.is_some() || app.messages.is_some() || app.menu.is_some() || app.leader.is_some() || app.picker.is_some();
-    let drawn = if covered { 0 } else { notes(app, buf, w, body) };
+    app.hit.notes = if covered { Vec::new() } else { notes(app, buf, w, body) };
+    let drawn = app.hit.notes.len();
     app.hit.unshown = drawn == 0 && !app.shown_notes(std::time::Instant::now()).is_empty();
     if app.help {
         let mut scroll = app.scroll;
@@ -159,7 +160,8 @@ fn panel(app: &mut App, buf: &mut Buffer, pw: usize, body: usize) -> Option<(u16
         for y in 0..body {
             put(buf, 0, y, &" ".repeat(pw), st);
         }
-        put(buf, 2, 0, "signals", st.add_modifier(Modifier::BOLD));
+        // titled as a card is (spec §14)
+        put(buf, 2, 0, &format!("{}signals", icon_text(draw::icon::WIRE)), st.fg(pal().cursor).add_modifier(Modifier::BOLD));
     }
     if !app.panel.marked.is_empty() {
         put(buf, 2, body.saturating_sub(1), &format!(" {} marked ", app.panel.marked.len()), Style::new().fg(pal().cursor));
@@ -454,8 +456,9 @@ fn menu(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
     app.hit.menus = main.into_iter().collect();
     if let (Some(r), Some((p, sub))) = (main, &m.sub) {
         let sw = card_width(&sub.items);
-        // right of the menu, or left where there is no room
-        let x = if r.right() as usize + sw <= w { r.right() as usize } else { (r.x as usize).saturating_sub(sw) };
+        // right of the menu, or left where there is no room; a column apart, which each card
+        // clears beside it
+        let x = if r.right() as usize + 1 + sw <= w { r.right() as usize + 1 } else { (r.x as usize).saturating_sub(sw + 1) };
         if let Some(r) = card(buf, w, body, (x, r.y as usize + p), &sub.items, sub.hl, false) {
             app.hit.menus.push(r);
         }
@@ -464,22 +467,22 @@ fn menu(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
 
 /// The newest messages in the top right, newest first (spec §4 "Notifications"): an agent's
 /// card cyan with its id (a step's tool at the right, what it asked, its answer in green), an
-/// error's red, the user's dim with the word before a `:` as its title; each fades over its last
-/// second.
-/// Returns how many it drew.
-fn notes(app: &App, buf: &mut Buffer, w: usize, body: usize) -> usize {
+/// error's red, the user's dim with the word before a `:` as its title; each fades into the card's
+/// background over its last second.
+/// Returns the cards drawn, each with its note's time.
+fn notes(app: &App, buf: &mut Buffer, w: usize, body: usize) -> Vec<(Rect, std::time::Instant)> {
     use crate::draw::icon;
     let now = std::time::Instant::now();
     let nw = (w * 2 / 5).clamp(24, 49);
     if nw + 2 > w {
-        return 0;
+        return Vec::new();
     }
-    let mut drawn = 0;
+    let mut drawn = Vec::new();
     let x0 = w - nw - 1;
     let mut y = 2.min(body);
     let green = pal().hues[3];
     for n in app.shown_notes(now).into_iter().take(3) {
-        let fading = crate::tui::app::note_life(n.err).saturating_sub(now.duration_since(n.at)) < std::time::Duration::from_secs(1);
+        let f = crate::tui::app::note_fade(n, now);
         // the title (icon, word, colour), the tool at the right, the lines and their colours
         let short = n.text.split_once(": ").filter(|(t, _)| !t.contains(' ') && t.chars().count() <= 16);
         let (ic, word, col, right, body_lines): (char, String, Color, String, Vec<(String, Color)>) = match (&n.step, &n.who) {
@@ -501,9 +504,9 @@ fn notes(app: &App, buf: &mut Buffer, w: usize, body: usize) -> usize {
         if y + bh > body {
             break;
         }
-        drawn += 1;
-        let edge = if fading || (n.who.is_none() && !n.err) { pal().dim } else { col };
-        let tcol = if fading { pal().dim } else { col };
+        drawn.push((Rect::new(x0 as u16, y as u16, nw as u16, bh as u16), n.at));
+        let edge = faded(if n.who.is_none() && !n.err { pal().dim } else { col }, f, false);
+        let tcol = faded(col, f, false);
         let title_st = Style::new().fg(tcol).add_modifier(Modifier::BOLD);
         let mut title = Vec::new();
         if let Some(c) = draw::icon(ic) {
@@ -512,10 +515,19 @@ fn notes(app: &App, buf: &mut Buffer, w: usize, body: usize) -> usize {
         if !word.is_empty() {
             title.push((if title.is_empty() { word } else { format!(" {word}") }, title_st));
         }
-        card_frame(buf, Rect::new(x0 as u16, y as u16, nw as u16, bh as u16), edge, &title, &right, "");
-        let st = card_style();
+        let r = Rect::new(x0 as u16, y as u16, nw as u16, bh as u16);
+        card_frame(buf, r, edge, &title, &right, "");
+        // the card's background fades with its contents, the border and title kept
+        let st = match pal().mono {
+            true => card_style(),
+            false => {
+                let back = faded(pal().panel, f, true);
+                buf.set_style(r, Style::new().bg(back));
+                card_style().bg(back)
+            }
+        };
         for (i, (l, c)) in lines.iter().enumerate() {
-            put(buf, x0 + 2, y + 1 + i, l, st.fg(if fading { pal().dim } else { *c }));
+            put(buf, x0 + 2, y + 1 + i, l, st.fg(faded(*c, f, false)));
         }
         y += bh;
     }
@@ -637,6 +649,26 @@ fn card_frame(buf: &mut Buffer, r: Rect, edge: Color, title: &[(String, Style)],
     }
     if !footer.is_empty() {
         put(buf, (x0 + bw).saturating_sub(footer.chars().count() + 4), y0 + bh - 1, &format!(" {footer} "), st.fg(pal().dim));
+    }
+}
+
+/// `c` faded by `f` (0 none, 1 all) into the screen's background, as a card fades (spec §4
+/// "Notifications"): blended in OKLab where both are `#rrggbb` (the terminal's own as it
+/// answered), eased so it leaves its colour slowly; else it stays until the end. `bg`: `c` is
+/// a background (the card's own fades with its contents, so they go together).
+fn faded(c: Color, f: f32, bg: bool) -> Color {
+    let p = pal();
+    let c = if c == Color::Reset && !bg { p.text } else { c };
+    match (draw::rgb_of(c, bg), draw::rgb_of(p.background, true)) {
+        _ if f <= 0.0 || p.mono => c,
+        (Some(a), Some(z)) => {
+            let (r, g, b) = crate::theme::blend(a, z, (f * f) as f64);
+            Color::Rgb(r, g, b)
+        }
+        // nothing to blend: one step, at the end, rather than a jump while it is read
+        _ if f < 0.85 => c,
+        _ if bg => p.background,
+        _ => p.dim,
     }
 }
 
@@ -783,16 +815,16 @@ fn leader(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
     app.hit.leader = hits;
 }
 
-/// A menu card's width: a column for the highlight, the labels, two spaces, the keys, and a
-/// column of margin on each side.
+/// A menu card's width: the border, a column for the highlight, the labels, two spaces, the
+/// keys, a space and the border.
 fn card_width(items: &[crate::tui::app::Item]) -> usize {
     let lw = items.iter().map(|i| i.label.chars().count()).max().unwrap_or(0);
     let kw = items.iter().map(|i| i.key.chars().count()).max().unwrap_or(0);
-    1 + lw + 2 + kw + 2
+    1 + 1 + lw + 2 + kw + 1 + 1
 }
 
-/// A menu card at `at` (moved left and up to fit with `fit`, else placed as given). Returns
-/// where it was drawn.
+/// A menu card at `at` (moved left and up to fit with `fit`, else placed as given), a card as
+/// the other floats are (spec §14). Returns where it was drawn.
 fn card(buf: &mut Buffer, w: usize, body: usize, at: (usize, usize), items: &[crate::tui::app::Item], hl: Option<usize>, fit: bool) -> Option<Rect> {
     let lw = items.iter().map(|i| i.label.chars().count()).max().unwrap_or(0);
     let kw = items.iter().map(|i| i.key.chars().count()).max().unwrap_or(0);
@@ -802,31 +834,25 @@ fn card(buf: &mut Buffer, w: usize, body: usize, at: (usize, usize), items: &[cr
     }
     let x0 = at.0.min(w - bw);
     let y0 = if fit || at.1 + bh > body { at.1.min(body - bh) } else { at.1 };
-    let st = Style::new().bg(pal().panel).fg(Color::Reset);
-    let dim = st.fg(pal().dim);
-    let b = gl().border;
-    for y in 0..bh {
-        let line = match (pal().mono, y) {
-            (true, 0) => format!("{}{}{}", b[0], b[4].to_string().repeat(bw - 2), b[1]),
-            (true, _) if y == bh - 1 => format!("{}{}{}", b[2], b[4].to_string().repeat(bw - 2), b[3]),
-            (true, _) => format!("{}{}{}", b[5], " ".repeat(bw - 2), b[5]),
-            (false, _) => " ".repeat(bw),
-        };
-        put(buf, x0, y0 + y, &line, if pal().mono { dim } else { st });
-    }
+    let r = Rect::new(x0 as u16, y0 as u16, bw as u16, bh as u16);
+    card_frame(buf, r, pal().dim, &[], "", "");
+    let st = card_style();
     for (k, i) in items.iter().enumerate() {
         let on = hl == Some(k);
-        let row = if on { st.bg(pal().selected).add_modifier(Modifier::BOLD) } else { st };
+        let row = if on { st.bg(pal().selected) } else { st };
+        let y = y0 + 1 + k;
+        put(buf, x0 + 1, y, &" ".repeat(bw - 2), row);
+        if on {
+            put(buf, x0 + 1, y, &gl().hl.to_string(), row.fg(pal().cursor));
+        }
         let label = match i.hue {
             Some(h) => row.fg(pal().hues[h]),
             None => row,
         };
-        let y = y0 + 1 + k;
-        put(buf, x0 + 1, y, &format!("{}{:<lw$}  ", if on { gl().hl } else { ' ' }, i.label), row);
-        put(buf, x0 + 2, y, &i.label, label);
-        put(buf, x0 + 1 + 1 + lw + 2, y, &format!("{:>kw$}", i.key), if on { row } else { dim });
+        put(buf, x0 + 2, y, &i.label, if on { label.add_modifier(Modifier::BOLD) } else { label });
+        put(buf, x0 + 2 + lw + 2, y, &format!("{:>kw$}", i.key), row.fg(pal().dim));
     }
-    Some(Rect::new(x0 as u16, y0 as u16, bw as u16, bh as u16))
+    Some(r)
 }
 
 /// Lines in one style.
@@ -1067,4 +1093,21 @@ fn command_line(app: &mut App, buf: &mut Buffer, w: usize, h: usize) -> Option<(
         }
     }
     Some(((bw + 1 + app.cursor()).min(w.saturating_sub(1)) as u16, y as u16))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fades_to_the_screen() {
+        // light paints its own background: a card's background and text both end on it, together
+        draw::set_palette(crate::theme::builtin("light", true).unwrap());
+        let (panel, back) = (pal().panel, pal().background);
+        assert_eq!((faded(panel, 0.0, true), faded(panel, 1.0, true)), (panel, back));
+        assert_eq!(faded(pal().unknown, 1.0, false), back);
+        let mid = faded(panel, 0.5, true);
+        assert!(mid != panel && mid != back, "{mid:?}");
+        draw::set_palette(crate::theme::builtin("dark", true).unwrap());
+    }
 }

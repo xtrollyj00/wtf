@@ -59,6 +59,8 @@ pub struct App {
     pub messages: Option<usize>,
     /// Notes before this one are dismissed from the corner (`Esc`).
     pub dismissed: usize,
+    /// Where the mouse was last, to hold a notification under it (spec §4 "Notifications").
+    pub pointer: Option<(usize, usize)>,
     /// When the corner was last drawn while a note showed, to draw again as they fade.
     noted: Option<std::time::Instant>,
     /// The last message an agent's joining, leaving or step put there: one replaces only that or
@@ -145,6 +147,15 @@ pub fn note_life(err: bool) -> std::time::Duration {
     std::time::Duration::from_secs(if err { 8 } else { 4 })
 }
 
+/// How far a note has faded, 0 until its last second, 1 when it goes (spec §4 "Notifications").
+pub fn note_fade(n: &Note, now: std::time::Instant) -> f32 {
+    let left = note_life(n.err).saturating_sub(now.duration_since(n.at));
+    (1.0 - left.as_secs_f32() / NOTE_FADE.as_secs_f32()).clamp(0.0, 1.0)
+}
+
+/// The last part of a note's life, over which it fades.
+const NOTE_FADE: std::time::Duration = std::time::Duration::from_secs(1);
+
 /// The messages `:messages` keeps.
 const NOTES: usize = 200;
 
@@ -229,6 +240,7 @@ impl App {
             seen,
             changed: None,
             hit: Hit::default(),
+            pointer: None,
             drag: None,
             held: None,
             click: None,
@@ -895,16 +907,36 @@ impl App {
         self.notes[self.dismissed.min(self.notes.len())..].iter().rev().filter(|n| now.duration_since(n.at) < note_life(n.err)).collect()
     }
 
-    /// The corner while notes show: true every quarter second, to draw them fading and gone.
+    /// The corner while notes show: true every quarter second, to draw them gone, and every 40 ms
+    /// while one fades, so it fades smoothly.
     pub fn note_tick(&mut self, now: std::time::Instant) -> bool {
-        if self.shown_notes(now).is_empty() && self.noted.is_none() {
+        self.hold_notes(now);
+        let shown = self.shown_notes(now);
+        if shown.is_empty() && self.noted.is_none() {
             return false;
         }
-        let due = self.noted.is_none_or(|t| now.duration_since(t) >= std::time::Duration::from_millis(250));
+        let every = if shown.iter().any(|n| note_fade(n, now) > 0.0) { 40 } else { 250 };
+        let due = self.noted.is_none_or(|t| now.duration_since(t) >= std::time::Duration::from_millis(every));
         if due {
             self.noted = (!self.shown_notes(now).is_empty()).then_some(now);
         }
         due
+    }
+
+    /// A notification under the pointer doesn't fade: it is put back to full colour, a second
+    /// before its fade, so it fades once the pointer has left it (spec §4 "Notifications").
+    pub fn hold_notes(&mut self, now: std::time::Instant) {
+        let Some((x, y)) = self.pointer else { return };
+        for (r, at) in &mut self.hit.notes {
+            if !(r.x as usize..r.right() as usize).contains(&x) || !(r.y as usize..r.bottom() as usize).contains(&y) {
+                continue;
+            }
+            let Some(n) = self.notes.iter_mut().find(|n| n.at == *at) else { continue };
+            let held = now.checked_sub(note_life(n.err).saturating_sub(NOTE_FADE + std::time::Duration::from_secs(1)));
+            if let Some(h) = held.filter(|&h| h > n.at) {
+                (n.at, *at) = (h, h);
+            }
+        }
     }
 
     /// The start of a sequence typed so far.

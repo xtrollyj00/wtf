@@ -2,9 +2,9 @@
 source: src/main.rs
 expression: "snapshot(&mut app, 100, None)"
 ---
-Name        │ Value │ 0               50ns             100ns            150ns
-            │       │ ┃    🮣────────────🮦──🮦──────🮢                🮣──🮢
-▸ rx.frame  │       │ ┃    🮡── #0 10B ──🮧──🮧 #2 … 🮠                🮡──🮠
-            │       │ ┃                                  🮣──🮢  🮣───🮢
-▸ rx.errors │       │ ┃                                  🮡──🮠  🮡───🮠
+Name        │ Value      │ 0               50ns             100ns            150ns
+            │            │ ┃    🮣────────────🮦──🮦──────🮢                🮣──🮢
+▸ rx.frame  │            │ ┃    🮡── #0 10B ──🮧──🮧 #2 … 🮠                🮡──🮠
+            │            │ ┃                                  🮣──🮢  🮣───🮢
+▸ rx.errors │            │ ┃                                  🮡──🮠  🮡───🮠
  NORMAL   signals ▸  rx.errors                                                0  3ns/col  axis [+]

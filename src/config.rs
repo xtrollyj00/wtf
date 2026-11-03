@@ -12,6 +12,8 @@ pub struct Config {
     pub keys: Keymap,
     /// How long keys wait before which-key shows what can follow (spec §19).
     pub which_key: std::time::Duration,
+    /// The name and value columns' widest (spec §19 `name_width`, `value_width`).
+    pub columns: (usize, usize),
     pub warnings: Vec<String>,
 }
 
@@ -91,11 +93,12 @@ pub fn parse(text: &str, rgb: bool, themes: &Path, bg: Option<theme::Rgb>) -> Co
         Ok(t) => t,
         Err(e) => {
             warnings.push(format!("config: {}", theme::toml_error(&e, text)));
-            return Config { glyphs: &draw::UNICODE, palette: dark(), keys: Keymap::default(), which_key: WHICH_KEY, warnings };
+            return Config { glyphs: &draw::UNICODE, palette: dark(), keys: Keymap::default(), which_key: WHICH_KEY, columns: draw::COLUMNS, warnings };
         }
     };
     let mut glyphs = &draw::UNICODE;
     let mut which_key = WHICH_KEY;
+    let mut columns = draw::COLUMNS;
     for (key, value) in &table {
         match key.as_str() {
             "glyphs" => match value.as_str().and_then(|s| draw::SETS.iter().find(|(n, _)| *n == s)) {
@@ -106,8 +109,16 @@ pub fn parse(text: &str, rgb: bool, themes: &Path, bg: Option<theme::Rgb>) -> Co
                 Some(n) => which_key = std::time::Duration::from_millis(n as u64),
                 None => warnings.push(format!("config: which_key = {}? (milliseconds, 0-10000)", theme::show(value))),
             },
+            // at least as wide as the column's header
+            "name_width" | "value_width" => {
+                let (min, w) = if key == "name_width" { (4, &mut columns.0) } else { (5, &mut columns.1) };
+                match value.as_integer().filter(|&n| (min..=200).contains(&n)) {
+                    Some(n) => *w = n as usize,
+                    None => warnings.push(format!("config: {key} = {}? (columns, {min}-200)", theme::show(value))),
+                }
+            }
             "theme" | "colors" | "keys" | "leader" => {}
-            _ => warnings.push(format!("config: unknown key {key} (keys: glyphs, theme, which_key, colors, keys, leader)")),
+            _ => warnings.push(format!("config: unknown key {key} (keys: glyphs, theme, which_key, name_width, value_width, colors, keys, leader)")),
         }
     }
     // the theme first, so the single colours override it whatever the order in the file
@@ -142,7 +153,7 @@ pub fn parse(text: &str, rgb: bool, themes: &Path, bg: Option<theme::Rgb>) -> Co
         Some(toml::Value::Table(t)) => keys.set_leader(t, &mut warnings),
         Some(v) => warnings.push(format!("config: leader = {}? (a table of key = [\"what it does\", \":command\"])", theme::show(v))),
     }
-    Config { glyphs, palette, keys, which_key, warnings }
+    Config { glyphs, palette, keys, which_key, columns, warnings }
 }
 
 #[cfg(test)]
@@ -187,6 +198,10 @@ mod tests {
         assert_eq!(c.palette.cursor, Color::Rgb(255, 0, 0));
         assert_eq!(c.palette.panel, Color::Indexed(17));
         assert_eq!(c.palette.hues[0], Color::Rgb(0x5f, 0x87, 0xaf));
+        assert_eq!(parse("name_width = 12\nvalue_width = 40\n", true, Path::new(""), None).columns, (12, 40));
+        // narrower than its header
+        let c = parse("value_width = 3\n", true, Path::new(""), None);
+        assert_eq!((c.columns, c.warnings), (draw::COLUMNS, vec!["config: value_width = 3? (columns, 5-200)".to_string()]));
     }
 
     #[test]
@@ -196,7 +211,7 @@ mod tests {
         assert_eq!(
             c.warnings,
             [
-                "config: unknown key foo (keys: glyphs, theme, which_key, colors, keys, leader)",
+                "config: unknown key foo (keys: glyphs, theme, which_key, name_width, value_width, colors, keys, leader)",
                 "config: glyphs = \"utf8\"? (unicode, box, ascii, nerd)",
                 "config: theme = 3? (dark, light)",
                 "config: unknown key colors.curser (keys: line, bus, fill, unknown, highz, cursor, cursor_text, column, cursor_dim, mark, selected, panel, hatch, dim, background, text, red, orange, yellow, green, cyan, blue, magenta, gray)",

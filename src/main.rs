@@ -66,7 +66,9 @@ fn run(args: Args) -> Result<(), String> {
     use std::io::IsTerminal;
     let window = args.snapshot.is_none() && std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
     // asked once, before anything reads keys: the themes fit their surfaces to it
-    let bg = (window && !no_color()).then(theme::terminal_background).flatten();
+    let (bg, fg) = (window && !no_color()).then(theme::terminal_colors).unwrap_or_default();
+    // what the terminal's own text fades from (spec §4 "Notifications")
+    draw::set_terminal_colors(bg, fg);
     let setup = (args.setup || (window && config::first_start())).then(|| tui::setup::run(no_color(), bg)).flatten();
     if args.setup && args.trace.is_none() {
         return setup.map_or(Ok(()), Err);
@@ -74,6 +76,7 @@ fn run(args: Args) -> Result<(), String> {
     let config = config::load(bg);
     // --glyphs over the config file over unicode (spec §19 "Precedence")
     draw::set_glyphs(args.glyphs.unwrap_or(config.glyphs));
+    draw::set_columns(config.columns);
     let mut warnings = config.warnings;
     warnings.extend(setup);
     let Some(path) = args.trace else {
@@ -1573,6 +1576,26 @@ mod tests {
     }
 
     #[test]
+    fn value_column_width() {
+        // as wide as the widest value the row can show, wherever the cursor is; a longer value
+        // cut with a mark (spec §4 "Value column")
+        let t = trace::Trace::open("tests/data/simple.vcd".as_ref()).unwrap();
+        let mut app = App::new(workspace::Workspace::new(t, "top".into()));
+        app.run("add top.cpu.data").unwrap();
+        app.run("radix bin").unwrap();
+        let row = |app: &mut App| draw::waveform(&mut app.ws, 100).lines().find(|l| l.starts_with("data ")).unwrap().split_inclusive('│').take(2).collect::<String>();
+        app.run("0ns").unwrap();
+        let at0 = row(&mut app);
+        app.run("50ns").unwrap();
+        assert_eq!(at0.chars().count(), row(&mut app).chars().count(), "{at0}");
+        assert!(at0.contains("│ 0bXXXXXXXX │"), "{at0}");
+        draw::set_columns((30, 6));
+        let cut = row(&mut app);
+        draw::set_columns(draw::COLUMNS);
+        assert!(cut.contains("│ 0bZZZ… │"), "{cut}");
+    }
+
+    #[test]
     fn field_all_z() {
         // a record whose field is all z draws it (0xZZ, 45ns - 55ns); before the first record, a gap
         let mut app = open("vcd", None);
@@ -1869,6 +1892,22 @@ mod tests {
         assert_eq!(app.shown_notes(now + Duration::from_secs(5)).len(), 1); // the error stays longer
         assert!(app.shown_notes(now + Duration::from_secs(9)).is_empty());
         assert!(app.note_tick(now) && !app.note_tick(now + Duration::from_millis(100)) && app.note_tick(now + Duration::from_millis(300)));
+        // fading: drawn more often, the colours going into the card's background
+        let fading = now + Duration::from_millis(7500);
+        assert!(app.note_tick(fading) && app.note_tick(fading + Duration::from_millis(50)));
+        let err = app.notes.iter().find(|n| n.err).unwrap();
+        let (a, b) = (app::note_fade(err, now + Duration::from_millis(7200)), app::note_fade(err, now + Duration::from_millis(7800)));
+        assert!(app::note_fade(err, now) == 0.0 && 0.0 < a && a < b && b < 1.0, "{a} {b}");
+        // the pointer over its card holds it at full colour; it fades a second after it leaves
+        let err_at = err.at;
+        let (r, _) = *app.hit.notes.iter().find(|(_, at)| *at == err_at).unwrap();
+        app.pointer = Some((r.x as usize + 2, r.y as usize + 1));
+        let late = now + Duration::from_millis(7600);
+        app.hold_notes(late);
+        let err = app.notes.iter().find(|n| n.err).unwrap();
+        assert_eq!(app::note_fade(err, late), 0.0);
+        assert!(app::note_fade(err, late + Duration::from_millis(1500)) > 0.0);
+        app.pointer = None;
         keys(&mut app, "<Esc>");
         assert!(app.shown_notes(now).is_empty());
         // agents: every one said, with its id, though the status line shows only the last

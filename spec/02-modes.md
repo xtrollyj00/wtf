@@ -204,18 +204,19 @@ A right click opens a menu of what can be done to what is under the pointer, eac
 key or command, so the menu teaches the keys. An item does what its key does.
 
 ```
- pkt          ▸ 0x5A5     ──┌─────────────────────┐
-                            │▌Open           Enter│
- pkts[0]      ▸ 0x000     ──│ Examine            e│
-                            │ Radix              ▸│┌─────────┐
-                            │ Colour             ▸││ hex    ●│
-                            │ Copy value        yy││ bin     │
-                            │ Remove            dd││ dec     │
-                            └─────────────────────┘└─────────┘
+ pkt     │ 0x5A5  │ ──╭────────────────────────╮
+         │        │ ──│▌Open             Enter │
+ pkts[0] │ 0x000  │ ──│ Examine              e │ ╭───────────╮
+         │        │   │ Radix                ▸ │ │ hex     ● │
+         │        │   │ Colour               ▸ │ │ bin       │
+         │        │   │ Copy value          yy │ │ dec       │
+         │        │   │ Remove              dd │ ╰───────────╯
+         │        │   ╰────────────────────────╯
 ```
 
 - It opens with its corner at the pointer, moved left or up to fit the screen. It is a card, as the
-  other boxes (section 14). No item is highlighted until the pointer is over one or `j` / `k`
+  other floats (section 14), the keys dim at its right; a second menu opens a column beside it.
+  No item is highlighted until the pointer is over one or `j` / `k`
   moves.
 - Pointer over an item highlights it; a click runs it and closes the menu. `j` / `k` move, `Enter`
   runs. `Esc`, a click outside or `q` closes it; a right click outside opens the menu there

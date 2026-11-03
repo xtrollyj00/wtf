@@ -148,7 +148,8 @@ pub struct Trace {
     pub by_path: HashMap<String, usize>,
     /// Vars of the file and its composites; computed ones follow them.
     pub fixed: usize,
-    /// Changes whenever computed vars are added or dropped, for views that list vars (the panel).
+    /// Changes whenever computed vars are added, replaced or dropped, for what is worked out from
+    /// them (the panel's list, the value column's width).
     pub version: u64,
     /// Clocks' rising edges by (var, bit), worked out once (`query::edges`): every clocked search
     /// walks them.
@@ -309,6 +310,8 @@ impl Trace {
         match self.by_path.get(path) {
             Some(&i) if matches!(self.vars[i].source, Source::Computed(_)) && !self.is_composite(i) => {
                 self.vars[i] = var;
+                // new values: what was worked out from the old ones is stale
+                self.version += 1;
                 // its edges, if it was a clock, are another signal's now
                 self.edges.get_mut().retain(|k, _| k.0 != i);
                 Ok(i)

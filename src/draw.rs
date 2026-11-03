@@ -12,8 +12,8 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 
-pub const MAX_NAME: usize = 30;
-pub const MAX_VALUE: usize = 20;
+/// The name and value columns' widest, without `name_width` / `value_width` in the config file.
+pub const COLUMNS: (usize, usize) = (30, 20);
 
 pub struct Palette {
     /// 1-bit lines and edges.
@@ -87,6 +87,24 @@ pub fn set_palette(p: Palette) {
 /// For a screen that switches palettes as it draws (the first start's samples).
 pub fn set_palette_ref(p: &'static Palette) {
     PALETTE.with(|c| c.set(Some(p)));
+}
+
+type Rgb = (u8, u8, u8);
+static TERMINAL: std::sync::OnceLock<(Option<Rgb>, Option<Rgb>)> = std::sync::OnceLock::new();
+
+/// The terminal's background and text colours, as far as it answered: a theme's `"default"`
+/// is these (spec §19 "The terminal's background").
+pub fn set_terminal_colors(bg: Option<Rgb>, fg: Option<Rgb>) {
+    let _ = TERMINAL.set((bg, fg));
+}
+
+/// `c` as `#rrggbb`: its own, or the terminal's for `Reset` (`bg` for a background), if known.
+pub fn rgb_of(c: Color, bg: bool) -> Option<Rgb> {
+    match c {
+        Color::Rgb(r, g, b) => Some((r, g, b)),
+        Color::Reset => TERMINAL.get().and_then(|t| if bg { t.0 } else { t.1 }),
+        _ => None,
+    }
 }
 
 pub fn pal() -> &'static Palette {
@@ -314,6 +332,45 @@ pub fn set_glyphs(g: &'static Glyphs) {
 
 pub fn gl() -> &'static Glyphs {
     GLYPHS.with(|c| c.get())
+}
+
+thread_local! {
+    static COLUMN_MAX: std::cell::Cell<(usize, usize)> = const { std::cell::Cell::new(COLUMNS) };
+    /// A line's widest value, by (trace version, var, radix, frac): a scan of its values is done once.
+    static WIDEST: std::cell::RefCell<std::collections::HashMap<(u64, usize, usize, u32), usize>> = Default::default();
+}
+
+/// The name and value columns' widest (spec §19).
+pub fn set_columns(c: (usize, usize)) {
+    COLUMN_MAX.with(|x| x.set(c));
+}
+
+/// The widest value a line can show (spec §4 "Value column"), so the column keeps its width as
+/// the cursor moves: a bit vector's from its width and radix, anything else (records, text,
+/// reals, times) from its values, scanned once.
+fn widest(ws: &Workspace, var: usize, bit: Option<u32>, row: &Sig) -> usize {
+    let (t, v) = (&ws.trace, &ws.trace.vars[var]);
+    if bit.is_some() {
+        return 1;
+    }
+    let stream = ws.stream_of(var);
+    if let (None, Some(w), false, None) = (stream, v.width, v.real, v.time) {
+        let w = w as usize;
+        let bits = |b: String| label(t, None, row, &Val::Bits(b)).chars().count();
+        // all ones the most digits, a one and zeros the most negative
+        let names = v.names.iter().flat_map(|n| n.iter()).map(|(_, n)| n.chars().count()).max().unwrap_or(0);
+        return bits("1".repeat(w)).max(bits(format!("1{}", "0".repeat(w - 1)))).max(names);
+    }
+    let key = (t.version, var, row.look.radix, row.look.frac);
+    if let Some(n) = WIDEST.with(|c| c.borrow().get(&key).copied()) {
+        return n;
+    }
+    let n = match stream {
+        Some(s) => (0..s.records.len()).map(|i| s.label(i, t.fs_per_tick).chars().count()).max().unwrap_or(0),
+        None => std::iter::once(t.value_at(var, t.start())).chain(t.walk(var, None, t.start(), true).map(|(_, v)| v)).flatten().map(|v| label(t, None, row, &v).chars().count()).max().unwrap_or(0),
+    };
+    WIDEST.with(|c| c.borrow_mut().insert(key, n));
+    n
 }
 
 pub fn red() -> Style {
@@ -573,16 +630,14 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
         })
         .collect();
     let width = |v: &[String], max| v.iter().map(|s| s.chars().count()).max().unwrap_or(0).min(max);
-    // hidden rows count too, so collapsing a group doesn't shift the waveforms
-    let hidden: Vec<String> = ws
-        .rows
-        .iter()
-        .filter_map(|r| r.sig())
-        .filter_map(|s| ws.trace.value_at(s.var, ws.view.cursor).filter(|_| !gap(&ws.trace, field_of(s.var), ws.view.cursor)).map(|v| label(&ws.trace, ws.stream_of(s.var), s, &v)))
-        .collect();
+    // the widest each line and row can show, hidden rows too, so neither the cursor moving nor a
+    // group collapsing shifts the waveforms (spec §4 "Value column")
+    let lines_widest = lines.iter().zip(&shows).filter_map(|(&(i, _), l)| Some(widest(ws, l.as_ref()?.var, l.as_ref()?.bit, &line_sig(ws, ws.rows[i].sig()?, l.as_ref()?.var))));
+    let rows_widest = ws.rows.iter().filter_map(Row::sig).map(|s| widest(ws, s.var, None, s));
+    let (max_name, max_value) = COLUMN_MAX.with(|c| c.get());
     // at least as wide as the headers on the time axis' line
-    let nw = width(&names, MAX_NAME).max(width(&row_names, MAX_NAME)).max(NAME_HEAD.len());
-    let vw = width(&values, MAX_VALUE).max(width(&hidden, MAX_VALUE)).max(VALUE_HEAD.len());
+    let nw = width(&names, max_name).max(width(&row_names, max_name)).max(NAME_HEAD.len());
+    let vw = lines_widest.chain(rows_widest).max().unwrap_or(0).min(max_value).max(VALUE_HEAD.len());
     // name, value, wave, a dim line in the gap of three between them (spec §4)
     let (vx, wx) = (nw + 3, nw + 3 + vw + 3);
     ws.view.set_width(w.saturating_sub(wx) as u64);
@@ -652,7 +707,11 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
         if let Some((at, c, col)) = icons[l].filter(|ic| ic.0 < nw) {
             put(buf, at, yb, &c.to_string(), Style::new().fg(col));
         }
-        let value: String = values[l].chars().take(vw).collect();
+        // cut with a mark, so a cut value isn't read as a whole one; `e` shows it whole
+        let value: String = match values[l].chars().count() > vw {
+            true => values[l].chars().take(vw - 1).chain([gl().cut]).collect(),
+            false => values[l].clone(),
+        };
         put(buf, vx, yb, &value, value_styles[l]);
         let cells = match &ws.rows[i] {
             Row::Signal(_) if shows[l].is_none() => Vec::new(),

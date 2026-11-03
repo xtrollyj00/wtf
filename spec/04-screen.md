@@ -109,7 +109,7 @@ data  │ 0x3A  │ ─ 0x43 ─🮧 0x96 ─🮧 0xE1 🮧── 0x3A ─🮧 0
   of their scope is added to tell them apart (`cpu.state`, `dma.state`). That scope
   is greyed, so the leaf names stand out.
   With the `nerd` glyphs an icon before the name (after a `▸`) tells what the row is (section 14, "Icons").
-  It is as wide as the longest name, up to a limit. The selected signal's name is bold in the accent colour,
+  It is as wide as the longest name, up to `name_width` (30, section 19). The selected signal's name is bold in the accent colour,
   and both of its lines get a background across the whole width.
 - **Time axis**: the top line shows times at round steps above the waveforms, and the cursor's
   time in the accent colour at its column (kept on screen at the right edge); labels it would
@@ -118,7 +118,11 @@ data  │ 0x3A  │ ─ 0x43 ─🮧 0x96 ─🮧 0xE1 🮧── 0x3A ─🮧 0
   glyphs) from the time axis down, with a space on each side. On the time axis' line, dim, the headers `Name`
   and `Value`; the columns are at least as wide as them.
 - **Value column**: each signal's value at the cursor, so all values can be read at once
-  even where a segment is too narrow for its label. Empty for group headers.
+  even where a segment is too narrow for its label. Empty for group headers. It is as wide as
+  the widest value its rows can show anywhere in the trace (a bit vector's from its width and
+  radix, `0xFFFF`; records, text, reals and times from their values), hidden rows too, up to
+  `value_width` (20, section 19): moving the cursor never shifts the waveforms. A longer value
+  is cut with `…`; `e` shows it whole.
 - **Cursor ruler**: a line above the waveforms, shown only when there is more than one cursor (section 9).
 - **Cursor and marks**: columns down to the last row. The cursor's column is tinted warm, so the
   waveform under it stays as it is; the marks' columns are a fainter, neutral tint. Without colour
@@ -178,8 +182,12 @@ the top right, so several stack and none is missed:
 - An error's border is red with `error` in it. An agent's step is cyan, with the agent's id as
   the title and the tool at the right: what it asked, then its answer in green. The user's own
   is dim; a message `word: rest` (`copied: 0x96`) has `word` as its title.
-- A card shows 4 seconds, an error 8, and fades (all of it dim) over its last second. `Esc` in
-  Normal mode clears them.
+- A card shows 4 seconds, an error 8, and fades over its last second: its background, border, title and
+  text blend together into the screen's background in OKLab, so equal steps look equal, slowly at first, drawn
+  every 40 ms meanwhile; the terminal's own text from the colour it answered (section 19). The
+  pointer over a card holds it at full colour; it fades a second after the pointer leaves. A
+  colour with nothing to blend (a 256-colour theme, a terminal that didn't answer) stays until
+  the fade's end, then goes dim, never jumping while the card is read. `Esc` in Normal mode clears them.
 - They hide under a box, a menu, the leader menu and the picker, which have the keys. When no
   card can show (under a box, or a screen too small), the status line shows the message instead,
   red for an error.

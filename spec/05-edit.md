@@ -124,7 +124,7 @@ border, the current one highlighted.
 
 | Source | Entries | Preview | `Enter` |
 |---|---|---|---|
-| `signals` | every signal by full path, computed ones and streams too; `●` shown, `+` marked | its width, its value at the cursor and its waveform around the cursor, drawn as the rows draw it | adds the marked signals, or the highlighted one, below the selected row as the signal panel's `Enter` does; a shown signal is not added twice |
+| `signals` | every signal by full path, computed ones and streams too; `●` shown, `+` marked | its width, the decodes it is in, under a dim `decodes` heading, a line each with the decode, its protocol and the signal's role there (`bus  axilite  awvalid`: its records may be what is wanted), its value at the cursor and its waveform around the cursor, drawn as the rows draw it | adds the marked signals, or the highlighted one, below the selected row as the signal panel's `Enter` does; a shown signal is not added twice |
 | `marks` | the cursor and each mark, with its name and time | its name, time and note | jumps to it, as `'n` |
 | `records` | a stream's records, `#n` and every field; every stream's, in time order and named by their stream (`bus.rd #3`), unless one is named or selected | its start, end and fields | jumps to its start and selects the stream's row, as `:records` |
 | `commands` | the `:` commands | the usage and what it does | puts it on the command line, to finish and run |

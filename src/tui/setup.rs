@@ -175,12 +175,14 @@ impl Setup {
             draw::rows(&mut self.ws, &mut 0, false, &mut Buffer::empty(full), sw, 1 + SAMPLE_LINES);
             command::run(&mut self.ws, "fit").ok();
             let mut s = Buffer::empty(full);
-            draw::rows(&mut self.ws, &mut 0, false, &mut s, sw, 1 + SAMPLE_LINES);
+            let nw = draw::rows(&mut self.ws, &mut 0, false, &mut s, sw, 1 + SAMPLE_LINES).name_w;
             draw::fill_screen(&mut s);
             draw::set_glyphs(self.glyphs());
             draw::set_palette_ref(self.base);
+            // the samples' column lines one under another: a set with icons has wider names
+            let sx = (x + label + 2).saturating_sub(nw.saturating_sub(4));
             for (dy, dx) in (0..SAMPLE_LINES).flat_map(|dy| (0..sw).map(move |dx| (dy, dx))) {
-                if let Some(cell) = buf.cell_mut((area.x + (x + label + dx) as u16, area.y + (y + dy) as u16)) {
+                if let Some(cell) = buf.cell_mut((area.x + (sx + dx) as u16, area.y + (y + dy) as u16)) {
                     *cell = s[(dx as u16, 1 + dy as u16)].clone();
                 }
             }

@@ -82,7 +82,7 @@ Each set keeps every distinction the others make, so a drawing reads the same in
 | what a drag adds (section 5) | `+ 3` | as `unicode` | `+ 3` |
 | between the name, value and waveform columns (dim) | `│` | as `unicode` | `\|` |
 | panel and help borders (without colour) | `┌─┐│└┘` | as `unicode` | `+-+\|++` |
-| cards (which-key, leader, picker, notifications, the `e` and `?` floats), what a key leads to | `╭─╮│╰╯`, `→` | as `unicode` | `+-+\|++`, `>` |
+| cards (which-key, leader, picker, notifications, the `e` and `?` floats, the right click's menus), what a key leads to | `╭─╮│╰╯`, `→` | as `unicode` | `+-+\|++`, `>` |
 | in text (`help · keys`, `65ns–85ns`) | `·`, `–` | as `unicode` | `-`, `-` |
 
 - In `ascii`, an edge and a bus crossing are both `+` on both lines: a 1-bit signal has one line
@@ -128,7 +128,7 @@ A group has `nf-md-folder_outline` (`nf-md-folder_open_outline` while open), a s
   and its labels; X, Z and violations keep their own colours, and the name column keeps its own.
   A field without one takes its row's. Set with `:color` (section 7) or the menu, saved in the
   session (section 11).
-- **Floats over the waveforms** (the `?` and `e` floats, records, which-key, the leader menu,
+- **Floats over the waveforms** (the `?` and `e` floats, records, the right click's menus, which-key, the leader menu,
   the picker, notifications, the command line's docs) are cards: a background of their own
   (`panel`), a rounded dim border with the title in the accent set in its top line and the keys
   that close it in its bottom line, a column cleared on each side so no stub of a waveform is

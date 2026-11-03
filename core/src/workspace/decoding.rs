@@ -157,6 +157,26 @@ impl Workspace {
         out
     }
 
+    /// The decodes a var is in, each with the role it plays there (spec §5 "Picker"): their
+    /// clock, a role given it, or one their prefix gives it, or the stream a decoder takes.
+    pub fn decodes_of(&self, var: usize) -> Vec<(&str, String)> {
+        let path = &self.trace.vars[var].path;
+        let role = |d: &Decode| {
+            if d.clock == *path {
+                return Some("clock".to_string());
+            }
+            if let Some((r, _)) = d.signals.iter().find(|(_, s)| s == path) {
+                return Some(r.clone());
+            }
+            // kept as the full path's prefix (`add_decode`); a role given apart wins
+            let b = protocol::builtin(&d.protocol)?;
+            let prefix = &d.params.iter().find(|p| p.0 == "prefix")?.1;
+            let r = path.strip_prefix(prefix.as_str())?;
+            (b.required.iter().chain(b.optional).any(|x| *x == r) && !d.signals.iter().any(|(x, _)| x == r)).then(|| r.to_string())
+        };
+        self.decodes.iter().filter_map(|d| Some((d.name.as_str(), role(d)?))).collect()
+    }
+
     /// The full path of a signal named as in a search.
     fn full_path(&mut self, name: &str) -> Result<String, String> {
         self.resolve(name).map(|p| self.trace.probe_path(p))

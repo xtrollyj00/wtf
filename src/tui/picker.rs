@@ -519,6 +519,27 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
         _ => "text".into(),
     };
     line(buf, &mut y, &what, dim);
+    // already decoded: its records may be what is wanted rather than the signal (spec §5); a
+    // table of decode, protocol and role under a dim heading
+    let decodes: Vec<(&str, &str, String)> = ws.decodes_of(v).into_iter().map(|(d, role)| (d, ws.decodes.iter().find(|x| x.name == d).map_or("", |x| x.protocol.as_str()), role)).collect();
+    if !decodes.is_empty() {
+        y += 1;
+        line(buf, &mut y, "decodes", dim);
+        let (dw, pw2) = (decodes.iter().map(|d| d.0.chars().count()).max().unwrap_or(0), decodes.iter().map(|d| d.1.chars().count()).max().unwrap_or(0));
+        for (d, proto, role) in &decodes {
+            if y >= y0 + bh - 1 {
+                break;
+            }
+            let cells = [(format!("  {d:<dw$}  "), st.fg(pal().hues[5])), (format!("{proto:<pw2$}  "), dim), (role.clone(), st)];
+            let mut x = px;
+            for (t, style) in cells {
+                let t: String = t.chars().take((px + pw).saturating_sub(x)).collect();
+                put(buf, x, y, &t, style);
+                x += t.chars().count();
+            }
+            y += 1;
+        }
+    }
     y += 1;
     let value = ws.trace.value_at(v, t).map_or("none".to_string(), |val| rows::label(var, &Look::of(var), &val));
     line(buf, &mut y, &format!("at {}  {value}", time::format(t, fpt)), st);
