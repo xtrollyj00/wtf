@@ -1581,12 +1581,12 @@ mod tests {
         app.run("add p.d").unwrap();
         app.run("50ns").unwrap();
         let w = draw::waveform(&mut app.ws, 100);
-        let row = w.lines().find(|l| l.starts_with("d ")).unwrap();
+        let row = w.lines().find(|l| l.starts_with("p.d ")).unwrap();
         assert!(row.contains("0xZZ"), "{w}");
         app.run("0ns").unwrap();
         let w = draw::waveform(&mut app.ws, 100);
-        let row = w.lines().find(|l| l.starts_with("d ")).unwrap();
-        assert_eq!(row.split('┃').next().unwrap().replace('│', "").trim(), "d", "the value column is blank: {w}");
+        let row = w.lines().find(|l| l.starts_with("p.d ")).unwrap();
+        assert_eq!(row.split('┃').next().unwrap().replace('│', "").trim(), "p.d", "the value column is blank: {w}");
     }
 
     #[test]
@@ -2105,7 +2105,7 @@ mod tests {
         let mut app = App::new(workspace::Workspace::new(t, "axilite".into()));
         keys(&mut app, ":decode bus axilite clock=aclk prefix=s_axi_\n:add bus.rd\n:fit\nw<CR>");
         let screen = snapshot(&mut app, 100, Some(14));
-        let delay = screen.lines().find(|l| l.trim_start().starts_with("rd.delay")).unwrap_or_else(|| panic!("{screen}"));
+        let delay = screen.lines().find(|l| l.trim_start().starts_with("delay")).unwrap_or_else(|| panic!("{screen}"));
         assert!(delay.split_whitespace().nth(2).is_some_and(|v| v.ends_with("ns")), "{screen}");
     }
 

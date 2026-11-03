@@ -643,7 +643,7 @@ fn records_of_a_declared_stream() {
         ],
         "rows": ["rx", "rx.tdata"],
     });
-    assert!(s.ok("workspace", decl).starts_with("rows (> selected):\n> rx  rx\n  tdata  rx.tdata  hex\n"));
+    assert!(s.ok("workspace", decl).starts_with("rows (> selected):\n> rx  rx\n  rx.tdata  rx.tdata  hex\n"));
     assert_eq!(s.ok("records", json!({"stream": "rx"})), "2 of 2\nn\tstart\tend\ttdata\tlow\n0\t35ns\t45ns\t0x11\t0x1\n1\t105ns\t115ns\t0x33\t0x3");
     // pages, ranges and counts
     assert_eq!(s.ok("records", json!({"stream": "v", "count": 2})), "2 of 6\nn\tstart\tend\td\n0\t15ns\t25ns\t0x11\n1\t25ns\t35ns\t0x11");
@@ -659,7 +659,7 @@ fn records_of_a_declared_stream() {
         "decode": [{"name": "c0", "protocol": "cmd", "clock": "clk", "signals": ["valid = valid", "ready = ready", "cmd = data"]}],
         "rows": ["c0.op"],
     });
-    assert!(s.ok("workspace", decl).starts_with("rows (> selected):\n> op  c0.op  hex\n"));
+    assert!(s.ok("workspace", decl).starts_with("rows (> selected):\n> c0.op  c0.op  hex\n"));
     assert_eq!(s.ok("records", json!({"stream": "c0"})), "2 of 2\nn\tstart\tend\top\n0\t35ns\t45ns\t0x1\n1\t105ns\t115ns\t0x3");
     let bad = s.tool("workspace", json!({"decode": [{"name": "c1", "protocol": "cmd", "signals": ["valid = valid", "x"]}], "rows": []}));
     assert_eq!(bad, Err("decode c1: x: not `name = signal`\ndecode c1: no signal for ready, cmd; no clock".into()));
@@ -694,7 +694,7 @@ fn axis_frames_and_errors() {
         "decode": [{"name": "rx", "protocol": "axis", "clock": "clk", "signals": ["tvalid = tvalid", "tready = tready", "tdata = tdata", "tlast = tlast", "tkeep = tkeep"]}],
         "rows": ["rx.frame", "rx.frame.len:dec", "rx.errors"],
     });
-    assert!(s.ok("workspace", decl).starts_with("rows (> selected):\n> frame  rx.frame\n  len  rx.frame.len  dec\n  errors  rx.errors\n"));
+    assert!(s.ok("workspace", decl).starts_with("rows (> selected):\n> rx.frame  rx.frame\n  rx.frame.len  rx.frame.len  dec\n  rx.errors  rx.errors\n"));
     // a frame's data past 8 bytes is its count in a table, whole in one record
     let short = "(long values shortened; one record, `count: 1` with `from`, shows them whole)";
     assert_eq!(s.ok("records", json!({"stream": "rx.frame"})), format!("4 of 4 {short}\nn\tstart\tend\tbeats\tlen\tdata\tcomplete\n0\t15ns\t55ns\t0x3\t0xA\ta0 00 00 00 a1 00 00 00 ... (10 bytes)\t1\n1\t55ns\t65ns\t0x1\t0x4\tb0 00 00 00\t1\n2\t65ns\t85ns\t0x2\t0x8\tc0 00 00 00 c1 00 00 00\t1\n3\t135ns\t145ns\t0x1\t0x4\te1 00 00 00\t1"));

@@ -2,19 +2,19 @@
 source: src/main.rs
 expression: "snapshot(&mut app, 100, Some(16))"
 ---
-Name             │ Value                │ 0                    65ns        100ns            150ns
-                 │                      │      🮣────────────🮦──┃──────🮢                🮣──🮢
-▾ frame          │ #2 8B                │      🮡── #0 10B ──🮧──┃ #2 … 🮠                🮡──🮠
-                 │ ╭─ rx.frame #2 8B ──── 65ns – 85ns  20ns ─╮ ┃──────🮢                🮣──🮢
-  frame.beats    │ │ beats     0x2                           │ ┃ 0x2 ─🮠                🮡──🮠
-                 │ │ len       0x8                           │ ┃──────🮢                🮣──🮢
-  frame.len      │ │ data      c0 00 00 00 c1 00 00 00       │ ┃ 0x8 ─🮠                🮡──🮠
-                 │ │ complete  1                             │ ┃──────🮢                🮣──🮢
-  frame.data     │ ╰─────────────────────────── e Esc close ─╯ ┃ c0 … 🮠                🮡──🮠
-                 │                      │      ┌───────────────┃──────┐                ┌──┐
-  frame.complete │ 1                    │      ╵               ┃      ╵                ╵  ╵
-                 │                      │                      ┃             🮣──🮢  🮣───🮢
-▸ errors         │                      │                      ┃             🮡──🮠  🮡───🮠
-                 │                      │
-                 │                      │
+Name        │ Value                │ 0                    65ns        100ns            150ns
+            │                      │      🮣────────────🮦──┃──────🮢                🮣──🮢
+▾ rx.frame  │ #2 8B                │      🮡── #0 10B ──🮧──┃ #2 … 🮠                🮡──🮠
+            │ ╭─ rx.frame #2 8B ──── 65ns – 85ns  20ns ─╮ ┃──────🮢                🮣──🮢
+  beats     │ │ beats     0x2                           │ ┃ 0x2 ─🮠                🮡──🮠
+            │ │ len       0x8                           │ ┃──────🮢                🮣──🮢
+  len       │ │ data      c0 00 00 00 c1 00 00 00       │ ┃ 0x8 ─🮠                🮡──🮠
+            │ │ complete  1                             │ ┃──────🮢                🮣──🮢
+  data      │ ╰─────────────────────────── e Esc close ─╯ ┃ c0 … 🮠                🮡──🮠
+            │                      │      ┌───────────────┃──────┐                ┌──┐
+  complete  │ 1                    │      ╵               ┃      ╵                ╵  ╵
+            │                      │                      ┃             🮣──🮢  🮣───🮢
+▸ rx.errors │                      │                      ┃             🮡──🮠  🮡───🮠
+            │                      │
+            │                      │
  NORMAL   signals ▸  rx.frame #2  65ns–85ns  beats=0x2 len=0x8 data=c0 0…  65ns  3ns/col  axis [+]

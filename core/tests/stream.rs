@@ -99,7 +99,7 @@ fn streams_are_signals() {
     assert_eq!(wtf_core::query::changes(&mut ws.trace, (tdata, None), 0, 200, &mut budget), (vec![35, 45, 105, 115], false));
     // rows and searches name them as any signal
     wtf_core::command::run(&mut ws, "add rx.beat rx.beat.tdata").unwrap();
-    assert_eq!(names(&ws), ["beat", "tdata"]);
+    assert_eq!(names(&ws), ["rx.beat", "rx.beat.tdata"]);
     ws.search("rx.beat.tdata == 0x33", true, 1).unwrap();
     assert_eq!(ws.view.cursor, 105);
     ws.view.jump(0);
@@ -116,7 +116,7 @@ fn streams_are_signals() {
     assert_eq!((ws.streams.len(), ws.protocols.len(), ws.streams[1].records.len()), (2, 2, 2));
     // :e samples them again; the rows stay
     assert_eq!(ws.reload(), Ok(("reloaded".into(), false)));
-    assert_eq!(names(&ws), ["beat", "tdata"]);
+    assert_eq!(names(&ws), ["rx.beat", "rx.beat.tdata"]);
     assert_eq!(ws.trace.value_at(var(&ws, "rx.beat.tdata"), 110), bits("00110011"));
 }
 

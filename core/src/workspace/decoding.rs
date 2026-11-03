@@ -357,7 +357,11 @@ impl Workspace {
         for (path, width, values) in signals {
             vars.push(self.trace.add_computed(&path, width, values)?);
         }
+        // shown by its whole name, the instance's with it (`bus.wr`, spec §4 "Name column")
+        let decl = crate::trace::parts(&s.name).len();
+        self.trace.vars[vars[0]].decl = decl;
         for (f, &v) in s.schema.iter().zip(&vars[1..]) {
+            self.trace.vars[v].decl = decl + 1;
             self.trace.vars[v].signed = f.signed;
             self.trace.vars[v].time = self.trace.fs_per_tick.filter(|_| f.time);
         }

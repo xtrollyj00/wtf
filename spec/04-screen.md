@@ -103,7 +103,9 @@ data  │ 0x3A  │ ─ 0x43 ─🮧 0x96 ─🮧 0xE1 🮧── 0x3A ─🮧 0
 - **Rows**: each signal takes two terminal lines (section 14). The name and value sit on the lower line.
 - **Name column**: the leaf name of each signal (`clk`, `state`); inside a struct, record or array,
   its whole name in the HDL (`pkts[1].pair.lo`, `mem[3]`, not `lo`, `[3]`; a VCD from Verilator
-  writes a struct as a module, so there it is the leaf). If two shown signals share a name, enough
+  writes a struct as a module, so there it is the leaf). A decoded stream (section 16) is named
+  whole, with its decode (`bus.wr`, `bus.wr.addr`, not `wr`), as its name alone says nothing of
+  which bus it is; the decode's part is greyed as a scope is. If two shown signals share a name, enough
   of their scope is added to tell them apart (`cpu.state`, `dma.state`). That scope
   is greyed, so the leaf names stand out.
   With the `nerd` glyphs an icon before the name (after a `▸`) tells what the row is (section 14, "Icons").

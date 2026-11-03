@@ -487,7 +487,7 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
         }
     }
     // the lines under a row, indented a level deeper each (spec §6): a bit after its bus,
-    // `data[3]`; a stream's field after its stream, `frame.len`; a composite's child by its field
+    // `data[3]`; a stream's field by its name, `len`; a composite's child by its field
     // or index, `valid`, `pkts[0]`. A stream or composite folds and unfolds as a group does its
     // rows: the same marks
     let mut subs: Option<(usize, Vec<Sub>)> = None;
@@ -522,7 +522,7 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
             }
             let own = |v: usize| match v == s.var {
                 true => n.trim_start().to_string(),
-                false if ws.stream_of(s.var).is_some() => format!("{}{}", n.trim_start(), &ws.trace.vars[v].path[ws.trace.vars[s.var].path.len()..]),
+                false if ws.stream_of(s.var).is_some() => ws.trace.vars[v].path[ws.trace.vars[s.var].path.len() + 1..].to_string(),
                 false => rows::child_name(&ws.trace.vars[v].path),
             };
             let (name, opens) = match l.bit {

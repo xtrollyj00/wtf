@@ -200,7 +200,8 @@ signal next to a group's edge move it into or out of the group.
 ### Composite rows
 
 A struct, record or array is one signal in the HDL, so it is one row. `Enter` opens it one level,
-the way a bus opens into its bits and a stream into its fields: **every index and every field is
+the way a bus opens into its bits and a stream into its fields (`bus.rd` into `delay`, `addr`,
+named as a struct's are): **every index and every field is
 a level**. `pkts` opens into `pkts[0]`, `pkts[1]`; `pkts[0]` into `valid`, `state`, `pair`;
 `pair` into `hi`, `lo`. `grid` opens into `grid[0]`, `grid[1]`, and `grid[1]` into `grid[1][0]`
 .. `grid[1][2]`.

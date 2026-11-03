@@ -18,7 +18,7 @@ expression: text
                                       |       | ------------:-------:---------|-
                           dma.state   | 0x0   | ------------: 0x0 --:---------|-
  SIGNALS  signals <  top.cpu.data                    30ns  1ns/col  simple [+]
-Name    | Value | 0               50ns             100ns            150ns
-        |       | |    +------------+--+------+                +--+
-> frame |       | |    +-- #0 10B --+--+ #2 ~ +                +--+
+Name       | Value | 0               50ns             100ns            150ns
+           |       | |    +------------+--+------+                +--+
+> rx.frame |       | |    +-- #0 10B --+--+ #2 ~ +                +--+
  NORMAL   signals >  rx.frame                                                 0  3ns/col  axis [+]
