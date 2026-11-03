@@ -82,7 +82,7 @@ as it would without the card; `Esc` cancels.
 
 `Space` opens the leader menu at once: a card across the bottom of the screen with the entries
 of the config file's `[leader]` (section 19) in columns, each its key, `→`, and what it does, its
-command dim at the column's right. Groups come first, in magenta with `+` (`+signals`); their key
+command dim at the column's right. Groups come first, in magenta with `+` (`+view`); their key
 opens them. The status line shows the keys so far (`Space a`), the card's title the keys and the
 group's name. A group whose entries say what happens (the third string in `[leader]`) lists one
 entry a line: what it does, its command in blue, and what happens, dim:
@@ -96,12 +96,12 @@ entry a line: what it does, its command in blue, and what happens, dim:
 
 ```
 ╭─ Space ──────────────────────────────────────────────────────────────────────────────────────╮
-│  s → +signals                                 m → marks                     :pick marks      │
-│  c → +cursors                                 r → records                 :pick records      │
+│  v → +view                                    m → marks                     :pick marks      │
+│  t → +time                                    r → records                 :pick records      │
 │  d → +decode                                  : → commands               :pick commands      │
-│  a → +agent                                   u → undo                            :undo      │
-│  w → +session                                 ? → keys                            :help      │
-│  f → find a signal           :pick signals    q → quit                               :q      │
+│  a → +agent                                   n → messages                    :messages      │
+│  q → +session                                 ? → keys                            :help      │
+│  f → find a signal           :pick signals                                                   │
 ╰─────────────────────────────────────────────────────────────── Esc close   Backspace close ─╯
 ```
 

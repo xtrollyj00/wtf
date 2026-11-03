@@ -85,7 +85,7 @@ An entry replaces the one on its key, and a group merges into the group there:
 ```toml
 [leader]
 b = ["bus reads", ":pick records bus.rd"]
-q = ""                  # no quit in the menu
+n = ""                  # no messages in the menu
 
 [leader.a]              # add to the agent group
 t = ["steps", ":trail"]
@@ -98,23 +98,19 @@ f = ["find a signal", ":pick signals"]
 m = ["marks", ":pick marks"]
 r = ["records", ":pick records"]
 ":" = ["commands", ":pick commands"]
-u = ["undo", ":undo"]
+n = ["messages", ":messages"]
 "?" = ["keys", ":help"]
-q = ["quit", ":q"]
 
-[s]
-name = "signals"
-a = ["add…", ":add "]
-n = ["name a computed signal…", ":signal "]
+[v]
+name = "view"
 g = ["group the selection…", ":group "]
 r = ["rename the group…", ":rename "]
 u = ["ungroup", ":ungroup"]
 c = ["colour…", ":color "]
 x = ["radix…", ":radix "]
-s = ["scope…", ":scope "]
 
-[c]
-name = "cursors"
+[t]
+name = "time"
 f = ["zoom to fit", ":fit"]
 z = ["zoom to…", ":zoom "]
 m = ["mark at a time…", ":cursor "]
@@ -123,8 +119,9 @@ m = ["mark at a time…", ":cursor "]
 name = "decode"
 d = ["decode…", ":decode "]
 p = ["protocol…", ":protocol "]
-r = ["records…", ":records "]
+s = ["computed signal…", ":signal "]
 n = ["name values…", ":names "]
+r = ["records where…", ":records "]
 
 [a]
 name = "agent"
@@ -134,11 +131,12 @@ t = ["trail", ":pick trail", "its steps; Enter jumps to one's time"]
 j = ["join a session…", ":pick sessions", "the agents working on this machine"]
 s = ["the agent's session", ":agent", "what it left while no window was open"]
 
-[w]
+[q]
 name = "session"
 w = ["save", ":w", "rows, marks and decodes, beside the trace"]
 e = ["reload the trace", ":e", "after the simulation ran again"]
-q = ["save and quit", ":wq"]
+q = ["quit", ":q", "refused with unsaved changes"]
+x = ["save and quit", ":wq"]
 Q = ["quit without saving", ":q!", "unsaved changes are lost"]
 ```
 

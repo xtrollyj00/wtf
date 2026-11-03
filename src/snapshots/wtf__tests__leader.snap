@@ -1,5 +1,6 @@
 ---
 source: src/main.rs
+assertion_line: 1963
 expression: "snapshot(&mut app, 100, Some(16))"
 ---
 Name        │ Value │ 0           12ns    20ns      30ns      40ns      50ns      60ns      70ns
@@ -9,12 +10,12 @@ clk         │ 0     │ ─────┘    └─┃──┘    └──�
 ▾ cpu       │       │             ┃
 ╭─ Space ──────────────────────────────────────────────────────────────────────────────────────────╮
 │                                                                                                  │
-│  s → +signals                                   m → marks                       :pick marks      │
-│  c → +cursors                                   r → records                   :pick records      │
+│  v → +view                                      m → marks                       :pick marks      │
+│  t → +time                                      r → records                   :pick records      │
 │  d → +decode                                    : → commands                 :pick commands      │
-│  a → +agent                                     u → undo                              :undo      │
-│  w → +session                                   ? → keys                              :help      │
-│  f → find a signal             :pick signals    q → quit                                 :q      │
+│  a → +agent                                     n → messages                      :messages      │
+│  q → +session                                   ? → keys                              :help      │
+│  f → find a signal             :pick signals                                                     │
 │                                                                                                  │
 ╰──────────────────────────────────────────────────────────────────── Esc close   Backspace close ─╯
  NORMAL   Space  signals ▸  top.clk                                          12ns  1ns/col  simple

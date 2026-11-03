@@ -779,8 +779,8 @@ fn leader(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
         match e {
             Entry::Group { name, .. } => {
                 let ic = match name.as_str() {
-                    "signals" => icon::WIRE,
-                    "cursors" => icon::MARK,
+                    "view" => icon::EYE,
+                    "time" => icon::CLOCK,
                     "decode" => icon::PLUG,
                     "agent" => icon::AGENT,
                     "session" => icon::SESSION,

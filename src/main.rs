@@ -1965,21 +1965,21 @@ mod tests {
         assert!(snapshot(&mut app, 100, Some(16)).contains("Space a  agent"));
         keys(&mut app, "<BS><BS>");
         assert!(app.leader.is_none());
-        keys(&mut app, "<Space>sa");
-        assert!(app.leader.is_none() && app.mode == app::Mode::Command && app.line == "add ");
-        keys(&mut app, "<Esc>dd");
-        assert!(app.ws.can_undo().0);
-        let rows = app.ws.rows.len();
-        keys(&mut app, "<Space>u");
-        assert_eq!(app.ws.rows.len(), rows + 1);
+        keys(&mut app, "<Space>vg");
+        assert!(app.leader.is_none() && app.mode == app::Mode::Command && app.line == "group ");
+        keys(&mut app, "<Esc>yt");
+        snapshot(&mut app, 100, Some(16));
+        keys(&mut app, "<Space>n");
+        assert!(app.leader.is_none() && app.messages.is_some());
+        keys(&mut app, "<Esc>");
         // a key with no entry closes it; a click on an entry picks it, outside closes
         keys(&mut app, "<Space>Z");
         assert!(app.leader.is_none() && app.mode == app::Mode::Normal);
         keys(&mut app, "<Space>");
         snapshot(&mut app, 100, Some(16));
-        let (r, _) = *app.hit.leader.iter().find(|(_, k)| k.show() == "w").unwrap();
+        let (r, _) = *app.hit.leader.iter().find(|(_, k)| k.show() == "q").unwrap();
         app.mouse(at(MouseEventKind::Down(MouseButton::Left), r.x + 1, r.y, NONE));
-        assert!(snapshot(&mut app, 100, Some(16)).contains("Space w  session"));
+        assert!(snapshot(&mut app, 100, Some(16)).contains("Space q  session"));
         app.mouse(at(MouseEventKind::Down(MouseButton::Left), 5, 0, NONE));
         assert!(app.leader.is_none());
     }
