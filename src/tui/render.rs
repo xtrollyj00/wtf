@@ -944,8 +944,13 @@ fn guide_actions(app: &App) -> Vec<crate::tui::start::Action> {
         out.push(a(icon::SEARCH, blue, "Find a signal", k));
     }
     out.push(a(icon::FOLDER, blue, "Browse the signals", keys.show(K::Panel)));
-    if let Some(k) = leader_key(app, ":decode ") {
-        out.push(a(icon::PLUG, blue, "Decode an interface", k));
+    if let Some(k) = leader_key(app, ":pick interfaces") {
+        let mut d = a(icon::PLUG, blue, "Decode an interface", k);
+        d.3 = match app.found.len() {
+            0 => String::new(),
+            n => format!("{n} found"),
+        };
+        out.push(d);
     }
     out.push(a(icon::CMD, purple, "Everything else", keys.show(K::Leader)));
     out.push(a(icon::KEYS, blue, "Keys", keys.show(K::Help)));
@@ -954,7 +959,7 @@ fn guide_actions(app: &App) -> Vec<crate::tui::start::Action> {
 }
 
 /// The keys of the leader menu's entry that runs `line`, as typed: `Space f`.
-fn leader_key(app: &App, line: &str) -> Option<String> {
+pub fn leader_key(app: &App, line: &str) -> Option<String> {
     use crate::tui::keys::Entry;
     fn find(e: &Entry, line: &str, path: &mut Vec<String>) -> bool {
         let Entry::Group { items, .. } = e else { return false };

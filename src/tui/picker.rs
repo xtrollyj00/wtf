@@ -14,7 +14,7 @@ use wtf_core::rows::{self, Look, Row, Sig};
 use wtf_core::time::{self, Tick};
 
 /// The sources, in the order `Ctrl-s` goes through them.
-pub const SOURCES: [&str; 6] = ["signals", "marks", "records", "commands", "sessions", "trail"];
+pub const SOURCES: [&str; 7] = ["signals", "marks", "records", "commands", "sessions", "trail", "interfaces"];
 
 /// What `Enter` does with an entry.
 #[derive(Clone)]
@@ -31,6 +31,9 @@ pub enum Act {
     Agent(String, bool),
     /// Jump to the step's time, if it has one.
     Step(Option<Tick>),
+    /// Run the decode line and add the instance's streams as a group; with the clock still to
+    /// name, put the line on the command line. A decode already made opens its records.
+    Decode { line: String, name: String, ready: bool, done: Option<String> },
 }
 
 pub struct Entry {
@@ -227,6 +230,7 @@ impl App {
                     })
                     .collect()
             }
+            6 => self.interfaces(),
             _ => self
                 .ws
                 .trail
@@ -247,11 +251,68 @@ impl App {
                 1 => "no marks",
                 2 => "no records",
                 4 => "no agent is working on this machine",
+                6 => "no interface a built-in protocol decodes: :decode names the signals (:help decode)",
                 _ => "no trail yet: the steps of an agent working on this trace show here",
             }
             .into());
         }
         Ok(out)
+    }
+
+    /// The interfaces built-in protocols decode (`protocol::detect`), each with its decode line,
+    /// the signals its roles take and its clock in the preview (spec §5 "Picker").
+    fn interfaces(&self) -> Vec<Entry> {
+        let t = &self.ws.trace;
+        wtf_core::protocol::detect(t)
+            .into_iter()
+            .map(|f| {
+                let done = self.ws.decodes.iter().find(|d| d.protocol == f.protocol && d.params.iter().any(|p| p.0 == "prefix" && p.1 == f.prefix)).map(|d| d.name.clone());
+                // a name not taken by another decode
+                let base = f.name().to_string();
+                let name = (1..).map(|k| if k == 1 { base.clone() } else { format!("{base}{k}") }).find(|n| !self.ws.decodes.iter().any(|d| d.name == *n)).expect("a free name");
+                let line = f.decode_line().replacen(&format!("decode {base} "), &format!("decode {name} "), 1);
+                let b = wtf_core::protocol::builtin(f.protocol).expect("detect finds built-ins");
+                let ready = f.clock.is_some() || !b.clocked;
+                let mut preview = vec![format!("{} at {}", f.protocol, f.prefix), line.clone(), String::new()];
+                let roles: Vec<&&str> = b.required.iter().chain(b.optional).filter(|r| t.by_path.contains_key(&format!("{}{r}", f.prefix))).collect();
+                let rw = roles.iter().map(|r| r.len()).max().unwrap_or(0).max(5);
+                preview.extend(roles.iter().map(|r| format!("{r:<rw$}  {}{r}", f.prefix)));
+                if b.clocked {
+                    preview.push(format!("{:<rw$}  {}", "clock", f.clock.clone().unwrap_or_else(|| "none found: Enter puts the line on the command line to name it".into())));
+                }
+                preview.push(String::new());
+                preview.push(match &done {
+                    Some(d) => format!("decoded already as {d}: Enter shows its records"),
+                    None => "Enter decodes it and adds its streams as a group".into(),
+                });
+                let right = done.as_ref().map_or_else(|| f.protocol.to_string(), |d| format!("{} {} {d}", f.protocol, gl().arrow));
+                Entry { text: format!("{name} {}", f.prefix), head: 0, right, act: Act::Decode { line, name, ready, done }, preview }
+            })
+            .collect()
+    }
+
+    /// A decode's streams, as the decode made them: `s_axi.aw` ... `s_axi.errors`.
+    pub fn streams_of(&self, decode: &str) -> Vec<String> {
+        let prefix = format!("{decode}.");
+        self.ws.streams.iter().filter(|s| s.name == decode || s.name.starts_with(&prefix)).map(|s| s.name.clone()).collect()
+    }
+
+    /// The first stream a decode made, or its own name for one that made a stream of that name.
+    fn first_stream(&self, decode: &str) -> String {
+        self.streams_of(decode).into_iter().next().unwrap_or_else(|| decode.to_string())
+    }
+
+    /// Runs a decode line from the interfaces, then adds the streams it made below the selected
+    /// row as a group named after it, the group selected.
+    fn decode_and_show(&mut self, line: &str, name: &str) -> Result<(), String> {
+        self.run(line)?;
+        let vars: Vec<usize> = self.streams_of(name).iter().filter_map(|s| self.ws.trace.by_path.get(s).copied()).filter(|&v| !self.ws.shown(v)).collect();
+        let (Some(&first), Some(&last)) = (vars.first(), vars.last()) else { return Ok(()) };
+        self.ws.add_rows(&vars);
+        let (a, b) = (self.ws.trace.vars[first].path.clone(), self.ws.trace.vars[last].path.clone());
+        wtf_core::command::run(&mut self.ws, &format!("select {a} {b}"))?;
+        wtf_core::command::run(&mut self.ws, &format!("group {name}"))?;
+        Ok(())
     }
 
     /// The picker has the keys (spec §5 "Picker"); they are fixed.
@@ -338,6 +399,12 @@ impl App {
                 Ok(())
             }
             Act::Step(None) => Err("this step is about no time".into()),
+            Act::Decode { done: Some(d), .. } => self.open_records(&self.first_stream(&d)),
+            Act::Decode { line, ready: false, .. } => {
+                self.prefill(&line);
+                Ok(())
+            }
+            Act::Decode { line, name, .. } => self.decode_and_show(&line, &name),
         };
         if let Err(e) = r {
             self.msg = Some((e, true));
@@ -428,6 +495,7 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
         0 => " Enter add  Tab mark  C-s source  Esc close ".into(),
         3 => " Enter type it  C-s source  Esc close ".into(),
         4 => " Enter follow  C-s source  Esc close ".into(),
+        6 => " Enter decode  C-s source  Esc close ".into(),
         _ => " Enter jump  C-s source  Esc close ".into(),
     };
     if keys.chars().count() + 4 < bw {
@@ -603,7 +671,7 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
 /// A source's icon, in the top border beside its name.
 fn source_icon(i: usize) -> char {
     use crate::draw::icon;
-    [icon::WIRE, icon::MARK, icon::RECORD, icon::CMD, icon::EYE, icon::TRAIL].get(i).copied().unwrap_or(icon::SEARCH)
+    [icon::WIRE, icon::MARK, icon::RECORD, icon::CMD, icon::EYE, icon::TRAIL, icon::PLUG].get(i).copied().unwrap_or(icon::SEARCH)
 }
 
 /// An entry's icon and its colour by what it is: a signal's kind (`draw::kind`), a mark, a record, a
@@ -617,6 +685,8 @@ fn kind_icon(ws: &wtf_core::workspace::Workspace, act: &Act) -> Option<(char, ra
         Act::Mark(_) => (icon::MARK, p.bus),
         Act::Record(_) => (icon::RECORD, p.hues[1]),
         Act::Command(_) => (icon::CMD, p.hues[5]),
+        Act::Decode { done: Some(_), .. } => (icon::OK, p.hues[3]),
+        Act::Decode { .. } => (icon::PLUG, p.hues[5]),
         Act::Agent(..) => (icon::AGENT, p.hues[4]),
         Act::Step(_) => (icon::TRAIL, p.hues[4]),
     };

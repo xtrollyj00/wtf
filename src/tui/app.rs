@@ -59,6 +59,9 @@ pub struct App {
     pub messages: Option<usize>,
     /// Notes before this one are dismissed from the corner (`Esc`).
     pub dismissed: usize,
+    /// What built-in protocols find in the trace (`protocol::detect`), worked out once when it
+    /// opens and again on `:e`: the launch guide counts them.
+    pub found: Vec<wtf_core::protocol::Found>,
     /// Drawn for plain text (`--snapshot` without `--ansi`): the guide's logo in plain characters.
     pub plain: bool,
     /// How long the picker's highlight rests before its preview reads a signal (spec §5).
@@ -202,7 +205,9 @@ impl App {
     pub fn new(ws: Workspace) -> Self {
         let panel = Panel::new(&ws.trace);
         let seen = stamp(&ws.trace_path);
+        let found = wtf_core::protocol::detect(&ws.trace);
         App {
+            found,
             ws,
             top: 0,
             page: 1,
@@ -367,6 +372,7 @@ impl App {
         self.msg = Some(self.ws.reload()?);
         self.matches = None;
         self.panel = Panel::new(&self.ws.trace);
+        self.found = wtf_core::protocol::detect(&self.ws.trace);
         Ok(())
     }
 
@@ -567,7 +573,7 @@ impl App {
 
 
     /// `:records <stream> [where <expr>]`: open the list of a stream's records (spec §7).
-    fn open_records(&mut self, arg: &str) -> Result<(), String> {
+    pub(crate) fn open_records(&mut self, arg: &str) -> Result<(), String> {
         let (name, filter) = match arg.split_once(" where ") {
             Some((n, f)) => (n.trim(), Some(f.trim())),
             None => (arg, None),

@@ -181,6 +181,12 @@ fn open(path: &std::path::Path, session: Option<PathBuf>, mut warnings: Vec<Stri
             offer = Some("an agent presented this trace before your last :w; :agent shows it".to_string());
         }
     }
+    // interfaces a built-in protocol decodes, said once when nothing is decoded yet (spec §4)
+    if offer.is_none() && app.ws.decodes.is_empty() && !app.found.is_empty() {
+        let what: Vec<String> = app.found.iter().map(|f| format!("{} at {}", f.protocol, f.prefix)).collect();
+        let key = render::leader_key(&app, ":pick interfaces").unwrap_or(":pick interfaces".into());
+        offer = Some(format!("found: {}; {key} decodes", what.join(", ")));
+    }
     if !warnings.is_empty() {
         app.msg = Some((warnings.join("; "), true));
     } else if let Some(o) = offer {
@@ -2208,6 +2214,27 @@ mod tests {
         draw::set_palette(theme::builtin("dark", true).unwrap());
         let row = app.hit.records[0].0 as u16;
         assert!((0..100).any(|x| buf[(x, row)].modifier.contains(Modifier::UNDERLINED)));
+    }
+
+    #[test]
+    fn picker_interfaces() {
+        // spec §5: the interfaces found, Enter decodes one and adds its streams as a group; once
+        // decoded, Enter shows its records; the guide counts them
+        let t = trace::Trace::open("tests/data/axilite.vcd".as_ref()).unwrap();
+        let mut app = App::new(workspace::Workspace::new(t, "axilite".into()));
+        assert!(snapshot(&mut app, 100, None).contains("Decode an interface 1 found"));
+        keys(&mut app, "<Space>dd");
+        let p = app.picker.as_ref().unwrap();
+        assert_eq!(p.entries.iter().map(|e| e.text.as_str()).collect::<Vec<_>>(), ["s_axi top.s_axi_"]);
+        assert!(p.entries[0].preview.iter().any(|l| l == "decode s_axi axilite clock=top.aclk prefix=top.s_axi_"));
+        keys(&mut app, "<CR>");
+        assert!(app.picker.is_none() && app.ws.decodes.iter().any(|d| d.name == "s_axi"), "{:?}", app.msg);
+        assert!(matches!(&app.ws.rows[app.ws.sel], wtf_core::rows::Row::Group { name, .. } if name == "s_axi"));
+        assert!(app.ws.rows.iter().filter_map(|r| r.sig()).any(|s| app.ws.trace.vars[s.var].path == "s_axi.rd"));
+        keys(&mut app, "<Space>dd");
+        assert!(app.picker.as_ref().unwrap().entries[0].preview.iter().any(|l| l.starts_with("decoded already as s_axi")));
+        keys(&mut app, "<CR>");
+        assert!(app.records.is_some(), "{:?}", app.msg);
     }
 
     #[test]

@@ -1,9 +1,10 @@
 ---
 source: src/main.rs
+assertion_line: 2198
 expression: "snapshot(&mut app, 100, Some(20))"
 ---
 Name │ Value │ 0         10ns      20ns      30ns      40ns      50ns      60ns      70ns      80ns
-    ╭─ signals  marks  records  commands  sessions  trail ─────────────────────────────────────╮
+    ╭─ signals  marks  records  commands  sessions  trail  interfaces ─────────────────────────╮
 clk │ ▸ cpust                            1/6 │ top.cpu.state                                   │
     │────────────────────────────────────────│ 3 bits                                          │
 data│▌  top.cpu.state                  [2:0] │                                                 │

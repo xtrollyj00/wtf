@@ -130,6 +130,7 @@ border, the current one highlighted.
 | `commands` | the `:` commands | the usage and what it does | puts it on the command line, to finish and run |
 | `sessions` | the agents' workspaces on this machine (section 15) | its trace, and whether it is this one | follows it, as `:follow <id>`; an agent on another trace says to open that trace |
 | `trail` | the agent's steps, newest highlighted | what it asked and the answer | jumps to its time, as `:trail` |
+| `interfaces` | the interfaces built-in protocols decode in the trace (section 16, as the agents' `open` lists them), each its name and prefix, the protocol at the right (`→ bus` once decoded) | its `:decode` line, each role and the signal it takes, the clock (or that none was found) | decodes it, named after its prefix (`s_axi`, a number after a name taken), and adds its streams below the selected row as a group of that name; without a clock found, puts the line on the command line to name it; decoded already, shows its records (`:records`) |
 
 The picker's keys are fixed: typing edits the query, `Backspace` deletes, `Ctrl-n` / `Ctrl-p`
 or the arrows move, `PageDown` / `PageUp` a box of entries, `Tab` marks the highlighted signal

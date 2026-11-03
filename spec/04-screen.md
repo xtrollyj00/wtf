@@ -65,8 +65,12 @@ line), the trace's whole path (the directory dim, `~` for the home directory, cu
 with `…` where it doesn't fit; the file name bold) with what is in it dim under it, then what to do first, a
 line each with its icon (`nerd` glyphs), label and key at the right in the accent. The keys are
 the keymap's and the leader menu's (section 19), so a moved key shows moved, and an entry the
-leader menu no longer has is left out. With the signal panel open, its keys instead (search,
-mark, add, add as a group, close).
+leader menu no longer has is left out; "Decode an interface" says how many the built-in protocols
+find (`2 found`, section 16). With the signal panel open, its keys instead (search, mark, add,
+add as a group, close).
+
+Opening a trace with interfaces found and no decode in its session says so once, as a
+notification: `found: axilite at top.s_axi_; Space d d decodes`.
 
 ```
                               w t ┃ f
@@ -76,7 +80,7 @@ mark, add, add as a group, close).
 
    Find a signal                                  Space f
    Browse the signals                                   a
-   Decode an interface                          Space d d
+   Decode an interface 1 found                  Space d d
    Everything else                                  Space
    Keys                                                 ?
    Quit                                                 q
