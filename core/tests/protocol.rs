@@ -471,3 +471,36 @@ fn decodes_of_a_signal() {
     assert_eq!(of(&ws, "top.s_axi_wdata"), ["s wdata", "t wdata"]);
     assert!(of(&ws, "s.aw").is_empty());
 }
+
+/// Spec §16 "Results" and "Records of a set": what nothing is made from is a result, and a set of
+/// streams reads as one table.
+#[test]
+fn results_and_sets() {
+    let mut ws = open("axilite.vcd");
+    ws.add_decode(decode("s", "axilite", "aclk", &[], &[("prefix", "s_axi_")])).unwrap();
+    let names = |ws: &wtf_core::workspace::Workspace, v: Vec<usize>| v.into_iter().map(|i| ws.streams[i].name.clone()).collect::<Vec<_>>();
+    assert_eq!(names(&ws, ws.results("s")), ["s.wr", "s.rd", "s.errors", "s.wr.unmatched", "s.rd.unmatched"]);
+    assert_eq!(names(&ws, ws.stream_set("s").unwrap()), names(&ws, ws.results("s")));
+    assert_eq!(names(&ws, ws.stream_set("s.rd s.w* s.rd").unwrap()), ["s.rd", "s.w", "s.wr"]);
+    assert!(ws.stream_set("s.nope").unwrap_err().starts_with("unknown stream: s.nope (streams: s.aw,"));
+    // a frame on rd makes rd intermediate, across decodes
+    ws.add_decode(decode("f", "frame", "", &[("input", "s.rd")], &[("gap", "100ns")])).unwrap();
+    assert!(!names(&ws, ws.results("s")).contains(&"s.rd".to_string()));
+    // wr and rd share addr, data, resp, delay; strb is wr's alone
+    let set = wtf_core::stream::Set::new(vec![&ws.streams[ws.stream_set("s.wr").unwrap()[0]], &ws.streams[ws.stream_set("s.rd").unwrap()[0]]]);
+    assert_eq!(set.columns.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["delay", "addr", "data", "strb", "resp"]);
+    let (all, total) = set.select(0, u64::MAX, None, ws.trace.fs_per_tick).unwrap();
+    assert_eq!((all.len(), total), (10, 10));
+    assert!(all.windows(2).all(|w| set.record(w[0]).start <= set.record(w[1]).start));
+    // a filter keeps the streams having every field it names
+    let (strb, _) = set.select(0, u64::MAX, Some("strb == 3"), None).unwrap();
+    assert_eq!(strb, [(0, 1)]);
+    let (resp, _) = set.select(0, u64::MAX, Some("resp != 0"), None).unwrap();
+    assert_eq!(resp.iter().map(|&(s, _)| s).collect::<Vec<_>>(), [1]);
+    assert!(set.select(0, u64::MAX, Some("nope == 1"), None).unwrap_err().starts_with("no field nope in s.wr, s.rd (fields: delay, addr"));
+    let groups = set.group_by(&all, &["resp".into()]).unwrap();
+    assert_eq!(groups.iter().map(|g| g.count).sum::<usize>(), 10);
+    // a name with two kinds is a column per stream
+    let set = wtf_core::stream::Set::new(vec![&ws.streams[ws.stream_set("s.errors").unwrap()[0]], &ws.streams[ws.stream_set("s.wr.unmatched").unwrap()[0]]]);
+    assert_eq!(set.columns.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["rule", "kind"]);
+}

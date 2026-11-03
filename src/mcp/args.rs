@@ -159,7 +159,8 @@ pub struct DecodeSpec {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 pub struct RecordsArgs {
-    /// A stream, e.g. `bus.wr` (`help decode`).
+    /// A stream, e.g. `bus.wr`; a decode's name for its results, `bus`; a glob, `bus.*`; or
+    /// several, space-separated (`help records`).
     pub stream: String,
     /// Records starting at or after this time; default the start.
     pub from: Option<String>,

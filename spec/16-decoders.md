@@ -31,6 +31,24 @@ checks that return only violations.
 - **Records and streams.** Decoding produces streams of records: a record has a start, an end
   and fields (`Record { start, end, fields }`), a stream has a name and a schema of field names
   and widths. A beat, a frame, a transaction and a violation are records.
+- **Results.** A stream another stream is made from is intermediate (axilite's `aw`, `w`, `b`,
+  `ar`, `r`, joined into `wr` and `rd`; axis's `beat`, framed into `frame`), across decodes too:
+  a `frame` put on `bus.rd` makes `bus.rd` intermediate. A stream nothing is made from is a
+  result, or violations. Each stream keeps the names of the streams it was made from, so this is
+  known from the steps, never from the trace. A decode's results and violations are what a person
+  reads: `decode` answers with them first (`bus: records bus.wr 2, bus.rd 8; violations
+  bus.errors 2, ...; made from bus.aw 2, ...`), decoding from the interfaces picker adds them
+  alone as rows, and a decode's name in `records` means them.
+- **Records of a set.** `records` (the tool and `:records`) reads a set of streams: a stream
+  (`bus.rd`), a decode's name (`bus`: its results, then its violations), a glob (`bus.*`), or
+  several of these separated by spaces. A set of several is one table, its records in order of
+  start with a `stream` column. Fields share a column when name and kind (width, sign, time or
+  text) are the same, in order of first appearance; a name with two kinds is a column per stream,
+  `<stream>.<field>`, so `data` as bytes never mixes with `data` as a number. A record of a
+  stream without a column's field is empty there. `where` keeps the records of the streams that
+  have every column it names (`strb != 0xF` on `bus` keeps writes only); a name no stream in the
+  set has is an error listing the columns. `past(x)` is x of the stream's record before; `n` the
+  record's number in its stream. `group_by` counts across the set (`resp` over writes and reads).
 - **Terms.** Three words, used only in these senses:
   - A **protocol** is what can be decoded: it has roles (`tvalid`, `sclk`), params (`baud`) and
     the streams it makes. `protocols` lists them.

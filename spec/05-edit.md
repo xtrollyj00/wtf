@@ -130,7 +130,7 @@ border, the current one highlighted.
 | `commands` | the `:` commands | the usage and what it does | puts it on the command line, to finish and run |
 | `sessions` | the agents' workspaces on this machine (section 15) | its trace, and whether it is this one | follows it, as `:follow <id>`; an agent on another trace says to open that trace |
 | `trail` | the agent's steps, newest highlighted | what it asked and the answer | jumps to its time, as `:trail` |
-| `interfaces` | the interfaces built-in protocols decode in the trace (section 16, as the agents' `open` lists them), each its name and prefix, the protocol at the right (`→ bus` once decoded) | its `:decode` line, each role and the signal it takes, the clock (or that none was found) | decodes it, named after its prefix (`s_axi`, a number after a name taken), and adds its streams below the selected row as a group of that name; without a clock found, puts the line on the command line to name it; decoded already, opens the records browser on its first stream |
+| `interfaces` | the interfaces built-in protocols decode in the trace (section 16, as the agents' `open` lists them), each its name and prefix, the protocol at the right (`→ bus` once decoded) | its `:decode` line, each role and the signal it takes, the clock (or that none was found) | decodes it, named after its prefix (`s_axi`, a number after a name taken), and adds its results and violations (section 16 "Results") below the selected row as a group of that name; without a clock found, puts the line on the command line to name it; decoded already, opens the records browser on the decode |
 
 The picker's keys are fixed: typing edits the query, `Backspace` deletes, `Ctrl-n` / `Ctrl-p`
 or the arrows move, `PageDown` / `PageUp` a box of entries, `Tab` marks the highlighted signal
@@ -140,37 +140,45 @@ necessarily together (`cpust` matches `top.cpu.state`); a tie goes to the shorte
 
 ### Records
 
-`:records <stream> [where <expr>]` (section 7) opens the records browser: a card over the
-waveforms with a stream's records as a table, as the agents' `records` tool gives them, for a
+`:records <streams> [where <expr>]` (section 7) opens the records browser: a card over the
+waveforms with the records of a set of streams (section 16 "Records of a set": a stream, a
+decode's name, a glob, several) as one table, as the agents' `records` tool gives them, for a
 person to look through.
 
 ```
-╭─ records · rx.frame ──────────────────────────────────────────── 2 of 4 ─╮
-│ ▸ where len >= 8                                                          │
-│───────────────────────────────────────────────────────────────────────────│
-│   n    start    length    beats    len    data                complete    │
-│   #0   15ns     40ns      0x3      0xA    a0 00 00 00 a1 00…  1           │
-│▌  #2   65ns     20ns      0x2      0x8    c0 00 00 00 c1 00…  1           │
-╰──────────────── Enter jump  / filter  s S sort  = group  Tab stream  Esc close ─╯
+╭─ records · s_axi ───────────────────────────────────────────────── 13 records ─╮
+│ all  wr  rd  errors  wr.unmatched  rd.unmatched  aw  w  b  ar  r               │
+│ ▸ where / filters: resp != 0 && addr >= 0x40                                   │
+│────────────────────────────────────────────────────────────────────────────────│
+│   stream  n    start    length    delay    addr    data        strb    resp    │
+│▌  wr      #0   30ns     20ns      10ns     0x10    0x11111111  0xF     0x0     │
+│   rd      #0   130ns    30ns      20ns     0x10    0x11111111          0x0     │
+│   errors  #0   180ns    10ns                                                   │
+╰──────── Enter jump  / filter  s S sort  = group  h l scroll  Tab set  Esc close ─╯
 ```
 
-- **Columns**: `n`, `start`, `length`, then a column per field, each as wide as its widest value
-  up to 24 characters (a longer value is cut, `…`). A record of a violations stream is red.
+- **Sets**: when the streams are a decode's, the line under the title lists its sets, `all`
+  (its results and violations) then each stream, results first and the streams they are made
+  from last, named without the decode's name. `Tab` / `Shift-Tab` go to the next / previous, its
+  filter and sort fresh.
+- **Columns**: `stream` (a set of several), `n`, `start`, `length`, then a column per field
+  (section 16), each as wide as its widest value up to 24 characters (a longer value is cut,
+  `…`). `h` / `l` scroll the columns after `stream` and `n`, which stay. A record of a
+  violations stream is red.
 - **Filter**: `/` edits the `where` expression (section 16, the `records` tool's), applied as
   typed; `Enter` or `Esc` stops editing, `Ctrl-u` clears it. An expression that doesn't parse
   keeps the records shown and says why at the right of its line. The top border counts the
   records kept of all.
-- **Sort**: `s` sorts by the next column, `S` reverses; the sorted column's name is in the
-  accent. Fields sort by value (a signed field as signed); values with `x` or `z` bits and text
-  after numbers, by their text; a record without the field last.
+- **Sort**: in order of start at first; `s` sorts by the next column, `S` reverses; the sorted
+  column's name is in the accent. Fields sort by value (a signed field as signed); values with
+  `x` or `z` bits and text after numbers, by their text; a record without the field last.
 - **Group**: `=`, sorted by a field, groups the records kept by its value: a line per value with
   its count and first and last start, the commonest first. `Enter` on a group keeps its records
-  (adds `field == value` to the filter); `=` again ungroups. Sorted by `n`, `start` or `length`,
-  `=` says to sort by a field first.
+  (adds `field == value` to the filter; a value with spaces can't be, and says so); `=` again
+  ungroups. Sorted by `stream`, `n`, `start` or `length`, `=` says to sort by a field first.
 - **Keys**: `j` / `k`, `Ctrl-f` / `Ctrl-b`, `g` / `G` move; `Enter` on a record jumps the cursor
-  to its start (a jump, so `''` comes back), selects the stream's row if shown and closes;
-  `Tab` / `Shift-Tab` go to the next / previous stream, its filter and sort fresh; `Esc` or `q`
-  closes. The mouse: section 2.
+  to its start (a jump, so `''` comes back), selects its stream's row if shown and closes; `Esc`
+  or `q` closes. The mouse: section 2.
 
 ### Rows
 

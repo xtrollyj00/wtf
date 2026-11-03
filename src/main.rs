@@ -1636,7 +1636,7 @@ mod tests {
         assert_eq!(app.browser.as_ref().unwrap().hl, k - 1);
         // a double click jumps to the record's start
         let b = app.browser.as_ref().unwrap();
-        let start = app.ws.streams.iter().find(|s| s.name == "beat").unwrap().records[b.rows[k]].start;
+        let start = app.ws.streams.iter().find(|s| s.name == "beat").unwrap().records[b.rows[k].1].start;
         click(&mut app, 40, y as u16, NONE, t0, 1000);
         click(&mut app, 40, y as u16, NONE, t0, 1100);
         assert!(app.browser.is_none());
@@ -2167,7 +2167,7 @@ mod tests {
         assert_eq!(msg(&app), "no streams yet: make one with :decode or :protocol");
         keys(&mut app, ":decode rx axis clock=clk tvalid=tvalid tready=tready tdata=tdata tlast=tlast tkeep=tkeep\n");
         keys(&mut app, ":records rx.fram\n");
-        assert_eq!(msg(&app), "unknown stream: rx.fram (streams: rx.beat, rx.errors, rx.frame)");
+        assert_eq!(msg(&app), "unknown stream: rx.fram (streams: rx.beat, rx.errors, rx.frame; or a decode's name for its results)");
         keys(&mut app, ":records rx.frame where len ==\n");
         assert!(app.browser.is_none() && !msg(&app).is_empty());
         keys(&mut app, ":records rx.frame where len == 99\n");
@@ -2183,12 +2183,12 @@ mod tests {
         keys(&mut app, " 8<CR>");
         let b = app.browser.as_ref().unwrap();
         assert!(b.error.is_none() && !b.typing && b.rows.len() == 2 && b.total == 4);
-        // s sorts by the next column, S reverses
-        keys(&mut app, "/<C-u><CR>ssS");
+        // s sorts by the next column (from start, the order they come in), S reverses
+        keys(&mut app, "/<C-u><CR>sS");
         let b = app.browser.as_ref().unwrap();
         assert_eq!(b.sort, (2, true));
         let st = app.ws.streams.iter().find(|s| s.name == "rx.frame").unwrap();
-        let lens: Vec<_> = b.rows.iter().map(|&i| st.records[i].end - st.records[i].start).collect();
+        let lens: Vec<_> = b.rows.iter().map(|&(_, i)| st.records[i].end - st.records[i].start).collect();
         assert!(lens.windows(2).all(|w| w[0] >= w[1]), "{lens:?}");
         // = groups by a field; Enter keeps a group's records
         keys(&mut app, "=");
@@ -2200,9 +2200,12 @@ mod tests {
         keys(&mut app, "<CR>");
         let b = app.browser.as_ref().unwrap();
         assert!(!b.group && b.rows.len() == count && b.filter.contains("=="), "{}", b.filter);
-        // Tab goes to the next stream
-        keys(&mut app, "<Tab>");
-        assert_eq!(app.browser.as_ref().unwrap().stream, "rx.beat");
+        // Tab goes through the decode's sets: all its results, then each stream
+        let b = app.browser.as_ref().unwrap();
+        assert_eq!((&b.tabs[..], b.tab), (&["rx", "rx.frame", "rx.errors", "rx.beat"].map(String::from)[..], 1));
+        keys(&mut app, "<Tab><Tab><Tab>");
+        let b = app.browser.as_ref().unwrap();
+        assert_eq!((b.tab, b.streams.len()), (0, 2));
         keys(&mut app, "\x1b");
         // Enter jumps to the highlighted record and selects its stream's row
         keys(&mut app, ":records rx.frame where len >= 8\nj\n");
@@ -2267,7 +2270,17 @@ mod tests {
         keys(&mut app, "<Space>dd");
         assert!(app.picker.as_ref().unwrap().entries[0].preview.iter().any(|l| l.starts_with("decoded already as s_axi")));
         keys(&mut app, "<CR>");
-        assert!(app.browser.is_some(), "{:?}", app.msg);
+        // decoded already: the records browser on all its results, a column per field
+        let b = app.browser.as_ref().unwrap();
+        assert_eq!((b.tabs[b.tab].as_str(), b.streams.len()), ("s_axi", 5), "{:?}", app.msg);
+        insta::assert_snapshot!(snapshot(&mut app, 110, Some(16)));
+        // l scrolls the columns after stream and n, which stay
+        keys(&mut app, "ll");
+        let screen = snapshot(&mut app, 110, Some(16));
+        assert!(screen.contains("stream        n    delay") && app.browser.as_ref().unwrap().left == 2, "{screen}");
+        keys(&mut app, "h\x1b");
+        // only results and violations were added: no s_axi.aw row
+        assert!(!app.ws.rows.iter().filter_map(|r| r.sig()).any(|s| app.ws.trace.vars[s.var].path == "s_axi.aw"));
     }
 
     #[test]
@@ -2350,7 +2363,7 @@ mod tests {
         let mut app = App::new(workspace::Workspace::new(t, "axis".into()));
         keys(&mut app, ":decode rx axis clock=clk tvalid=tvalid tready=tready tdata=tdata tlast=tlast tkeep=tkeep\n");
         // what it made, violations apart
-        assert_eq!(app.msg, Some(("rx: records rx.beat 7, rx.frame 4; violations rx.errors 2".into(), false)));
+        assert_eq!(app.msg, Some(("rx: records rx.frame 4; violations rx.errors 2; made from rx.beat 7".into(), false)));
         keys(&mut app, ":add rx.frame rx.errors\n:fit\n");
         insta::assert_snapshot!(snapshot(&mut app, 100, None));
         // Space shows a row per field under the stream, as a bus's bits

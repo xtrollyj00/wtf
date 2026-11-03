@@ -244,3 +244,14 @@ fn instance_errors_at_once() {
     let warn = wtf_core::session::apply(&mut ws, "[[decode]]\nname = \"z\"\nprotocol = \"cmd\"\nclock = \"clk\"\nsignals = { valid = \"valid\" }\n[[decode]]\nname = \"w\"\n");
     assert_eq!(warn, Ok(vec!["decode z: no signal for ready, cmd".to_string(), "decode: needs a name, a protocol, signals and params as tables".to_string()]));
 }
+
+/// Spec §16 "Records of a set": a name with two kinds is a column per stream.
+#[test]
+fn set_columns_by_kind() {
+    let f = |name: &str, width| Field { name: name.into(), width: Some(width), time: false, signed: false };
+    let s = |name: &str, schema| Stream { name: name.into(), schema, records: vec![], violations: false, inputs: vec![] };
+    let (a, b) = (s("a", vec![f("len", 8), f("x", 1)]), s("b", vec![f("x", 1), f("len", 16)]));
+    let set = wtf_core::stream::Set::new(vec![&a, &b]);
+    let cols: Vec<(&str, Vec<Option<usize>>)> = set.columns.iter().map(|c| (c.name.as_str(), c.at.clone())).collect();
+    assert_eq!(cols, [("a.len", vec![Some(0), None]), ("x", vec![Some(1), Some(0)]), ("b.len", vec![None, Some(1)])]);
+}

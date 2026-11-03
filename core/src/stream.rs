@@ -34,6 +34,9 @@ pub struct Stream {
     pub records: Vec<Record>,
     /// Its records are violations (`check`, a pair's `unmatched`), drawn red.
     pub violations: bool,
+    /// The streams it is made from (a frame's beats, a join's parts): those are intermediate,
+    /// it may be a result (spec §16 "Results").
+    pub inputs: Vec<String>,
 }
 
 /// A signal made from a stream: path, width, values in time order.
@@ -137,64 +140,131 @@ impl Stream {
         let b = self.records.partition_point(|r| r.start <= to).max(a);
         Page { records: &self.records[a..b.min(a.saturating_add(limit))], total: b - a }
     }
+}
 
-    /// The numbers of the records starting in [from, to] for which `filter` holds, and how many
-    /// start there in all. `filter` is a search expression over the fields, named bare (`addr !=
-    /// 0x1C && resp == 0`), evaluated on each record, so never on the gaps between them; `past(x)`
-    /// is x of the record before, `n` the record's number unless a field has that name, and a
-    /// field compares with another field too (`req_addr != resp_addr`).
-    pub fn select(&self, from: Tick, to: Tick, filter: Option<&str>, fpt: Option<u128>) -> Result<(Vec<usize>, usize), String> {
-        let all = self.records(from, to, usize::MAX);
-        let first = self.records.partition_point(|r| r.start < from);
-        let numbers = first..first + all.records.len();
-        let Some(text) = filter else { return Ok((numbers.collect(), all.total)) };
-        // `n`, the record's number, is the probe after the fields
-        let n = self.schema.len();
-        let q = crate::search::parse_query(text, fpt, &mut |name| match self.schema.iter().position(|f| f.name == name) {
-            Some(k) => Ok(((k, None), self.schema[k].width, None, self.schema[k].signed)),
-            None if name == "n" => Ok(((n, None), Some(64), None, false)),
-            None => {
-                let names: Vec<&str> = self.schema.iter().map(|f| f.name.as_str()).collect();
-                Err(format!("{}: no field {name} (fields: {}, and n, the record's number)", self.name, names.join(", ")))
+/// A column of a `Set`: a field of one or more of its streams, and its index in each.
+pub struct Column {
+    pub name: String,
+    pub field: Field,
+    pub at: Vec<Option<usize>>,
+}
+
+/// Streams read together as one table (spec §16 "Records of a set"): their records in order of
+/// start, a column per field. Fields share a column when name and kind (width, sign, time, text)
+/// are the same; a name with different kinds is a column per stream, `<stream>.<field>`. One
+/// stream's columns are its schema.
+pub struct Set<'a> {
+    pub streams: Vec<&'a Stream>,
+    pub columns: Vec<Column>,
+}
+
+/// A record of a set: its stream's index in the set, and its number there.
+pub type At = (usize, usize);
+
+impl<'a> Set<'a> {
+    pub fn new(streams: Vec<&'a Stream>) -> Set<'a> {
+        let kind = |f: &Field| (f.width, f.time, f.signed);
+        let mut columns: Vec<Column> = Vec::new();
+        for (s, st) in streams.iter().enumerate() {
+            for (k, f) in st.schema.iter().enumerate() {
+                let mixed = streams.iter().flat_map(|o| &o.schema).any(|o| o.name == f.name && kind(o) != kind(f));
+                let name = if mixed { format!("{}.{}", st.name, f.name) } else { f.name.clone() };
+                let c = match columns.iter().position(|c| c.name == name) {
+                    Some(c) => c,
+                    None => {
+                        columns.push(Column { name, field: f.clone(), at: vec![None; streams.len()] });
+                        columns.len() - 1
+                    }
+                };
+                columns[c].at[s] = Some(k);
             }
+        }
+        Set { streams, columns }
+    }
+
+    /// A record's value in a column; None where its stream has no such field, or no value.
+    pub fn value(&self, (s, i): At, c: usize) -> Option<&Val> {
+        self.columns[c].at[s].and_then(|k| self.streams[s].records[i].fields[k].as_ref())
+    }
+
+    pub fn record(&self, (s, i): At) -> &Record {
+        &self.streams[s].records[i]
+    }
+
+    fn names(&self) -> String {
+        self.columns.iter().map(|c| c.name.as_str()).collect::<Vec<_>>().join(", ")
+    }
+
+    /// The records starting in [from, to] for which `filter` holds, in order of start, and how many
+    /// start there in all. `filter` is a search expression over the columns, named bare (`addr !=
+    /// 0x1C && resp == 0`), evaluated on each record; `past(x)` is x of its stream's record before,
+    /// `n` the record's number unless a column has that name, and a column compares with another
+    /// too (`req_addr != resp_addr`). It keeps records of the streams that have every column it
+    /// names; a name no stream has is an error listing the columns.
+    pub fn select(&self, from: Tick, to: Tick, filter: Option<&str>, fpt: Option<u128>) -> Result<(Vec<At>, usize), String> {
+        let mut total = 0;
+        let mut all: Vec<At> = Vec::new();
+        for (s, st) in self.streams.iter().enumerate() {
+            let a = st.records.partition_point(|r| r.start < from);
+            let b = st.records.partition_point(|r| r.start <= to).max(a);
+            total += b - a;
+            all.extend((a..b).map(|i| (s, i)));
+        }
+        all.sort_by_key(|&(s, i)| (self.streams[s].records[i].start, s, i));
+        let Some(text) = filter else { return Ok((all, total)) };
+        // `n`, the record's number, is the probe after the columns
+        let n = self.columns.len();
+        let mut named = Vec::new();
+        let q = crate::search::parse_query(text, fpt, &mut |name| match self.columns.iter().position(|c| c.name == name) {
+            Some(c) => {
+                named.push(c);
+                Ok(((c, None), self.columns[c].field.width, None, self.columns[c].field.signed))
+            }
+            None if name == "n" => Ok(((n, None), Some(64), None, false)),
+            None if self.streams.len() == 1 => Err(format!("{}: no field {name} (fields: {}, and n, the record's number)", self.streams[0].name, self.names())),
+            None => Err(format!("no field {name} in {} (fields: {}, and n, the record's number)", self.streams.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(", "), self.names())),
         })?;
         if q.clock.is_some() {
             return Err("a record filter has no clock: it is evaluated on each record".into());
         }
-        let picked = numbers
-            .filter(|&i| {
-                crate::search::holds(&q.expr, &|(k, _), back| {
-                    let i = i.checked_sub(back as usize)?;
-                    Some(match k == n {
-                        true => Some(Val::Bits(format!("{i:064b}"))),
-                        false => self.records[i].fields[k].clone(),
+        let has: Vec<bool> = (0..self.streams.len()).map(|s| named.iter().all(|&c| self.columns[c].at[s].is_some())).collect();
+        let picked = all
+            .into_iter()
+            .filter(|&(s, i)| {
+                has[s]
+                    && crate::search::holds(&q.expr, &|(c, _), back| {
+                        let i = i.checked_sub(back as usize)?;
+                        Some(match c == n {
+                            true => Some(Val::Bits(format!("{i:064b}"))),
+                            false => self.value((s, i), c).cloned(),
+                        })
                     })
-                })
             })
             .collect();
-        Ok((picked, all.total))
+        Ok((picked, total))
     }
 
-    /// The distinct values of the fields named among `records`, in order of first appearance, so
+    /// The distinct values of the columns named among `records`, in order of first appearance, so
     /// 128 identical polls are one group.
-    pub fn group_by(&self, records: &[&Record], names: &[String]) -> Result<Vec<Group>, String> {
-        let ks = names
+    pub fn group_by(&self, records: &[At], names: &[String]) -> Result<Vec<Group>, String> {
+        let cs = names
             .iter()
-            .map(|n| self.schema.iter().position(|f| f.name == *n).ok_or_else(|| {
-                let all: Vec<&str> = self.schema.iter().map(|f| f.name.as_str()).collect();
-                format!("{}: no field {n} (fields: {})", self.name, all.join(", "))
+            .map(|n| self.columns.iter().position(|c| c.name == *n).ok_or_else(|| match self.streams.len() {
+                1 => format!("{}: no field {n} (fields: {})", self.streams[0].name, self.names()),
+                _ => format!("no field {n} (fields: {})", self.names()),
             }))
             .collect::<Result<Vec<_>, _>>()?;
         let mut groups: Vec<Group> = Vec::new();
         let mut index = std::collections::HashMap::new();
-        for r in records {
-            let values: Vec<Option<Val>> = ks.iter().map(|&k| r.fields[k].clone()).collect();
+        for &at in records {
+            let values: Vec<Option<Val>> = cs.iter().map(|&c| self.value(at, c).cloned()).collect();
+            let start = self.record(at).start;
             let i = *index.entry(values.clone()).or_insert_with(|| {
-                groups.push(Group { values, count: 0, first: r.start, last: r.start });
+                groups.push(Group { values, count: 0, first: start, last: start });
                 groups.len() - 1
             });
             groups[i].count += 1;
-            groups[i].last = r.start;
+            groups[i].last = start;
         }
         Ok(groups)
     }
@@ -227,7 +297,7 @@ pub fn changes(trace: &Trace, name: &str, p: Probe) -> Stream {
         .map(|(i, (t, v))| Record { start: t, end: ends.get(i).copied().unwrap_or(end.max(t + 1)), fields: vec![v] })
         .collect();
     let schema = vec![Field { name: "value".into(), width: trace.probe_width(p), time: false, signed: false }];
-    Stream { name: name.into(), schema, records, violations: false }
+    Stream { name: name.into(), schema, records, violations: false, inputs: vec![] }
 }
 
 /// The stateless sampler: a record for each clock cycle whose ending edge samples `q` true, from
@@ -247,5 +317,5 @@ pub fn sample(trace: &Trace, name: &str, q: &Query, fields: &[(String, Probe, Op
         })
         .collect();
     let schema = fields.iter().map(|(n, p, w)| Field { name: n.clone(), width: *w, time: false, signed: p.1.is_none() && trace.vars[p.0].signed }).collect();
-    Ok(Stream { name: name.to_string(), schema, records, violations: false })
+    Ok(Stream { name: name.to_string(), schema, records, violations: false, inputs: vec![] })
 }

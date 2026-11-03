@@ -113,8 +113,8 @@ fn field_text(app: &Workspace, f: &wtf_core::stream::Field, v: &Option<Val>, u: 
 
 /// The radix asked for each of a stream's fields (`dec`, `len:dec,data:hex`), None for the
 /// default: a radix for every field skips those it doesn't fit, one for a field must fit it.
-fn field_radixes(s: &wtf_core::stream::Stream, asked: Option<&str>) -> Result<Vec<Option<(usize, u32)>>, String> {
-    let mut out = vec![None; s.schema.len()];
+fn field_radixes(s: &wtf_core::stream::Set, asked: Option<&str>) -> Result<Vec<Option<(usize, u32)>>, String> {
+    let mut out = vec![None; s.columns.len()];
     for item in asked.unwrap_or("").split([',', ' ']).filter(|i| !i.is_empty()) {
         let (field, r) = match with_radix(item) {
             (f, Some(r)) => (Some(f), r),
@@ -124,18 +124,19 @@ fn field_radixes(s: &wtf_core::stream::Stream, asked: Option<&str>) -> Result<Ve
         match field {
             None => {
                 radix::parse_name(r).ok_or(format!("unknown radix: {r}"))?;
-                for (k, f) in s.schema.iter().enumerate() {
+                for (k, f) in s.columns.iter().map(|c| &c.field).enumerate() {
                     if let Some(Ok(rf)) = numbers(f).map(|w| radix_for(r, w, false, &f.name)) {
                         out[k] = Some(rf);
                     }
                 }
             }
             Some(name) => {
-                let Some(k) = s.schema.iter().position(|f| f.name == name) else {
-                    let names: Vec<&str> = s.schema.iter().map(|f| f.name.as_str()).collect();
-                    return Err(format!("{}: no field {name} (fields: {})", s.name, names.join(", ")));
+                let Some(k) = s.columns.iter().position(|c| c.name == name) else {
+                    let names: Vec<&str> = s.columns.iter().map(|c| c.name.as_str()).collect();
+                    let streams: Vec<&str> = s.streams.iter().map(|s| s.name.as_str()).collect();
+                    return Err(format!("{}: no field {name} (fields: {})", streams.join(", "), names.join(", ")));
                 };
-                let f = &s.schema[k];
+                let f = &s.columns[k].field;
                 let w = numbers(f).ok_or(format!("{name} isn't a number: a time or text takes no radix"))?;
                 out[k] = Some(radix_for(r, w, false, name)?);
             }
@@ -450,16 +451,20 @@ impl Wtf {
         Ok(budget(out))
     }
 
-    #[tool(description = "A decoded stream's records as a table: n, start (the rising edge that starts the record's first clock cycle), end (the edge that samples its last) and the fields; `where`, `group_by`, `count_only` (`help records`).")]
+    #[tool(description = "Records of a decoded stream, or of several in start order (a decode's name: its results), as a table: n, start (the rising edge that starts the record's first clock cycle), end (the edge that samples its last) and the fields; `where`, `group_by`, `count_only` (`help records`).")]
     fn records(&self, Parameters(a): Parameters<RecordsArgs>) -> Result<String, String> {
         let w = current(self)?;
         let app = lock(&w);
-        let Some(s) = app.streams.iter().find(|s| s.name == a.stream) else {
-            // an interface `open` listed, not decoded yet (`top.s_axi.wr`, `s_axi.wr`): its line
-            let (base, part) = a.stream.rsplit_once('.').unwrap_or((&a.stream, ""));
-            let named = |f: &protocol::Found| [a.stream.as_str(), base].iter().any(|&n| n == f.name() || n == f.prefix.trim_end_matches(['_', '.']));
-            let found: Vec<protocol::Found> = protocol::detect(&app.trace).into_iter().filter(named).collect();
-            if !found.is_empty() {
+        let ids = match app.stream_set(&a.stream) {
+            Ok(ids) => ids,
+            Err(e) => {
+                // an interface `open` listed, not decoded yet (`top.s_axi.wr`, `s_axi.wr`): its line
+                let (base, part) = a.stream.rsplit_once('.').unwrap_or((&a.stream, ""));
+                let named = |f: &protocol::Found| [a.stream.as_str(), base].iter().any(|&n| n == f.name() || n == f.prefix.trim_end_matches(['_', '.']));
+                let found: Vec<protocol::Found> = protocol::detect(&app.trace).into_iter().filter(named).collect();
+                if found.is_empty() {
+                    return Err(e.replace("decode or protocol", "`command`: `decode <name> <protocol> ...`"));
+                }
                 let how: Vec<String> = found
                     .iter()
                     .take(3)
@@ -470,25 +475,22 @@ impl Wtf {
                     .collect();
                 return Err(format!("unknown stream: {}: its interface isn't decoded yet; with `command`, {}", a.stream, how.join("; or ")));
             }
-            let names: Vec<&str> = app.streams.iter().map(|s| s.name.as_str()).collect();
-            return Err(match names.len() {
-                0 => format!("unknown stream: {} (none yet; make one with `command`: `decode <name> <protocol> ...`)", a.stream),
-                _ => format!("unknown stream: {} (streams: {})", a.stream, names.join(", ")),
-            });
         };
+        let set = wtf_core::stream::Set::new(ids.iter().map(|&i| &app.streams[i]).collect());
+        // several streams: a column says whose each record is
+        let multi = set.streams.len() > 1;
         let from = a.from.as_deref().map(|f| at(&app, f)).transpose()?.map_or(0, |s| s.0);
         let to = a.to.as_deref().map(|t| at(&app, t)).transpose()?.map_or(app.trace.end(), |s| s.1);
-        let (numbers, of) = s.select(from, to, a.filter.as_deref(), app.trace.fs_per_tick)?;
-        let radixes = field_radixes(s, a.radix.as_deref())?;
-        let picked: Vec<&wtf_core::stream::Record> = numbers.iter().map(|&i| &s.records[i]).collect();
+        let (picked, of) = set.select(from, to, a.filter.as_deref(), app.trace.fs_per_tick)?;
+        let radixes = field_radixes(&set, a.radix.as_deref())?;
         // with `where`: how many match, of how many there are
         let (matching, of) = match a.filter {
             Some(_) => (" matching", format!(", of {of}")),
             None => ("", String::new()),
         };
-        let (Some(first), Some(last)) = (picked.first(), picked.last()) else {
+        let (Some(&first), Some(&last)) = (picked.first(), picked.last()) else {
             // a check's empty answer is its result, not a sign it didn't run
-            return Ok(match (matching, s.violations) {
+            return Ok(match (matching, set.streams.iter().all(|s| s.violations)) {
                 ("", true) => "no records: no violations".into(),
                 ("", false) => "no records".into(),
                 _ => format!("no matching records{of}"),
@@ -496,7 +498,7 @@ impl Wtf {
         };
         let count = a.count.unwrap_or(20).min(MAX_LINES);
         if !a.group_by.is_empty() {
-            let groups = s.group_by(&picked, &a.group_by)?;
+            let groups = set.group_by(&picked, &a.group_by)?;
             let what = format!("{} distinct, of {}{matching} records{of}", groups.len(), picked.len());
             if a.count_only {
                 return Ok(what);
@@ -504,27 +506,38 @@ impl Wtf {
             let page = &groups[..groups.len().min(count)];
             let u = unit(&app, &a.unit, page.iter().flat_map(|g| [g.first, g.last]))?;
             let mut lines = vec![format!("{} of {what}", page.len())];
-            let fields: Vec<usize> = a.group_by.iter().filter_map(|n| s.schema.iter().position(|f| f.name == *n)).collect();
+            let cols: Vec<usize> = a.group_by.iter().filter_map(|n| set.columns.iter().position(|c| c.name == *n)).collect();
             for g in page {
-                let values: Vec<String> = fields.iter().zip(&g.values).map(|(&k, v)| format!("{}={}", s.schema[k].name, field_text(&app, &s.schema[k], v, u, radixes[k]))).collect();
+                let values: Vec<String> = cols.iter().zip(&g.values).map(|(&k, v)| format!("{}={}", set.columns[k].name, field_text(&app, &set.columns[k].field, v, u, radixes[k]))).collect();
                 lines.push(format!("{} × {} ({} .. {})", g.count, values.join(" "), show(&app, g.first, u), show(&app, g.last, u)));
             }
             return Ok(budget(lines.join("\n")));
         }
+        let (first, last) = (set.record(first), set.record(last));
         if a.count_only {
             let u = unit(&app, &a.unit, [first.start, last.start])?;
             return Ok(format!("{}{matching} records{of}, first {}, last {}", picked.len(), show(&app, first.start, u), show(&app, last.start, u)));
         }
         let page = &picked[..picked.len().min(count)];
-        let u = unit(&app, &a.unit, page.iter().flat_map(|r| [r.start, r.end]))?;
+        let u = unit(&app, &a.unit, page.iter().flat_map(|&at| [set.record(at).start, set.record(at).end]))?;
         // several records: long values shortened, as the rest of the row is what's compared
         let whole = page.len() == 1;
-        let texts: Vec<Vec<String>> = page.iter().map(|r| s.schema.iter().zip(&r.fields).zip(&radixes).map(|((f, v), &rf)| field_text(&app, f, v, u, rf)).map(|t| if whole { t } else { shorten(t) }).collect()).collect();
+        let texts: Vec<Vec<String>> = page
+            .iter()
+            .map(|&(s, i)| {
+                let r = &set.streams[s].records[i];
+                // a field its stream hasn't is empty
+                set.columns.iter().zip(&radixes).map(|(c, &rf)| c.at[s].map_or(String::new(), |k| field_text(&app, &c.field, &r.fields[k], u, rf))).map(|t| if whole { t } else { shorten(t) }).collect()
+            })
+            .collect();
         let cut = texts.iter().flatten().any(|t| t.ends_with(" bytes)") || t.ends_with(" chars)"));
         let mut lines = vec![format!("{} of {}{matching}{of}{}", page.len(), picked.len(), if cut { " (long values shortened; one record, `count: 1` with `from`, shows them whole)" } else { "" })];
-        lines.push(["n", "start", "end"].into_iter().chain(s.schema.iter().map(|f| f.name.as_str())).collect::<Vec<_>>().join("\t"));
-        for ((r, n), texts) in page.iter().zip(&numbers).zip(texts) {
-            lines.push(std::iter::once(format!("{n}\t{}\t{}", show(&app, r.start, u), show(&app, r.end, u))).chain(texts).collect::<Vec<_>>().join("\t"));
+        let heads = ["stream", "n", "start", "end"];
+        lines.push(heads[!multi as usize..].iter().copied().chain(set.columns.iter().map(|c| c.name.as_str())).collect::<Vec<_>>().join("\t"));
+        for (&(s, n), texts) in page.iter().zip(texts) {
+            let r = &set.streams[s].records[n];
+            let stream = multi.then(|| set.streams[s].name.clone());
+            lines.push(stream.into_iter().chain([format!("{n}\t{}\t{}", show(&app, r.start, u), show(&app, r.end, u))]).chain(texts).collect::<Vec<_>>().join("\t"));
         }
         Ok(budget(lines.join("\n")))
     }
@@ -765,7 +778,7 @@ impl Wtf {
         if cmd == "decode" {
             let protocol = line.split_whitespace().nth(2).unwrap_or("<protocol>");
             let pair = if protocol == "pair" { "" } else { "; `pair` matches a stream with another (`help decode`)" };
-            out.push(format!("`records <stream>` lists one; `protocols {protocol}` says what each stream and field is{pair}"));
+            out.push(format!("`records <stream>` lists one, `records <name>` its records and violations in order; `protocols {protocol}` says what each stream and field is{pair}"));
         }
         Ok(if out.is_empty() { "done".into() } else { out.join("\n") })
     }

@@ -22,7 +22,7 @@ pub const COMMANDS: &[Command] = &[
     Command { name: "decode", usage: ":decode <name> <protocol> <role>=<signal>...", desc: "Decode a protocol into streams, e.g. :decode rx axis clock=clk tvalid=rx_tvalid tready=rx_tready tdata=rx_tdata tlast=rx_tlast", args: true },
     Command { name: "protocol", usage: ":protocol <name> roles=<a,b> when=<expr> <field>=<expr>...", desc: "Define a protocol on its roles, a record per cycle where when holds, e.g. :protocol cmd roles=valid,ready,data when=valid && ready op=data[7:0]; :decode puts it on signals", args: true },
     Command { name: "names", usage: ":names <signal> <value>=<name>...", desc: "Name a signal's values, shown by the enum radix and searched by name, e.g. :names state 0=IDLE 1=BUSY; off removes them", args: true },
-    Command { name: "records", usage: ":records <stream> [where <expr>]", desc: "List a stream's records, e.g. :records bus.wr where resp != 0; Enter jumps to one", args: true },
+    Command { name: "records", usage: ":records <streams> [where <expr>]", desc: "Browse records as a table: a stream, a decode's results (:records bus), a glob; / filters, s sorts, = groups", args: true },
     Command { name: "scope", usage: ":scope [path]", desc: "Resolve names under a scope first, e.g. :scope top.cpu makes state top.cpu.state; none without a path", args: true },
     Command { name: "radix", usage: ":radix <name>", desc: "Set the radix: hex bin dec sdec oct ascii float enum, q4.12 / uq4.12 fixed point", args: true },
     Command { name: "color", usage: ":color <name|off>", desc: "Colour the selected row or group: red orange yellow green cyan blue magenta gray; off for the theme's", args: true },
@@ -156,7 +156,8 @@ fn arguments(c: &Command, line: &str, app: &crate::tui::app::App) -> Completion 
         ("add" | "rm", _) => ("signal", signals(word)),
         ("radix", 1) => ("radix", fuzzy(word, wtf_core::radix::RADIXES.iter().map(|r| r.name)).into_iter().map(|r| item(r, "")).collect()),
         ("color", 1) => ("colour", fuzzy(word, wtf_core::rows::COLORS.iter().copied().chain(["off"])).into_iter().map(|r| item(r, "")).collect()),
-        ("records", 1) => ("stream", fuzzy(word, ws.streams.iter().map(|s| s.name.as_str())).into_iter().map(|s| item(s, "")).collect()),
+        // a decode's name first: its results
+        ("records", 1) => ("stream", fuzzy(word, ws.decodes.iter().map(|d| d.name.as_str()).chain(ws.streams.iter().map(|s| s.name.as_str()))).into_iter().map(|s| item(s, "")).collect()),
         ("help", 1) => {
             let topics = crate::mcp::help::TOPICS;
             ("topic", fuzzy(word, topics.iter().map(|t| t.0)).into_iter().filter_map(|t| topics.iter().find(|x| x.0 == t)).map(|t| item(t.0, t.1)).collect())

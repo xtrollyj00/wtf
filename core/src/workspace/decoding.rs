@@ -177,6 +177,51 @@ impl Workspace {
         self.decodes.iter().filter_map(|d| Some((d.name.as_str(), role(d)?))).collect()
     }
 
+    /// Stream `i` is intermediate: another stream is made from it (spec §16 "Results").
+    pub fn intermediate(&self, i: usize) -> bool {
+        let name = &self.streams[i].name;
+        self.streams.iter().any(|s| s.inputs.contains(name))
+    }
+
+    /// The streams a decode made (named it, or `<it>.<step>`), in the order made.
+    pub fn streams_of_decode(&self, decode: &str) -> Vec<usize> {
+        let prefix = format!("{decode}.");
+        (0..self.streams.len()).filter(|&i| self.streams[i].name == decode || self.streams[i].name.starts_with(&prefix)).collect()
+    }
+
+    /// A decode's results then its violations: the streams nothing is made from.
+    pub fn results(&self, decode: &str) -> Vec<usize> {
+        let mut out: Vec<usize> = self.streams_of_decode(decode).into_iter().filter(|&i| !self.intermediate(i)).collect();
+        out.sort_by_key(|&i| self.streams[i].violations);
+        out
+    }
+
+    /// The streams named for `records` (spec §16 "Records of a set"), each name a stream, a
+    /// decode's name (its results and violations) or a glob (`bus.*`), separated by spaces.
+    pub fn stream_set(&self, names: &str) -> Result<Vec<usize>, String> {
+        let mut out: Vec<usize> = Vec::new();
+        for name in names.split_whitespace() {
+            let found = match self.streams.iter().position(|s| s.name == name) {
+                Some(i) => vec![i],
+                None if self.decodes.iter().any(|d| d.name == name) => self.results(name),
+                None if name.contains('*') => (0..self.streams.len()).filter(|&i| crate::command::glob(name, &self.streams[i].name)).collect(),
+                None => vec![],
+            };
+            if found.is_empty() {
+                let all: Vec<&str> = self.streams.iter().map(|s| s.name.as_str()).collect();
+                return Err(match all.len() {
+                    0 => format!("unknown stream: {name} (none yet; make one with decode or protocol)"),
+                    _ => format!("unknown stream: {name} (streams: {}; or a decode's name for its results)", all.join(", ")),
+                });
+            }
+            out.extend(found.into_iter().filter(|i| !out.contains(i)).collect::<Vec<_>>());
+        }
+        if out.is_empty() {
+            return Err("records of which stream? (a stream, a decode's name or a glob)".into());
+        }
+        Ok(out)
+    }
+
     /// The full path of a signal named as in a search.
     fn full_path(&mut self, name: &str) -> Result<String, String> {
         self.resolve(name).map(|p| self.trace.probe_path(p))
@@ -255,7 +300,12 @@ impl Workspace {
                 protocol::Step::Decode { name, input, decoder, params } => {
                     let full = format!("{}.{input}", d.name);
                     let input = scratch.iter().find(|s| s.name == input).or_else(|| self.streams.iter().find(|s| s.name == full)).ok_or(format!("no stream {full}"));
-                    let made = input.and_then(|i| Ok(decode::run(&format!("{}.{name}", d.name), i, decode::make(decoder, &i.schema, &params, self.trace.fs_per_tick)?)));
+                    let made = input.and_then(|i| {
+                        let mut s = decode::run(&format!("{}.{name}", d.name), i, decode::make(decoder, &i.schema, &params, self.trace.fs_per_tick)?);
+                        // a signal's changes are no stream of the workspace's
+                        s.inputs.retain(|x| *x == full);
+                        Ok(s)
+                    });
                     made.and_then(|s| self.add_signals(s))
                 }
             };
@@ -346,7 +396,7 @@ impl Workspace {
             records.extend(s.records.into_iter().map(|r| stream::Record { fields: vec![Some(crate::trace::Val::Text(rule.clone()))], ..r }));
         }
         records.sort_by_key(|r| r.start);
-        Ok(Stream { name: name.into(), schema: vec![stream::Field { name: "rule".into(), width: None, time: false, signed: false }], records, violations: true })
+        Ok(Stream { name: name.into(), schema: vec![stream::Field { name: "rule".into(), width: None, time: false, signed: false }], records, violations: true, inputs: vec![] })
     }
 
     /// Sample a protocol into the stream `name` and add it as signals. Returns the stream's var.

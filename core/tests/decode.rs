@@ -56,7 +56,7 @@ fn frame_schema_and_errors() {
     assert_eq!(err(&[("last", "tlast"), ("gap", "-1"), ("gap", "soon"), ("size", "4")]), "frame: no field tlast (fields: d, rdy); frame: gap: bad time: -1; frame: gap: bad time: soon; frame: no parameter size (last, gap, select, key, bytes, data)");
     assert_eq!(decode::make("axi9", &s.schema, &[], None).err().unwrap(), "unknown decoder: axi9 (decoders: frame, spi, uart)");
     // an empty stream makes no frames
-    let empty = Stream { name: "e".into(), schema: s.schema.clone(), records: vec![], violations: false };
+    let empty = Stream { name: "e".into(), schema: s.schema.clone(), records: vec![], violations: false, inputs: vec![] };
     assert!(decode::run("f", &empty, make(&[("gap", "0")]).unwrap()).records.is_empty());
 }
 
@@ -71,6 +71,7 @@ fn join_in_order() {
         schema: vec![Field { name: name.into(), width: Some(8), time: false, signed: false }],
         records: starts.iter().map(|&t| Record { start: t, end: t + 5, fields: vec![Some(Val::Bits(format!("{t:08b}")))] }).collect(),
         violations: false,
+        inputs: vec![],
     };
     // a at 10, 50, 70; b at 20, 60: requests complete at 20 and 60, a's third has no b
     let (a, b, resp) = (stream("a", &[10, 50, 70]), stream("b", &[20, 60]), stream("r", &[5, 30]));

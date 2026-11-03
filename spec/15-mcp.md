@@ -17,7 +17,7 @@ reuse wtf's own pieces:
 | `render(signals, from, to, width, unit)` | the signals drawn as text, as on the screen (`--snapshot`); without signals, the workspace. The name and value columns keep their default widest (30, 20): the server reads no config file, so an answer doesn't depend on the user's |
 | `workspace(scope, signals, protocols, decode, rows, cursors, range)` | set up the whole workspace in one call |
 | `protocols(name)` | what can be decoded and how; for one protocol its roles, params and streams |
-| `records(stream, from, to, where, group_by, count, count_only, unit)` | a stream's records as a table |
+| `records(stream, from, to, where, group_by, count, count_only, unit)` | the records of a stream, or of a set of streams (a decode's name: its results), as a table |
 | `reload` | reopen the trace after the simulation was rerun, like `:e` |
 | `command(line)` | run a `:` command on the agent's workspace (milestone 7) |
 | `view(unit)` | describe the workspace: rows, cursors with Δt, visible range |
@@ -78,7 +78,8 @@ reuse wtf's own pieces:
   each match, as the clock edge samples it (one row per cycle), so `@clk awvalid && awready` with
   `show: [awaddr, wdata]` is a table of the writes. `to` ends the search, e.g. at a reset.
   `count_only` gives the number of matches and runs, first and last.
-- `records` lists a stream's records (section 16) as a table, `n` (the record's number, as the
+- `records` lists a stream's records (section 16) as a table, or a set's (section 16 "Records of
+  a set": `stream` names a decode, a glob or several, and a `stream` column comes first), `n` (the record's number, as the
   stream's value `#n` shows it), `start` (the rising edge that starts the record's first clock
   cycle, as `find @clk` reports a match), `end` (the edge that samples its last) and a column per field, headed with how many are shown of all in the range (`20 of 157`). With more
   than one record, long values are shortened, a frame's data to its first 8 bytes and its size
@@ -151,8 +152,9 @@ reuse wtf's own pieces:
   scope's name too (`cpu_state=cpu.state dma_state=dma.state`). A field is named as its role,
   with a number appended where two are alike (`data_0=data[7:4] data_1=data[3:0]`).
 - `command` decodes without touching the rows (`decode`, `protocol`, `signal`). `decode` answers
-  with the streams it made and their records, violations apart (`bus: records bus.aw 2, ...;
-  violations bus.errors 2, bus.wr.unmatched 1, ...`), then where to read more; the window shows
+  with the streams it made and their records, results first, then violations, then what they are
+  made from (`bus: records bus.wr 2, bus.rd 8; violations bus.errors 2, ...; made from bus.aw 2,
+  ...`, section 16 "Results"), then where to read more; the window shows
   that line on its status line.
 
 ### Workspaces, present and the link
@@ -229,4 +231,4 @@ the last 200 steps.
   line, never the user's own (an error after `:q`); the step is in `:trail` either way.
 - `:trail` (section 7) lists the steps of the agent followed, or else of the agent that made the
   last step, oldest first and the newest highlighted,
-  in the box `:records` uses; `Enter` on a step with a time moves the cursor there.
+  in the box `:help <topic>` uses; `Enter` on a step with a time moves the cursor there.

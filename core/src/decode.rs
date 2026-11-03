@@ -35,7 +35,7 @@ pub fn run(name: &str, input: &Stream, mut d: Box<dyn Decoder>) -> Stream {
     let mut records: Vec<Record> = input.records.iter().flat_map(|r| d.feed(r)).collect();
     records.extend(d.finish());
     records.sort_by_key(|r| r.start);
-    Stream { name: name.to_string(), schema: d.schema(), records, violations: d.violations() }
+    Stream { name: name.to_string(), schema: d.schema(), records, violations: d.violations(), inputs: vec![input.name.clone()] }
 }
 
 /// A duration, as a `time` field holds it: 64 bits of ticks.
@@ -276,8 +276,9 @@ pub fn join(name: &str, requests: &[(&str, &Stream)], response: &Stream, id: Opt
     let reqs: Vec<(&str, &[Field])> = requests.iter().map(|(l, s)| (*l, &s.schema[..])).collect();
     let schema = join_schema(&reqs, &response.schema);
     let kinds = vec![Field { name: "kind".into(), width: None, time: false, signed: false }];
-    let unmatched = Stream { name: format!("{name}.unmatched"), schema: kinds, records: unmatched, violations: true };
-    Ok((Stream { name: name.into(), schema, records: done, violations: false }, unmatched))
+    let inputs: Vec<String> = requests.iter().map(|r| r.1.name.clone()).chain([response.name.clone()]).collect();
+    let unmatched = Stream { name: format!("{name}.unmatched"), schema: kinds, records: unmatched, violations: true, inputs: inputs.clone() };
+    Ok((Stream { name: name.into(), schema, records: done, violations: false, inputs }, unmatched))
 }
 
 /// The fields of `join`'s transactions, from its inputs' (label, fields).
@@ -337,8 +338,9 @@ pub fn pair(name: &str, req: &Stream, resp: &Stream, id: Option<(&str, &str)>) -
     schema.extend(prefixed("req_", req));
     schema.extend(prefixed("resp_", resp));
     let kind_schema = vec![Field { name: "kind".into(), width: None, time: false, signed: false }];
-    let unmatched = Stream { name: format!("{name}.unmatched"), schema: kind_schema, records: unmatched, violations: true };
-    Ok((Stream { name: name.into(), schema, records: pairs, violations: false }, unmatched))
+    let inputs = vec![req.name.clone(), resp.name.clone()];
+    let unmatched = Stream { name: format!("{name}.unmatched"), schema: kind_schema, records: unmatched, violations: true, inputs: inputs.clone() };
+    Ok((Stream { name: name.into(), schema, records: pairs, violations: false, inputs }, unmatched))
 }
 
 /// A param's value: the one given, or `default`; `what` says what it must be.

@@ -4,9 +4,10 @@ expression: "snapshot(&mut app, 100, Some(16))"
 ---
 Name        │ Value      │ 0               50ns             100ns            150ns
   ╭─ records · rx.frame ──────────────────────────────────────────────────────────────── 2 of 4 ─╮
-▸ │ ▸ where len >= 8                                                                             │
-  │──────────────────────────────────────────────────────────────────────────────────────────────│
-▸ │   n    start    length    beats    len    data                      complete                 │
+▸ │ all  frame  errors  beat                                                                     │
+  │ ▸ where len >= 8                                                                             │
+▸ │──────────────────────────────────────────────────────────────────────────────────────────────│
+  │   n    start    length    beats    len    data                      complete                 │
   │   #0   15ns     40ns      0x3      0xA    a0 00 00 00 a1 00 00 00…  1                        │
   │▌  #2   65ns     20ns      0x2      0x8    c0 00 00 00 c1 00 00 00   1                        │
   │                                                                                              │
@@ -14,7 +15,6 @@ Name        │ Value      │ 0               50ns             100ns           
   │                                                                                              │
   │                                                                                              │
   │                                                                                              │
-  │                                                                                              │
-  ╰───────────────────────────── Enter jump  / filter  s S sort  = group  Tab stream  Esc close ─╯
+  ╰──────────────────── Enter jump  / filter  s S sort  = group  h l scroll  Tab set  Esc close ─╯
             │            │
  NORMAL   signals ▸  rx.errors                                                0  3ns/col  axis [+]

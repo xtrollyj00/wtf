@@ -650,7 +650,7 @@ fn records_of_a_declared_stream() {
     assert_eq!(s.ok("records", json!({"stream": "v", "from": "60ns", "to": "80ns"})), "2 of 2\nn\tstart\tend\td\n3\t65ns\t75ns\t0x22\n4\t75ns\t85ns\t0x23");
     assert_eq!(s.ok("records", json!({"stream": "v", "count_only": true})), "6 records, first 15ns, last 105ns");
     assert_eq!(s.ok("records", json!({"stream": "v", "from": "120ns"})), "no records");
-    assert_eq!(s.tool("records", json!({"stream": "w"})), Err("unknown stream: w (streams: rx, v)".into()));
+    assert_eq!(s.tool("records", json!({"stream": "w"})), Err("unknown stream: w (streams: rx, v; or a decode's name for its results)".into()));
     // the stream's signals work as any: a search on a field
     assert_eq!(s.ok("find", json!({"expr": "rx.tdata == 0x33"})), "time\n105ns");
     // a protocol with roles, put on signals by an instance
@@ -720,14 +720,22 @@ fn decode_with_command() {
     assert_eq!(s.tool("records", json!({"stream": "top.s_axi.wr"})), Err(format!("unknown stream: top.s_axi.wr: {undecoded}")));
     assert_eq!(s.tool("records", json!({"stream": "s_axi.wr"})), Err(format!("unknown stream: s_axi.wr: {undecoded}")));
     assert_eq!(s.tool("records", json!({"stream": "s_axi"})), Err(format!("unknown stream: s_axi: its interface isn't decoded yet; with `command`, `{line}` makes its streams (`protocols axilite`)")));
-    assert!(s.ok("command", json!({"line": line})).starts_with("s_axi: records s_axi.aw 2,"));
+    assert!(s.ok("command", json!({"line": line})).starts_with("s_axi: records s_axi.wr 2, s_axi.rd 8;"));
     s.ok("command", json!({"line": "add top.aclk"}));
     // decode says what it made and where the violations are, and where to read more
     assert_eq!(
         s.ok("command", json!({"line": "decode bus axilite clock=aclk prefix=s_axi_"})),
-        "bus: records bus.aw 2, bus.w 2, bus.b 3, bus.ar 8, bus.r 8, bus.wr 2, bus.rd 8; violations bus.errors 2, bus.wr.unmatched 1, bus.rd.unmatched 0\n`records <stream>` lists one; `protocols axilite` says what each stream and field is; `pair` matches a stream with another (`help decode`)"
+        "bus: records bus.wr 2, bus.rd 8; violations bus.errors 2, bus.wr.unmatched 1, bus.rd.unmatched 0; made from bus.aw 2, bus.w 2, bus.b 3, bus.ar 8, bus.r 8\n`records <stream>` lists one, `records <name>` its records and violations in order; `protocols axilite` says what each stream and field is; `pair` matches a stream with another (`help decode`)"
     );
     assert!(s.ok("view", json!({})).contains("aclk"), "the rows stay");
+    // a decode's name: its results and violations in order of start, a column per field, empty
+    // where a stream has none; a filter keeps the streams having its fields
+    assert_eq!(
+        s.ok("records", json!({"stream": "bus", "count": 3})),
+        "3 of 13\nstream\tn\tstart\tend\tdelay\taddr\tdata\tstrb\tresp\trule\tkind\nbus.wr\t0\t30ns\t50ns\t10ns\t0x10\t0x11111111\t0xF\t0x0\t\t\nbus.wr\t1\t60ns\t120ns\t20ns\t0x14\t0x22222222\t0x3\t0x0\t\t\nbus.rd\t0\t130ns\t160ns\t20ns\t0x10\t0x11111111\t\t0x0\t\t"
+    );
+    assert_eq!(s.ok("records", json!({"stream": "bus", "where": "strb != 0xF", "count_only": true})), "1 matching records, of 13, first 60ns, last 60ns");
+    assert_eq!(s.ok("records", json!({"stream": "bus.wr bus.rd", "group_by": ["resp"]})), "2 of 2 distinct, of 10 records\n9 × resp=0x0 (30ns .. 410ns)\n1 × resp=0x2 (170ns .. 170ns)");
     assert_eq!(s.ok("records", json!({"stream": "bus.wr"})), "2 of 2\nn\tstart\tend\tdelay\taddr\tdata\tstrb\tresp\n0\t30ns\t50ns\t10ns\t0x10\t0x11111111\t0xF\t0x0\n1\t60ns\t120ns\t20ns\t0x14\t0x22222222\t0x3\t0x0");
     assert_eq!(s.ok("records", json!({"stream": "bus.errors"})), "2 of 2\nn\tstart\tend\trule\n0\t180ns\t190ns\tr_resp\n1\t210ns\t220ns\taw_dropped");
     // a radix for every number field (not the delay, a time), or one field's

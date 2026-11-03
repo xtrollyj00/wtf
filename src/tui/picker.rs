@@ -291,22 +291,11 @@ impl App {
             .collect()
     }
 
-    /// A decode's streams, as the decode made them: `s_axi.aw` ... `s_axi.errors`.
-    pub fn streams_of(&self, decode: &str) -> Vec<String> {
-        let prefix = format!("{decode}.");
-        self.ws.streams.iter().filter(|s| s.name == decode || s.name.starts_with(&prefix)).map(|s| s.name.clone()).collect()
-    }
-
-    /// The first stream a decode made, or its own name for one that made a stream of that name.
-    fn first_stream(&self, decode: &str) -> String {
-        self.streams_of(decode).into_iter().next().unwrap_or_else(|| decode.to_string())
-    }
-
-    /// Runs a decode line from the interfaces, then adds the streams it made below the selected
-    /// row as a group named after it, the group selected.
+    /// Runs a decode line from the interfaces, then adds its results and violations (spec §16
+    /// "Results") below the selected row as a group named after it, the group selected.
     fn decode_and_show(&mut self, line: &str, name: &str) -> Result<(), String> {
         self.run(line)?;
-        let vars: Vec<usize> = self.streams_of(name).iter().filter_map(|s| self.ws.trace.by_path.get(s).copied()).filter(|&v| !self.ws.shown(v)).collect();
+        let vars: Vec<usize> = self.ws.results(name).into_iter().filter_map(|i| self.ws.trace.by_path.get(&self.ws.streams[i].name).copied()).filter(|&v| !self.ws.shown(v)).collect();
         let (Some(&first), Some(&last)) = (vars.first(), vars.last()) else { return Ok(()) };
         self.ws.add_rows(&vars);
         let (a, b) = (self.ws.trace.vars[first].path.clone(), self.ws.trace.vars[last].path.clone());
@@ -399,7 +388,7 @@ impl App {
                 Ok(())
             }
             Act::Step(None) => Err("this step is about no time".into()),
-            Act::Decode { done: Some(d), .. } => self.open_browser(&self.first_stream(&d)),
+            Act::Decode { done: Some(d), .. } => self.open_browser(&d),
             Act::Decode { line, ready: false, .. } => {
                 self.prefill(&line);
                 Ok(())

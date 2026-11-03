@@ -118,10 +118,17 @@ fn decode(app: &mut Workspace, arg: &str) -> Result<String, String> {
     });
     let d = crate::stream::Decode { name: name.into(), protocol: protocol.into(), clock, signals, params };
     app.add_decode(d)?;
-    let inner = format!("{name}.");
-    let made: Vec<&crate::stream::Stream> = app.streams.iter().filter(|s| s.name == name || s.name.starts_with(&inner)).collect();
-    let list = |violations: bool| made.iter().filter(|s| s.violations == violations).map(|s| format!("{} {}", s.name, s.records.len())).collect::<Vec<_>>().join(", ");
-    let parts: Vec<String> = [("records", list(false)), ("violations", list(true))].into_iter().filter(|(_, l)| !l.is_empty()).map(|(w, l)| format!("{w} {l}")).collect();
+    // its results first, then violations, then the streams they are made from (spec §16 "Results")
+    let made = app.streams_of_decode(name);
+    let list = |kind: u8| {
+        let of = |i: usize| match (app.intermediate(i), app.streams[i].violations) {
+            (true, _) => 2,
+            (_, true) => 1,
+            _ => 0,
+        };
+        made.iter().filter(|&&i| of(i) == kind).map(|&i| format!("{} {}", app.streams[i].name, app.streams[i].records.len())).collect::<Vec<_>>().join(", ")
+    };
+    let parts: Vec<String> = [("records", list(0)), ("violations", list(1)), ("made from", list(2))].into_iter().filter(|(_, l)| !l.is_empty()).map(|(w, l)| format!("{w} {l}")).collect();
     Ok(format!("{name}: {}", parts.join("; ")))
 }
 
