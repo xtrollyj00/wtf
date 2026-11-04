@@ -1,0 +1,50 @@
+name: pages
+
+# The site (site/README.md) on GitHub Pages, its screens made by this checkout's wtf. A tag v*
+# publishes it with the release; a pull request builds it only, so a screen wtf fails to make
+# (screens.py exits non-zero) fails before a release does. The release workflow's own release
+# starts no workflow, so this one runs on the tag too.
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+  # by hand: publish the site again from the branch it runs on
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release --locked
+      - run: python3 site/tools/screens.py
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: zola@0.23
+      - run: zola build && zola check --skip-external-links
+        working-directory: site
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site/public
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

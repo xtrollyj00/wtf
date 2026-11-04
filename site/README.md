@@ -11,6 +11,10 @@ python3 site/tools/screens.py      # site/screens/, from target/release/wtf (or 
 cd site && zola serve              # http://127.0.0.1:1111; zola build writes public/
 ```
 
+`.github/workflows/pages.yml` publishes it to https://xtrollyj00.github.io/wtf when a `v*` tag is
+pushed, with the screens of that tag's wtf, or by hand (Actions, pages, Run workflow). Each pull
+request builds it without publishing, so a screen wtf fails to make fails there first.
+
 A new screen is an entry in `screens.toml`, shown by a `load_data` of its SVG in a template, or
 in content by the `screen` component (`templates/components.html`): `{{ <screen name="..." caption="..." /> }}`.
 Zola 0.23 runs content through Tera, so a page that shows `{{` wraps it in `{% raw %}`.
