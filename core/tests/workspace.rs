@@ -185,7 +185,8 @@ fn presents_a_session() {
     assert_eq!(names(&ws), ["clk"]);
     // nor does one from a newer wtf: the marks and decoding stay
     wtf_core::command::run(&mut ws, "cursor 2 30ns name=mine").unwrap();
-    wtf_core::command::run(&mut ws, "protocol p clock=top.clk when=top.cpu.busy d=top.cpu.data").unwrap();
+    wtf_core::command::run(&mut ws, "protocol t roles=busy,data when=busy d=data").unwrap();
+    wtf_core::command::run(&mut ws, "decode p t clock=top.clk busy=top.cpu.busy data=top.cpu.data").unwrap();
     assert!(ws.present("version = 99\n", false).unwrap_err().contains("newer than this wtf supports"));
     assert_eq!((ws.marks[1], ws.labels[1].name.as_str(), ws.streams.len()), (Some(30), "mine", 1));
 }
@@ -205,17 +206,18 @@ fn reloads() {
     // a reload isn't undone, and clears undo
     assert!(ws.undo().is_err());
     wtf_core::command::run(&mut ws, "decode d check clock=clk busy=top.dma.state != 0").unwrap();
-    wtf_core::command::run(&mut ws, "protocol dp clock=clk when=top.dma.state != 0").unwrap();
+    wtf_core::command::run(&mut ws, "protocol t roles=state when=state != 0").unwrap();
+    wtf_core::command::run(&mut ws, "decode dp t clock=clk state=top.dma.state").unwrap();
     // the simulation ran again: shorter, and without dma
     let text = std::fs::read_to_string(&trace).unwrap();
     let short: String = text.lines().filter(|l| !l.contains("dma") && !l.ends_with('&')).take_while(|l| *l != "#60").map(|l| format!("{l}\n")).collect();
     std::fs::write(&trace, short).unwrap();
     let (msg, _) = ws.reload().unwrap();
-    assert_eq!(msg, "reloaded; not in trace: dp (unknown signal: top.dma.state), d (d: busy: unknown signal: top.dma.state), top.dma.state");
+    assert_eq!(msg, "reloaded; not in trace: d (d: busy: unknown signal: top.dma.state), dp (dp: state: unknown signal: top.dma.state), top.dma.state");
     assert_eq!(names(&ws), ["clk", "rst"]);
     assert_eq!((ws.trace.end(), ws.marks[1]), (55, Some(55)));
     // the instance that failed is kept, and made again once it can be
-    assert_eq!((ws.decodes.len(), ws.protocols.len()), (1, 1));
+    assert_eq!((ws.decodes.len(), ws.protocols.len()), (2, 1));
     std::fs::write(&trace, &text).unwrap();
     assert_eq!(ws.reload(), Ok(("reloaded".into(), false)));
     assert!(ws.streams.iter().any(|s| s.name == "d") && ws.streams.iter().any(|s| s.name == "dp"));
@@ -548,4 +550,15 @@ fn undo_covers_marks() {
     assert_eq!((ws.marks[1], ws.marks[2], ws.labels[2].name.as_str()), (None, Some(60), "bug"));
     ws.undo().unwrap();
     assert_eq!((ws.marks[1], ws.marks[2], ws.labels[1].name.as_str()), (Some(30), None, "first"));
+}
+
+/// A computed signal reads nothing of its own: it is loaded when its parts are (spec §3).
+#[test]
+fn computed_signals_load_with_their_parts() {
+    let mut ws = common::with(&["top.cpu.data[3:0]"]);
+    let v = ws.trace.vars.iter().position(|v| v.path.contains("data[3:0]")).unwrap();
+    assert!(ws.trace.loaded(v));
+    let file = ws.trace.vars.iter().position(|v| v.path == "top.cpu.state").unwrap();
+    ws.trace.load(&[file]);
+    assert!(ws.trace.loaded(file));
 }

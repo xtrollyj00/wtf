@@ -1,17 +1,19 @@
 ---
 source: src/main.rs
+assertion_line: 243
 expression: "snapshot(&mut open(\"vcd\", None), 60, None)"
 ---
 
-                           w t f
-                 waveform terminal frontend
+                          w t ┃ f
 
-                           simple
-                    6 signals  ·  0–80ns
+   simple
+   6 signals  ·  0–80ns
 
-                       a  add signals
-                       :  commands
-                       ?  help
-                       q  quit
+   Find a signal                                  Space f
+   Browse the signals                                   a
+   Decode an interface                          Space d d
+   Everything else                                  Space
+   Keys                                                 ?
+   Quit                                                 q
 
- signals ▸                         0  ·  2ns/col  ·  simple
+ NORMAL   signals ▸                     0  2ns/col  simple

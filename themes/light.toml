@@ -12,6 +12,7 @@ cursor      = ["#c18401", 136]  # the accent: the cursor's time, the selected na
 cursor_text = ["#fafafa", 231]  # text on the accent
 column      = ["#f2d896", 222]  # behind the cursor's column
 cursor_dim  = ["#e6e6e6", 253]  # behind the marks' columns, fainter and neutral
+mark        = ["#d5dae2", 252]  # behind a mark's number and name on the ruler
 selected    = ["#e4e8ee", 254]  # behind the selected row
 panel       = ["#eef0f3", 255]  # behind the signal panel, help and completions
 hatch       = ["#8a8f98", 245]  # busy bus columns

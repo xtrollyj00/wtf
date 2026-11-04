@@ -39,6 +39,7 @@ cargo run -p wtf-bench --release -- mcp /tmp/b/bench.fst   # time the MCP tools 
 cargo build --release && cargo run -p wtf-bench --release -- agent run [--runs 3] [--review] [<task>...]
                                      # agent benchmark: claude -p solves bench/agent/tasks (costs money)
 cargo run -p wtf-bench --release -- agent report           # results.jsonl per task, commit, model
+python3 site/tools/screens.py && (cd site && zola serve)    # the site, its screens from target/release/wtf
 ```
 
 `bench/` (`wtf-bench`) is not a default member: `cargo test` and `cargo clippy` skip it unless
@@ -75,7 +76,8 @@ Ideas that span files:
 - **Search expressions** (`search.rs`) parse to `Expr`, evaluated by `search::holds` over a value
   function; `query.rs` finds matches (runs of clock cycles with `@clk`). `records` `where` reuses
   the same parser on a stream's fields.
-- **Decoding**: stateless `Sampler`s (`[[protocol]]`) sample at a clock; Rust protocols
+- **Decoding**: stateless `Sampler`s (`[[protocol]]`), defined on roles only, sample at their
+  instance's clock; Rust protocols
   (`protocol.rs`: `axis`, `axilite`, `axi4`, `spi`, `uart`) are lists of `Step`s, with params of
   their own; stateful `Decoder`s (`decode.rs`, registry `make`: `frame`, `spi`, `uart`; plus the
   functions `pair`, `join`, and `check`) stack on streams. SPI and UART sample by time: a `Changes`

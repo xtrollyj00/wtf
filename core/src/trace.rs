@@ -148,7 +148,8 @@ pub struct Trace {
     pub by_path: HashMap<String, usize>,
     /// Vars of the file and its composites; computed ones follow them.
     pub fixed: usize,
-    /// Changes whenever computed vars are added or dropped, for views that list vars (the panel).
+    /// Changes whenever computed vars are added, replaced or dropped, for what is worked out from
+    /// them (the panel's list, the value column's width).
     pub version: u64,
     /// Clocks' rising edges by (var, bit), worked out once (`query::edges`): every clocked search
     /// walks them.
@@ -156,7 +157,7 @@ pub struct Trace {
 }
 
 impl Trace {
-    /// wellen detects VCD / FST from the content, not the extension (spec §13).
+    /// wellen detects VCD / FST / GHW from the content, not the extension (spec §13).
     pub fn open(path: &std::path::Path) -> Result<Self, String> {
         // wellen panics on a missing file, so check first
         std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -164,7 +165,7 @@ impl Trace {
         Ok(Self::of(wave))
     }
 
-    /// A trace held in memory, VCD or FST as in a file.
+    /// A trace held in memory, VCD, FST or GHW as in a file.
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, String> {
         unpanic(|| simple::read_from_reader(std::io::Cursor::new(bytes))).map(Self::of)
     }
@@ -221,6 +222,20 @@ impl Trace {
         if !refs.is_empty() {
             self.wave.load_signals(&refs);
         }
+    }
+
+    /// Whether `var`'s values are read already (`load`): drawing it costs no reading then.
+    pub fn loaded(&self, var: usize) -> bool {
+        let mut all = vec![var];
+        let mut i = 0;
+        while i < all.len() {
+            all.extend_from_slice(&self.vars[all[i]].children);
+            i += 1;
+        }
+        all.iter().all(|&v| match self.vars[v].source {
+            Source::File(s) => self.wave.get_signal(s).is_some(),
+            _ => true,
+        })
     }
 
     /// A composite's value from its children's (spec §6 "Composite rows"), worked out when asked,
@@ -309,6 +324,8 @@ impl Trace {
         match self.by_path.get(path) {
             Some(&i) if matches!(self.vars[i].source, Source::Computed(_)) && !self.is_composite(i) => {
                 self.vars[i] = var;
+                // new values: what was worked out from the old ones is stale
+                self.version += 1;
                 // its edges, if it was a clock, are another signal's now
                 self.edges.get_mut().retain(|k, _| k.0 != i);
                 Ok(i)

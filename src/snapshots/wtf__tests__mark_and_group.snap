@@ -1,16 +1,17 @@
 ---
 source: src/main.rs
+assertion_line: 481
 expression: "snapshot(&mut app, 80, Some(12))"
 ---
-  signals                                         w t f
-  / to search                           waveform terminal frontend
-  ▾ top
-    ▾ cpu                                         simple
-      + state                              6 signals  ·  0–80ns
-      + data
-        busy                              /       search
-    ▸ dma                                 Space   mark
-      clk                                 Enter   add
-                                          Ctrl-g  add as a group
-   2 marked                               Esc     close
- signals ◂                                             0  ·  2ns/col  ·  simple
+  signals                                        w t ┃ f
+  / to search
+  ▾ top                    simple
+    ▾ cpu                  6 signals  ·  0–80ns
+      + state
+      + data               Search                                             /
+        busy               Mark                                           Space
+    ▸ dma                  Add                                            Enter
+      clk                  Add as a group                                Ctrl-g
+                           Close                                            Esc
+   2 marked
+ SIGNALS  signals ◂                                         0  2ns/col  simple

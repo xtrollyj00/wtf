@@ -1,7 +1,7 @@
 //! The mouse (spec §2 "Mouse" and "Menu", §5 "Signal panel"): what is on top takes it, the rows
 //! last. Where things are comes from the last screen drawn (`Hit`), so the geometry has one home.
 
-use super::{App, Mode};
+use super::{App, Mode, A};
 use crate::draw::{gl, Marked, RowLine};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
@@ -37,9 +37,18 @@ pub struct Hit {
     pub records: Vec<(usize, usize)>,
     /// The command completions on screen: screen line and item.
     pub completions: Vec<(usize, usize)>,
+    /// The card the completions are in.
+    pub completion_card: Option<Rect>,
     /// The menu, then its second menu: where each was drawn, its items from the line under the
     /// top.
     pub menus: Vec<Rect>,
+    /// The notification cards on screen, each with its note's time (`Note::at`).
+    pub notes: Vec<(Rect, Instant)>,
+    /// Notes to show that no card could (the screen too small, a box over them): the status
+    /// line shows the message instead.
+    pub unshown: bool,
+    /// The leader menu's entries on screen, each with its key.
+    pub leader: Vec<(Rect, crate::tui::keys::Key)>,
 }
 
 impl Hit {
@@ -112,24 +121,17 @@ pub struct Item {
 
 #[derive(Clone)]
 enum Act {
-    Toggle,
-    Examine,
+    /// What a Normal mode key does, on cursor `given` (`'2`, `2M`).
+    Do(A, Option<usize>),
     Radix(usize),
     /// Fixed point needs its bits typed: the command line with `:radix q`.
     RadixLine,
     Color(Option<usize>),
-    Copy,
-    Remove,
     MarkAt(Tick),
     CopyTime(Tick),
     Line(String),
     /// A `:` command, run.
     Run(String),
-    /// Keys, pressed as typed (`'2`, `3M`, `w`).
-    Keys(String),
-    AddSignals,
-    Undo,
-    Redo,
     Key(KeyEvent),
     Expand(bool),
     Sub(Vec<Item>),
@@ -165,8 +167,26 @@ impl App {
     /// The mouse at time `now` (double clicks): whatever is on top takes it.
     pub fn mouse_at(&mut self, m: MouseEvent, now: Instant) {
         let at = (m.column as usize, m.row as usize);
+        self.pointer = Some(at);
         if self.menu.is_some() {
             return self.menu_mouse(m, at, now);
+        }
+        // the leader menu: a click on an entry picks it, anywhere else closes the menu
+        if let Some(path) = &self.leader {
+            if m.kind == MouseEventKind::Down(MouseButton::Left) || m.kind == MouseEventKind::Down(MouseButton::Right) {
+                let hit = self.hit.leader.iter().find(|(r, _)| inside(Some(*r), at.0, at.1)).map(|&(_, k)| k);
+                match hit.filter(|_| m.kind == MouseEventKind::Down(MouseButton::Left)) {
+                    Some(k) => {
+                        let mut next = path.clone();
+                        next.push(k);
+                        let mark = self.ws.mark();
+                        self.leader_pick(next);
+                        self.ws.record(mark);
+                    }
+                    None => self.leader = None,
+                }
+            }
+            return;
         }
         if matches!(self.mode, Mode::Command | Mode::Search) {
             return self.line_mouse(m, at, now);
@@ -174,8 +194,27 @@ impl App {
         if self.help || self.examine.is_some() {
             return self.box_mouse(m, at);
         }
+        if self.browser.is_some() {
+            return self.browser_mouse(m, at, now);
+        }
         if self.records.is_some() {
             return self.records_mouse(m, at, now);
+        }
+        // `:messages`: the wheel moves, a click outside closes
+        if let Some(i) = self.messages {
+            let last = self.notes.len().saturating_sub(1);
+            match m.kind {
+                MouseEventKind::ScrollDown => self.messages = Some((i + 1).min(last)),
+                MouseEventKind::ScrollUp => self.messages = Some(i.saturating_sub(1)),
+                MouseEventKind::Down(_) if !inside(self.hit.boxed, at.0, at.1) => self.messages = None,
+                _ => {}
+            }
+            return;
+        }
+        if self.picker.is_some() {
+            let mark = self.ws.mark();
+            self.picker_mouse(m, at, now);
+            return self.ws.record(mark);
         }
         // the status line's button opens and closes the panel
         if m.kind == MouseEventKind::Down(MouseButton::Left) && inside(self.hit.button, at.0, at.1) {
@@ -201,7 +240,7 @@ impl App {
     }
 
     /// A double click: the same target clicked again soon. Remembers this click otherwise.
-    fn double(&mut self, t: Target, now: Instant) -> bool {
+    pub(crate) fn double(&mut self, t: Target, now: Instant) -> bool {
         let double = self.click.is_some_and(|(c, when)| c == t && now.duration_since(when) < DOUBLE);
         self.click = if double { None } else { Some((t, now)) };
         double
@@ -276,8 +315,8 @@ impl App {
             MouseEventKind::Up(MouseButton::Left) => self.let_go(),
             MouseEventKind::Down(MouseButton::Right) if y < self.hit.head && x >= self.wave_x => {
                 let items = match self.ruler_at(x, y).filter(|&i| i > 0) {
-                    Some(i) => vec![item("Jump to", &format!("'{}", i + 1), Act::Keys(format!("'{}", i + 1))), item("Remove mark", &format!("{}M", i + 1), Act::Keys(format!("{}M", i + 1)))],
-                    None => vec![item("Zoom to fit", ":fit", Act::Run("fit".into())), item("Zoom in", "z", Act::Keys("z".into())), item("Zoom out", "x", Act::Keys("x".into()))],
+                    Some(i) => vec![item("Jump to", &format!("{}{}", self.keymap.show(A::Jump), i + 1), Act::Do(A::Jump, Some(i))), item("Remove mark", &format!("{}{}", i + 1, self.keymap.show(A::Unmark)), Act::Do(A::Unmark, Some(i)))],
+                    None => vec![item("Zoom to fit", ":fit", Act::Run("fit".into())), self.does("Zoom in", A::ZoomIn), self.does("Zoom out", A::ZoomOut)],
                 };
                 self.menu = Some(Menu::new((x, y), items));
             }
@@ -293,12 +332,12 @@ impl App {
                     self.menu = Some(Menu::new((x, y), items));
                 } else if y >= self.hit.head && y < self.hit.body {
                     let (undo, redo) = self.ws.can_undo();
-                    let mut items = vec![item("Add signals…", "a", Act::AddSignals)];
+                    let mut items = vec![self.does("Add signals…", A::Panel)];
                     if undo {
-                        items.push(item("Undo", "u", Act::Undo));
+                        items.push(self.does("Undo", A::Undo));
                     }
                     if redo {
-                        items.push(item("Redo", "Ctrl-r", Act::Redo));
+                        items.push(self.does("Redo", A::Redo));
                     }
                     self.menu = Some(Menu::new((x, y), items));
                 }
@@ -460,7 +499,7 @@ impl App {
         }
     }
 
-    /// The `:records` box: a click highlights, a double click jumps, the wheel moves.
+    /// The `:trail` box: a click highlights, a double click jumps, the wheel moves.
     fn records_mouse(&mut self, m: MouseEvent, (x, y): (usize, usize), now: Instant) {
         match m.kind {
             MouseEventKind::ScrollDown => self.records_key(key(KeyCode::Char('j'), KeyModifiers::NONE)),
@@ -481,13 +520,12 @@ impl App {
 
     /// The command line: a click on a completion completes it as `Tab`, a double click runs it;
     /// the wheel moves the highlight; a click elsewhere closes the line.
-    fn line_mouse(&mut self, m: MouseEvent, (_, y): (usize, usize), now: Instant) {
-        let n = crate::tui::commands::completions(&self.line).len();
+    fn line_mouse(&mut self, m: MouseEvent, (x, y): (usize, usize), now: Instant) {
+        let n = crate::tui::commands::complete(&self.line, self).items.len();
         match m.kind {
-            // the list grows upward: up is the next item
-            MouseEventKind::ScrollUp if n > 0 && self.mode == Mode::Command => self.hl = (self.hl + 1) % n,
-            MouseEventKind::ScrollDown if n > 0 && self.mode == Mode::Command => self.hl = (self.hl + n - 1) % n,
-            MouseEventKind::Down(MouseButton::Left) => match self.hit.completions.iter().find(|(ly, _)| *ly == y) {
+            MouseEventKind::ScrollUp if n > 0 && self.mode == Mode::Command => self.hl = (self.hl + n - 1) % n,
+            MouseEventKind::ScrollDown if n > 0 && self.mode == Mode::Command => self.hl = (self.hl + 1) % n,
+            MouseEventKind::Down(MouseButton::Left) => match self.hit.completions.iter().find(|(ly, _)| *ly == y).filter(|_| inside(self.hit.completion_card, x, y)) {
                 Some(&(_, k)) => {
                     if self.double(Target::Completion(y), now) {
                         return self.command_key(key(KeyCode::Enter, KeyModifiers::NONE));
@@ -792,13 +830,9 @@ impl App {
 
     fn act(&mut self, act: Act) -> Result<(), String> {
         match act {
-            Act::Toggle => self.ws.toggle_group(),
-            Act::Examine => self.examine(),
             Act::Radix(r) => return self.ws.set_radix(Some((r, 0, None))),
             Act::Color(c) => return self.ws.set_color(c),
             Act::RadixLine => self.prefill("radix q"),
-            Act::Copy => return self.copy('y'),
-            Act::Remove => return self.ws.delete(),
             Act::MarkAt(t) => {
                 let cursor = std::mem::replace(&mut self.ws.view.cursor, t);
                 let r = self.ws.set_mark(None);
@@ -812,10 +846,7 @@ impl App {
             }
             Act::Line(l) => self.prefill(&l),
             Act::Run(c) => return self.run(&c),
-            Act::Keys(k) => return self.keys(&k),
-            Act::AddSignals => self.open_panel(),
-            Act::Undo => return self.ws.undo(),
-            Act::Redo => return self.ws.redo(),
+            Act::Do(a, given) => self.action(a, 1, given),
             Act::Key(k) => self.panel_key(k),
             Act::Expand(open) => self.panel.open(open),
             Act::Sub(_) => {}
@@ -824,10 +855,15 @@ impl App {
     }
 
     /// The command line opened with `text` typed, to finish and run with `Enter`.
-    fn prefill(&mut self, text: &str) {
+    pub(crate) fn prefill(&mut self, text: &str) {
         self.open_command();
         self.line = text.into();
         self.col = usize::MAX;
+    }
+
+    /// An item doing what a Normal mode key does, named by its key (spec §2 "Menu").
+    fn does(&self, label: &str, a: A) -> Item {
+        item(label, &self.keymap.show(a), Act::Do(a, None))
     }
 
     /// The menu of the selected row, the `V` range, or a header; `t` the time clicked on a
@@ -847,36 +883,35 @@ impl App {
                 items.push(item("Group…", ":group", Act::Line("group ".into())));
                 radix(&mut items);
                 colour(&mut items);
-                items.push(item("Remove", "dd", Act::Remove));
+                items.push(self.does("Remove", A::Remove));
             }
             Some(Row::Group { collapsed, name, .. }) => {
-                items.push(item(if *collapsed { "Open" } else { "Fold" }, "Space", Act::Toggle));
+                items.push(self.does(if *collapsed { "Open" } else { "Fold" }, A::Fold));
                 radix(&mut items);
                 colour(&mut items);
                 items.push(item("Rename…", ":rename", Act::Line(format!("rename {name}"))));
                 items.push(item("Ungroup", ":ungroup", Act::Run("ungroup".into())));
-                items.push(item("Remove", "dd", Act::Remove));
+                items.push(self.does("Remove", A::Remove));
             }
             Some(Row::Signal(s)) => {
                 let (var, bit) = ws.probe(s, ws.bit);
                 if bit.is_none() && !ws.children(var).is_empty() {
-                    items.push(item(if s.open.contains(&var) { "Fold" } else { "Open" }, "Space", Act::Toggle));
+                    items.push(self.does(if s.open.contains(&var) { "Fold" } else { "Open" }, A::Fold));
                 }
-                items.push(item("Examine", "e", Act::Examine));
+                items.push(self.does("Examine", A::Examine));
                 radix(&mut items);
                 colour(&mut items);
-                items.push(item("Copy value", "yy", Act::Copy));
-                items.push(item("Remove", "dd", Act::Remove));
+                items.push(self.does("Copy value", A::CopyValue));
+                items.push(self.does("Remove", A::Remove));
             }
             None => {}
         }
         if let Some(t) = t.filter(|_| !range) {
-            items.push(item("Mark here", "m", Act::MarkAt(t)));
-            items.push(item("Copy time", "yt", Act::CopyTime(t)));
-            let keys = |label: &str, k: &str| item(label, k, Act::Keys(k.into()));
-            items.extend([keys("Next change", "w"), keys("Previous change", "b"), item("Search value…", "/", Act::Keys("/".into()))]);
+            items.push(item("Mark here", &self.keymap.show(A::Mark), Act::MarkAt(t)));
+            items.push(item("Copy time", &self.keymap.show(A::CopyTime), Act::CopyTime(t)));
+            items.extend([self.does("Next change", A::NextChange), self.does("Previous change", A::PrevChange), self.does("Search value…", A::Search)]);
             if self.last_search.is_some() {
-                items.extend([keys("Next match", "n"), keys("Previous match", "N")]);
+                items.extend([self.does("Next match", A::NextMatch), self.does("Previous match", A::PrevMatch)]);
             }
         }
         items

@@ -31,7 +31,7 @@ mkdir -p "$dir/config/wtf"
 rm -f "$dir"/demo.vcd*
 cp "$repo/docs/demo.vcd" "$dir/demo.vcd"
 # glyphs and theme set, so the window doesn't ask on its first start
-printf 'glyphs = "unicode"\ntheme = "dark"\n' > "$dir/config/wtf/config.toml"
+printf 'glyphs = "nerd"\ntheme = "dark"\n' > "$dir/config/wtf/config.toml"
 printf '{"mcpServers": {"wtf": {"command": "%s", "args": ["--mcp"]}}}\n' "$wtf" > "$dir/mcp.json"
 # your own status line, hooks and plugins (bands above the prompt) stay out of the recording
 printf '{"statusLine": {"type": "command", "command": "true"}, "disableAllHooks": true, "enabledPlugins": {"ponytail@ponytail": false}}\n' > "$dir/settings.json"

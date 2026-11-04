@@ -1,0 +1,21 @@
+---
+source: src/main.rs
+assertion_line: 2232
+expression: "snapshot(&mut app, 100, Some(16))"
+---
+Name        │ Value │ 0           12ns    20ns      30ns      40ns      50ns      60ns      70ns
+    ╭─ signals  marks  records  commands  sessions  trail  interfaces ─────────────────────────╮ ┌──
+clk │ ▸                                  3/3 │ value_at top.cpu.data 40ns                      │─┘
+    │────────────────────────────────────────│                                                 │
+▾ cp│   command decode bus axilite clock=clk │ at 40ns: 0x2A                                   │
+    │   find @clk top.cpu.busy          20ns │                                                 │────
+  cp│▌  value_at top.cpu.data 40ns      40ns │ Enter jumps to 40ns                             │────
+    │                                        │                                                 │────
+  da│                                        │                                                 │────
+    │                                        │                                                 │
+  bu│                                        │                                                 │────
+    │                                        │                                                 │────
+dma.│                                        │                                                 │────
+    ╰────────────────────────────────────────┴───────────── Enter jump  C-s source  Esc close ─╯
+            │       │
+ PICK     signals ▸  top.clk                                                 12ns  1ns/col  simple

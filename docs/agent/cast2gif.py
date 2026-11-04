@@ -1,11 +1,15 @@
 # Turns an asciinema recording (record.sh) into a GIF and an MP4, drawn as docs/demo.gif is:
 #   python3 docs/agent/cast2gif.py agent.cast target/agent [end]
 # writes target/agent/agent.gif and .mp4, cut at `end` seconds of the cast if given. Each screen is replayed by pyte, a terminal emulator,
-# then drawn by docs/screenshot.py in headless Chromium, so bus edges join up. Runs in the image
-# of docs/gif/Dockerfile:
-#   docker run --rm -v "$PWD":/work -u "$(id -u):$(id -g)" wtf-gif python3 docs/agent/cast2gif.py agent.cast target/agent
+# then drawn as the site draws its screens, in headless Firefox (docs/gif/demo.py `photo`). Needs
+# pyte, Firefox and ffmpeg, and for what wtf's font lacks, JetBrains Mono Nerd Font and Noto Sans
+# Symbols 2 installed (in ~/.local/share/fonts, then fc-cache).
 import json, os, subprocess, sys, tempfile
+from pathlib import Path
 import pyte
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "gif"))
+from demo import photo  # noqa: E402
 
 NAMES = ["black", "red", "green", "brown", "blue", "magenta", "cyan", "white"]
 MIN_FRAME = 0.05  # changes closer than this show as one frame
@@ -74,17 +78,12 @@ def main(cast, out_dir, end=None):
     # tmux clears the screen as its last pane ends
     while shown and shown[-1][2]:
         shown.pop()
-    tmp = tempfile.mkdtemp()
-    w, h = int(cols * 9 * 1.25) + 24, int(rows * 20 * 1.25) + 24
-    concat = os.path.join(tmp, "frames.txt")
+    tmp = Path(tempfile.mkdtemp())
+    concat = tmp / "frames.txt"
     with open(concat, "w") as f:
         for n, (start, text, _) in enumerate(shown):
-            html = subprocess.run(["python3", "docs/screenshot.py"], input=text.encode(), capture_output=True, check=True).stdout
-            page, png = os.path.join(tmp, f"{n}.html"), os.path.join(tmp, f"{n}.png")
-            with open(page, "wb") as p:
-                p.write(html)
-            subprocess.run(["chromium", "--headless", "--no-sandbox", "--disable-gpu", "--hide-scrollbars",
-                            f"--screenshot={png}", f"--window-size={w},{h}", f"file://{page}"], capture_output=True, check=True)
+            png = tmp / f"{n}.png"
+            photo(text, cols, rows, png, tmp)
             end = shown[n + 1][0] if n + 1 < len(shown) else start + 3  # the last screen stays 3 s
             f.write(f"file '{png}'\nduration {max(end - start, MIN_FRAME):.3f}\n")
         f.write(f"file '{png}'\n")

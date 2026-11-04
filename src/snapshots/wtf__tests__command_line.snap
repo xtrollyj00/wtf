@@ -2,8 +2,8 @@
 source: src/main.rs
 expression: "snapshot(&mut app, 60, Some(5))"
 ---
-                   0           12ns    20ns      30ns
-                        ┌────┐ ┃  ┌────┐    ┌────┐    ┌────┐
-clk          0     ─────┘    └─┃──┘    └────┘    └────┘    └
- ▌ :zoom <time>  Set the time per column, e.g. :zoom 1ns
-:zo
+Name        │ Value │ 0           12ns    20ns      30ns
+    ╭─ command ────────────────────────────╮   ┌────┐    ┌──
+clk │▌:zoom <time>  Set the time per colu… │ ──┘    └────┘
+    ╰───────────────────────── Tab accept ─╯
+ CMD  :zoom <time>

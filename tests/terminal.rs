@@ -40,7 +40,7 @@ impl Term {
         // SAFETY: both descriptors are fresh from openpty and owned here
         let (master, slave) = unsafe { (File::from_raw_fd(master), File::from_raw_fd(slave)) };
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_wtf"));
-        cmd.args(args).env("XDG_CONFIG_HOME", &dir).env("XDG_RUNTIME_DIR", &dir).env("TERM", "xterm-256color").env("NO_COLOR", "1");
+        cmd.args(args).env("XDG_CONFIG_HOME", &dir).env("XDG_STATE_HOME", &dir).env("XDG_RUNTIME_DIR", &dir).env("TERM", "xterm-256color").env("NO_COLOR", "1");
         cmd.stdin(slave.try_clone().unwrap()).stdout(slave.try_clone().unwrap()).stderr(slave);
         // SAFETY: only async-signal-safe calls between fork and exec: a new session whose
         // controlling terminal is the pty, as a terminal emulator starts its shell
@@ -151,6 +151,25 @@ fn mouse_reporting_on_and_off() {
 }
 
 #[test]
+fn start_screen_opens_a_trace() {
+    // without a trace: the start screen; o, a path and Enter open it in a window, which goes
+    // into the history, and the next start lists it as recent 1 (spec §4 "Start screen")
+    let mut t = Term::spawn("start", &[]);
+    t.wait("the start screen", |s| s.contents().contains("Open a trace"));
+    t.send("otests/data/nope.vcd\r");
+    t.wait("the error", |s| s.contents().contains("nope.vcd") && !s.contents().contains("open tests"));
+    t.send("otests/data/simple.vcd\r");
+    t.wait("the window", |s| s.contents().contains("Browse the signals"));
+    t.send(":q!\r");
+    assert!(t.child.wait().unwrap().success());
+    let history = std::fs::read_to_string(t.dir.join("wtf/history")).unwrap();
+    assert!(history.contains("\tyou\t") && history.trim_end().ends_with("simple.vcd"), "{history}");
+    let out = Command::new(env!("CARGO_BIN_EXE_wtf")).args(["--snapshot", "100x32"]).env("XDG_STATE_HOME", &t.dir).env("XDG_RUNTIME_DIR", &t.dir).output().unwrap();
+    let screen = String::from_utf8(out.stdout).unwrap();
+    assert!(screen.lines().any(|l| l.contains("simple.vcd") && l.trim_end().ends_with('1')), "{screen}");
+}
+
+#[test]
 fn drag_moves_a_row() {
     // simple's session: clk first, then cpu with state, data and busy; a row's name is on its
     // lower line, so pressing on clk's name and letting go on busy's moves clk below busy
@@ -195,7 +214,8 @@ fn drag_adds_from_the_panel() {
 #[test]
 fn an_agent_joins_and_leaves() {
     // spec §15 "Joining": a window looks for agents on its trace every half second; one found
-    // joins, each new step shows on the status line, and one gone leaves
+    // joins, each new step shows in a card (its tool, what it asked, the answer), and one gone
+    // leaves
     use std::io::{BufRead, BufReader};
     use std::os::unix::net::UnixListener;
     let args = session();
@@ -222,7 +242,7 @@ fn an_agent_joins_and_leaves() {
     });
     t.wait("the agent joined", |s| s.contents().contains("agent 999-1 joined"));
     *session.lock().unwrap() = format!("version = 1\n{}", step(2));
-    t.wait("its new step", |s| s.contents().contains("agent: find step 1  ·  1 matches"));
+    t.wait("its new step", |s| s.contents().contains("999-1") && s.contents().contains("find") && s.contents().contains("│ step 1") && s.contents().contains("│ 1 matches"));
     std::fs::remove_file(&sock).unwrap();
     t.wait("the agent left", |s| s.contents().contains("agent 999-1 left"));
     // a present arrives over the window's own socket
@@ -233,4 +253,37 @@ fn an_agent_joins_and_leaves() {
     link.read_to_string(&mut answer).unwrap();
     assert!(answer.starts_with("OK ") && answer.contains("agent: presented 1 signals"), "{answer}");
     t.wait("the present", |s| line_of(s, "rst").is_some() && line_of(s, "dma.state").is_none());
+}
+
+#[test]
+fn start_screen_joins_an_agent() {
+    // an agent's workspace on this machine: `a` joins it, opening its trace in a window that
+    // follows it (spec §4 "Start screen"); this one answers INFO only, so the follow is refused
+    // and said
+    let mut t = Term::spawn("join", &[]);
+    t.wait("the start screen", |s| s.contents().contains("Open a trace"));
+    let trace = std::fs::canonicalize("tests/data/simple.vcd").unwrap();
+    let listener = std::os::unix::net::UnixListener::bind(t.dir.join("wtf-9-1.sock")).unwrap();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let mut stream = stream.unwrap();
+            let mut head = String::new();
+            std::io::BufRead::read_line(&mut std::io::BufReader::new(stream.try_clone().unwrap()), &mut head).unwrap();
+            let answer = if head.starts_with("INFO") { format!("OK {}\nagent\n{}", 6 + trace.as_os_str().len(), trace.display()) } else { "ERR no\n".into() };
+            let _ = stream.write_all(answer.as_bytes());
+        }
+    });
+    t.wait("the agent listed", |s| s.contents().contains("1 agent on this machine"));
+    t.send("a");
+    t.wait("the window", |s| s.contents().contains("Browse the signals"));
+    t.send(":q!\r");
+    assert!(t.child.wait().unwrap().success());
+}
+
+#[test]
+fn start_screen_quits() {
+    let mut t = Term::spawn("startq", &[]);
+    t.wait("the start screen", |s| s.contents().contains("Open a trace"));
+    t.send("q");
+    assert!(t.child.wait().unwrap().success());
 }

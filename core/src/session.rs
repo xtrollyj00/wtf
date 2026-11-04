@@ -85,17 +85,19 @@ pub fn apply(app: &mut Workspace, text: &str) -> Result<Vec<String>, String> {
     if let Some(Value::Array(protocols)) = t.remove("protocol") {
         for p in protocols {
             let roles = match p.get("roles") {
-                None => Some(Vec::new()),
+                None => None,
                 Some(r) => r.as_array().map(|r| r.iter().map(|r| r.as_str().unwrap_or_default().to_string()).collect::<Vec<_>>()),
             };
-            // a type's instances may give the clock
-            let clock = text(&p, "clock").or(roles.as_ref().filter(|r| !r.is_empty()).map(|_| String::new()));
-            match (text(&p, "name"), clock, text(&p, "when"), pairs(&p, "fields"), roles) {
-                (Some(name), Some(clock), Some(when), Some(fields), Some(roles)) => {
-                    let def = crate::stream::Sampler { name: name.clone(), clock, when, fields, roles };
+            if p.get("clock").is_some() {
+                warn.push(format!("protocol {}: a protocol has no clock; its [[decode]] gives it", text(&p, "name").unwrap_or_default()));
+                continue;
+            }
+            match (text(&p, "name"), text(&p, "when"), pairs(&p, "fields"), roles) {
+                (Some(name), Some(when), Some(fields), Some(roles)) => {
+                    let def = crate::stream::Sampler { name: name.clone(), when, fields, roles };
                     app.add_protocol(def).map(drop).unwrap_or_else(|e| warn.push(format!("protocol {name}: {e}")));
                 }
-                _ => warn.push("protocol: needs a name, a clock (or roles), a when, fields as a table and roles as a list".into()),
+                _ => warn.push("protocol: needs a name, roles as a list, a when and fields as a table".into()),
             }
         }
     }
@@ -392,12 +394,7 @@ pub fn rows_toml(app: &Workspace) -> String {
     let table = |pairs: &[(String, String)]| pairs.iter().map(|(k, v)| format!("{k} = {}", quote(v))).collect::<Vec<_>>().join(", ");
     for p in &app.protocols {
         out += &format!("\n[[protocol]]\nname = {}\n", quote(&p.name));
-        if !p.roles.is_empty() {
-            out += &format!("roles = [{}]\n", p.roles.iter().map(|r| quote(r)).collect::<Vec<_>>().join(", "));
-        }
-        if !p.clock.is_empty() {
-            out += &format!("clock = {}\n", quote(&p.clock));
-        }
+        out += &format!("roles = [{}]\n", p.roles.iter().map(|r| quote(r)).collect::<Vec<_>>().join(", "));
         out += &format!("when = {}\nfields = {{ {} }}\n", quote(&p.when), table(&p.fields));
     }
     for d in &app.decodes {

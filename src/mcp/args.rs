@@ -5,7 +5,7 @@ use serde::Deserialize;
 
 #[derive(Deserialize, schemars::JsonSchema)]
 pub struct OpenArgs {
-    /// Path of a VCD or FST file, best absolute.
+    /// Path of a VCD, FST or GHW file, best absolute.
     pub trace: String,
 }
 
@@ -69,6 +69,7 @@ pub struct FindArgs {
     pub from: Option<String>,
     /// Stop at this time (with `backward`, down to it); default the end.
     pub to: Option<String>,
+    /// Search toward the start: the latest matches first.
     #[serde(default)]
     pub backward: bool,
     /// How many lines to list; default 20.
@@ -129,19 +130,15 @@ pub struct WorkspaceArgs {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 pub struct ProtocolSpec {
-    /// The stream's name, e.g. `rx`.
+    /// The protocol's name, e.g. `cmd`, for `decode`.
     pub name: String,
-    /// The clock; with roles, each instance may give it.
-    #[serde(default)]
-    pub clock: String,
-    /// When to make a record: an expression without the clock, `tvalid && tready`.
+    /// The names its expressions use, which `decode` puts on signals: `["valid", "ready", "data"]`.
+    pub roles: Vec<String>,
+    /// When to make a record, on the roles: `valid && ready`; the clock is the decode's.
     pub when: String,
-    /// Fields in order, `["tdata = tdata", "op = cmd[7:0]"]`.
+    /// Fields in order, on the roles: `["op = data[7:0]"]`.
     #[serde(default)]
     pub fields: Vec<String>,
-    /// Role names, making it a type for `decode`.
-    #[serde(default)]
-    pub roles: Vec<String>,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -150,7 +147,7 @@ pub struct DecodeSpec {
     pub name: String,
     /// The protocol: `axis`, `axilite`, `frame`, `pair`, `check`, ... (`protocols`).
     pub protocol: String,
-    /// The clock, if not the protocol's.
+    /// The clock it samples at (not for `spi`, `uart`, `frame`, `pair`).
     #[serde(default)]
     pub clock: String,
     /// Each role's signal, `["tvalid = rx_tvalid"]`; streams for `frame` / `pair`.
@@ -163,7 +160,8 @@ pub struct DecodeSpec {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 pub struct RecordsArgs {
-    /// A stream, e.g. `bus.wr` (`help decode`).
+    /// A stream, e.g. `bus.wr`; a decode's name for its results, `bus`; a glob, `bus.*`; or
+    /// several, space-separated (`help records`).
     pub stream: String,
     /// Records starting at or after this time; default the start.
     pub from: Option<String>,

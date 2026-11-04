@@ -98,11 +98,14 @@ each one's roles, params, streams and fields.
   `axilite`, `axi4`, and without a clock `spi` (`mode=0`) and `uart` (`baud=115200`).
   `prefix=s_axi_` plays each role not given by `<prefix><role>`. A value runs to the next `key=`,
   so it can have spaces; in quotes it runs to the closing one (`when=\"x=1\"`).
-- An interface of the design's own: `protocol <name> clock=<clk> when=<expr> <field>=<signal>...`
-  makes a record per clock cycle where `when` holds (`help expressions`), the fields sampled with
-  it. A field is any expression without past: `next=pc + 4`, `imm=signed(insn[31:20])` (a field
-  that can be negative is signed, shown in decimal); later fields and `when` can name it
-  (`f3=insn[14:12] ok=f3 == 0`). With `roles=a,b` it is a type for `decode`.
+- An interface of the design's own: `protocol <name> roles=<a,b> when=<expr> <field>=<expr>...`
+  defines a protocol on its roles, no signals: a record per clock cycle where `when` holds (`help
+  expressions`), the fields sampled with it. `decode <name> <protocol> clock=<clk> <role>=<signal>...`
+  puts it on signals, as a built-in: `protocol hs roles=valid,ready,data when=valid && ready
+  d=data` then `decode rx hs clock=clk valid=rx_valid ready=rx_ready data=rx_data`. A field is
+  any expression of roles without past: `next=pc + 4`, `imm=signed(insn[31:20])` (a field that
+  can be negative is signed, shown in decimal); later fields and `when` can name it
+  (`f3=insn[14:12] ok=f3 == 0`).
 - On streams: `decode f frame input=rx.beat last=tlast` groups records into frames;
   `decode m pair request=axi.wr response=mi` matches requests with responses (by order, or
   `id=` / `req_id=` and `resp_id=`), each record both sides with its `delay`;
@@ -116,7 +119,10 @@ Decoding doesn't touch the rows. Read a stream with `records` (`help records`)."
         "reading streams: where, n, field comparisons, group_by, count_only",
         "\
 `records` lists a stream as a table: n (the record's number), start, end and a field per column,
-headed `20 of 157`. `start` is the rising edge that starts the record's first clock cycle, as
+headed `20 of 157`. `stream` may name a set: a decode (`bus`: its results and violations, not the
+streams they are made from), a glob (`bus.*`) or several (`bus.wr bus.rd`); their records come
+in order of start with a `stream` column, fields of the same name and kind sharing a column, empty
+where a stream has none. `start` is the rising edge that starts the record's first clock cycle, as
 `find @clk` reports a match; `end` is the edge that samples its last. With more than one record long values are shortened (a frame's data to 8
 bytes and its size); `count: 1` with `from` shows one whole.
 - `from` / `to` pick records by their start; `count` how many (default 20).
@@ -124,7 +130,7 @@ bytes and its size); `count: 1` with `from` shows one whole.
   and evaluated on each record: `addr != 0x1C && resp != 0`, `rule == dropped`, `delay > 40ns`.
   `past(x)` is x of the record before; `n` is the record's number (`n == 138`, a testbench's
   packet #138); a field compares with another field (`req_addr != resp_addr`, a pair's two
-  sides, as a scoreboard checks them).
+  sides, as a scoreboard checks them). On a set it keeps the streams having every field it names.
 - `group_by` names fields and answers a line per distinct value, with how many records have it
   and the first and last start: `128 × addr=0x1C data=0x3 (2.975us .. 69.015us)`.
 - Fields show in hex; `radix` gives another for every number field (`dec`) or for one
@@ -152,7 +158,7 @@ one undo step:
   when they jump there.
 - `range`: the visible range, `[\"60ns\", \"480ns\"]`; default the whole trace.
 - `scope` (`help names`); `signals`: computed signals, `[\"op = cmd[7:0]\"]`.
-- `protocols`: `{name, clock, when, fields: [\"tdata = tdata\"], roles}`, as `protocol` makes them;
+- `protocols`: `{name, roles, when, fields: [\"op = data[7:0]\"]}`, as `protocol` defines them;
   `decode`: `{name, protocol, clock, signals: [\"tvalid = rx_tvalid\"], params: [\"prefix =
   rx_\"]}`, as `decode` does (`help decode`). Streams can then be rows.
 Every name, radix and time is checked first and all the errors come back at once. `command`

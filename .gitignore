@@ -1,3 +1,6 @@
 /target
 /bench/agent/runs
 /bench/agent/results.jsonl
+/site/screens
+/site/public
+__pycache__/

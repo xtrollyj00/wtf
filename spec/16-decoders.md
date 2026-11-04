@@ -31,6 +31,25 @@ checks that return only violations.
 - **Records and streams.** Decoding produces streams of records: a record has a start, an end
   and fields (`Record { start, end, fields }`), a stream has a name and a schema of field names
   and widths. A beat, a frame, a transaction and a violation are records.
+- **Results.** A stream another stream is made from is intermediate (axilite's `aw`, `w`, `b`,
+  `ar`, `r`, joined into `wr` and `rd`; axis's `beat`, framed into `frame`), across decodes too:
+  a `frame` put on `bus.rd` makes `bus.rd` intermediate. A stream nothing is made from is a
+  result, or violations. Each stream keeps the names of the streams it was made from, so this is
+  known from the steps, never from the trace. A decode's results and violations are what a person
+  reads: `decode` answers with them first (`bus: records bus.wr 2, bus.rd 8; violations
+  bus.errors 2, ...; made from bus.aw 2, ...`), decoding from the interfaces picker adds them
+  alone as rows, and a decode's name in `records` means them.
+- **Records of a set.** `records` (the tool and `:records`) reads a set of streams: a stream
+  (`bus.rd`), a decode's name (`bus`: its results, then its violations), a glob (`bus.*`), or
+  several of these separated by spaces. A stream's name comes first: a `pair` `lat` is its
+  stream `lat`, and `lat lat.unmatched` its results and violations. A set of several is one table, its records in order of
+  start with a `stream` column. Fields share a column when name and kind (width, sign, time or
+  text) are the same, in order of first appearance; a name with two kinds is a column per stream,
+  `<stream>.<field>`, so `data` as bytes never mixes with `data` as a number. A record of a
+  stream without a column's field is empty there. `where` keeps the records of the streams that
+  have every column it names (`strb != 0xF` on `bus` keeps writes only); a name no stream in the
+  set has is an error listing the columns. `past(x)` is x of the stream's record before; `n` the
+  record's number in its stream. `group_by` counts across the set (`resp` over writes and reads).
 - **Terms.** Three words, used only in these senses:
   - A **protocol** is what can be decoded: it has roles (`tvalid`, `sclk`), params (`baud`) and
     the streams it makes. `protocols` lists them.
@@ -68,17 +87,26 @@ checks that return only violations.
   levels do). An SPI bit lasts to the next sampling edge, the last of a transfer to sclk's next
   edge. UART checks every stop bit; the line low for a whole frame is a `break`, with no byte.
 - **Protocols come in three kinds:**
-  - **Sampled protocols**, defined in the session without Rust (`[[protocol]]`, `:protocol`): a
-    clock, a predicate and fields as expressions. With `roles` one is a type, put on signals by
-    instances; without, it is its own single stream. Defining a type again (`:protocol`) samples
-    its instances again at once, with the instances made after them (which may stack on their
-    streams), in order; if one fails, the type stays defined and the error says which failed.
+  - **Sampled protocols**, defined in the session without Rust (`[[protocol]]`, `:protocol`):
+    roles, a predicate and fields as expressions of the roles. A definition names no signal and
+    no clock, as a built-in's doesn't: an instance (`:decode`) puts it on signals at its clock.
+    While an instance samples, a name that is no role, nor a field before it, nor the instance's
+    clock is an error, so a protocol can't reach for a signal its instances don't give.
+    Defining one again (`:protocol`) samples its instances again at once, with the instances
+    made after them (which may stack on their streams), in order; if one fails, the protocol
+    stays defined and the error says which failed.
     ```toml
     [[protocol]]
     name = "cmd"
-    clock = "top.clk"
-    when = "cmd_valid && cmd_ready"
+    roles = ["valid", "ready", "cmd"]
+    when = "valid && ready"
     fields = { op = "cmd[7:0]", addr = "cmd[39:8]" }
+
+    [[decode]]
+    name = "host"
+    protocol = "cmd"
+    clock = "top.clk"
+    signals = { valid = "top.cmd_valid", ready = "top.cmd_ready", cmd = "top.cmd" }
     ```
   - **Built-in protocols** (`axis`, `axilite`, `axi4`, `spi`, `uart`), written in Rust as a list
     of steps: sample a stream, feed a signal's changes, run a decoder on a stream, join or check
@@ -106,7 +134,7 @@ checks that return only violations.
   (`rx.frame`, its segments the records) with a signal per field (`rx.frame.len`), holding the
   field's value during each record.
 - **TUI.** A stream row draws like a bus, a segment per record with a short label
-  (`#3 64B`); `Space` expands it into a row per field. Violation records draw red. Field
+  (`#3 64B`); `Enter` expands it into a row per field. Violation records draw red. Field
   signals search like any other (`/len == 64`). `:decode <name> <protocol> <role>=<signal>...`
   adds an instance.
 - **MCP.** Streams and fields are signal names for every tool; `records` lists a stream's records

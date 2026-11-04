@@ -1,0 +1,18 @@
+---
+source: src/main.rs
+expression: "snapshot(&mut app, 80, Some(14))"
+---
+Name        │ Value │ 0           12ns    20ns      30ns      40ns      50ns
+            │       │             1───── 18ns ──────2 first bad write
+            │       │      ┌────┐ ┃  ┌────┐    ┌────╎    ┌────┐    ┌────┐    ┌──
+clk         │ 0     │ ─────┘    └─┃──┘    └────┘    ╎────┘    └────┘    └────┘
+            │       │             ┃                 ╎
+▾ cpu       │       │             ┃                 ╎
+            │       │ ──────────🮦─┃───────🮦─────────╎─────────🮦─────────────────
+  cpu.state │ 0x1   │ ── 0x0 ───🮧─┃ 0x1 ──🮧─────── 0x2 ───────🮧────── 0x4 ──────
+            │       │ ━━━━━━━━━━🮦─┃───────🮦 ╭─ ' jump to ─────────────────────╮
+  data      │ 0x43  │ ━━ 0xXX ━━🮧─┃0x43 ──🮧 │ 1 → cursor                 12ns │
+            │       │             ┃       ┌ │ 2 → first bad write        30ns │
+  busy      │ 0     │ ────────────┃───────┘ │ ' → back before the jump        │
+            │       │                       ╰───────────────────── Esc close ─╯
+ NORMAL   '  signals ▸  top.clk                      12ns  1ns/col  simple [+]

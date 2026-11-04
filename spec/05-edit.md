@@ -100,6 +100,87 @@ The panel stays open after adding.
   A scope without direct signals, or whose signals are all shown already, adds nothing and says so
   on the status line.
 
+### Picker
+
+The **picker** is another way in: one floating box over the rows that finds things by name.
+`:pick <source>` (section 7) opens it. A query line is on top, the entries it matches under it,
+best first, the matched characters in the accent (bold and underlined without colour, section 14),
+and a preview of the highlighted entry on the right. The sources are named in the box's top
+border, the current one highlighted.
+
+```
+┌─ signals  marks  records  commands  sessions  trail ─────────────────────────────┐
+│ ▸ cpust                            1/6 │ top.cpu.state                           │
+│────────────────────────────────────────│ 3 bits                                  │
+│▌  top.cpu.state                  [2:0] │                                         │
+│                                        │ at 30ns  0x2                            │
+│                                        │                                         │
+│                                        │ ───🮦─────────🮦────────┃────────🮦────── │
+│                                        │ ───🮧── 0x1 ──🮧────── 0x2 ─────🮧─ 0x4 ─ │
+│                                        │ 7ns                                53ns │
+│                                        │ Enter adds it below top.clk             │
+└────────────────────────────────────────┴── Enter add  Tab mark  C-s source  Esc ─┘
+```
+
+| Source | Entries | Preview | `Enter` |
+|---|---|---|---|
+| `signals` | every signal by full path, computed ones and streams too; `●` shown, `+` marked | its width, the decodes it is in, under a dim `decodes` heading, a line each with the decode, its protocol and the signal's role there (`bus  axilite  awvalid`: its records may be what is wanted), its value at the cursor and its waveform around the cursor, drawn as the rows draw it; a signal not read from the file yet is read once the highlight has rested on it 120 ms (`…` till then), so holding `j` over a big trace doesn't read every signal it passes | adds the marked signals, or the highlighted one, below the selected row as the signal panel's `Enter` does; a shown signal is not added twice |
+| `marks` | the cursor and each mark, with its name and time | its name, time and note | jumps to it, as `'n` |
+| `records` | a stream's records, `#n` and every field; every stream's, in time order and named by their stream (`bus.rd #3`), unless one is named or selected | its start, end and fields | jumps to its start and selects the stream's row, as the records browser does |
+| `commands` | the `:` commands | the usage and what it does | puts it on the command line, to finish and run |
+| `sessions` | the agents' workspaces on this machine (section 15) | its trace, and whether it is this one | follows it, as `:follow <id>`; an agent on another trace says to open that trace |
+| `trail` | the agent's steps, newest highlighted | what it asked and the answer | jumps to its time, as `:trail` |
+| `interfaces` | the interfaces built-in protocols decode in the trace (section 16, as the agents' `open` lists them), each its name and prefix, the protocol at the right (`→ bus` once decoded) | its `:decode` line, each role and the signal it takes, the clock (or that none was found) | decodes it, named after its prefix (`s_axi`, a number after a name taken), and adds its results and violations (section 16 "Results") below the selected row as a group of that name; without a clock found, puts the line on the command line to name it; decoded already, opens the records browser on the decode |
+
+The picker's keys are fixed: typing edits the query, `Backspace` deletes, `Ctrl-n` / `Ctrl-p`
+or the arrows move, `PageDown` / `PageUp` a box of entries, `Tab` marks the highlighted signal
+and moves on, `Ctrl-s` goes to the next source (an empty one says why), `Enter` picks and closes,
+`Esc` closes. Adding is one undo step. A query matches its characters in order, not
+necessarily together (`cpust` matches `top.cpu.state`); a tie goes to the shorter entry.
+
+### Records
+
+`:records <streams> [where <expr>]` (section 7) opens the records browser: a card over the
+waveforms with the records of a set of streams (section 16 "Records of a set": a stream, a
+decode's name, a glob, several) as one table, as the agents' `records` tool gives them, for a
+person to look through.
+
+```
+╭─ records · s_axi ───────────────────────────────────────────────── 13 records ─╮
+│ all  wr  rd  errors  wr.unmatched  rd.unmatched  aw  w  b  ar  r               │
+│ ▸ where / filters on delay, addr, data, strb, resp, rule, kind                 │
+│────────────────────────────────────────────────────────────────────────────────│
+│   stream  n    start    length    delay    addr    data        strb    resp    │
+│▌  wr      #0   30ns     20ns      10ns     0x10    0x11111111  0xF     0x0     │
+│   rd      #0   130ns    30ns      20ns     0x10    0x11111111          0x0     │
+│   errors  #0   180ns    10ns                                                   │
+╰──────── Enter jump  / filter  s S sort  = group  h l scroll  Tab set  Esc close ─╯
+```
+
+- **Sets**: when the streams are a decode's, the line under the title lists its sets, `all`
+  (its results and violations, named one by one when a stream has the decode's name, as a
+  `pair`'s) then each stream, results first and the streams they are made
+  from last, named without the decode's name. `Tab` / `Shift-Tab` go to the next / previous, its
+  filter and sort fresh.
+- **Columns**: `stream` (a set of several), `n`, `start`, `length`, then a column per field
+  (section 16), each as wide as its widest value up to 24 characters (a longer value is cut,
+  `…`). `h` / `l` scroll the columns after `stream` and `n`, which stay. A record of a
+  violations stream is red.
+- **Filter**: `/` edits the `where` expression (section 16, the `records` tool's), applied as
+  typed; empty, the line names the set's fields. `Enter` or `Esc` stops editing, `Ctrl-u` clears it. An expression that doesn't parse
+  keeps the records shown and says why at the right of its line. The top border counts the
+  records kept of all.
+- **Sort**: in order of start at first; `s` sorts by the next column, `S` reverses; the sorted
+  column's name is in the accent. Fields sort by value (a signed field as signed); values with
+  `x` or `z` bits and text after numbers, by their text; a record without the field last.
+- **Group**: `=`, sorted by a field, groups the records kept by its value: a line per value with
+  its count and first and last start, the commonest first. `Enter` on a group keeps its records
+  (adds `field == value` to the filter; a value with spaces can't be, and says so); `=` again
+  ungroups. Sorted by `stream`, `n`, `start` or `length`, `=` says to sort by a field first.
+- **Keys**: `j` / `k`, `Ctrl-f` / `Ctrl-b`, `g` / `G` move; `Enter` on a record jumps the cursor
+  to its start (a jump, so `''` comes back), selects its stream's row if shown and closes; `Esc`
+  or `q` closes. The mouse: section 2.
+
 ### Rows
 
 The keys that change the rows are in section 3 with the others: `dd` removes, `J` / `K` move, `r`
@@ -133,9 +214,9 @@ A group is a named set of rows with a header row. Groups have one level (no nest
  ▸ stream (4)       ───▀▀──▀▀▀▀───▀───     ← collapsed: shows activity
 ```
 
-- **Collapse / expand**: `Space` on a group header.
-- **Bus bits**: `Space` on a bus shows one line per bit under it, MSB first (`data[7]` … `data[0]`),
-  drawn as 1-bit signals; `Space` on the bus or one of its bits folds them again. Bit lines can be
+- **Collapse / expand**: `Enter` on a group header.
+- **Bus bits**: `Enter` on a bus shows one line per bit under it, MSB first (`data[7]` … `data[0]`),
+  drawn as 1-bit signals; `Enter` on the bus or one of its bits folds them again. Bit lines can be
   selected (`j` / `k`, `w` / `b` jump between that bit's changes, the value column shows the bit),
   but they move and are removed with their bus. Like collapsing, expanding is not an undo step.
   Combining bits or signals into new ones is done by computed signals (`:signal`, section 16).
@@ -162,8 +243,9 @@ signal next to a group's edge move it into or out of the group.
 
 ### Composite rows
 
-A struct, record or array is one signal in the HDL, so it is one row. `Space` opens it one level,
-the way a bus opens into its bits and a stream into its fields: **every index and every field is
+A struct, record or array is one signal in the HDL, so it is one row. `Enter` opens it one level,
+the way a bus opens into its bits and a stream into its fields (`bus.rd` into `delay`, `addr`,
+named as a struct's are): **every index and every field is
 a level**. `pkts` opens into `pkts[0]`, `pkts[1]`; `pkts[0]` into `valid`, `state`, `pair`;
 `pair` into `hi`, `lo`. `grid` opens into `grid[0]`, `grid[1]`, and `grid[1]` into `grid[1][0]`
 .. `grid[1][2]`.
@@ -194,7 +276,7 @@ a level**. `pkts` opens into `pkts[0]`, `pkts[1]`; `pkts[0]` into `valid`, `stat
 - **Like bit lines**: child lines are selected with `j` / `k` (`w` / `b` jump between that
   child's changes, the value column shows it, `e` examines it), but they move and are removed
   with their row: `dd` on one removes the whole row. Opening and folding is not an undo step.
-  `Space` on an open level folds it and every level under it.
+  `Enter` on an open level folds it and every level under it.
 - **Each line its own look**: a composite row's radix applies to its whole value; a child line
   starts in the default radix for its signal (an enum its names), a stream's field in its row's,
   and each can be given its own radix and colour (`r`, `:radix`, `:color`, the menu), kept with

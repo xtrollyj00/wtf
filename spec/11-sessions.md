@@ -77,15 +77,15 @@ rows = [
   saved: it comes back as decodes run again.
 - `version` is the format version. A file with a newer version than wtf knows is refused
   with an error instead of being misread.
-- `[[protocol]]` entries (after `[[signal]]`, before the rows) sample streams: `name`, `clock`,
-  `when` and `fields` in their order (section 16). Each stream is a signal, and so is
-  each of its fields (`rx.tdata`), so rows can show them; they are sampled again on `:e`. One that
-  can't be is reported and kept, to try again on the next `:e`. Named signals, protocols and
-  instances are made in passes, so one that uses one listed after it is made too.
-  A protocol with `roles = ["valid", "ready", "cmd"]` is a type instead: its `when` and `fields`
-  name the roles, its `clock` may be left out, and `[[decode]]` entries (`name`, `protocol`,
-  optional `clock`, `signals = { valid = "top.cmd_valid", ... }`) put it on signals, each making
-  the stream of its name. All of an instance's mistakes are reported at once.
+- `[[protocol]]` entries (after `[[signal]]`, before the rows) define protocols, names only:
+  `name`, `roles = ["valid", "ready", "cmd"]`, `when` and `fields` in their order, all naming
+  the roles (section 16). A protocol has no `clock` and no signals; one with a `clock` is
+  reported and left out. `[[decode]]` entries (`name`, `protocol`, `clock`, `signals = { valid =
+  "top.cmd_valid", ... }`) put it on signals, each making the stream of its name. Each stream is
+  a signal, and so is each of its fields (`rx.tdata`), so rows can show them; they are sampled
+  again on `:e`. One that can't be is reported and kept, to try again on the next `:e`. Named
+  signals, protocols and instances are made in passes, so one that uses one listed after it is
+  made too. All of an instance's mistakes are reported at once.
   `[[decode]]` also puts built-in protocols on signals (`protocol = "axis"`, making
   `rx.beat`, `rx.frame`, `rx.errors`), and the protocols on streams, with
   `params`: `frame` (`signals = { input = "c0" }`, `params = { last = "last" }`, or `gap`,
@@ -125,7 +125,7 @@ As few options as possible. Everything that describes what to show (signals, gro
 cursors, zoom, time) lives in the session file (section 11), not on the command line.
 
 ```
-wtf [-S <session>] [--glyphs <set>] [--snapshot <width>[x<height>] [--ansi] [--keys <keys>]] <trace>
+wtf [-S <session>] [--glyphs <set>] [--snapshot <width>[x<height>] [--ansi] [--keys <keys>]] [<trace>]
 wtf --setup [<trace>]
 wtf --mcp
 wtf --help
@@ -134,12 +134,12 @@ wtf --version
 
 | Option | Meaning |
 |---|---|
-| `<trace>` | the VCD or FST file to open; required |
-| `-S <session>` | load this session instead of `<trace>.session.toml` |
-| `--glyphs <set>` | draw with this glyph set: `unicode`, `box` or `ascii` (section 14), over the config file's (section 19) |
+| `<trace>` | the VCD, FST or GHW file to open; without it, the start screen (section 4), also as a `--snapshot` |
+| `-S <session>` | load this session instead of `<trace>.session.toml`; needs `<trace>` |
+| `--glyphs <set>` | draw with this glyph set: `unicode`, `box`, `ascii` or `nerd` (section 14), over the config file's (section 19) |
 | `--snapshot <width>[x<height>]` | render one screen as plain text to stdout and exit, without the terminal UI; without a height, as tall as the content |
 | `--ansi` | with `--snapshot`: print the screen in its colours, as SGR escape codes, with the configured theme (section 19); `NO_COLOR` gives the reversed cells of a terminal without colour |
-| `--keys <keys>` | with `--snapshot`: press these keys first, the screen drawn before each as the window draws it, so a mode or an overlay can be shown (`?`, `a`, `:` with its completions, `e`). Written as in Vim's mappings: plain characters, `<Esc>`, `<CR>`, `<Tab>`, `<BS>`, `<Space>`, `<lt>` for `<`, `<C-x>`; another `<name>` is an error, a `<` that starts no name is typed as it is |
+| `--keys <keys>` | with `--snapshot`: press these keys first, the screen drawn before each as the window draws it, so a mode or an overlay can be shown (`?`, `a`, `:` with its completions, `e`). Written as in Vim's mappings: plain characters, `<Esc>`, `<CR>`, `<Tab>`, `<S-Tab>`, `<BS>`, `<Space>`, `<lt>` for `<`, `<C-x>`; another `<name>` is an error, a `<` that starts no name is typed as it is |
 | `--setup` | ask again which glyphs and theme to use, as on the first start (section 19), then open `<trace>` if given |
 | `--mcp` | serve AI agents over MCP on stdin / stdout instead of opening the screen (section 15) |
 
@@ -155,5 +155,5 @@ wtf --version
 
 ## 13. Formats
 
-- VCD and FST. No other formats are planned.
+- VCD, FST and GHW (GHDL's own format). No other formats are planned.
 - The format is detected from the file's content, not its extension.

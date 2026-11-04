@@ -2,7 +2,7 @@
 source: src/main.rs
 expression: "snapshot(&mut app, 40, None)"
 ---
-            0           50ns
-            ┃━🮦──🮦─🮦──╳╳🮣┄┄🮦─────
-data  0xXX  ┃━🮧──🮧─🮧──╳╳🮡┄┄🮧─────
- signals ▸ 0  ·  4ns/col  ·  simple [+]
+Name │ Value │ 0           50ns
+     │       │ ┃━🮦──🮦─🮦──╳╳🮣┄┄🮦─────
+data │ 0xXX  │ ┃━🮧──🮧─🮧──╳╳🮡┄┄🮧─────
+ NORMAL   signals ▸  top.cpu.d…  0 [+]

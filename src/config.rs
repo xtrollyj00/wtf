@@ -1,19 +1,28 @@
-//! The config file (spec §19): glyph set, theme and single colours, read once at start. A bad
+//! The config file (spec §19): glyph set, theme, single colours and keys, read once at start. A bad
 //! entry is skipped with a warning for the status line; nothing in it stops wtf.
 
 use crate::draw::{self, Palette};
 use crate::theme;
+use crate::tui::keys::Keymap;
 use std::path::{Path, PathBuf};
 
 pub struct Config {
     pub glyphs: &'static draw::Glyphs,
     pub palette: Palette,
+    pub keys: Keymap,
+    /// How long keys wait before which-key shows what can follow (spec §19).
+    pub which_key: std::time::Duration,
+    /// The name and value columns' widest (spec §19 `name_width`, `value_width`).
+    pub columns: (usize, usize),
     pub warnings: Vec<String>,
 }
 
 /// `$XDG_CONFIG_HOME/wtf/`, or `~/.config/wtf/`: `config.toml` and the user's `themes/`. A missing
 /// file means the defaults.
 /// `bg` is the terminal's background, if it answered: the theme's surfaces are fitted to it.
+/// Which-key's wait, without `which_key` in the file.
+const WHICH_KEY: std::time::Duration = std::time::Duration::from_millis(300);
+
 pub fn load(bg: Option<theme::Rgb>) -> Config {
     match dir() {
         Some(d) => load_from(&d, bg),
@@ -84,18 +93,32 @@ pub fn parse(text: &str, rgb: bool, themes: &Path, bg: Option<theme::Rgb>) -> Co
         Ok(t) => t,
         Err(e) => {
             warnings.push(format!("config: {}", theme::toml_error(&e, text)));
-            return Config { glyphs: &draw::UNICODE, palette: dark(), warnings };
+            return Config { glyphs: &draw::UNICODE, palette: dark(), keys: Keymap::default(), which_key: WHICH_KEY, columns: draw::COLUMNS, warnings };
         }
     };
     let mut glyphs = &draw::UNICODE;
+    let mut which_key = WHICH_KEY;
+    let mut columns = draw::COLUMNS;
     for (key, value) in &table {
         match key.as_str() {
             "glyphs" => match value.as_str().and_then(|s| draw::SETS.iter().find(|(n, _)| *n == s)) {
                 Some((_, g)) => glyphs = g,
-                None => warnings.push(format!("config: glyphs = {}? (unicode, box, ascii)", theme::show(value))),
+                None => warnings.push(format!("config: glyphs = {}? (unicode, box, ascii, nerd)", theme::show(value))),
             },
-            "theme" | "colors" => {}
-            _ => warnings.push(format!("config: unknown key {key} (keys: glyphs, theme, colors)")),
+            "which_key" => match value.as_integer().filter(|&n| (0..=10_000).contains(&n)) {
+                Some(n) => which_key = std::time::Duration::from_millis(n as u64),
+                None => warnings.push(format!("config: which_key = {}? (milliseconds, 0-10000)", theme::show(value))),
+            },
+            // at least as wide as the column's header
+            "name_width" | "value_width" => {
+                let (min, w) = if key == "name_width" { (4, &mut columns.0) } else { (5, &mut columns.1) };
+                match value.as_integer().filter(|&n| (min..=200).contains(&n)) {
+                    Some(n) => *w = n as usize,
+                    None => warnings.push(format!("config: {key} = {}? (columns, {min}-200)", theme::show(value))),
+                }
+            }
+            "theme" | "colors" | "keys" | "leader" => {}
+            _ => warnings.push(format!("config: unknown key {key} (keys: glyphs, theme, which_key, name_width, value_width, colors, keys, leader)")),
         }
     }
     // the theme first, so the single colours override it whatever the order in the file
@@ -117,7 +140,20 @@ pub fn parse(text: &str, rgb: bool, themes: &Path, bg: Option<theme::Rgb>) -> Co
             None => warnings.push(format!("config: colors = {}? (a table of colours)", theme::show(v))),
         }
     }
-    Config { glyphs, palette, warnings }
+    let mut keys = match table.get("keys") {
+        None => Keymap::default(),
+        Some(toml::Value::Table(t)) => Keymap::from_table(t, &mut warnings),
+        Some(v) => {
+            warnings.push(format!("config: keys = {}? (a table of action = key)", theme::show(v)));
+            Keymap::default()
+        }
+    };
+    match table.get("leader") {
+        None => {}
+        Some(toml::Value::Table(t)) => keys.set_leader(t, &mut warnings),
+        Some(v) => warnings.push(format!("config: leader = {}? (a table of key = [\"what it does\", \":command\"])", theme::show(v))),
+    }
+    Config { glyphs, palette, keys, which_key, columns, warnings }
 }
 
 #[cfg(test)]
@@ -162,6 +198,10 @@ mod tests {
         assert_eq!(c.palette.cursor, Color::Rgb(255, 0, 0));
         assert_eq!(c.palette.panel, Color::Indexed(17));
         assert_eq!(c.palette.hues[0], Color::Rgb(0x5f, 0x87, 0xaf));
+        assert_eq!(parse("name_width = 12\nvalue_width = 40\n", true, Path::new(""), None).columns, (12, 40));
+        // narrower than its header
+        let c = parse("value_width = 3\n", true, Path::new(""), None);
+        assert_eq!((c.columns, c.warnings), (draw::COLUMNS, vec!["config: value_width = 3? (columns, 5-200)".to_string()]));
     }
 
     #[test]
@@ -171,10 +211,10 @@ mod tests {
         assert_eq!(
             c.warnings,
             [
-                "config: unknown key foo (keys: glyphs, theme, colors)",
-                "config: glyphs = \"utf8\"? (unicode, box, ascii)",
+                "config: unknown key foo (keys: glyphs, theme, which_key, name_width, value_width, colors, keys, leader)",
+                "config: glyphs = \"utf8\"? (unicode, box, ascii, nerd)",
                 "config: theme = 3? (dark, light)",
-                "config: unknown key colors.curser (keys: line, bus, fill, unknown, highz, cursor, cursor_text, column, cursor_dim, selected, panel, hatch, dim, background, text, red, orange, yellow, green, cyan, blue, magenta, gray)",
+                "config: unknown key colors.curser (keys: line, bus, fill, unknown, highz, cursor, cursor_text, column, cursor_dim, mark, selected, panel, hatch, dim, background, text, red, orange, yellow, green, cyan, blue, magenta, gray)",
                 "config: colors.cursor = \"blue\"? (\"#rrggbb\", 0-255, [\"#rrggbb\", 0-255] or \"default\")",
             ]
         );
@@ -182,6 +222,26 @@ mod tests {
         assert_eq!(c.palette.hues[0], Color::Rgb(255, 0, 0));
         assert_eq!(c.palette.cursor, dark().cursor);
         assert_eq!(c.glyphs.crossing, draw::UNICODE.crossing);
+    }
+
+    #[test]
+    fn right_kinds_apply() {
+        let c = parse("which_key = 250\n[keys]\n[leader]\n", true, Path::new(""), None);
+        assert_eq!((c.warnings, c.which_key), (vec![], std::time::Duration::from_millis(250)));
+    }
+
+    #[test]
+    fn wrong_kinds_warn() {
+        let c = parse("which_key = 99999\ncolors = 1\nkeys = 2\nleader = 3\n", true, Path::new(""), None);
+        assert_eq!(
+            c.warnings,
+            [
+                "config: which_key = 99999? (milliseconds, 0-10000)",
+                "config: colors = 1? (a table of colours)",
+                "config: keys = 2? (a table of action = key)",
+                "config: leader = 3? (a table of key = [\"what it does\", \":command\"])",
+            ]
+        );
     }
 
     #[test]

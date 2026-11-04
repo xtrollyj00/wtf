@@ -1,5 +1,6 @@
 mod config;
 mod draw;
+mod history;
 mod live;
 mod mcp;
 mod theme;
@@ -16,11 +17,10 @@ use std::path::PathBuf;
 #[derive(Parser)]
 #[command(name = "wtf", version, about = "Waveform Terminal Frontend")]
 struct Args {
-    /// The VCD or FST file to open
-    #[arg(required_unless_present_any = ["mcp", "setup"])]
+    /// The VCD, FST or GHW file to open
     trace: Option<PathBuf>,
     /// Load this session instead of <trace>.session.toml
-    #[arg(short = 'S', value_name = "session")]
+    #[arg(short = 'S', value_name = "session", requires = "trace")]
     session: Option<PathBuf>,
     /// Render one screen as plain text to stdout and exit
     #[arg(long, value_name = "width[xheight]", value_parser = parse_size)]
@@ -31,7 +31,7 @@ struct Args {
     /// With --snapshot: press these keys first, e.g. `:add **<CR>?` (<Esc>, <CR>, <Tab>, <C-x>)
     #[arg(long, value_name = "keys", requires = "snapshot")]
     keys: Option<String>,
-    /// Draw with this glyph set: unicode, box (no legacy computing glyphs) or ascii
+    /// Draw with this glyph set: unicode, box (no legacy computing glyphs), ascii or nerd (unicode with Nerd Font icons)
     #[arg(long, value_name = "set", value_parser = draw::glyphs_named)]
     glyphs: Option<&'static draw::Glyphs>,
     /// Ask again which glyphs and theme to use (asked on the first start), then open <trace> if given
@@ -66,7 +66,9 @@ fn run(args: Args) -> Result<(), String> {
     use std::io::IsTerminal;
     let window = args.snapshot.is_none() && std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
     // asked once, before anything reads keys: the themes fit their surfaces to it
-    let bg = (window && !no_color()).then(theme::terminal_background).flatten();
+    let (bg, fg) = (window && !no_color()).then(theme::terminal_colors).unwrap_or_default();
+    // what the terminal's own text fades from (spec §4 "Notifications")
+    draw::set_terminal_colors(bg, fg);
     let setup = (args.setup || (window && config::first_start())).then(|| tui::setup::run(no_color(), bg)).flatten();
     if args.setup && args.trace.is_none() {
         return setup.map_or(Ok(()), Err);
@@ -74,44 +76,23 @@ fn run(args: Args) -> Result<(), String> {
     let config = config::load(bg);
     // --glyphs over the config file over unicode (spec §19 "Precedence")
     draw::set_glyphs(args.glyphs.unwrap_or(config.glyphs));
+    draw::set_columns(config.columns);
     let mut warnings = config.warnings;
     warnings.extend(setup);
-    let path = args.trace.expect("clap requires it");
-    let mut app = App::new(workspace::Workspace::open(&path)?);
-
-    // -S may name a file that doesn't exist yet: that starts an empty session, and :w creates it.
-    let session = args.session.unwrap_or_else(|| session::default_path(&path));
-    app.ws.session_path = session.clone();
-    if session.exists() {
-        let text = std::fs::read_to_string(&session).map_err(|e| format!("{}: {e}", session.display()))?;
-        warnings.extend(session::apply(&mut app.ws, &text)?);
-    }
-    // an agent's evidence for this trace, left while no window was open (spec §15 "Present"):
-    // shown when newer than the user's own session, offered otherwise
-    let agent = session::agent_path(&path);
-    let mut offer = None;
-    if let Ok(at) = std::fs::metadata(&agent).and_then(|m| m.modified()) {
-        let own = std::fs::metadata(&session).and_then(|m| m.modified()).ok();
-        if own.is_none_or(|own| at > own) {
-            if let Err(e) = app.show_agent_file() {
-                warnings.push(format!("{}: {e}", agent.display()));
-            }
-        } else {
-            offer = Some("an agent presented this trace before your last :w; :agent shows it".to_string());
-        }
-    }
-    if !warnings.is_empty() {
-        app.msg = Some((warnings.join("; "), true));
-    } else if let Some(o) = offer {
-        app.msg = Some((o, false));
-    }
-
+    let Some(path) = args.trace else {
+        return start(args.snapshot, args.ansi, args.keys.as_deref(), config.palette, (config.keys, config.which_key), &warnings);
+    };
+    let mut app = open(&path, args.session.clone(), warnings)?;
+    (app.keymap, app.which_delay) = (config.keys, config.which_key);
     match args.snapshot {
         Some((w, h)) => {
             // plain text keeps the default palette: `text` tells the cursor columns by it
             if args.ansi {
                 set_palette(config.palette);
             }
+            // keys come with no time between them: which-key shows at once
+            app.which_delay = std::time::Duration::ZERO;
+            app.plain = !args.ansi;
             // drawn before each key, as the window is: what a key does can depend on the width
             for k in tui::app::parse_keys(args.keys.as_deref().unwrap_or(""))? {
                 screen(&mut app, w, h);
@@ -123,9 +104,95 @@ fn run(args: Args) -> Result<(), String> {
         }
         None => {
             set_palette(config.palette);
+            history::opened(&path, args.session.as_deref(), false);
             tui::run(&mut app)
         }
     }
+}
+
+/// Without a trace: the start screen (spec §4), then the trace picked in a window, or its
+/// snapshot.
+fn start(snapshot: Option<(u16, Option<u16>)>, ansi: bool, keys: Option<&str>, palette: draw::Palette, keymap: (tui::keys::Keymap, std::time::Duration), warnings: &[String]) -> Result<(), String> {
+    let mut start = tui::start::Start::load();
+    start.msg = (!warnings.is_empty()).then(|| warnings.join("; "));
+    if let Some((w, h)) = snapshot {
+        if ansi {
+            set_palette(palette);
+        }
+        start.plain = !ansi;
+        for k in tui::app::parse_keys(keys.unwrap_or(""))? {
+            start.key(k);
+        }
+        let area = Rect::new(0, 0, w, h.unwrap_or_else(|| start.height()));
+        let mut buf = Buffer::empty(area);
+        start.draw(area, &mut buf);
+        print!("{}", if ansi { draw::ansi(&buf) } else { draw::text(&buf) });
+        return Ok(());
+    }
+    set_palette(palette);
+    loop {
+        let (path, session, follow) = match tui::start::run(&mut start)? {
+            tui::start::Choice::Quit => return Ok(()),
+            tui::start::Choice::Open { trace, session } => (trace, session, None),
+            tui::start::Choice::Join { trace, id } => (trace, None, Some(id)),
+        };
+        // a trace that doesn't open is said there, and the user picks again
+        let mut app = match open(&path, session.clone(), Vec::new()) {
+            Ok(app) => app,
+            Err(e) => {
+                start.msg = Some(e);
+                continue;
+            }
+        };
+        if let Some(id) = follow
+            && let Err(e) = app.run(&format!("follow {id}"))
+        {
+            app.msg = Some((e, true));
+        }
+        (app.keymap, app.which_delay) = keymap;
+        history::opened(&path, session.as_deref(), false);
+        return tui::run(&mut app);
+    }
+}
+
+/// The trace opened with its session (`-S`, or the one next to it), and an agent's evidence left
+/// for it; `warnings` go on the status line.
+fn open(path: &std::path::Path, session: Option<PathBuf>, mut warnings: Vec<String>) -> Result<App, String> {
+    let mut app = App::new(workspace::Workspace::open(path)?);
+
+    // -S may name a file that doesn't exist yet: that starts an empty session, and :w creates it.
+    let session = session.unwrap_or_else(|| session::default_path(path));
+    app.ws.session_path = session.clone();
+    if session.exists() {
+        let text = std::fs::read_to_string(&session).map_err(|e| format!("{}: {e}", session.display()))?;
+        warnings.extend(session::apply(&mut app.ws, &text)?);
+    }
+    // an agent's evidence for this trace, left while no window was open (spec §15 "Present"):
+    // shown when newer than the user's own session, offered otherwise
+    let agent = session::agent_path(path);
+    let mut offer = None;
+    if let Ok(at) = std::fs::metadata(&agent).and_then(|m| m.modified()) {
+        let own = std::fs::metadata(&session).and_then(|m| m.modified()).ok();
+        if own.is_none_or(|own| at > own) {
+            if let Err(e) = app.show_agent_file() {
+                warnings.push(format!("{}: {e}", agent.display()));
+            }
+        } else {
+            offer = Some("an agent presented this trace before your last :w; :agent shows it".to_string());
+        }
+    }
+    // interfaces a built-in protocol decodes, said once when nothing is decoded yet (spec §4)
+    if offer.is_none() && app.ws.decodes.is_empty() && !app.found.is_empty() {
+        let what: Vec<String> = app.found.iter().map(|f| format!("{} at {}", f.protocol, f.prefix)).collect();
+        let key = render::leader_key(&app, ":pick interfaces").unwrap_or(":pick interfaces".into());
+        offer = Some(format!("found: {}; {key} decodes", what.join(", ")));
+    }
+    if !warnings.is_empty() {
+        app.msg = Some((warnings.join("; "), true));
+    } else if let Some(o) = offer {
+        app.msg = Some((o, false));
+    }
+    Ok(app)
 }
 
 /// The configured palette, or none where `NO_COLOR` is set.
@@ -149,6 +216,7 @@ fn screen(app: &mut App, w: u16, h: Option<u16>) -> Buffer {
 
 #[cfg(test)]
 fn snapshot(app: &mut App, w: u16, h: Option<u16>) -> String {
+    app.plain = true;
     draw::text(&screen(app, w, h))
 }
 
@@ -203,7 +271,7 @@ mod tests {
         // one an agent set shows on the status line
         app.ws.unit = Some(wtf_core::time::unit_named("ns").unwrap());
         app.msg = None;
-        assert!(snapshot(&mut app, 100, None).contains("agents in ns"));
+        assert!(snapshot(&mut app, 100, None).contains(" unit ns "));
     }
 
     #[test]
@@ -279,7 +347,7 @@ mod tests {
     #[test]
     fn collapsed_group() {
         let mut app = open("vcd", Some(SESSION));
-        keys(&mut app, "j ");
+        keys(&mut app, "j<CR>");
         insta::assert_snapshot!(snapshot(&mut app, 60, None));
         keys(&mut app, "w");
         assert_eq!(app.ws.view.cursor, 20); // the next change of any signal in the group, after 12ns
@@ -288,7 +356,7 @@ mod tests {
         keys(&mut app, "j");
         assert_eq!(app.msg, None);
         assert!(matches!(&app.ws.rows[app.ws.sel], rows::Row::Signal(s) if app.ws.trace.vars[s.var].path == "top.dma.state"));
-        keys(&mut app, "k ");
+        keys(&mut app, "k<CR>");
         assert_eq!(rows::visible(&app.ws.rows).len(), 6);
     }
 
@@ -399,7 +467,7 @@ mod tests {
         app.run("add calc.mode").unwrap();
         app.run("add top.clk").unwrap();
         app.ws.sel = 0;
-        keys(&mut app, " ");
+        keys(&mut app, "<CR>");
         insta::assert_snapshot!(snapshot(&mut app, 80, None));
     }
 
@@ -449,37 +517,42 @@ mod tests {
         keys(&mut app, ":add gen(0).p gen(1).p\n");
         let screen = snapshot(&mut app, 80, None);
         let line = screen.lines().find(|l| l.starts_with("▸ gen[0]")).unwrap_or_else(|| panic!("{screen}"));
-        assert!(line.starts_with("▸ gen[0].p  0x0 "), "{line}");
+        assert!(line.starts_with("▸ gen[0].p │ 0x0 "), "{line}");
         keys(&mut app, ":rm gen(0).p gen(1).p\n");
         insta::assert_snapshot!("composite_folded", snapshot(&mut app, 80, None));
         // grid opens into its rows, grid[1] into its elements; the selection stays on grid[1]
-        keys(&mut app, "kk jj ");
+        keys(&mut app, "kk<CR>jj<CR>");
         assert_eq!((app.ws.sel, app.ws.bit), (0, Some(3)));
         insta::assert_snapshot!("composite_grid_1", snapshot(&mut app, 80, None));
-        // an element of 4 bits opens into its bits; Space on a bit folds the level it is in; on
+        // an element of 4 bits opens into its bits; Enter on a bit folds the level it is in; on
         // the row, the row and all under it
-        keys(&mut app, "j ");
+        keys(&mut app, "j<CR>");
         assert_eq!((app.ws.sel, app.ws.bit), (0, Some(6)));
-        keys(&mut app, "j ");
+        keys(&mut app, "j<CR>");
         assert_eq!((app.ws.sel, app.ws.bit), (0, Some(2)));
-        keys(&mut app, "kkk ");
+        keys(&mut app, "kkk<CR>");
         assert_eq!((app.ws.sel, app.ws.bit), (0, None));
         assert!(matches!(&app.ws.rows[0], rows::Row::Signal(s) if s.open.is_empty()));
         // pkt > pair
-        keys(&mut app, "j jjj ");
+        keys(&mut app, "j<CR>jjj<CR>");
         insta::assert_snapshot!("composite_pkt_pair", snapshot(&mut app, 80, None));
         keys(&mut app, "j");
         assert_eq!(app.ws.trace.vars[app.ws.probe(app.ws.rows[1].sig().unwrap(), app.ws.bit).0].path, "types.pkt.pair.hi");
         // e on a folded struct and array: the fields, nested, without opening it
-        keys(&mut app, "k kkke");
+        keys(&mut app, "k<CR>kkke");
         assert_eq!(
             app.examine.clone(),
-            Some(("types.pkt @ 10ns".to_string(), ["0x101A5", "", "valid  1", "state  busy", "pair", "  hi   0xA", "  lo   0x5"].map(String::from).to_vec()))
+            Some(app::Examine {
+                title: "types.pkt".into(),
+                at: "10ns".into(),
+                lines: [("", "0x101A5"), ("", ""), ("valid", "1"), ("state", "busy"), ("pair", ""), ("  hi", "0xA"), ("  lo", "0x5")].map(|(n, v)| (n.to_string(), v.to_string())).to_vec(),
+                of: (app.ws.trace.vars.iter().position(|v| v.path == "types.pkt").unwrap(), None),
+            })
         );
-        keys(&mut app, "e je");
+        keys(&mut app, "e<CR>je");
         insta::assert_snapshot!("composite_examine_pkts", snapshot(&mut app, 80, Some(24)));
         // dd on a line under a row removes the row; u brings it back
-        keys(&mut app, "e jdd");
+        keys(&mut app, "e<CR>jdd");
         assert_eq!(app.ws.rows.len(), 2);
         keys(&mut app, "u");
         assert_eq!(app.ws.rows.len(), 3);
@@ -488,7 +561,7 @@ mod tests {
     #[test]
     fn expand_bus() {
         let mut app = open("vcd", Some(SESSION));
-        keys(&mut app, "jjj ");
+        keys(&mut app, "jjj<CR>");
         assert!(matches!(&app.ws.rows[3], rows::Row::Signal(s) if app.ws.subs(s).len() == 8));
         keys(&mut app, "8j");
         assert_eq!(app.ws.bit, Some(0)); // data[0], the last bit line
@@ -504,7 +577,7 @@ mod tests {
         assert_eq!(app.ws.bit, Some(4));
         keys(&mut app, "u");
         assert!(matches!(&app.ws.rows[3], rows::Row::Signal(s) if app.ws.subs(s).len() == 8));
-        keys(&mut app, " ");
+        keys(&mut app, "<CR>");
         assert!(matches!(&app.ws.rows[3], rows::Row::Signal(s) if s.open.is_empty()) && app.ws.bit.is_none());
         keys(&mut app, "u");
         assert_eq!(app.msg.as_ref().unwrap().0, "already at oldest change");
@@ -660,7 +733,7 @@ mod tests {
         assert!(app.ws.modified());
         keys(&mut app, "u");
         assert!(!app.ws.modified());
-        keys(&mut app, "rk k 3z:30ns\n");
+        keys(&mut app, "rk<CR>k<CR>3z:30ns\n");
         keys(&mut app, &format!(":w {}\n", file.display()));
         assert_eq!(app.msg.as_ref().unwrap().0, format!("written: {}", file.display()));
         assert!(!app.ws.modified() && app.ws.session_path == file);
@@ -1020,12 +1093,12 @@ mod tests {
         let mut app = open("vcd", Some(SESSION));
         let t0 = Instant::now();
         let shot = snapshot(&mut app, 100, Some(22));
-        assert!(shot.lines().last().unwrap().starts_with(" signals ▸  top.clk "), "{shot}");
+        assert!(shot.lines().last().unwrap().starts_with(" NORMAL   signals ▸  top.clk "), "{shot}");
         let b = app.hit.button.unwrap();
         click(&mut app, b.x + 2, b.y, NONE, t0, 0);
         assert!(app.panel_shown());
         let shot = snapshot(&mut app, 100, Some(22));
-        assert!(shot.lines().last().unwrap().starts_with(" signals ◂ "), "{shot}");
+        assert!(shot.lines().last().unwrap().starts_with(" SIGNALS  signals ◂ "), "{shot}");
         click(&mut app, b.x + 2, b.y, NONE, t0, 1000);
         assert!(!app.panel_shown());
         assert_eq!(app.mode, app::Mode::Normal);
@@ -1326,6 +1399,7 @@ mod tests {
         // the time axis' menu
         app.run("fit").unwrap();
         screen(&mut app, 100, Some(22));
+        let v = app.ws.view.clone();
         right(&mut app, 50, 0);
         let labels = |app: &App| app.menu.as_ref().unwrap().items.iter().map(|i| i.label.clone()).collect::<Vec<_>>();
         assert_eq!(labels(&app), ["Zoom to fit", "Zoom in", "Zoom out"]);
@@ -1368,6 +1442,7 @@ mod tests {
         assert_eq!(app.ws.marks[1], None);
         // a waveform's menu has the time keys: Next change is w
         screen(&mut app, 100, Some(22));
+        app.ws.view.cursor = 10;
         right(&mut app, 60, 8);
         let k = labels(&app).iter().position(|l| l == "Next change").unwrap();
         keys(&mut app, &format!("{}<CR>", "j".repeat(k + 1)));
@@ -1378,7 +1453,7 @@ mod tests {
     fn mouse_drag_autoscroll() {
         // more lines than fit: rst added, data's bits open
         let mut app = panel_app();
-        keys(&mut app, "<Esc>jjj<Space>");
+        keys(&mut app, "<Esc>jjj<CR>");
         app.run("add top.rst").unwrap();
         keys(&mut app, "a");
         screen(&mut app, 100, Some(14));
@@ -1430,7 +1505,7 @@ mod tests {
         let zoom = (app.ws.view.ticks, app.ws.view.cols);
         keys(&mut app, ":fi");
         screen(&mut app, 100, Some(22));
-        let &(y, _) = app.hit.completions.iter().find(|&&(_, k)| commands::completions("fi")[k].name == "fit").unwrap();
+        let &(y, _) = app.hit.completions.iter().find(|&&(_, k)| commands::complete("fi", &app).items[k].label.starts_with(":fit")).unwrap();
         click(&mut app, 5, y as u16, NONE, t0, 2000);
         assert_eq!(app.line, "fit ");
         click(&mut app, 5, y as u16, NONE, t0, 2100);
@@ -1445,21 +1520,21 @@ mod tests {
 
     #[test]
     fn named_marks() {
-        // spec §9: a mark's name on the ruler after its number; its note on the status line while
-        // the cursor is on it
+        // spec §9: a mark's name on the ruler, a tab after its number; its note on the status line
+        // while the cursor is on it
         let mut app = open("vcd", None);
         app.run("add top.clk").unwrap();
         app.run("cursor 2 30ns name=first bad write note=AW came before W").unwrap();
         app.run("cursor 3 60ns").unwrap();
         let s = snapshot(&mut app, 100, Some(8));
-        assert!(s.contains("2 first bad write───") && !s.contains("2 first bad write:"), "{s}");
+        assert!(s.contains("2 first bad write ───") && !s.contains("2 first bad write:"), "{s}");
         keys(&mut app, "'2");
         let s = snapshot(&mut app, 100, Some(8));
         assert!(s.lines().last().unwrap().contains("2 first bad write: AW came before W"), "{s}");
         // a name too long for the gap is cut before the next mark
         app.run("cursor 2 name=a name much too long to fit between the two marks here").unwrap();
         let s = snapshot(&mut app, 100, Some(8));
-        assert!(s.contains("fi…─3"), "{s}");
+        assert!(s.contains("fi… 3"), "{s}");
         // a mark right after it leaves no room: no name
         app.run("cursor 3 31ns").unwrap();
         let s = snapshot(&mut app, 100, Some(8));
@@ -1467,44 +1542,114 @@ mod tests {
     }
 
     #[test]
+    fn ruler_cursor_on_mark() {
+        // spec §9: the cursor on a mark leaves the mark's number on the accent, its name after it
+        let mut app = open("vcd", None);
+        app.run("add top.clk").unwrap();
+        app.run("cursor 2 30ns name=first bad write").unwrap();
+        app.run("cursor 3 60ns").unwrap();
+        keys(&mut app, "'2");
+        let buf = screen(&mut app, 100, Some(8));
+        let ruler: String = (0..100).map(|x| buf[(x, 1)].symbol().to_string()).collect();
+        assert!(ruler.contains("2 first bad write ───") && !ruler.contains('1'), "{ruler}");
+        let x = ruler.chars().position(|c| c == '2').unwrap() as u16;
+        assert_eq!((buf[(x, 1)].bg, buf[(x + 2, 1)].fg, buf[(x + 2, 1)].bg), (draw::pal().cursor, draw::pal().cursor, draw::pal().column));
+        // off it, the mark's tab is back on its tint and the cursor's 1 is drawn
+        app.run("cursor 1 55ns").unwrap();
+        let buf = screen(&mut app, 100, Some(8));
+        assert_eq!((buf[(x, 1)].bg, buf[(x + 2, 1)].bg), (draw::pal().mark, draw::pal().mark));
+        let ruler: String = (0..100).map(|x| buf[(x, 1)].symbol().to_string()).collect();
+        assert!(ruler.contains("2 first bad write ─") && ruler.contains("─1─"), "{ruler}");
+    }
+
+    #[test]
+    fn ruler_marks_off_screen() {
+        // spec §9: a mark off screen keeps its name by the edge arrow; the nearest one shows
+        let mut app = open("vcd", None);
+        app.run("add top.clk").unwrap();
+        app.run("cursor 2 5ns name=first bad write").unwrap();
+        app.run("cursor 4 2ns name=farther").unwrap();
+        app.run("cursor 3 28ns name=retry").unwrap();
+        app.run("cursor 1 15ns").unwrap();
+        app.run("fit 10ns 20ns").unwrap();
+        let s = snapshot(&mut app, 100, Some(8));
+        let ruler = s.lines().nth(1).unwrap();
+        assert!(ruler.contains("◂2 first bad write ─") && ruler.ends_with("─ retry 3▸") && !ruler.contains("farther"), "{s}");
+        insta::assert_snapshot!(s);
+        // the cursor off the same edge: the mark there takes the accent, not ◂1
+        app.run("cursor 1 7ns").unwrap();
+        app.run("fit 10ns 20ns").unwrap();
+        let s = snapshot(&mut app, 100, Some(8));
+        assert!(s.lines().nth(1).unwrap().contains("◂2 first bad write ─") && !s.contains("◂1"), "{s}");
+        // two marks past the right edge: the nearer one shows, the other is not drawn
+        app.run("cursor 5 60ns name=later").unwrap();
+        let s = snapshot(&mut app, 100, Some(8));
+        let ruler = s.lines().nth(1).unwrap();
+        assert!(ruler.ends_with("─ retry 3▸") && !ruler.contains("later"), "{s}");
+    }
+
+    #[test]
+    fn value_column_width() {
+        // as wide as the widest value the row can show, wherever the cursor is; a longer value
+        // cut with a mark (spec §4 "Value column")
+        let t = trace::Trace::open("tests/data/simple.vcd".as_ref()).unwrap();
+        let mut app = App::new(workspace::Workspace::new(t, "top".into()));
+        app.run("add top.cpu.data").unwrap();
+        app.run("radix bin").unwrap();
+        let row = |app: &mut App| draw::waveform(&mut app.ws, 100).lines().find(|l| l.starts_with("data ")).unwrap().split_inclusive('│').take(2).collect::<String>();
+        app.run("0ns").unwrap();
+        let at0 = row(&mut app);
+        app.run("50ns").unwrap();
+        assert_eq!(at0.chars().count(), row(&mut app).chars().count(), "{at0}");
+        assert!(at0.contains("│ 0bXXXXXXXX │"), "{at0}");
+        draw::set_columns((30, 6));
+        let cut = row(&mut app);
+        draw::set_columns(draw::COLUMNS);
+        assert!(cut.contains("│ 0bZZZ… │"), "{cut}");
+    }
+
+    #[test]
     fn field_all_z() {
         // a record whose field is all z draws it (0xZZ, 45ns - 55ns); before the first record, a gap
         let mut app = open("vcd", None);
-        app.run("protocol p clock=top.clk when=!top.rst d=top.cpu.data").unwrap();
+        app.run("protocol t roles=rst,data when=!rst d=data").unwrap();
+        app.run("decode p t clock=top.clk rst=top.rst data=top.cpu.data").unwrap();
         app.run("add p.d").unwrap();
         app.run("50ns").unwrap();
         let w = draw::waveform(&mut app.ws, 100);
-        let row = w.lines().find(|l| l.starts_with("d ")).unwrap();
+        let row = w.lines().find(|l| l.starts_with("p.d ")).unwrap();
         assert!(row.contains("0xZZ"), "{w}");
         app.run("0ns").unwrap();
         let w = draw::waveform(&mut app.ws, 100);
-        let row = w.lines().find(|l| l.starts_with("d ")).unwrap();
-        assert_eq!(row.split('┃').next().unwrap().trim(), "d", "the value column is blank: {w}");
+        let row = w.lines().find(|l| l.starts_with("p.d ")).unwrap();
+        assert_eq!(row.split('┃').next().unwrap().replace('│', "").trim(), "p.d", "the value column is blank: {w}");
     }
 
     #[test]
     fn mouse_records() {
         let mut app = open("vcd", Some(SESSION));
         let t0 = Instant::now();
-        app.run("protocol beat clock=top.clk when=top.cpu.busy").unwrap();
+        app.run("protocol b roles=busy when=busy").unwrap();
+        app.run("decode beat b clock=top.clk busy=top.cpu.busy").unwrap();
         app.run("add beat").unwrap();
         app.run("records beat").unwrap();
         screen(&mut app, 100, Some(22));
         let &(y, k) = app.hit.records.last().unwrap();
-        click(&mut app, 30, y as u16, NONE, t0, 0);
-        assert_eq!(app.records.as_ref().unwrap().hl, k);
-        app.mouse(at(MouseEventKind::ScrollUp, 30, 5, NONE));
-        assert_eq!(app.records.as_ref().unwrap().hl, k - 1);
+        click(&mut app, 40, y as u16, NONE, t0, 0);
+        assert_eq!(app.browser.as_ref().unwrap().hl, k);
+        app.mouse(at(MouseEventKind::ScrollUp, 40, 5, NONE));
+        assert_eq!(app.browser.as_ref().unwrap().hl, k - 1);
         // a double click jumps to the record's start
-        let start = app.records.as_ref().unwrap().items[k].0.unwrap();
-        click(&mut app, 30, y as u16, NONE, t0, 1000);
-        click(&mut app, 30, y as u16, NONE, t0, 1100);
-        assert!(app.records.is_none());
+        let b = app.browser.as_ref().unwrap();
+        let start = app.ws.streams.iter().find(|s| s.name == "beat").unwrap().records[b.rows[k].1].start;
+        click(&mut app, 40, y as u16, NONE, t0, 1000);
+        click(&mut app, 40, y as u16, NONE, t0, 1100);
+        assert!(app.browser.is_none());
         assert_eq!(app.ws.view.cursor, start);
         app.run("records beat").unwrap();
         screen(&mut app, 100, Some(22));
         click(&mut app, 0, 0, NONE, t0, 2000);
-        assert!(app.records.is_none());
+        assert!(app.browser.is_none());
     }
 
     /// Run the open menu's item `label`: `j` down to it, then `Enter`.
@@ -1523,7 +1668,7 @@ mod tests {
         right(&mut app, 60, 8);
         pick(&mut app, "Open");
         assert_eq!(app.ws.subs(app.ws.rows[3].sig().unwrap()).len(), 8);
-        keys(&mut app, "<Space>");
+        keys(&mut app, "<CR>");
         screen(&mut app, 100, Some(22));
         right(&mut app, 60, 8);
         pick(&mut app, "Examine");
@@ -1726,7 +1871,7 @@ mod tests {
         let ws = workspace::Workspace::open(std::path::Path::new("tests/data/types-verilator-structs.fst")).unwrap();
         let mut app = App::new(ws);
         app.run("add types.pkt").unwrap();
-        keys(&mut app, "<Space>jjj<Space>j");
+        keys(&mut app, "<CR>jjj<CR>j");
         let s = app.ws.rows[0].sig().unwrap().clone();
         let hi = app.ws.trace.by_path["types.pkt.pair.hi"];
         assert_eq!(app.ws.probe(&s, app.ws.bit).0, hi);
@@ -1744,6 +1889,137 @@ mod tests {
     }
 
     #[test]
+    fn notifications() {
+        // each message goes into the history once, shows in the top right a while, the user's
+        // and each agent's apart; Esc dismisses them; :messages lists them (spec §4)
+        let mut app = open("vcd", Some(SESSION));
+        keys(&mut app, ":zoom nope\n");
+        let screen = snapshot(&mut app, 80, Some(14));
+        assert!(screen.contains("─ error ─") && screen.contains("│ bad time: nope"), "{screen}");
+        keys(&mut app, "yt");
+        snapshot(&mut app, 80, Some(14));
+        snapshot(&mut app, 80, Some(14));
+        let said: Vec<_> = app.notes.iter().map(|n| (n.text.as_str(), n.err, n.who.clone())).collect();
+        assert_eq!(said, [("bad time: nope", true, None), ("copied: 12ns", false, None)]);
+        let now = Instant::now();
+        assert_eq!(app.shown_notes(now).len(), 2);
+        assert_eq!(app.shown_notes(now + Duration::from_secs(5)).len(), 1); // the error stays longer
+        assert!(app.shown_notes(now + Duration::from_secs(9)).is_empty());
+        assert!(app.note_tick(now) && !app.note_tick(now + Duration::from_millis(100)) && app.note_tick(now + Duration::from_millis(300)));
+        // fading: drawn more often, the colours going into the card's background
+        let fading = now + Duration::from_millis(7500);
+        assert!(app.note_tick(fading) && app.note_tick(fading + Duration::from_millis(50)));
+        let err = app.notes.iter().find(|n| n.err).unwrap();
+        let (a, b) = (app::note_fade(err, now + Duration::from_millis(7200)), app::note_fade(err, now + Duration::from_millis(7800)));
+        assert!(app::note_fade(err, now) == 0.0 && 0.0 < a && a < b && b < 1.0, "{a} {b}");
+        // the pointer over its card holds it at full colour; it fades a second after it leaves
+        let err_at = err.at;
+        let (r, _) = *app.hit.notes.iter().find(|(_, at)| *at == err_at).unwrap();
+        app.pointer = Some((r.x as usize + 2, r.y as usize + 1));
+        let late = now + Duration::from_millis(7600);
+        app.hold_notes(late);
+        let err = app.notes.iter().find(|n| n.err).unwrap();
+        assert_eq!(app::note_fade(err, late), 0.0);
+        assert!(app::note_fade(err, late + Duration::from_millis(1500)) > 0.0);
+        app.pointer = None;
+        keys(&mut app, "<Esc>");
+        assert!(app.shown_notes(now).is_empty());
+        // agents: every one said, with its id, though the status line shows only the last
+        app.agents_now(vec![("41-1".into(), String::new()), ("41-2".into(), String::new())]);
+        snapshot(&mut app, 80, Some(14));
+        let who: Vec<_> = app.notes.iter().skip(2).map(|n| (n.text.clone(), n.who.clone())).collect();
+        assert_eq!(who, [("agent 41-1 joined (:follow shows its workspace)".to_string(), Some("41-1".to_string())), ("agent 41-2 joined (:follow shows its workspace)".into(), Some("41-2".into()))], "{:?}", app.notes);
+        assert_eq!(app.notes.len(), 4);
+        // no room for a card: the status line says it
+        keys(&mut app, ":zoom nope\n");
+        let screen = snapshot(&mut app, 80, Some(4));
+        assert!(screen.lines().last().unwrap().contains("bad time: nope"), "{screen}");
+        assert!(!snapshot(&mut app, 80, Some(14)).lines().last().unwrap().contains("bad time"));
+        keys(&mut app, ":messages\n");
+        assert_eq!(app.messages, Some(4));
+        keys(&mut app, "ky");
+        assert_eq!(app.yank.as_deref(), Some("agent 41-2 joined (:follow shows its workspace)"));
+        let screen = snapshot(&mut app, 100, Some(14));
+        assert!(screen.contains("you       bad time: nope") && screen.lines().any(|l| l.starts_with("▌ ") && l.contains("agent 41-2 joined")) && screen.contains("41-1      agent 41-1 joined"), "{screen}");
+        keys(&mut app, "q");
+        assert!(app.messages.is_none());
+    }
+
+    #[test]
+    fn which_key() {
+        // keys pending wait which_key before it shows what can follow; a count shows the keys it
+        // goes to; the status line shows what is pending (spec §2 "Which-key")
+        let mut app = open("vcd", Some(SESSION));
+        app.run("cursor 2 30ns name=first bad write").unwrap();
+        let t0 = Instant::now();
+        keys(&mut app, "'");
+        assert!(!app.which_key && !app.which_tick(t0) && app.which_tick(t0 + Duration::from_millis(400)));
+        insta::assert_snapshot!(snapshot(&mut app, 80, Some(14)));
+        keys(&mut app, "2");
+        assert!(!app.which_key && app.ws.view.cursor == 30);
+        // at once when it already shows, or with no wait
+        app.which_delay = Duration::ZERO;
+        keys(&mut app, "3");
+        let screen = snapshot(&mut app, 80, Some(30));
+        assert!(screen.contains(" 3  ") && screen.contains("put mark N") && screen.contains("zoom in"), "{screen}");
+        keys(&mut app, "<Esc>g");
+        assert!(snapshot(&mut app, 80, Some(14)).contains("g → start of the trace"));
+        keys(&mut app, "g");
+        assert!(!app.which_key && app.pending().is_empty());
+    }
+
+    #[test]
+    fn leader() {
+        // Space opens the menu at once; a group opens, Backspace goes up and then closes; an
+        // entry runs its command, or puts it on the command line to finish (spec §2 "Leader")
+        let mut app = open("vcd", Some(SESSION));
+        keys(&mut app, "<Space>");
+        insta::assert_snapshot!(snapshot(&mut app, 100, Some(16)));
+        keys(&mut app, "a");
+        assert!(snapshot(&mut app, 100, Some(16)).contains("Space a  agent"));
+        keys(&mut app, "<BS><BS>");
+        assert!(app.leader.is_none());
+        keys(&mut app, "<Space>vg");
+        assert!(app.leader.is_none() && app.mode == app::Mode::Command && app.line == "group ");
+        keys(&mut app, "<Esc>yt");
+        snapshot(&mut app, 100, Some(16));
+        keys(&mut app, "<Space>n");
+        assert!(app.leader.is_none() && app.messages.is_some());
+        keys(&mut app, "<Esc>");
+        // a key with no entry closes it; a click on an entry picks it, outside closes
+        keys(&mut app, "<Space>Z");
+        assert!(app.leader.is_none() && app.mode == app::Mode::Normal);
+        keys(&mut app, "<Space>");
+        snapshot(&mut app, 100, Some(16));
+        let (r, _) = *app.hit.leader.iter().find(|(_, k)| k.show() == "q").unwrap();
+        app.mouse(at(MouseEventKind::Down(MouseButton::Left), r.x + 1, r.y, NONE));
+        assert!(snapshot(&mut app, 100, Some(16)).contains("Space q  session"));
+        app.mouse(at(MouseEventKind::Down(MouseButton::Left), 5, 0, NONE));
+        assert!(app.leader.is_none());
+    }
+
+    #[test]
+    fn remapped_keys() {
+        // a key moved in the config file does its action, its old key nothing, and the ? box and
+        // the menus name the new one (spec §19 "Keys")
+        let mut app = open("vcd", Some(SESSION));
+        let mut warnings = Vec::new();
+        app.keymap = tui::keys::Keymap::from_table(&"zoom_in = \"i\"\nstart = \"<C-g>\"\nfold = \"o\"".parse().unwrap(), &mut warnings);
+        assert!(warnings.is_empty(), "{warnings:?}");
+        snapshot(&mut app, 100, Some(20));
+        let cols = app.ws.view.cols;
+        keys(&mut app, "z");
+        assert_eq!(app.ws.view.cols, cols);
+        keys(&mut app, "i");
+        assert_eq!(app.ws.view.cols, cols * 2);
+        keys(&mut app, "l<C-g>");
+        assert_eq!(app.ws.view.cursor, app.ws.trace.start());
+        keys(&mut app, "?");
+        let screen = snapshot(&mut app, 100, Some(20));
+        assert!(screen.contains("i x       zoom in / out") && screen.contains("Ctrl-g G  start / end") && screen.contains("o         fold"), "{screen}");
+    }
+
+    #[test]
     fn help() {
         let mut app = open("vcd", Some(SESSION));
         keys(&mut app, "?");
@@ -1754,7 +2030,7 @@ mod tests {
         assert!(!app.help && !app.quit);
         // too long for a small screen: the whole width, scrolled by j k, G to the end
         keys(&mut app, "?");
-        assert!(snapshot(&mut app, 60, Some(20)).contains("lines 1–16 of "));
+        assert!(snapshot(&mut app, 60, Some(20)).contains(" 1–17 of "));
         keys(&mut app, "G");
         let screen = snapshot(&mut app, 60, Some(20));
         assert!(screen.contains("sampled at clk") && !screen.contains("cursor left / right"), "{screen}");
@@ -1790,13 +2066,17 @@ mod tests {
         let area = Rect::new(0, 0, 100, 30);
         let mut buf = Buffer::empty(area);
         render::draw(&mut app, area, &mut buf);
-        // ten of them, the highlight nearest the line
-        assert!(commands::completions("").len() > 10);
-        for y in 19..29 {
-            let bg = if y == 28 { draw::pal().selected } else { draw::pal().panel };
-            assert!((0..100).all(|x| buf[(x, y)].bg == bg), "line {y}");
+        // ten of them in a card over the line, top down, the first highlighted
+        assert!(commands::complete("", &app).items.len() > 10);
+        let r = app.hit.completion_card.unwrap();
+        assert_eq!((r.y, r.height), (17, 12));
+        for y in r.y + 1..r.y + 11 {
+            let bg = if y == r.y + 1 { draw::pal().selected } else { draw::pal().panel };
+            assert!((r.x + 1..r.right() - 1).all(|x| buf[(x, y)].bg == bg), "line {y}");
         }
-        assert!(buf[(0, 18)].bg != draw::pal().panel);
+        // Ctrl-n (Down) goes to the next, Ctrl-p (Up) back (on an empty line, the history)
+        keys(&mut app, "e<C-n><C-n><C-p>");
+        assert_eq!(app.hl, 1);
         keys(&mut app, "\x1b");
         assert!(app.mode == app::Mode::Normal);
     }
@@ -1818,8 +2098,16 @@ mod tests {
             }
             insta::assert_snapshot!(name, text);
         }
+        // icons only with nerd: the leader's groups and the status line's clock (spec §14)
+        let icons = |t: &str| t.chars().filter(|c| ('\u{e000}'..='\u{f8ff}').contains(c)).count();
+        draw::set_glyphs(&draw::NERD);
+        keys(&mut app, "a<Space>");
+        let text = snapshot(&mut app, 120, Some(20));
+        assert!(text.contains('\u{eb31}') && text.contains('\u{eb7c}') && icons(&text) > 10, "{text}");
         draw::set_glyphs(&draw::UNICODE);
-        assert!(Args::try_parse_from(["wtf", "--glyphs", "utf8", "x.vcd"]).err().unwrap().to_string().contains("unknown glyphs: utf8 (unicode, box, ascii)"));
+        assert_eq!(icons(&snapshot(&mut app, 120, Some(20))), 0);
+        keys(&mut app, "<Esc>");
+        assert!(Args::try_parse_from(["wtf", "--glyphs", "utf8", "x.vcd"]).err().unwrap().to_string().contains("unknown glyphs: utf8 (unicode, box, ascii, nerd)"));
     }
 
     #[test]
@@ -1868,14 +2156,40 @@ mod tests {
         // a field holding a time (a read's delay) shows it as a time in the value column too
         let t = trace::Trace::open("tests/data/axilite.vcd".as_ref()).unwrap();
         let mut app = App::new(workspace::Workspace::new(t, "axilite".into()));
-        keys(&mut app, ":decode bus axilite clock=aclk prefix=s_axi_\n:add bus.rd\n:fit\nw ");
+        keys(&mut app, ":decode bus axilite clock=aclk prefix=s_axi_\n:add bus.rd\n:fit\nw<CR>");
         let screen = snapshot(&mut app, 100, Some(14));
-        let delay = screen.lines().find(|l| l.trim_start().starts_with("rd.delay")).unwrap_or_else(|| panic!("{screen}"));
-        assert!(delay.split_whitespace().nth(1).is_some_and(|v| v.ends_with("ns")), "{screen}");
+        let delay = screen.lines().find(|l| l.trim_start().starts_with("delay")).unwrap_or_else(|| panic!("{screen}"));
+        assert!(delay.split_whitespace().nth(2).is_some_and(|v| v.ends_with("ns")), "{screen}");
+    }
+
+    /// The site's keys and commands page is written from the tables the window reads; a change
+    /// to them needs `UPDATE_SITE=1 cargo test site_keys`.
+    #[test]
+    fn site_keys() {
+        let page = tui::reference::keys_page(&mut open("vcd", None));
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("site/content/keys.md");
+        if std::env::var_os("UPDATE_SITE").is_some() {
+            std::fs::write(&path, &page).unwrap();
+        }
+        let have = std::fs::read_to_string(&path).unwrap_or_default();
+        assert!(have == page, "site/content/keys.md is out of date: UPDATE_SITE=1 cargo test site_keys");
+    }
+
+    #[test]
+    fn records_named_as_decode() {
+        // spec §5 "Records": a pair's stream has the decode's name, so `all` names its sets one by one
+        let mut app = App::new(workspace::Workspace::new(trace::Trace::open("tests/data/reqresp.vcd".as_ref()).unwrap(), "rr".into()));
+        keys(&mut app, ":protocol hs roles=valid,id when=valid id=id\n:decode req hs clock=clk valid=req_valid id=req_id\n");
+        keys(&mut app, ":decode resp hs clock=clk valid=resp_valid id=resp_id\n:decode lat pair request=req response=resp id=id\n:records lat\n");
+        let b = app.browser.as_ref().unwrap();
+        assert_eq!((b.tabs.clone(), b.tab, b.all.clone()), (vec!["lat lat.unmatched".into(), "lat".into(), "lat.unmatched".into()], 1, Some("lat lat.unmatched".into())));
+        keys(&mut app, "<Esc>:records lat lat.unmatched\n");
+        assert_eq!(app.browser.as_ref().unwrap().tab, 0);
     }
 
     #[test]
     fn records_list() {
+        // spec §5 "Records": the browser filters as typed, sorts, groups, and Enter jumps
         let t = trace::Trace::open("tests/data/axis.vcd".as_ref()).unwrap();
         let mut app = App::new(workspace::Workspace::new(t, "axis".into()));
         let msg = |app: &App| app.msg.as_ref().map_or(String::new(), |m| m.0.clone());
@@ -1883,22 +2197,194 @@ mod tests {
         assert_eq!(msg(&app), "no streams yet: make one with :decode or :protocol");
         keys(&mut app, ":decode rx axis clock=clk tvalid=tvalid tready=tready tdata=tdata tlast=tlast tkeep=tkeep\n");
         keys(&mut app, ":records rx.fram\n");
-        assert_eq!(msg(&app), "unknown stream: rx.fram (streams: rx.beat, rx.errors, rx.frame)");
+        assert_eq!(msg(&app), "unknown stream: rx.fram (streams: rx.beat, rx.errors, rx.frame; or a decode's name for its results)");
+        keys(&mut app, ":records rx.frame where len ==\n");
+        assert!(app.browser.is_none() && !msg(&app).is_empty());
         keys(&mut app, ":records rx.frame where len == 99\n");
-        assert_eq!(msg(&app), "no matching records, of 4");
-        keys(&mut app, ":add rx.frame rx.errors\n:fit\n:select rx.errors\n");
+        assert!(snapshot(&mut app, 100, Some(16)).contains("no records match"));
+        keys(&mut app, "\x1b:add rx.frame rx.errors\n:fit\n:select rx.errors\n");
         keys(&mut app, ":records rx.frame where len >= 8\nj");
-        insta::assert_snapshot!(snapshot(&mut app, 100, Some(10)));
+        insta::assert_snapshot!(snapshot(&mut app, 100, Some(16)));
+        // typing filters at once; a filter that does not parse keeps the rows it had (all, once
+        // cleared) and says why
+        keys(&mut app, "/<C-u>len <");
+        let b = app.browser.as_ref().unwrap();
+        assert!(b.error.is_some() && b.rows.len() == 4, "{:?}", b.error);
+        keys(&mut app, " 8<CR>");
+        let b = app.browser.as_ref().unwrap();
+        assert!(b.error.is_none() && !b.typing && b.rows.len() == 2 && b.total == 4);
+        // s sorts by the next column (from start, the order they come in), S reverses
+        keys(&mut app, "/<C-u><CR>sS");
+        let b = app.browser.as_ref().unwrap();
+        assert_eq!(b.sort, (2, true));
+        let st = app.ws.streams.iter().find(|s| s.name == "rx.frame").unwrap();
+        let lens: Vec<_> = b.rows.iter().map(|&(_, i)| st.records[i].end - st.records[i].start).collect();
+        assert!(lens.windows(2).all(|w| w[0] >= w[1]), "{lens:?}");
+        // = groups by a field; Enter keeps a group's records
+        keys(&mut app, "=");
+        assert_eq!(msg(&app), "= groups by the sorted column, a field: s sorts by one");
+        keys(&mut app, "s=");
+        let b = app.browser.as_ref().unwrap();
+        assert!(b.group && !b.groups.is_empty());
+        let count = b.groups[0].count;
+        keys(&mut app, "<CR>");
+        let b = app.browser.as_ref().unwrap();
+        assert!(!b.group && b.rows.len() == count && b.filter.contains("=="), "{}", b.filter);
+        // Tab goes through the decode's sets: all its results, then each stream
+        let b = app.browser.as_ref().unwrap();
+        assert_eq!((&b.tabs[..], b.tab), (&["rx", "rx.frame", "rx.errors", "rx.beat"].map(String::from)[..], 1));
+        keys(&mut app, "<Tab><Tab><Tab>");
+        let b = app.browser.as_ref().unwrap();
+        assert_eq!((b.tab, b.streams.len()), (0, 2));
+        keys(&mut app, "\x1b");
         // Enter jumps to the highlighted record and selects its stream's row
-        keys(&mut app, "\n");
-        assert!(app.records.is_none());
+        keys(&mut app, ":records rx.frame where len >= 8\nj\n");
+        assert!(app.browser.is_none());
         assert_eq!(app.ws.view.cursor, 65); // the third frame, 8 bytes
         assert_eq!(app.ws.sel, 0);
         keys(&mut app, "''");
         assert_eq!(app.ws.view.cursor, 0);
         keys(&mut app, ":records rx.frame\nGk\x1b");
-        assert!(app.records.is_none());
+        assert!(app.browser.is_none());
         assert_eq!(app.ws.view.cursor, 0);
+    }
+
+    #[test]
+    fn picker_signals() {
+        // spec §5 "Picker": fuzzy over full paths, a waveform preview at the cursor, Tab marks,
+        // Enter adds below the selected row, one undo step
+        let mut app = open("vcd", None);
+        keys(&mut app, ":add top.clk top.cpu.data\n:select top.clk\n:30ns\n:pick signals\ncpust");
+        // a signal not read yet: what it is at once, its values once the highlight rests
+        let first = snapshot(&mut app, 100, Some(20));
+        assert!(first.contains("│ 3 bits") && first.contains("│ … ") && !first.contains("at 30ns"), "{first}");
+        let now = Instant::now();
+        assert!(!app.picker_tick(now) && app.picker_tick(now + tui::picker::PREVIEW_WAIT));
+        app.preview_wait = Duration::ZERO;
+        insta::assert_snapshot!(snapshot(&mut app, 100, Some(20)));
+        assert!(!app.picker_tick(now + tui::picker::PREVIEW_WAIT), "drawn whole: no more ticks");
+        let rows = app.ws.rows.len();
+        keys(&mut app, "<BS><BS><BS><BS><BS>state<Tab><Tab><CR>");
+        assert!(app.picker.is_none());
+        assert_eq!(app.ws.rows.len(), rows + 2);
+        keys(&mut app, "u");
+        assert_eq!(app.ws.rows.len(), rows);
+        // a shown signal is not added twice
+        keys(&mut app, ":pick signals\ntop.clk<CR>");
+        assert_eq!((app.ws.rows.len(), app.msg.as_ref().unwrap().0.as_str()), (rows, "nothing to add: already shown"));
+        assert!(app.run("pick nope").unwrap_err().starts_with("no picker source nope"));
+        // without colour the matched characters are still told apart
+        draw::set_palette(draw::Palette::mono());
+        keys(&mut app, ":pick signals\nzzz<BS><BS><BS>state");
+        let buf = screen(&mut app, 100, Some(20));
+        draw::set_palette(theme::builtin("dark", true).unwrap());
+        let row = app.hit.records[0].0 as u16;
+        assert!((0..100).any(|x| buf[(x, row)].modifier.contains(Modifier::UNDERLINED)));
+    }
+
+    #[test]
+    fn picker_interfaces() {
+        // spec §5: the interfaces found, Enter decodes one and adds its streams as a group; once
+        // decoded, Enter shows its records; the guide counts them
+        let t = trace::Trace::open("tests/data/axilite.vcd".as_ref()).unwrap();
+        let mut app = App::new(workspace::Workspace::new(t, "axilite".into()));
+        assert!(snapshot(&mut app, 100, None).contains("Decode an interface 1 found"));
+        keys(&mut app, "<Space>dd");
+        let p = app.picker.as_ref().unwrap();
+        assert_eq!(p.entries.iter().map(|e| e.text.as_str()).collect::<Vec<_>>(), ["s_axi top.s_axi_"]);
+        assert!(p.entries[0].preview.iter().any(|l| l == "decode s_axi axilite clock=top.aclk prefix=top.s_axi_"));
+        keys(&mut app, "<CR>");
+        assert!(app.picker.is_none() && app.ws.decodes.iter().any(|d| d.name == "s_axi"), "{:?}", app.msg);
+        assert!(matches!(&app.ws.rows[app.ws.sel], wtf_core::rows::Row::Group { name, .. } if name == "s_axi"));
+        assert!(app.ws.rows.iter().filter_map(|r| r.sig()).any(|s| app.ws.trace.vars[s.var].path == "s_axi.rd"));
+        keys(&mut app, "<Space>dd");
+        assert!(app.picker.as_ref().unwrap().entries[0].preview.iter().any(|l| l.starts_with("decoded already as s_axi")));
+        keys(&mut app, "<CR>");
+        // decoded already: the records browser on all its results, a column per field
+        let b = app.browser.as_ref().unwrap();
+        assert_eq!((b.tabs[b.tab].as_str(), b.streams.len()), ("s_axi", 5), "{:?}", app.msg);
+        insta::assert_snapshot!(snapshot(&mut app, 110, Some(16)));
+        // l scrolls the columns after stream and n, which stay
+        keys(&mut app, "ll");
+        let screen = snapshot(&mut app, 110, Some(16));
+        assert!(screen.contains("stream        n    delay") && app.browser.as_ref().unwrap().left == 2, "{screen}");
+        keys(&mut app, "h\x1b");
+        // only results and violations were added: no s_axi.aw row
+        assert!(!app.ws.rows.iter().filter_map(|r| r.sig()).any(|s| app.ws.trace.vars[s.var].path == "s_axi.aw"));
+    }
+
+    #[test]
+    fn picker_sources() {
+        let mut app = open("vcd", Some(SESSION));
+        let msg = |app: &App| app.msg.as_ref().map_or(String::new(), |m| m.0.clone());
+        let step = |tool: &str, ask: &str, answer: &str, time| wtf_core::workspace::Step { tool: tool.into(), ask: ask.into(), answer: answer.into(), time };
+        assert!(app.run("pick trail").unwrap_err().starts_with("no trail yet"));
+        app.ws.trail = vec![
+            step("command", "decode bus axilite clock=clk", "decoded 2 streams", None),
+            step("find", "@clk top.cpu.busy", "1 matches, first 20ns, last 20ns", Some(20)),
+            step("value_at", "top.cpu.data 40ns", "at 40ns: 0x2A", Some(40)),
+        ];
+        // the trail opens on the newest step; Enter jumps to its time
+        keys(&mut app, ":pick trail\n");
+        insta::assert_snapshot!(snapshot(&mut app, 100, Some(16)));
+        keys(&mut app, "<C-p><CR>");
+        assert_eq!((app.picker.is_none(), app.ws.view.cursor), (true, 20));
+        // marks: Enter jumps; Ctrl-s goes to the next source
+        keys(&mut app, ":cursor 2 60ns name=late\n:pick marks\n");
+        assert_eq!(app.picker.as_ref().unwrap().entries.len(), 2);
+        keys(&mut app, "late<CR>");
+        assert_eq!(app.ws.view.cursor, 60);
+        keys(&mut app, ":pick marks\n<C-s>");
+        let p = app.picker.as_ref().unwrap();
+        assert_eq!((p.source, p.shown.len(), p.empty.as_str()), (2, 0, "no streams yet: make one with :decode or :protocol"));
+        // commands: Enter puts it on the command line
+        keys(&mut app, "<C-s>zoo<CR>");
+        assert_eq!((app.mode, app.line.as_str()), (tui::app::Mode::Command, "zoom "));
+        keys(&mut app, "<Esc>:pick commands\n<Esc>");
+        assert!(app.picker.is_none() && msg(&app).is_empty());
+    }
+
+    #[test]
+    fn picker_records() {
+        // without a stream named: every stream's records in time order, or the selected stream's
+        let t = trace::Trace::open("tests/data/axilite.vcd".as_ref()).unwrap();
+        let mut app = App::new(workspace::Workspace::new(t, "axilite".into()));
+        app.run("decode bus axilite clock=aclk prefix=s_axi_").unwrap();
+        app.run("add bus.rd").unwrap();
+        app.run("add top.aclk").unwrap();
+        app.run("select aclk").unwrap();
+        app.open_picker("records").unwrap();
+        let p = app.picker.as_ref().unwrap();
+        assert!(p.stream.is_none());
+        assert!(p.entries.iter().any(|e| e.text.starts_with("bus.aw #0")) && p.entries.iter().any(|e| e.text.starts_with("bus.rd #0")));
+        let times: Vec<u64> = p.entries.iter().filter_map(|e| match e.act { tui::picker::Act::Record(t) => Some(t), _ => None }).collect();
+        assert!(times.windows(2).all(|w| w[0] <= w[1]));
+        app.picker = None;
+        keys(&mut app, ":select bus.rd\n");
+        app.open_picker("records").unwrap();
+        let p = app.picker.as_ref().unwrap();
+        assert_eq!(p.stream.as_deref(), Some("bus.rd"));
+        assert!(p.entries.iter().all(|e| e.text.starts_with('#')));
+    }
+
+    #[test]
+    fn picker_mouse() {
+        let mut app = open("vcd", None);
+        let t0 = Instant::now();
+        keys(&mut app, ":pick signals\nbusy");
+        snapshot(&mut app, 100, Some(20));
+        let (y, _) = app.hit.records[0];
+        let rows = app.ws.rows.len();
+        // a click highlights, a double click picks
+        click(&mut app, 20, y as u16, NONE, t0, 0);
+        assert!(app.picker.is_some());
+        click(&mut app, 20, y as u16, NONE, t0, 100);
+        assert_eq!((app.picker.is_none(), app.ws.rows.len()), (true, rows + 1));
+        // a click outside closes it
+        keys(&mut app, ":pick signals\n");
+        snapshot(&mut app, 100, Some(20));
+        click(&mut app, 0, 0, NONE, t0, 1000);
+        assert!(app.picker.is_none());
     }
 
     #[test]
@@ -1907,7 +2393,7 @@ mod tests {
         let mut app = App::new(workspace::Workspace::new(t, "axis".into()));
         keys(&mut app, ":decode rx axis clock=clk tvalid=tvalid tready=tready tdata=tdata tlast=tlast tkeep=tkeep\n");
         // what it made, violations apart
-        assert_eq!(app.msg, Some(("rx: records rx.beat 7, rx.frame 4; violations rx.errors 2".into(), false)));
+        assert_eq!(app.msg, Some(("rx: records rx.frame 4; violations rx.errors 2; made from rx.beat 7".into(), false)));
         keys(&mut app, ":add rx.frame rx.errors\n:fit\n");
         insta::assert_snapshot!(snapshot(&mut app, 100, None));
         // Space shows a row per field under the stream, as a bus's bits
@@ -1918,7 +2404,7 @@ mod tests {
         let fg = |y: u16, ch: &str| (0..100).map(|x| &buf[(x, y)]).find(|c| c.symbol() == ch).map(|c| c.fg);
         assert_eq!(fg(4, "🮡"), Some(draw::red().fg.unwrap()));
         assert_eq!(fg(2, "🮡"), Some(draw::pal().bus));
-        keys(&mut app, ":select rx.frame\n ");
+        keys(&mut app, ":select rx.frame\n<CR>");
         insta::assert_snapshot!(snapshot(&mut app, 100, None));
         // the instance and the expanded row come back from the session
         let text = session::to_toml(&app.ws);
@@ -1932,16 +2418,16 @@ mod tests {
         // on the stream, the status line shows the record at the cursor; `e` all of it
         keys(&mut app, ":select rx.frame\n");
         let screen = snapshot(&mut app, 120, None);
-        assert!(screen.contains(" signals ▸  rx.frame #2  65ns–85ns  beats=0x2 len=0x8 data=c0 00 00 00 c1 00 00 00 comp…"), "{screen}");
+        assert!(screen.contains("signals ▸  rx.frame #2  65ns–85ns  beats=0x2 len=0x8 data=c0 00 00 00 c1 00 00 00 …"), "{screen}");
         keys(&mut app, "e");
         insta::assert_snapshot!(snapshot(&mut app, 100, Some(16)));
         keys(&mut app, "jl\x1b");
         assert!(app.examine.is_none() && app.ws.view.cursor == 65); // the box takes no other keys
         // any other signal: its value in the row's radix
         keys(&mut app, ":add top.tdata\ne");
-        assert_eq!(app.examine.clone(), Some(("top.tdata @ 65ns".to_string(), vec!["0xC0".to_string()])));
+        assert_eq!(app.examine.clone().map(|e| (e.title, e.at, e.lines)), Some(("top.tdata".to_string(), "65ns".to_string(), vec![(String::new(), "0xC0".to_string())])));
         keys(&mut app, "e:rm top.tdata\n:select rx.frame\n");
-        keys(&mut app, " ");
+        keys(&mut app, "<CR>");
         assert!(matches!(&app.ws.rows[0], rows::Row::Signal(s) if s.open.is_empty()) && app.ws.bit.is_none());
         // a rule's value runs to the next key, spaces and all
         keys(&mut app, ":decode stall check clock=clk bad=tvalid && !tready\n");
@@ -1998,13 +2484,13 @@ signal = "stall"
             seen
         };
         let c0 = examine(&mut app, "c0", "35ns");
-        assert_eq!((c0.0.as_str(), &c0.1[2..]), ("c0 #0", &["op   0x1".to_string(), "arg  0x1".to_string()][..]));
+        assert_eq!((c0.title.as_str(), &c0.lines[..]), ("c0 #0", &[("op".to_string(), "0x1".to_string()), ("arg".to_string(), "0x1".to_string())][..]));
         let burst = examine(&mut app, "burst", "35ns");
-        assert_eq!(burst.0, "burst #0"); // `data` stays out of the label
-        assert!(burst.1.contains(&"data      01 03".to_string()), "{burst:?}");
+        assert_eq!(burst.title, "burst #0"); // `data` stays out of the label
+        assert!(burst.lines.contains(&("data".to_string(), "01 03".to_string())), "{burst:?}");
         let first = app.ws.streams.iter().find(|s| s.name == "stall").unwrap().records[0].start;
         let stall = examine(&mut app, "stall", &format!("{first}ns"));
-        assert!(stall.0.starts_with("stall #0 waiting") && stall.1.contains(&"rule  waiting".to_string()), "{stall:?}");
+        assert!(stall.title.starts_with("stall #0 waiting") && stall.lines.contains(&("rule".to_string(), "waiting".to_string())), "{stall:?}");
     }
 
     #[test]

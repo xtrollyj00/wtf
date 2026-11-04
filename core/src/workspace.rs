@@ -69,6 +69,9 @@ pub struct Workspace {
     pub streams: Vec<Stream>,
     /// While an instance samples: its roles, names that stand for its signals.
     roles: HashMap<String, String>,
+    /// While a sampled protocol's instance samples: names other than roles are errors, with the
+    /// first to say why; the second, the instance's clock, is allowed.
+    only_roles: Option<(String, String)>,
     /// Index into `rows`; always a visible row.
     pub sel: usize,
     /// A bit line of the selected (expanded) bus, if one of those is selected.
@@ -171,6 +174,7 @@ impl Workspace {
             decodes: Vec::new(),
             streams: Vec::new(),
             roles: HashMap::new(),
+            only_roles: None,
             sel: 0,
             bit: None,
             anchor: None,
@@ -344,10 +348,18 @@ impl Workspace {
         let name = name.trim();
         if let Some(sig) = self.roles.get(name).cloned() {
             // the signal is named as usual, so a role can be played by a signal of the same name
-            let roles = std::mem::take(&mut self.roles);
+            let (roles, only) = (std::mem::take(&mut self.roles), self.only_roles.take());
             let p = self.resolve(&sig);
-            self.roles = roles;
+            (self.roles, self.only_roles) = (roles, only);
             return p;
+        }
+        // a computed form or a bit resolves its names, each checked here
+        if let Some((why, clock)) = &self.only_roles
+            && name != clock
+            && computed::form(&crate::trace::brackets(name)).is_none()
+            && !name.ends_with(']')
+        {
+            return Err(format!("{name} is no role: {why}"));
         }
         if let Some(&v) = self.scope.as_ref().and_then(|s| self.trace.by_path.get(&format!("{s}.{name}"))) {
             return Ok((v, None));

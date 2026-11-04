@@ -12,7 +12,7 @@ it.
 A Vim-like viewer for VCD and FST, with sessions, search, cursors, computed signals, protocol
 decoders and composite types (structs, records and arrays as one row), and an MCP server through
 which agents debug a trace and present what they found. Themes, glyph sets for any font (asked on
-the first start), the mouse, and a [user guide](docs/guide.md). Release binaries for Linux and
+the first start), the mouse, and a [site](https://xtrollyj00.github.io/wtf/) with a tour. Release binaries for Linux and
 macOS with an install script, and an agent benchmark (`wtf-bench agent`) that measures wtf against
 debugging without it.
 

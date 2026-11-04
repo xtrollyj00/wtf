@@ -1,0 +1,172 @@
++++
+title = "Agent tools"
+description = "The tools wtf --mcp gives an agent."
++++
+
+<!-- Written by `UPDATE_SITE=1 cargo test --test mcp site_tools` from what wtf --mcp tells an agent; don't edit. -->
+
+What `wtf --mcp` tells an agent, word for word: each tool's description and arguments. See [For agents](@/agents.md) for setting it up.
+
+## Tools
+
+### `command`
+
+Run one of wtf's `:` commands on the workspace: `decode`, `protocol`, rows, cursors (`help commands`).
+
+| Argument | Means |
+|---|---|
+| `line` (required) | A `:` command without the colon: `decode ...`, `add ...`, `cursor 2 80ns` (`help commands`). |
+
+### `find`
+
+The times a search expression matches, as a table. With `@clk ` first, a match is a clock cycle whose ending edge samples it true, reported at the cycle's starting edge; without, where the expression becomes true, so back-to-back handshakes are one match. `show` adds values (and the `protocol` and `decode` lines making them records), `count_only` counts (`help expressions`). For a bus, decode it instead (`help decode`).
+
+| Argument | Means |
+|---|---|
+| `backward` | Search toward the start: the latest matches first. |
+| `count` | How many lines to list; default 20. |
+| `count_only` | Only count the matches; no list. |
+| `expr` (required) | A search expression, `@clk valid && ready` (`help expressions`). |
+| `from` | Search after (or with `backward`, before) this time; default the start. |
+| `show` | Signals whose values to list on each match: a table of the transfers. |
+| `to` | Stop at this time (with `backward`, down to it); default the end. |
+| `unit` | As for `values`. |
+
+### `help`
+
+The reference: a topic per concept (names, times, radix, expressions, decode, records, workspace, commands); none lists them.
+
+| Argument | Means |
+|---|---|
+| `topic` | A topic; none lists them. |
+
+### `info`
+
+The trace: file, time range, signals, and the interfaces a built-in protocol decodes, each with its `decode` line.
+
+### `open`
+
+Open a trace in a new workspace, the current one from then on. Answers with `info`, which lists the interfaces to decode.
+
+| Argument | Means |
+|---|---|
+| `trace` (required) | Path of a VCD, FST or GHW file, best absolute. |
+
+### `present`
+
+Show the workspace to the user, in every wtf window on this trace or as a session file.
+
+### `protocols`
+
+What can be decoded; with a name, its roles, params, streams and fields (`help decode`).
+
+| Argument | Means |
+|---|---|
+| `name` | A protocol to describe (`axilite`, `frame`, ...); none lists them all. |
+
+### `records`
+
+Records of a decoded stream, or of several in start order (a decode's name: its results), as a table: n, start (the rising edge that starts the record's first clock cycle), end (the edge that samples its last) and the fields; `where`, `group_by`, `count_only` (`help records`).
+
+| Argument | Means |
+|---|---|
+| `count` | How many records to list; default 20. |
+| `count_only` | Only count the records; no list. |
+| `from` | Records starting at or after this time; default the start. |
+| `group_by` | Fields to group by: a line per distinct value, with its count. |
+| `radix` | hex, dec, ... for every field (`help radix`); `len:dec` for one, several with commas. |
+| `stream` (required) | A stream, e.g. `bus.wr`; a decode's name for its results, `bus`; a glob, `bus.*`; or several, space-separated (`help records`). |
+| `to` | Records starting at or before this time; default the end. |
+| `unit` | As for `values`. |
+| `where` | Only the records this holds for: `resp != 0`, `n == 138`, `req_addr != resp_addr` (`help records`). |
+
+### `reload`
+
+Reopen the trace file, after the simulation was run again.
+
+### `render`
+
+Draw signals over a time range as text, as wtf's screen does; without signals, the workspace.
+
+| Argument | Means |
+|---|---|
+| `from` | Start of the range; default the start, or the workspace's range. |
+| `signals` | Signals drawn top to bottom; none: the workspace. |
+| `to` | End of the time range shown. |
+| `unit` | The unit of the range in the heading; as for `values`. |
+| `width` | Width in characters; default 120. |
+
+### `sessions`
+
+The open sessions: the user's wtf windows and agents' workspaces, with ids and traces.
+
+### `signals`
+
+List signals with their widths; arrays and generate instances fold to one line (`gen[0..4].x`).
+
+| Argument | Means |
+|---|---|
+| `pattern` | `*` within a scope level, `**` across (`**.s_axi_*`); without `*`, any path containing the text. Empty lists all. |
+
+### `use`
+
+Make another of this server's workspaces the current one.
+
+| Argument | Means |
+|---|---|
+| `session` (required) | The id of one of this server's workspaces, from `sessions`. |
+
+### `user_view`
+
+What the user is looking at in their wtf window on this trace; `adopt` copies it into the workspace.
+
+| Argument | Means |
+|---|---|
+| `adopt` | Also copy the user's rows, cursors and visible range into the workspace, to build on them. |
+
+### `value_at`
+
+Values of signals at one time.
+
+| Argument | Means |
+|---|---|
+| `radix` | As for `values`. |
+| `signals` (required) | Signals, named as for `values`. |
+| `time` (required) | The time, e.g. `120ns`. |
+| `unit` | As for `values`. |
+
+### `values`
+
+Values of signals over a time range: the value at `from`, then each change, as `time value` lines.
+
+| Argument | Means |
+|---|---|
+| `from` (required) | Start time with a unit (`help times`). |
+| `radix` | hex, bin, dec, ... (`help radix`); `data:dec` for one signal. |
+| `signals` (required) | Signals by path or path end (`help names`). |
+| `to` (required) | End time, inclusive. |
+| `unit` | The unit of the answer's times (`help times`). |
+
+### `view`
+
+Describe the workspace: rows, cursors with the time between them, visible range.
+
+| Argument | Means |
+|---|---|
+| `unit` | As for `values`. |
+
+### `workspace`
+
+Set up the whole workspace in one call: rows, cursors, range, decodes (`help workspace`). Answers as `view` does.
+
+| Argument | Means |
+|---|---|
+| `cursors` | Cursors by number, `{"1": "80ns", "2": "390ns"}`: 1 the cursor, 2 - 9 marks; a mark may be `{"time": "390ns", "name": "first bad write", "note": "..."}`. |
+| `decode` | Decodes, as `decode` makes them (`help decode`). |
+| `protocols` | Sampled protocols, as `protocol` makes them (`help decode`). |
+| `range` | The visible range, `["60ns", "480ns"]`; default the whole trace. |
+| `rows` (required) | The rows, top to bottom: `"name:radix:colour"`, a group or a struct's open levels (`help workspace`). |
+| `scope` | The scope names resolve under first (`help names`); not given: it stays. |
+| `signals` | Computed signals, `["op = cmd[7:0]"]`. |
+
+The `help` topics they point to are the [reference](@/reference.md).

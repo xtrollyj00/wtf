@@ -31,13 +31,9 @@ impl Workspace {
         Ok((self.query(&format!("@{clock} {when}"))?, probes))
     }
 
-    /// Add a protocol, replacing one of that name. Without roles it is sampled into a stream of
-    /// its own name, whose var is returned; with roles it waits for instances (`add_decode`).
-    pub fn add_protocol(&mut self, mut p: Sampler) -> Result<Option<usize>, String> {
-        // by full path, as an instance's (`add_decode`)
-        if !p.clock.is_empty() {
-            p.clock = self.full_path(&p.clock).unwrap_or(p.clock);
-        }
+    /// Define a protocol, replacing one of that name: names only, its roles, which instances put
+    /// on signals (`add_decode`).
+    pub fn add_protocol(&mut self, p: Sampler) -> Result<(), String> {
         let name = &p.name;
         if name.is_empty() || !name.chars().all(|c| c.is_alphanumeric() || "_.$".contains(c)) {
             return Err(format!("not a protocol name: {name}"));
@@ -53,10 +49,9 @@ impl Workspace {
         if let Some(r) = p.roles.iter().find(|r| !plain(r)) {
             return Err(format!("{name}: not a role name: {r}"));
         }
-        let var = match p.roles.is_empty() {
-            true => Some(self.make_stream(name, &p.clock, &p)?),
-            false => None,
-        };
+        if p.roles.is_empty() {
+            return Err(format!("{name}: needs roles, the names its expressions use (roles=valid,ready,data); :decode puts them on signals"));
+        }
         // a type defined again: its instances sampled again, and those after them, which may stack on them
         let first = self.decodes.iter().position(|d| d.protocol == p.name);
         let name = name.clone();
@@ -71,7 +66,7 @@ impl Workspace {
                 return Err(format!("{name} defined, but instances failed: {}", failed.join("; ")));
             }
         }
-        Ok(var)
+        Ok(())
     }
 
     /// Put a protocol on signals (or `frame` / `pair` on streams): the streams it makes, named after
@@ -162,6 +157,71 @@ impl Workspace {
         out
     }
 
+    /// The decodes a var is in, each with the role it plays there (spec §5 "Picker"): their
+    /// clock, a role given it, or one their prefix gives it, or the stream a decoder takes.
+    pub fn decodes_of(&self, var: usize) -> Vec<(&str, String)> {
+        let path = &self.trace.vars[var].path;
+        let role = |d: &Decode| {
+            if d.clock == *path {
+                return Some("clock".to_string());
+            }
+            if let Some((r, _)) = d.signals.iter().find(|(_, s)| s == path) {
+                return Some(r.clone());
+            }
+            // kept as the full path's prefix (`add_decode`); a role given apart wins
+            let b = protocol::builtin(&d.protocol)?;
+            let prefix = &d.params.iter().find(|p| p.0 == "prefix")?.1;
+            let r = path.strip_prefix(prefix.as_str())?;
+            (b.required.iter().chain(b.optional).any(|x| *x == r) && !d.signals.iter().any(|(x, _)| x == r)).then(|| r.to_string())
+        };
+        self.decodes.iter().filter_map(|d| Some((d.name.as_str(), role(d)?))).collect()
+    }
+
+    /// Stream `i` is intermediate: another stream is made from it (spec §16 "Results").
+    pub fn intermediate(&self, i: usize) -> bool {
+        let name = &self.streams[i].name;
+        self.streams.iter().any(|s| s.inputs.contains(name))
+    }
+
+    /// The streams a decode made (named it, or `<it>.<step>`), in the order made.
+    pub fn streams_of_decode(&self, decode: &str) -> Vec<usize> {
+        let prefix = format!("{decode}.");
+        (0..self.streams.len()).filter(|&i| self.streams[i].name == decode || self.streams[i].name.starts_with(&prefix)).collect()
+    }
+
+    /// A decode's results then its violations: the streams nothing is made from.
+    pub fn results(&self, decode: &str) -> Vec<usize> {
+        let mut out: Vec<usize> = self.streams_of_decode(decode).into_iter().filter(|&i| !self.intermediate(i)).collect();
+        out.sort_by_key(|&i| self.streams[i].violations);
+        out
+    }
+
+    /// The streams named for `records` (spec §16 "Records of a set"), each name a stream, a
+    /// decode's name (its results and violations) or a glob (`bus.*`), separated by spaces.
+    pub fn stream_set(&self, names: &str) -> Result<Vec<usize>, String> {
+        let mut out: Vec<usize> = Vec::new();
+        for name in names.split_whitespace() {
+            let found = match self.streams.iter().position(|s| s.name == name) {
+                Some(i) => vec![i],
+                None if self.decodes.iter().any(|d| d.name == name) => self.results(name),
+                None if name.contains('*') => (0..self.streams.len()).filter(|&i| crate::command::glob(name, &self.streams[i].name)).collect(),
+                None => vec![],
+            };
+            if found.is_empty() {
+                let all: Vec<&str> = self.streams.iter().map(|s| s.name.as_str()).collect();
+                return Err(match all.len() {
+                    0 => format!("unknown stream: {name} (none yet; make one with decode or protocol)"),
+                    _ => format!("unknown stream: {name} (streams: {}; or a decode's name for its results)", all.join(", ")),
+                });
+            }
+            out.extend(found.into_iter().filter(|i| !out.contains(i)).collect::<Vec<_>>());
+        }
+        if out.is_empty() {
+            return Err("records of which stream? (a stream, a decode's name or a glob)".into());
+        }
+        Ok(out)
+    }
+
     /// The full path of a signal named as in a search.
     fn full_path(&mut self, name: &str) -> Result<String, String> {
         self.resolve(name).map(|p| self.trace.probe_path(p))
@@ -171,20 +231,19 @@ impl Workspace {
     fn decode_user(&mut self, d: &Decode) -> Result<usize, String> {
         let p = self.protocols.iter().find(|p| p.name == d.protocol).cloned().ok_or_else(|| protocol::unknown(&d.protocol, &self.protocols))?;
         let mut errors = Vec::new();
-        if p.roles.is_empty() {
-            errors.push(format!("protocol {} has no roles to put on signals", p.name));
-        }
         let roles: Vec<&str> = p.roles.iter().map(String::as_str).collect();
         self.bind(d, &roles, &[], &[], &mut errors);
-        let clock = if d.clock.is_empty() { &p.clock } else { &d.clock };
-        if clock.is_empty() {
-            errors.push("no clock (the protocol has none either)".into());
+        if d.clock.is_empty() {
+            errors.push("no clock".into());
         }
         if !errors.is_empty() {
             self.roles.clear();
             return Err(errors.join("; "));
         }
-        let var = self.make_stream(&d.name, &clock.clone(), &p);
+        // its expressions name roles and its own fields, never a signal
+        self.only_roles = Some((format!("{} names only its roles ({}) and fields", p.name, p.roles.join(", ")), d.clock.clone()));
+        let var = self.make_stream(&d.name, &d.clock, &p);
+        self.only_roles = None;
         self.roles.clear();
         var
     }
@@ -223,7 +282,7 @@ impl Workspace {
                     }
                 }
                 protocol::Step::Sample { name, when, fields } => {
-                    let p = Sampler { name: name.into(), clock: d.clock.clone(), when, fields, roles: vec![] };
+                    let p = Sampler { name: name.into(), when, fields, roles: vec![] };
                     self.make_stream(&format!("{}.{name}", d.name), &d.clock, &p)
                 }
                 protocol::Step::Check { name, rules } => self.check(&format!("{}.{name}", d.name), &d.clock, &rules).and_then(|s| self.add_signals(s)),
@@ -241,7 +300,12 @@ impl Workspace {
                 protocol::Step::Decode { name, input, decoder, params } => {
                     let full = format!("{}.{input}", d.name);
                     let input = scratch.iter().find(|s| s.name == input).or_else(|| self.streams.iter().find(|s| s.name == full)).ok_or(format!("no stream {full}"));
-                    let made = input.and_then(|i| Ok(decode::run(&format!("{}.{name}", d.name), i, decode::make(decoder, &i.schema, &params, self.trace.fs_per_tick)?)));
+                    let made = input.and_then(|i| {
+                        let mut s = decode::run(&format!("{}.{name}", d.name), i, decode::make(decoder, &i.schema, &params, self.trace.fs_per_tick)?);
+                        // a signal's changes are no stream of the workspace's
+                        s.inputs.retain(|x| *x == full);
+                        Ok(s)
+                    });
                     made.and_then(|s| self.add_signals(s))
                 }
             };
@@ -332,7 +396,7 @@ impl Workspace {
             records.extend(s.records.into_iter().map(|r| stream::Record { fields: vec![Some(crate::trace::Val::Text(rule.clone()))], ..r }));
         }
         records.sort_by_key(|r| r.start);
-        Ok(Stream { name: name.into(), schema: vec![stream::Field { name: "rule".into(), width: None, time: false, signed: false }], records, violations: true })
+        Ok(Stream { name: name.into(), schema: vec![stream::Field { name: "rule".into(), width: None, time: false, signed: false }], records, violations: true, inputs: vec![] })
     }
 
     /// Sample a protocol into the stream `name` and add it as signals. Returns the stream's var.
@@ -363,7 +427,11 @@ impl Workspace {
         for (path, width, values) in signals {
             vars.push(self.trace.add_computed(&path, width, values)?);
         }
+        // shown by its whole name, the instance's with it (`bus.wr`, spec §4 "Name column")
+        let decl = crate::trace::parts(&s.name).len();
+        self.trace.vars[vars[0]].decl = decl;
         for (f, &v) in s.schema.iter().zip(&vars[1..]) {
+            self.trace.vars[v].decl = decl + 1;
             self.trace.vars[v].signed = f.signed;
             self.trace.vars[v].time = self.trace.fs_per_tick.filter(|_| f.time);
         }

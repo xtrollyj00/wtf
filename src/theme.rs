@@ -33,10 +33,20 @@ pub fn find(name: &str, dir: &Path, rgb: bool, bg: Option<Rgb>, warnings: &mut V
     }
 }
 
-/// The terminal's background colour, asked with OSC 11 (spec §19 "The terminal's background");
-/// `None` when it doesn't answer.
-pub fn terminal_background() -> Option<Rgb> {
-    terminal_colorsaurus::background_color(terminal_colorsaurus::QueryOptions::default()).ok().map(|c| c.scale_to_8bit())
+/// The terminal's background and text colours, asked with OSC 11 and OSC 10 (spec §19 "The
+/// terminal's background"); `None` for what it doesn't answer.
+pub fn terminal_colors() -> (Option<Rgb>, Option<Rgb>) {
+    let q = terminal_colorsaurus::QueryOptions::default;
+    match terminal_colorsaurus::color_palette(q()) {
+        Ok(p) => (Some(p.background.scale_to_8bit()), Some(p.foreground.scale_to_8bit())),
+        Err(_) => (terminal_colorsaurus::background_color(q()).ok().map(|c| c.scale_to_8bit()), None),
+    }
+}
+
+/// `a` blended towards `b` by `t` (0 `a`, 1 `b`) in OKLab, so equal steps of `t` look equal.
+pub fn blend(a: Rgb, b: Rgb, t: f64) -> Rgb {
+    let (x, y) = (oklab(a), oklab(b));
+    srgb((x.0 + (y.0 - x.0) * t, x.1 + (y.1 - x.1) * t, x.2 + (y.2 - x.2) * t))
 }
 
 /// A light background: the light theme suits it.
@@ -56,6 +66,7 @@ fn fit(p: &mut Palette, bg: Rgb, rgb: bool) {
     p.panel = step(0.07);
     p.selected = step(0.10);
     p.cursor_dim = step(0.14);
+    p.mark = step(0.12);
     // the accent's yellow, a quarter of the way from the background
     let m = |x: u8, y: u8| (x as f64 + (y as f64 - x as f64) * 0.25).round() as u8;
     p.column = colour((m(bg.0, 0xe5), m(bg.1, 0xc0), m(bg.2, 0x7b)));
@@ -159,6 +170,7 @@ fn slot<'a>(p: &'a mut Palette, key: &str) -> Option<&'a mut Color> {
         "cursor_text" => &mut p.cursor_text,
         "column" => &mut p.column,
         "cursor_dim" => &mut p.cursor_dim,
+        "mark" => &mut p.mark,
         "selected" => &mut p.selected,
         "panel" => &mut p.panel,
         "hatch" => &mut p.hatch,
@@ -170,7 +182,7 @@ fn slot<'a>(p: &'a mut Palette, key: &str) -> Option<&'a mut Color> {
 }
 
 fn keys() -> String {
-    const FIELDS: [&str; 15] = ["line", "bus", "fill", "unknown", "highz", "cursor", "cursor_text", "column", "cursor_dim", "selected", "panel", "hatch", "dim", "background", "text"];
+    const FIELDS: [&str; 16] = ["line", "bus", "fill", "unknown", "highz", "cursor", "cursor_text", "column", "cursor_dim", "mark", "selected", "panel", "hatch", "dim", "background", "text"];
     FIELDS.iter().chain(COLORS.iter()).copied().collect::<Vec<_>>().join(", ")
 }
 
@@ -273,6 +285,15 @@ mod tests {
         for bad in ["256", "-1", "\"#12345\"", "\"blue\"", "[\"#2e7d32\"]", "[\"#2e7d32\", 300]"] {
             assert_eq!(c(bad, true), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn blend_ends_and_middle() {
+        let (a, b) = ((0xe5, 0xc0, 0x7b), (0x28, 0x2c, 0x34));
+        assert_eq!((blend(a, b, 0.0), blend(a, b, 1.0)), (a, b));
+        // halfway is halfway in lightness, as the eye sees it
+        let l = |c| oklab(c).0;
+        assert!((l(blend(a, b, 0.5)) - (l(a) + l(b)) / 2.0).abs() < 0.01);
     }
 
     #[test]

@@ -10,40 +10,19 @@ use wtf_core::command;
 use wtf_core::trace::Trace;
 use wtf_core::workspace::Workspace;
 
-/// A clock and a bus that starts unknown, for the samples.
-const SAMPLE: &str = "$timescale 1ns $end
-$scope module top $end
-$var wire 1 ! clk $end
-$var wire 8 # data $end
-$upscope $end
-$enddefinitions $end
-#0
-0!
-bxxxxxxxx #
-#5
-1!
-#10
-0!
-b10100101 #
-#15
-1!
-#20
-0!
-#25
-1!
-#30
-0!
-b111100 #
-#35
-1!
-#40
-0!
-b11110000 #
-#45
-1!
-#50
-0!
-";
+/// A clock and a bus that starts unknown, for the samples: long enough to fill the widest card
+/// at the samples' zoom.
+fn sample() -> String {
+    let mut v = String::from("$timescale 1ns $end\n$scope module top $end\n$var wire 1 ! clk $end\n$var wire 8 # data $end\n$upscope $end\n$enddefinitions $end\n#0\n0!\nbxxxxxxxx #\n");
+    let data = ["10100101", "111100", "11110000", "1111", "10011001"];
+    for t in (5..=400).step_by(5) {
+        v.push_str(&format!("#{t}\n{}!\n", (t / 5) % 2));
+        if t % 20 == 10 {
+            v.push_str(&format!("b{} #\n", data[(t / 20) as usize % data.len()]));
+        }
+    }
+    v
+}
 
 /// Lines a sample takes: two rows, without the time axis above them.
 const SAMPLE_LINES: usize = 2 * draw::ROW_LINES;
@@ -76,9 +55,11 @@ impl Setup {
         let themes = ["dark", "light"].map(|n| (n, leak(crate::theme::builtin_on(n, rgb, bg).expect("built in")))).to_vec();
         let suited = bg.is_some_and(crate::theme::is_light) as usize;
         let base = if mono { leak(Palette::mono()) } else { themes[0].1 };
-        let mut ws = Workspace::new(Trace::from_bytes(SAMPLE.as_bytes().to_vec()).expect("the sample is a VCD"), String::new());
+        let mut ws = Workspace::new(Trace::from_bytes(sample().into_bytes()).expect("the sample is a VCD"), String::new());
         command::run(&mut ws, "add **").expect("the sample has signals");
-        ws.view.cursor = 30;
+        // two ticks a column: a clock period is five columns
+        command::run(&mut ws, "zoom 2").expect("a zoom");
+        ws.view.cursor = 20;
         Setup { theme_step: false, sel: 0, glyph: 0, mono, themes, suited, base, ws }
     }
 
@@ -130,60 +111,85 @@ impl Setup {
         draw::SETS[self.glyph].1
     }
 
+    /// The question, then a card per answer (spec §19 "First start"): titled with its key and
+    /// name, the sample inside, the highlighted one's border in the accent. Each card is drawn in
+    /// its own glyphs (the glyphs question) or theme (the theme question), its frame too, so the
+    /// card itself shows whether the terminal draws it cleanly. Two cards a row where they fit.
     pub fn draw(&mut self, area: Rect, buf: &mut Buffer) {
         let (w, h) = (area.width as usize, area.height as usize);
         draw::set_palette_ref(self.base);
         draw::set_glyphs(self.glyphs());
         let accent = Style::new().fg(pal().cursor).add_modifier(Modifier::BOLD);
         let dim = Style::new().fg(pal().dim);
-        let x = 2;
+        let names: Vec<&str> = match self.theme_step {
+            false => draw::SETS.iter().map(|(n, _)| *n).collect(),
+            true => self.themes.iter().map(|(n, _)| *n).collect(),
+        };
+        // two cards a row where each gets 34 columns, as wide as 66
+        let cols = if w >= 2 * 34 + 6 { 2 } else { 1 };
+        let cw = ((w.saturating_sub(4 + 2 * (cols - 1))) / cols).min(66);
+        let total = cols * cw + 2 * (cols - 1);
+        let x = (w.saturating_sub(total) / 2).max(1);
         put(buf, x, 1, "wtf", accent);
         put(buf, x + 4, 1, &format!("{} first start", gl().dot), dim);
+        if !self.mono {
+            let step = format!("{} of 2", 1 + self.theme_step as usize);
+            put(buf, (x + total).saturating_sub(step.chars().count()), 1, &step, dim);
+        }
         let (question, hint) = match self.theme_step {
             false => ("Which of these does your terminal draw cleanly?", "Lines should join up; no character should be a box or a question mark."),
             true => ("Dark or light?", "Pick the one that suits your terminal's background."),
         };
         put(buf, x, 3, question, Style::new().add_modifier(Modifier::BOLD));
         put(buf, x, 4, hint, dim);
-        let names: Vec<&str> = match self.theme_step {
-            false => draw::SETS.iter().map(|(n, _)| *n).collect(),
-            true => self.themes.iter().map(|(n, _)| *n).collect(),
-        };
-        let label = 14;
-        let sw = w.saturating_sub(x + label + 2).min(64);
-        let mut y = 6;
+        let ch = SAMPLE_LINES + 2;
+        let rows = names.len().div_ceil(cols);
+        // a blank line between rows of cards where all fit with it
+        let gap = (6 + rows * (ch + 1) - 1 <= h.saturating_sub(2)) as usize;
+        let sw = cw.saturating_sub(4);
         for (i, name) in names.iter().enumerate() {
-            if y + SAMPLE_LINES > h.saturating_sub(2) {
+            let (cx, cy) = (x + (i % cols) * (cw + 2), 6 + (i / cols) * (ch + gap));
+            if cy + ch > h.saturating_sub(2) || sw < 10 {
                 break;
             }
             let on = i == self.sel;
-            let mark = if on { gl().hl } else { ' ' };
-            put(buf, x, y + SAMPLE_LINES / 2, &format!("{mark} {} {name}", i + 1), if on { accent } else { Style::new() });
-            // the sample in its own glyphs and palette, then back to the screen's
+            // the card in its own glyphs and palette, then back to the screen's
             let (g, p) = match self.theme_step {
                 false => (draw::SETS[i].1, self.base),
                 true => (self.glyphs(), self.themes[i].1),
             };
             draw::set_glyphs(g);
             draw::set_palette_ref(p);
-            // drawn once to learn the width the waveforms get, so `fit` can fill it
+            // a set with icons shows one: a font without them draws a box
+            let icon = if !self.theme_step && g.icons { " \u{ea83}" } else { "" };
+            let mark = if on && pal().mono { format!("{} ", gl().hl) } else { String::new() };
+            let title = vec![(format!("{mark}{} {name}{icon}", i + 1), if on { accent } else { Style::new().add_modifier(Modifier::BOLD) })];
+            let r = Rect::new(cx as u16, cy as u16, cw as u16, ch as u16);
+            super::render::card_frame(buf, r, if on { pal().cursor } else { pal().dim }, &title, "", "");
             let full = Rect::new(0, 0, sw as u16, 1 + SAMPLE_LINES as u16);
-            draw::rows(&mut self.ws, &mut 0, false, &mut Buffer::empty(full), sw, 1 + SAMPLE_LINES);
-            command::run(&mut self.ws, "fit").ok();
             let mut s = Buffer::empty(full);
             draw::rows(&mut self.ws, &mut 0, false, &mut s, sw, 1 + SAMPLE_LINES);
             draw::fill_screen(&mut s);
             draw::set_glyphs(self.glyphs());
             draw::set_palette_ref(self.base);
             for (dy, dx) in (0..SAMPLE_LINES).flat_map(|dy| (0..sw).map(move |dx| (dy, dx))) {
-                if let Some(cell) = buf.cell_mut((area.x + (x + label + dx) as u16, area.y + (y + dy) as u16)) {
+                if let Some(cell) = buf.cell_mut((area.x + (cx + 2 + dx) as u16, area.y + (cy + 1 + dy) as u16)) {
                     *cell = s[(dx as u16, 1 + dy as u16)].clone();
                 }
             }
-            y += SAMPLE_LINES + 1;
         }
-        let keys = format!("1{}{} or j k, Enter to pick {} Esc for the defaults {} wtf --setup asks again", gl().dash, names.len(), gl().dot, gl().dot);
-        put(buf, x, h.saturating_sub(2), &keys, dim);
+        // the keys, in the accent, what they do dim
+        let keys = [(format!("1{}{}", gl().dash, names.len()), " pick   "), ("j k".into(), " move   "), ("Enter".into(), " pick   "), ("Esc".into(), " the defaults")];
+        let mut kx = x;
+        for (k, what) in keys {
+            put(buf, kx, h.saturating_sub(2), &k, accent);
+            put(buf, kx + k.chars().count(), h.saturating_sub(2), what, dim);
+            kx += k.chars().count() + what.chars().count();
+        }
+        let again = "wtf --setup asks again";
+        if kx + 2 + again.len() <= x + total {
+            put(buf, x + total - again.len(), h.saturating_sub(2), again, dim);
+        }
         draw::fill_screen(buf);
     }
 }
@@ -260,7 +266,7 @@ mod tests {
         // without colour, no theme question
         let a = press(&mut Setup::new(true, true, None), KeyCode::Char('3')).unwrap().unwrap();
         assert_eq!((a.glyphs, a.theme), ("ascii", None));
-        assert!(press(&mut Setup::new(false, true, None), KeyCode::Char('4')).is_none());
+        assert!(press(&mut Setup::new(false, true, None), KeyCode::Char('5')).is_none());
         // on a light terminal light is selected, and the default
         let mut s = Setup::new(false, true, Some((0xfa, 0xfa, 0xfa)));
         press(&mut s, KeyCode::Enter);

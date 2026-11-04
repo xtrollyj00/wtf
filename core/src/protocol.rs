@@ -286,7 +286,7 @@ fn channels<const N: usize>(given: &Given, channels: [(&'static str, &[(&str, &s
 }
 
 /// The generic protocols on streams: name, one line, and the rest of `protocols <name>`.
-const ON_STREAMS: &[(&str, &str, &str)] = &[
+pub const ON_STREAMS: &[(&str, &str, &str)] = &[
     (
         "frame",
         "records of a stream grouped into frames, by a last flag, a gap or a select",
@@ -331,8 +331,7 @@ pub fn list(session: &[Sampler]) -> String {
 }
 
 fn sampler_line(p: &Sampler) -> String {
-    let roles = if p.roles.is_empty() { String::new() } else { format!("roles {}: ", p.roles.join(", ")) };
-    format!("{roles}a record where {} at {}", p.when, if p.clock.is_empty() { "the instance's clock" } else { &p.clock })
+    format!("roles {}: a record where {} at the instance's clock", p.roles.join(", "), p.when)
 }
 
 /// `protocols <name>`: its roles, params, and the streams it makes with their fields.
@@ -364,10 +363,7 @@ pub fn describe(name: &str, session: &[Sampler]) -> Result<String, String> {
     if let Some(p) = session.iter().find(|p| p.name == name) {
         let fields: Vec<String> = p.fields.iter().map(|(f, sig)| format!("{f}={sig}")).collect();
         let mut out = vec![format!("{name}: in this session, {}", sampler_line(p)), format!("fields: {}", fields.join(" "))];
-        out.push(match p.roles.is_empty() {
-            true => format!("the stream {name} (a protocol without roles samples its own signals)"),
-            false => format!("example: decode x {name} clock=<clk> {}", p.roles.iter().map(|r| format!("{r}=<signal>")).collect::<Vec<_>>().join(" ")),
-        });
+        out.push(format!("example: decode x {name} clock=<clk> {}", p.roles.iter().map(|r| format!("{r}=<signal>")).collect::<Vec<_>>().join(" ")));
         return Ok(out.join("\n"));
     }
     Err(unknown(name, session))
@@ -377,6 +373,28 @@ pub fn describe(name: &str, session: &[Sampler]) -> Result<String, String> {
 pub fn unknown(name: &str, session: &[Sampler]) -> String {
     let names: Vec<&str> = BUILTINS.iter().copied().chain(ON_STREAMS.iter().map(|g| g.0)).chain(session.iter().map(|p| p.name.as_str())).collect();
     format!("unknown protocol: {name} (protocols: {}; `protocols <name>` describes one)", names.join(", "))
+}
+
+/// A short card on a protocol, for the command line's docs (spec §4): its line, roles and
+/// streams, a line each.
+pub fn brief(name: &str, session: &[Sampler]) -> Option<String> {
+    if let Some(b) = builtin(name) {
+        let clock = if b.clocked { " clock=<clk>" } else { "" };
+        let mut roles = b.required.join(" ");
+        if !b.optional.is_empty() {
+            roles += &format!(" ({} optional)", b.optional.join(" "));
+        }
+        let streams: Vec<String> = streams_of(&b).into_iter().map(|s| s.0).collect();
+        let params = if b.params.is_empty() { String::new() } else { format!("\nParams: {}", b.params.join(" ")) };
+        return Some(format!("decode <name> {name}{clock} prefix=<prefix>\n\n{}\nRoles: {roles}{params}\nStreams: {}", b.about, streams.join(" ")));
+    }
+    if let Some((_, about, _)) = ON_STREAMS.iter().find(|g| g.0 == name) {
+        return Some(format!("decode <name> {name} ...\n\n{about}"));
+    }
+    let p = session.iter().find(|p| p.name == name)?;
+    let roles: Vec<String> = p.roles.iter().map(|r| format!("{r}=<signal>")).collect();
+    let fields: Vec<&str> = p.fields.iter().map(|f| f.0.as_str()).collect();
+    Some(format!("decode <name> {name} clock=<clk> {}\n\nA record where {}\nFields: {}", roles.join(" "), p.when, fields.join(" ")))
 }
 
 /// A stream of a built-in, for `protocols <name>`: its name, fields, for violations what they

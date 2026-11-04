@@ -46,14 +46,9 @@ fn declare(app: &mut Workspace, a: &WorkspaceArgs) -> Result<String, String> {
     let mut protocols = Vec::new();
     for p in &a.protocols {
         let fields = split(&format!("protocol {}", p.name), &p.fields, &mut errors);
-        let def = wtf_core::stream::Sampler { name: p.name.clone(), clock: p.clock.clone(), when: p.when.clone(), fields, roles: p.roles.clone() };
+        let def = wtf_core::stream::Sampler { name: p.name.clone(), when: p.when.clone(), fields, roles: p.roles.clone() };
         let mut t = Table::from_iter([("name".into(), Value::from(def.name.clone())), ("when".into(), def.when.clone().into()), ("fields".into(), table(&def.fields))]);
-        if !def.clock.is_empty() {
-            t.insert("clock".into(), def.clock.clone().into());
-        }
-        if !def.roles.is_empty() {
-            t.insert("roles".into(), Value::Array(def.roles.iter().map(|r| Value::from(r.clone())).collect()));
-        }
+        t.insert("roles".into(), Value::Array(def.roles.iter().map(|r| Value::from(r.clone())).collect()));
         match app.add_protocol(def) {
             Ok(_) => protocols.push(Value::Table(t)),
             Err(e) => errors.push(format!("protocol {}: {e}", p.name)),

@@ -2,10 +2,16 @@
 //! the command line (spec §2 - §9).
 
 pub mod app;
+pub mod browser;
 pub mod commands;
+pub mod keys;
 pub mod panel;
+pub mod picker;
+#[cfg(test)]
+pub mod reference;
 pub mod render;
 pub mod setup;
+pub mod start;
 
 use crate::live;
 use app::App;
@@ -65,6 +71,9 @@ pub fn run(app: &mut App) -> Result<(), String> {
                 }
                 // a drag resting at an edge scrolls
                 if app.tick(std::time::Instant::now()) {
+                    break;
+                }
+                if app.which_tick(std::time::Instant::now()) || app.note_tick(std::time::Instant::now()) || app.picker_tick(std::time::Instant::now()) {
                     break;
                 }
                 if let Ok(now) = agents.try_recv()

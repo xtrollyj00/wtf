@@ -117,7 +117,7 @@ fn builtin_instance_errors() {
     assert_eq!(err(&mut ws, decode("rx", "axis", "", &[("tvalid", "tvalid"), ("tuser", "tdata"), ("tdata", "nope")], &[("x", "1")])),
         "rx: no signal for tready (the file has: decode rx axis clock=top.clk prefix=top.); axis has no role tuser; tdata: unknown signal: nope; axis has no param x (params: prefix); no clock");
     // its names are taken
-    let p = Sampler { name: "axis".into(), clock: "clk".into(), when: "tvalid".into(), fields: vec![], roles: vec![] };
+    let p = Sampler { name: "axis".into(), when: "tvalid".into(), fields: vec![], roles: vec!["tvalid".into()] };
     assert_eq!(ws.add_protocol(p), Err("axis is a built-in protocol".into()));
     assert!(ws.streams.is_empty() && ws.decodes.is_empty());
 }
@@ -126,9 +126,10 @@ fn builtin_instance_errors() {
 /// resp_id) 2 at 35, 1 at 55, 0 at 85.
 fn reqresp() -> Workspace {
     let mut ws = open("reqresp.vcd");
+    // one protocol, put on each side
+    ws.add_protocol(Sampler { name: "hs".into(), when: "valid".into(), fields: pairs(&[("id", "id")]), roles: vec!["valid".into(), "id".into()] }).unwrap();
     for (name, v, id) in [("req", "req_valid", "req_id"), ("resp", "resp_valid", "resp_id")] {
-        let fields = pairs(&[("id", id)]);
-        ws.add_protocol(Sampler { name: name.into(), clock: "clk".into(), when: v.into(), fields, roles: vec![] }).unwrap();
+        ws.add_decode(Decode { name: name.into(), protocol: "hs".into(), clock: "clk".into(), signals: pairs(&[("valid", v), ("id", id)]), params: vec![] }).unwrap();
     }
     ws
 }
@@ -182,7 +183,7 @@ fn chained_frame_and_their_errors() {
 fn instance_names_signals_in_full() {
     let mut ws = open("simple.vcd");
     let add = |ws: &mut Workspace, p: Sampler| ws.add_protocol(p).unwrap();
-    add(&mut ws, Sampler { name: "busy".into(), clock: String::new(), when: "b".into(), fields: pairs(&[("s", "s")]), roles: vec!["b".into(), "s".into()] });
+    add(&mut ws, Sampler { name: "busy".into(), when: "b".into(), fields: pairs(&[("s", "s")]), roles: vec!["b".into(), "s".into()] });
     let state = ws.var_named("top.cpu.state").unwrap();
     ws.add_rows(&[state]);
     assert!(ws.resolve("state").is_ok() && ws.resolve("dma.state").is_ok());
@@ -454,3 +455,72 @@ fn spi_last_bit_at_cs() {
     assert_eq!(table(stream(&ws, "s.bit")), [row(20, 50, &["1"])]);
 }
 
+
+#[test]
+fn decodes_of_a_signal() {
+    // a signal's decodes and roles: the clock, one by the prefix, one given apart, a stream taken
+    let mut ws = open("axilite.vcd");
+    ws.add_decode(decode("s", "axilite", "aclk", &[("wdata", "s_axi_wdata")], &[("prefix", "s_axi_")])).unwrap();
+    ws.add_decode(decode("t", "axilite", "aclk", &[], &[("prefix", "s_axi_")])).unwrap();
+    let of = |ws: &Workspace, path: &str| {
+        let v = ws.trace.vars.iter().position(|v| v.path == path).unwrap();
+        ws.decodes_of(v).into_iter().map(|(d, r)| format!("{d} {r}")).collect::<Vec<_>>()
+    };
+    assert_eq!(of(&ws, "top.aclk"), ["s clock", "t clock"]);
+    assert_eq!(of(&ws, "top.s_axi_awvalid"), ["s awvalid", "t awvalid"]);
+    assert_eq!(of(&ws, "top.s_axi_wdata"), ["s wdata", "t wdata"]);
+    assert!(of(&ws, "s.aw").is_empty());
+}
+
+/// Spec §16 "Results" and "Records of a set": what nothing is made from is a result, and a set of
+/// streams reads as one table.
+#[test]
+fn results_and_sets() {
+    let mut ws = open("axilite.vcd");
+    ws.add_decode(decode("s", "axilite", "aclk", &[], &[("prefix", "s_axi_")])).unwrap();
+    let names = |ws: &wtf_core::workspace::Workspace, v: Vec<usize>| v.into_iter().map(|i| ws.streams[i].name.clone()).collect::<Vec<_>>();
+    assert_eq!(names(&ws, ws.results("s")), ["s.wr", "s.rd", "s.errors", "s.wr.unmatched", "s.rd.unmatched"]);
+    assert_eq!(names(&ws, ws.stream_set("s").unwrap()), names(&ws, ws.results("s")));
+    assert_eq!(names(&ws, ws.stream_set("s.rd s.w* s.rd").unwrap()), ["s.rd", "s.w", "s.wr"]);
+    assert!(ws.stream_set("s.nope").unwrap_err().starts_with("unknown stream: s.nope (streams: s.aw,"));
+    // a frame on rd makes rd intermediate, across decodes
+    ws.add_decode(decode("f", "frame", "", &[("input", "s.rd")], &[("gap", "100ns")])).unwrap();
+    assert!(!names(&ws, ws.results("s")).contains(&"s.rd".to_string()));
+    // wr and rd share addr, data, resp, delay; strb is wr's alone
+    let set = wtf_core::stream::Set::new(vec![&ws.streams[ws.stream_set("s.wr").unwrap()[0]], &ws.streams[ws.stream_set("s.rd").unwrap()[0]]]);
+    assert_eq!(set.columns.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["delay", "addr", "data", "strb", "resp"]);
+    let (all, total) = set.select(0, u64::MAX, None, ws.trace.fs_per_tick).unwrap();
+    assert_eq!((all.len(), total), (10, 10));
+    assert!(all.windows(2).all(|w| set.record(w[0]).start <= set.record(w[1]).start));
+    // a filter keeps the streams having every field it names
+    let (strb, _) = set.select(0, u64::MAX, Some("strb == 3"), None).unwrap();
+    assert_eq!(strb, [(0, 1)]);
+    let (resp, _) = set.select(0, u64::MAX, Some("resp != 0"), None).unwrap();
+    assert_eq!(resp.iter().map(|&(s, _)| s).collect::<Vec<_>>(), [1]);
+    assert!(set.select(0, u64::MAX, Some("nope == 1"), None).unwrap_err().starts_with("no field nope in s.wr, s.rd (fields: delay, addr"));
+    let groups = set.group_by(&all, &["resp".into()]).unwrap();
+    assert_eq!(groups.iter().map(|g| g.count).sum::<usize>(), 10);
+    // a name with two kinds is a column per stream
+    let set = wtf_core::stream::Set::new(vec![&ws.streams[ws.stream_set("s.errors").unwrap()[0]], &ws.streams[ws.stream_set("s.wr.unmatched").unwrap()[0]]]);
+    assert_eq!(set.columns.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["rule", "kind"]);
+}
+
+/// Spec §16: `records` names a stream, and a field it lacks lists those it has.
+#[test]
+fn set_errors_and_briefs() {
+    let mut ws = open("axilite.vcd");
+    assert_eq!(ws.stream_set("  ").unwrap_err(), "records of which stream? (a stream, a decode's name or a glob)");
+    ws.add_decode(decode("s", "axilite", "aclk", &[], &[("prefix", "s_axi_")])).unwrap();
+    let one = wtf_core::stream::Set::new(vec![&ws.streams[ws.stream_set("s.wr").unwrap()[0]]]);
+    assert!(one.group_by(&[], &["nope".into()]).err().unwrap().starts_with("s.wr: no field nope (fields: "));
+    let two = wtf_core::stream::Set::new(vec![&ws.streams[ws.stream_set("s.wr").unwrap()[0]], &ws.streams[ws.stream_set("s.rd").unwrap()[0]]]);
+    assert!(two.group_by(&[], &["nope".into()]).err().unwrap().starts_with("no field nope (fields: "));
+
+    // `protocols <name>` in short: a built-in, a generic one, one of the session's, none
+    let brief = |n: &str, ws: &Workspace| wtf_core::protocol::brief(n, &ws.protocols);
+    assert!(brief("axilite", &ws).unwrap().starts_with("decode <name> axilite clock=<clk> prefix=<prefix>"));
+    assert!(brief("frame", &ws).unwrap().starts_with("decode <name> frame ...\n\nrecords of a stream"));
+    assert_eq!(brief("cmd", &ws), None);
+    ws.add_protocol(Sampler { name: "cmd".into(), when: "valid && ready".into(), fields: vec![("op".into(), "cmd[3:0]".into())], roles: vec!["valid".into(), "ready".into(), "cmd".into()] }).unwrap();
+    assert_eq!(brief("cmd", &ws).unwrap(), "decode <name> cmd clock=<clk> valid=<signal> ready=<signal> cmd=<signal>\n\nA record where valid && ready\nFields: op");
+}

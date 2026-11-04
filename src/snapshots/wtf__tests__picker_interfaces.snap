@@ -1,0 +1,20 @@
+---
+source: src/main.rs
+expression: "snapshot(&mut app, 110, Some(16))"
+---
+Name                   │ Value         │ 0             100ns         200ns         300ns          400ns
+  ╭─ records · s_axi ───────────────────────────────────────────────────────────────────────── 13 records ─╮
+▾ │ all  wr  rd  errors  wr.unmatched  rd.unmatched  aw  w  b  ar  r                                       │
+  │ ▸ where / filters on delay, addr, data, strb, resp, rule, kind                                         │
+  │────────────────────────────────────────────────────────────────────────────────────────────────────────│
+  │   stream        n    start    length    delay    addr    data        strb    resp    rule        kind  │
+  │▌  wr            #0   30ns     20ns      10ns     0x10    0x11111111  0xF     0x0                       │
+  │   wr            #1   60ns     60ns      20ns     0x14    0x22222222  0x3     0x0                       │
+  │   rd            #0   130ns    30ns      20ns     0x10    0x11111111          0x0                       │
+  │   rd            #1   170ns    20ns      10ns     0x20    0xDEADBEEF          0x2                       │
+  │   errors        #0   180ns    10ns                                                   r_resp            │
+  │   errors        #1   210ns    10ns                                                   aw_dropped        │
+  │   wr.unmatched  #0   230ns    10ns                                                               no r… │
+  ╰────────────────────────────── Enter jump  / filter  s S sort  = group  h l scroll  Tab set  Esc close ─╯
+                       │               │
+ NORMAL   signals ▸  s_axi                                                           0  7ns/col  axilite [+]
