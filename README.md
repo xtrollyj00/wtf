@@ -117,7 +117,7 @@ them in your open wtf window (`:undo` gives you your own view back). With no win
 a session file for you to open. While it works, your window on the trace shows each step it takes,
 and `:follow` shows its workspace as it builds it.
 
-https://github.com/user-attachments/assets/7c244cad-1cd9-48b3-ba10-d42ba655e726
+https://github.com/user-attachments/assets/19ea36cd-b8ff-4986-a786-f335e6e31a12
 
 `wtf-bench agent` measures how much it helps: it gives an agent failing RTL testbenches to debug
 and fix, with wtf and without it. Every run fixed its bug either way; 17 of 20 runs with wtf also
