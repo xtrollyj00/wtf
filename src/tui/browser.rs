@@ -483,3 +483,147 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
     }
     app.hit.boxed = Some(r);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wtf_core::trace::Trace;
+
+    fn axi() -> App {
+        let t = Trace::open("tests/data/axilite.vcd".as_ref()).unwrap();
+        let mut app = App::new(Workspace::new(t, "x".into()));
+        app.keys(":decode s_axi axilite clock=top.aclk prefix=top.s_axi_\n:records s_axi\n").unwrap();
+        app
+    }
+
+    fn b(app: &App) -> &Browser {
+        app.browser.as_ref().unwrap()
+    }
+
+    fn msg(app: &App) -> String {
+        app.msg.as_ref().map_or(String::new(), |m| m.0.clone())
+    }
+
+    #[test]
+    fn sort_every_column() {
+        // spec §5 "Records": `s` sorts by the next column, blanks last; `S` reverses
+        let mut app = axi();
+        let ncols = b(&app).fixed() + b(&app).set(&app.ws).columns.len();
+        assert_eq!((b(&app).sort, ncols), ((2, false), 11));
+        for col in (2..ncols).chain(0..2) {
+            let br = b(&app);
+            assert_eq!(br.sort.0, col);
+            let set = br.set(&app.ws);
+            let rec = |at| set.record(at);
+            let key: Vec<_> = br.rows.iter().map(|&at| match col {
+                0 => (at.0 as u64, rec(at).start),
+                1 => (at.1 as u64, at.0 as u64),
+                2 => (rec(at).start, 0),
+                3 => (rec(at).end - rec(at).start, 0),
+                c => (set.value(at, c - 4).is_none() as u64, 0),
+            }).collect();
+            // for a field, a stream without it comes after the ones with it
+            assert!(key.windows(2).all(|w| w[0] <= w[1]), "column {col}: {key:?}");
+            app.keys("s").unwrap();
+        }
+        assert_eq!(b(&app).sort.0, 2);
+    }
+
+    #[test]
+    fn group_and_keep() {
+        let mut app = axi();
+        // `=` on a fixed column says to sort by a field first
+        app.keys("=").unwrap();
+        assert!(!b(&app).group && msg(&app).starts_with("= groups by the sorted column"));
+        // group by resp (column 8): Enter keeps one value's records; a second time narrows further
+        app.keys("ssssss=").unwrap();
+        assert!(b(&app).group);
+        let screen = crate::snapshot(&mut app, 120, Some(30));
+        assert!(screen.contains("values,") && screen.contains("Enter keep these"), "{screen}");
+        app.keys("\n").unwrap();
+        let f1 = b(&app).filter.clone();
+        assert!(f1.starts_with("resp == ") && !b(&app).group, "{f1}");
+        app.keys("=\n").unwrap();
+        let f2 = b(&app).filter.clone();
+        assert!(f2.starts_with(&format!("({f1}) && resp == ")), "{f2}");
+        // typing shows its own keys, and a filter that fails shows why in the card
+        app.keys("/").unwrap();
+        let screen = crate::snapshot(&mut app, 120, Some(30));
+        assert!(screen.contains("Enter Esc done  Ctrl-u clear"), "{screen}");
+        app.keys("<C-u>zz ==\n").unwrap();
+        assert!(b(&app).error.is_some());
+        let screen = crate::snapshot(&mut app, 120, Some(30));
+        assert!(screen.contains(&b(&app).error.clone().unwrap().chars().take(10).collect::<String>()), "{screen}");
+        // Backspace edits it; Ctrl-x and Tab are ignored while typing
+        app.keys("/<BS><BS><BS>").unwrap();
+        assert_eq!(b(&app).filter, "zz");
+        app.keys("<C-x><Tab>").unwrap();
+        assert!(b(&app).typing && b(&app).filter == "zz" && b(&app).tab == 0);
+        app.keys("<Esc>").unwrap();
+        // group by rule: the commonest value is blank, which a filter cannot write
+        app.keys("<Esc>:records s_axi\n").unwrap();
+        app.keys("sssssss=\n").unwrap();
+        assert!(b(&app).group && msg(&app).ends_with("this value can't be written in a filter"), "{}", msg(&app));
+    }
+
+    #[test]
+    fn move_and_scroll() {
+        let mut app = axi();
+        // a short card: the highlight scrolls the lines
+        crate::snapshot(&mut app, 120, Some(12));
+        let page = b(&app).page;
+        assert!((1..13).contains(&page), "{page}");
+        app.keys("G").unwrap();
+        crate::snapshot(&mut app, 120, Some(12));
+        assert_eq!((b(&app).hl, b(&app).top), (12, 13 - page));
+        app.keys("g").unwrap();
+        crate::snapshot(&mut app, 120, Some(12));
+        assert_eq!((b(&app).hl, b(&app).top), (0, 0));
+        app.keys("<C-f>").unwrap();
+        assert_eq!(b(&app).hl, page);
+        app.keys("<C-b>z").unwrap();
+        assert_eq!(b(&app).hl, 0);
+        // wheel moves; a click outside closes
+        app.mouse(crossterm::event::MouseEvent { kind: MouseEventKind::ScrollDown, column: 40, row: 5, modifiers: KeyModifiers::NONE });
+        assert_eq!(b(&app).hl, 1);
+        // a card too small to draw: nothing
+        let screen = crate::snapshot(&mut app, 20, Some(12));
+        assert!(!screen.contains("records"), "{screen}");
+        let screen = crate::snapshot(&mut app, 120, Some(8));
+        assert!(!screen.contains("╭─ records"), "{screen}");
+    }
+
+    #[test]
+    fn narrow_card() {
+        // the tabs cut with an ellipsis and the columns stop at the card's edge
+        let mut app = axi();
+        let screen = crate::snapshot(&mut app, 40, Some(20));
+        assert!(screen.contains(gl().cut) && screen.contains("stream"), "{screen}");
+        assert!(!screen.contains("delay  "), "{screen}");
+    }
+
+    #[test]
+    fn tabs_and_set_names() {
+        // several streams that are not a whole decode's set: the tabs start with that set
+        let mut app = axi();
+        app.keys("<Esc>:records s_axi.wr s_axi.rd\n").unwrap();
+        assert_eq!(b(&app).tabs[0], "s_axi.wr s_axi.rd");
+        assert_eq!(b(&app).tabs.len(), 12);
+        // streams of two decodes: no decode's tabs, the set alone
+        app.keys("<Esc>:decode s2 axilite clock=top.aclk prefix=top.s_axi_\n:records s_axi.wr s2.wr\n").unwrap();
+        assert_eq!((b(&app).tabs.clone(), b(&app).decode.clone()), (vec!["s_axi.wr s2.wr".to_string()], None));
+        // one set: no tab line
+        let screen = crate::snapshot(&mut app, 120, Some(20));
+        assert!(!screen.contains("all "), "{screen}");
+    }
+
+    #[test]
+    fn sort_key_order() {
+        // numbers by value (signed as signed), then text and X/Z values, then none
+        let bits = |s: &str| Some(Val::Bits(s.into()));
+        assert_eq!(key(bits("111").as_ref(), true).1, -1);
+        assert_eq!(key(bits("111").as_ref(), false).1, 7);
+        assert_eq!(key(bits("1x0").as_ref(), false), (1, 0, "1x0".into()));
+        assert_eq!(key(None, false).0, 2);
+    }
+}

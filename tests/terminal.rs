@@ -254,3 +254,36 @@ fn an_agent_joins_and_leaves() {
     assert!(answer.starts_with("OK ") && answer.contains("agent: presented 1 signals"), "{answer}");
     t.wait("the present", |s| line_of(s, "rst").is_some() && line_of(s, "dma.state").is_none());
 }
+
+#[test]
+fn start_screen_joins_an_agent() {
+    // an agent's workspace on this machine: `a` joins it, opening its trace in a window that
+    // follows it (spec §4 "Start screen"); this one answers INFO only, so the follow is refused
+    // and said
+    let mut t = Term::spawn("join", &[]);
+    t.wait("the start screen", |s| s.contents().contains("Open a trace"));
+    let trace = std::fs::canonicalize("tests/data/simple.vcd").unwrap();
+    let listener = std::os::unix::net::UnixListener::bind(t.dir.join("wtf-9-1.sock")).unwrap();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let mut stream = stream.unwrap();
+            let mut head = String::new();
+            std::io::BufRead::read_line(&mut std::io::BufReader::new(stream.try_clone().unwrap()), &mut head).unwrap();
+            let answer = if head.starts_with("INFO") { format!("OK {}\nagent\n{}", 6 + trace.as_os_str().len(), trace.display()) } else { "ERR no\n".into() };
+            let _ = stream.write_all(answer.as_bytes());
+        }
+    });
+    t.wait("the agent listed", |s| s.contents().contains("1 agent on this machine"));
+    t.send("a");
+    t.wait("the window", |s| s.contents().contains("Browse the signals"));
+    t.send(":q!\r");
+    assert!(t.child.wait().unwrap().success());
+}
+
+#[test]
+fn start_screen_quits() {
+    let mut t = Term::spawn("startq", &[]);
+    t.wait("the start screen", |s| s.contents().contains("Open a trace"));
+    t.send("q");
+    assert!(t.child.wait().unwrap().success());
+}

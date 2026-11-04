@@ -225,6 +225,26 @@ mod tests {
     }
 
     #[test]
+    fn right_kinds_apply() {
+        let c = parse("which_key = 250\n[keys]\n[leader]\n", true, Path::new(""), None);
+        assert_eq!((c.warnings, c.which_key), (vec![], std::time::Duration::from_millis(250)));
+    }
+
+    #[test]
+    fn wrong_kinds_warn() {
+        let c = parse("which_key = 99999\ncolors = 1\nkeys = 2\nleader = 3\n", true, Path::new(""), None);
+        assert_eq!(
+            c.warnings,
+            [
+                "config: which_key = 99999? (milliseconds, 0-10000)",
+                "config: colors = 1? (a table of colours)",
+                "config: keys = 2? (a table of action = key)",
+                "config: leader = 3? (a table of key = [\"what it does\", \":command\"])",
+            ]
+        );
+    }
+
+    #[test]
     fn not_toml_gives_defaults() {
         let c = parse("glyphs = \"box\"\ntheme = \n", true, Path::new(""), None);
         assert_eq!(c.warnings.len(), 1, "{:?}", c.warnings);

@@ -1036,3 +1036,46 @@ fn site_tools() {
         assert!(have == page, "site/content/{name}.md is out of date: UPDATE_SITE=1 cargo test --test mcp site_tools");
     }
 }
+
+/// Signals alike down to their scope's name take a number in the roles `find` suggests (spec §15).
+#[test]
+fn find_roles_alike_get_numbers() {
+    let dir = Dir::new("roles-alike");
+    let mut s = Server::start(&dir.0);
+    s.ok("open", json!({"trace": std::fs::canonicalize("tests/data/hdl.vcd").unwrap()}));
+    let out = s.ok("find", json!({"expr": "@clk data", "show": ["dut.gen_stages(0).x", "dut.gen_stages(1).x"]}));
+    assert!(out.contains("roles=data,gen_stages_x_1,gen_stages_x_2"), "{out}");
+}
+
+/// `protocols` and `records` errors name the stream wanted and what there is (spec §16).
+#[test]
+fn records_errors() {
+    let dir = Dir::new("records-errors");
+    let mut s = Server::start(&dir.0);
+    s.ok("open", json!({"trace": std::fs::canonicalize("tests/data/axilite.vcd").unwrap()}));
+    s.ok("command", json!({"line": "decode bus axilite clock=aclk prefix=s_axi_"}));
+    assert!(s.tool("records", json!({"stream": "bus.wr", "group_by": ["nope"]})).unwrap_err().starts_with("bus.wr: no field nope (fields: "));
+    assert_eq!(s.tool("records", json!({"stream": " "})), Err("records of which stream? (a stream, a decode's name or a glob)".into()));
+}
+
+/// `--ansi` draws colours, with or without a trace; the start screen takes `--keys` (spec §4).
+#[test]
+fn snapshot_ansi_and_start_keys() {
+    let dir = Dir::new("ansi");
+    let out = |args: &[&str]| String::from_utf8(wtf(&dir.0).args(args).output().unwrap().stdout).unwrap();
+    assert!(out(&["--snapshot", "100x32", "--ansi"]).contains("\x1b["));
+    let trace = simple();
+    assert!(out(&[trace.to_str().unwrap(), "--snapshot", "100x20", "--ansi"]).contains("\x1b["));
+    let typing = out(&["--snapshot", "100x32", "--keys", "ox.vcd"]);
+    assert!(typing.contains("x.vcd"), "{typing}");
+}
+
+/// A trace with an interface a built-in protocol decodes says so once (spec §4).
+#[test]
+fn found_interfaces_are_offered() {
+    let dir = Dir::new("found");
+    let trace = std::fs::canonicalize("tests/data/axilite.vcd").unwrap();
+    let shot = wtf(&dir.0).arg(trace).args(["--snapshot", "140x12"]).output().unwrap();
+    let shot = String::from_utf8(shot.stdout).unwrap();
+    assert!(shot.contains("axilite at top.s_axi_") && shot.contains("decodes"), "{shot}");
+}

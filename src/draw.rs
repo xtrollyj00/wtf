@@ -616,8 +616,7 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
         .map(|((&(i, _), l), (n, m))| {
             let (c, col) = match (&ws.rows[i], l) {
                 (Row::Group { collapsed, .. }, _) => (if *collapsed { icon::GROUP } else { icon::GROUP_OPEN }, pal().cursor),
-                (_, Some(l)) => kind(ws, l.var, l.bit)?,
-                _ => return None,
+                (_, l) => kind(ws, l.as_ref()?.var, l.as_ref()?.bit)?,
             };
             gl().icons.then_some((m.map_or(n.len() - n.trim_start().len(), |m| m + 2), c, col))
         })

@@ -551,3 +551,14 @@ fn undo_covers_marks() {
     ws.undo().unwrap();
     assert_eq!((ws.marks[1], ws.marks[2], ws.labels[1].name.as_str()), (Some(30), None, "first"));
 }
+
+/// A computed signal reads nothing of its own: it is loaded when its parts are (spec §3).
+#[test]
+fn computed_signals_load_with_their_parts() {
+    let mut ws = common::with(&["top.cpu.data[3:0]"]);
+    let v = ws.trace.vars.iter().position(|v| v.path.contains("data[3:0]")).unwrap();
+    assert!(ws.trace.loaded(v));
+    let file = ws.trace.vars.iter().position(|v| v.path == "top.cpu.state").unwrap();
+    ws.trace.load(&[file]);
+    assert!(ws.trace.loaded(file));
+}

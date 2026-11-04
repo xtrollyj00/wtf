@@ -406,4 +406,59 @@ mod tests {
         assert!(names("records bus.rd where !(add").contains(&"!(addr ".to_string()));
         assert_eq!(names("select bus.r"), ["bus.rd "]);
     }
+
+    #[test]
+    fn completes_more() {
+        let ws = wtf_core::workspace::Workspace::open(std::path::Path::new("tests/data/axilite.vcd")).unwrap();
+        let mut app = crate::tui::app::App::new(ws);
+        // a ghost shows only what continues the typed word
+        let c = complete("zo", &app);
+        assert_eq!(c.ghost("xx", 0), "");
+        assert_eq!(c.ghost("zo", 99), "");
+        let names = |app: &crate::tui::app::App, line: &str| complete(line, app).items.into_iter().map(|i| i.text).collect::<Vec<_>>();
+        // help topics, the trace's prefixes, a protocol's roles
+        assert!(names(&app, "help de").contains(&"decode".to_string()));
+        assert!(complete("help ", &app).what == "topic");
+        let p = names(&app, "decode bus axilite prefix=");
+        assert!(!p.is_empty() && p[0].ends_with(' '), "{p:?}");
+        assert!(names(&app, "decode bus nosuch ").is_empty());
+        assert!(names(&app, "zoom 5 6 7").is_empty());
+        // what a protocol adds: its clock and prefix, only a prefix where it has no clock, nothing for a stream function
+        let then = |app: &crate::tui::app::App, p: &str| complete(&format!("decode x {p}"), app).items.iter().find(|i| i.label == p).map(|i| i.then.clone());
+        assert_eq!(then(&app, "axilite").unwrap(), "clock=<clk> prefix=<prefix>");
+        assert_eq!(then(&app, "spi").unwrap(), "prefix=<prefix>");
+        assert_eq!(then(&app, "pair").unwrap(), "");
+        app.run("protocol cmd roles=valid,data when=valid").unwrap();
+        assert_eq!(names(&app, "decode x cmd da"), ["data="]);
+        // rows: signals and groups; marks with their times once put
+        app.run("add top.aclk").unwrap();
+        app.run("group g").unwrap();
+        let rows = names(&app, "select ");
+        assert!(rows.iter().any(|r| r.starts_with("g ")), "{rows:?}");
+        assert!(rows.iter().any(|r| r.contains("aclk")), "{rows:?}");
+        assert!(complete("cursor 2", &app).items[0].desc == "not put");
+        app.run("cursor 2 40ns").unwrap();
+        let c = complete("cursor 2", &app);
+        assert!(c.items[0].desc.contains("40"), "{:?}", c.items[0].desc);
+        assert_eq!(names(&app, "fit '"), ["'2 "]);
+        // :w lists session files and directories to go into
+        assert!(names(&app, "w tests/data/simple.s").contains(&"tests/data/simple.session.toml".to_string()));
+        assert!(names(&app, "w tests/d").contains(&"tests/data/".to_string()));
+        assert!(names(&app, "w nosuchdir/x").is_empty());
+        assert!(names(&app, "w ").iter().all(|f| !f.starts_with('.')));
+    }
+
+    #[test]
+    fn icons() {
+        use crate::draw::icon as ic;
+        let it = |desc: &str| Item { desc: desc.into(), ..item("x", "") };
+        assert_eq!(item_icon("protocol", &it("found here: x")), ic::OK);
+        assert_eq!(item_icon("protocol", &it("")), ic::PLUG);
+        for (what, c) in [("signal", ic::WIRE), ("role", ic::WIRE), ("stream", ic::STREAM), ("file", ic::FILE), ("scope", ic::FOLDER), ("row", ic::FOLDER), ("topic", ic::CMD)] {
+            assert_eq!(item_icon(what, &it("")), c, "{what}");
+        }
+        assert_eq!(icon(":pick interfaces"), ic::PLUG);
+        assert_eq!(icon("pick signals"), ic::WIRE);
+        assert_eq!(icon("pick nothing-known"), ic::SEARCH);
+    }
 }

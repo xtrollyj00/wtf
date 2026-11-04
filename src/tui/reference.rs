@@ -29,19 +29,18 @@ fn sections(out: &mut String, app: &App) {
         out.push_str("\n</section>\n\n");
     }
     out.push_str("</div>\n\n");
-    if !examples.is_empty() {
-        if !heading.is_empty() {
-            out.push_str(&format!("### {heading}\n\n| Type | Finds |\n|---|---|\n"));
-            for (e, d) in examples {
-                out.push_str(&format!("| `{}` | {} |\n", cell(e), cell(d)));
-            }
-        } else {
-            for (_, d) in examples {
-                out.push_str(&format!("{d}\n"));
-            }
+    // help_text always has examples
+    if !heading.is_empty() {
+        out.push_str(&format!("### {heading}\n\n| Type | Finds |\n|---|---|\n"));
+        for (e, d) in examples {
+            out.push_str(&format!("| `{}` | {} |\n", cell(e), cell(d)));
         }
-        out.push('\n');
+    } else {
+        for (_, d) in examples {
+            out.push_str(&format!("{d}\n"));
+        }
     }
+    out.push('\n');
 }
 
 /// The leader menu: the top's entries, then a table per group.

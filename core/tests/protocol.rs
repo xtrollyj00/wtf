@@ -504,3 +504,23 @@ fn results_and_sets() {
     let set = wtf_core::stream::Set::new(vec![&ws.streams[ws.stream_set("s.errors").unwrap()[0]], &ws.streams[ws.stream_set("s.wr.unmatched").unwrap()[0]]]);
     assert_eq!(set.columns.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["rule", "kind"]);
 }
+
+/// Spec §16: `records` names a stream, and a field it lacks lists those it has.
+#[test]
+fn set_errors_and_briefs() {
+    let mut ws = open("axilite.vcd");
+    assert_eq!(ws.stream_set("  ").unwrap_err(), "records of which stream? (a stream, a decode's name or a glob)");
+    ws.add_decode(decode("s", "axilite", "aclk", &[], &[("prefix", "s_axi_")])).unwrap();
+    let one = wtf_core::stream::Set::new(vec![&ws.streams[ws.stream_set("s.wr").unwrap()[0]]]);
+    assert!(one.group_by(&[], &["nope".into()]).err().unwrap().starts_with("s.wr: no field nope (fields: "));
+    let two = wtf_core::stream::Set::new(vec![&ws.streams[ws.stream_set("s.wr").unwrap()[0]], &ws.streams[ws.stream_set("s.rd").unwrap()[0]]]);
+    assert!(two.group_by(&[], &["nope".into()]).err().unwrap().starts_with("no field nope (fields: "));
+
+    // `protocols <name>` in short: a built-in, a generic one, one of the session's, none
+    let brief = |n: &str, ws: &Workspace| wtf_core::protocol::brief(n, &ws.protocols);
+    assert!(brief("axilite", &ws).unwrap().starts_with("decode <name> axilite clock=<clk> prefix=<prefix>"));
+    assert!(brief("frame", &ws).unwrap().starts_with("decode <name> frame ...\n\nrecords of a stream"));
+    assert_eq!(brief("cmd", &ws), None);
+    ws.add_protocol(Sampler { name: "cmd".into(), when: "valid && ready".into(), fields: vec![("op".into(), "cmd[3:0]".into())], roles: vec!["valid".into(), "ready".into(), "cmd".into()] }).unwrap();
+    assert_eq!(brief("cmd", &ws).unwrap(), "decode <name> cmd clock=<clk> valid=<signal> ready=<signal> cmd=<signal>\n\nA record where valid && ready\nFields: op");
+}

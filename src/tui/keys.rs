@@ -442,4 +442,40 @@ mod tests {
             ][..]
         );
     }
+
+    #[test]
+    fn shown_keys_and_groups() {
+        let show = |t: &str| keys(t)[0].show();
+        assert_eq!((show("<BS>"), show("<S-Tab>"), Key { code: KeyCode::Up, ctrl: false }.show()), ("Backspace".into(), "Shift-Tab".into(), "Up".into()));
+        assert_eq!((Keymap::group(Action::JumpBack), Keymap::group(Action::CopyTime), Keymap::group(Action::Remove), Keymap::group(Action::Start)), ("jump to", "copy", "remove", "go to"));
+        // a jump key followed by something that is no digit means nothing
+        let mut w = Vec::new();
+        let m = Keymap::from_table(&"jump = \"<C-j>\"".parse().unwrap(), &mut w);
+        assert_eq!(m.hit(&keys("<C-j><CR>")), Meaning::None);
+    }
+
+    #[test]
+    fn leader_table_replaces() {
+        // a non-string name is named; a table over a command replaces it; a path through a command is none
+        let mut m = Keymap::default();
+        let mut w = Vec::new();
+        let t: toml::Table = "[f]\nname = 3\n[u]\nname = \"x\"\ny = [\"y\", \":q\"]\n[n]\nz = [\"z\", \":q\"]".parse().unwrap();
+        m.set_leader(&t, &mut w);
+        assert_eq!(w, ["config: leader.f.name = 3? (a string)"]);
+        let mut w = Vec::new();
+        m.set_leader(&"q = 3".parse().unwrap(), &mut w);
+        assert_eq!(w.len(), 1);
+        // a new group on a free key, and over a command key
+        assert!(matches!(m.leader.at(&keys("uy")), Some(Entry::Run { .. })));
+        assert!(matches!(m.leader.at(&keys("nz")), Some(Entry::Run { .. })));
+        let Entry::Group { items, .. } = &m.leader else { panic!() };
+        let run = items.iter().find(|(_, e)| matches!(e, Entry::Run { .. })).map(|(k, _)| *k);
+        if let Some(k) = run {
+            assert_eq!(m.leader.at(&[k, k]), None);
+            let mut m2 = m;
+            let key = k.show();
+            m2.set_leader(&format!("[{key}]\nname = \"g\"").parse().unwrap(), &mut Vec::new());
+            assert!(matches!(m2.leader.at(&[k]), Some(Entry::Group { .. })));
+        }
+    }
 }

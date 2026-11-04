@@ -98,6 +98,16 @@ mod tests {
         record(&file, trace, None, false).unwrap();
         let h = read(&file);
         assert_eq!((h.len(), &h[KEEP - 1].trace), (KEEP, &abs));
+        // a line of another kind, or with no trace, is skipped
+        std::fs::write(&file, "1\tbot\t/a.vcd\n2\tyou\t\n3\tyou\t/b.vcd\n").unwrap();
+        assert_eq!(read(&file).len(), 1);
+        // a path with a tab is not kept; the file is made in a directory that is missing
+        let odd = d.join("a\tb.vcd");
+        record(&file, &odd, None, false).unwrap();
+        assert_eq!(read(&file).len(), 1);
+        let deep = d.join("x/y/history");
+        record(&deep, trace, None, false).unwrap();
+        assert_eq!(read(&deep).len(), 1);
         std::fs::remove_dir_all(&d).unwrap();
     }
 }

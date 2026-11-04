@@ -1485,6 +1485,108 @@ pub fn parse_keys(s: &str) -> Result<Vec<KeyEvent>, String> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+
+    #[test]
+    fn clock_out_of_range() {
+        // a time past the years localtime_r can hold fails it: no made-up 00:00:00
+        assert_eq!(clock(i64::MAX as u64), "--:--:--");
+    }
+
+    fn simple() -> App {
+        let t = wtf_core::trace::Trace::open("tests/data/simple.vcd".as_ref()).unwrap();
+        App::new(wtf_core::workspace::Workspace::new(t, "x".into()))
+    }
+
+    fn wheel(kind: MouseEventKind, x: u16, y: u16) -> MouseEvent {
+        MouseEvent { kind, column: x, row: y, modifiers: KeyModifiers::NONE }
+    }
+
+    #[test]
+    fn messages_list() {
+        // spec §4 "Notifications": `:messages` moves, copies, opens an agent's step, closes
+        let mut app = simple();
+        assert_eq!(app.run("messages").unwrap_err(), "no messages yet");
+        for t in ["a", "b", "c"] {
+            app.log(&(t.into(), false), None);
+        }
+        app.log(&("agent: find".into(), false), Some("1-1".into()));
+        app.notes[3].step = Some(("find".into(), "x".into(), "1 matches".into()));
+        app.keys(":messages\n").unwrap();
+        assert_eq!(app.messages, Some(3));
+        app.keys("kk").unwrap();
+        assert_eq!(app.messages, Some(1));
+        app.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        app.keys("j").unwrap();
+        app.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        assert_eq!(app.messages, Some(3));
+        app.keys("g").unwrap();
+        assert_eq!(app.messages, Some(0));
+        app.keys("y").unwrap();
+        assert_eq!(app.yank.as_deref(), Some("a"));
+        // Enter on a plain note, and a key with no meaning, change nothing
+        app.keys("<CR>z").unwrap();
+        assert_eq!(app.messages, Some(0));
+        // the wheel moves, a click outside closes
+        app.mouse(wheel(MouseEventKind::ScrollDown, 5, 5));
+        app.mouse(wheel(MouseEventKind::ScrollDown, 5, 5));
+        assert_eq!(app.messages, Some(2));
+        app.mouse(wheel(MouseEventKind::ScrollUp, 5, 5));
+        app.mouse(wheel(MouseEventKind::Moved, 5, 5));
+        assert_eq!(app.messages, Some(1));
+        app.mouse(wheel(MouseEventKind::Down(MouseButton::Left), 0, 0));
+        assert!(app.messages.is_none());
+        // Enter on an agent's step opens the trail
+        app.ws.trail = vec![wtf_core::workspace::Step { tool: "find".into(), ask: "x".into(), answer: "1 matches".into(), time: Some(20) }];
+        app.keys(":messages\n<CR>").unwrap();
+        assert!(app.messages.is_none() && app.picker.is_some(), "{:?} {:?}", app.msg, app.messages);
+        app.keys("<Esc>:messages\nG").unwrap();
+        assert_eq!(app.messages, Some(3));
+        app.keys("<Esc>").unwrap();
+        assert!(app.messages.is_none());
+    }
+
+    #[test]
+    fn leader_and_line_mouse() {
+        let mut app = simple();
+        // a right click closes the leader menu
+        app.keys("<Space>").unwrap();
+        assert!(app.leader.is_some());
+        app.mouse(wheel(MouseEventKind::Down(MouseButton::Right), 0, 0));
+        assert!(app.leader.is_none());
+        // the wheel moves the highlight in the completions, and wraps
+        app.keys(":a").unwrap();
+        let n = crate::tui::commands::complete(&app.line, &app).items.len();
+        assert!(n > 1);
+        app.mouse(wheel(MouseEventKind::ScrollDown, 5, 5));
+        assert_eq!(app.hl, 1);
+        app.mouse(wheel(MouseEventKind::ScrollUp, 5, 5));
+        app.mouse(wheel(MouseEventKind::ScrollUp, 5, 5));
+        assert_eq!(app.hl, n - 1);
+    }
+
+    #[test]
+    fn notes_keep_the_latest() {
+        let mut app = simple();
+        for k in 0..NOTES + 5 {
+            app.log(&(format!("m{k}"), false), None);
+        }
+        assert_eq!((app.notes.len(), app.notes[0].text.as_str()), (NOTES, "m5"));
+    }
+
+    #[test]
+    fn menu_search_and_zoom_out() {
+        let mut app = simple();
+        app.keys("/").unwrap();
+        assert_eq!(app.mode, Mode::Search);
+        app.keys("<Esc>:fit 0 20ns\n").unwrap();
+        let (cols, ticks) = (app.ws.view.cols, app.ws.view.ticks);
+        app.ws.view.width = 80;
+        app.keys("x").unwrap();
+        assert!((app.ws.view.cols, app.ws.view.ticks) != (cols, ticks));
+    }
+
     #[test]
     fn common_scope() {
         assert_eq!(super::common_scope(&["top.cpu.a", "top.cpu.sub.b"]), "top.cpu");

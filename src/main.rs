@@ -1581,6 +1581,11 @@ mod tests {
         app.run("fit 10ns 20ns").unwrap();
         let s = snapshot(&mut app, 100, Some(8));
         assert!(s.lines().nth(1).unwrap().contains("◂2 first bad write ─") && !s.contains("◂1"), "{s}");
+        // two marks past the right edge: the nearer one shows, the other is not drawn
+        app.run("cursor 5 60ns name=later").unwrap();
+        let s = snapshot(&mut app, 100, Some(8));
+        let ruler = s.lines().nth(1).unwrap();
+        assert!(ruler.ends_with("─ retry 3▸") && !ruler.contains("later"), "{s}");
     }
 
     #[test]

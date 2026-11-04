@@ -247,8 +247,6 @@ impl App {
         };
         if out.is_empty() {
             return Err(match p.source {
-                0 => "no signals in this trace",
-                1 => "no marks",
                 2 => "no records",
                 4 => "no agent is working on this machine",
                 6 => "no interface a built-in protocol decodes: :decode names the signals (:help decode)",
@@ -711,5 +709,201 @@ mod tests {
         p.query.clear();
         p.filter();
         assert_eq!(p.shown, vec![0, 1, 2, 3]);
+    }
+
+    fn app(file: &str) -> App {
+        let t = wtf_core::trace::Trace::open(format!("tests/data/{file}").as_ref()).unwrap();
+        App::new(wtf_core::workspace::Workspace::new(t, "x".into()))
+    }
+
+    fn key(app: &mut App, code: KeyCode, mods: KeyModifiers) {
+        app.picker_key(KeyEvent::new(code, mods));
+    }
+
+    fn hl(app: &App) -> usize {
+        app.picker.as_ref().unwrap().hl
+    }
+
+    #[test]
+    fn picker_moves_marks_and_closes() {
+        // spec §5 "Picker": the fixed keys
+        let mut app = app("simple.vcd");
+        app.open_picker("").unwrap();
+        crate::snapshot(&mut app, 100, Some(10));
+        let (none, ctrl) = (KeyModifiers::NONE, KeyModifiers::CONTROL);
+        key(&mut app, KeyCode::Down, none);
+        key(&mut app, KeyCode::Char('n'), ctrl);
+        assert_eq!(hl(&app), 2);
+        key(&mut app, KeyCode::Up, none);
+        key(&mut app, KeyCode::Char('p'), ctrl);
+        key(&mut app, KeyCode::Up, none);
+        assert_eq!(hl(&app), 0, "stops at the first");
+        let page = app.picker.as_ref().unwrap().page;
+        assert!((1..5).contains(&page));
+        key(&mut app, KeyCode::PageDown, none);
+        assert_eq!(hl(&app), page);
+        // the list scrolls to the highlight
+        key(&mut app, KeyCode::PageDown, none);
+        key(&mut app, KeyCode::PageDown, none);
+        crate::snapshot(&mut app, 100, Some(10));
+        assert!(app.picker.as_ref().unwrap().top > 0);
+        for _ in 0..4 {
+            key(&mut app, KeyCode::PageUp, none);
+        }
+        crate::snapshot(&mut app, 100, Some(10));
+        assert_eq!(app.picker.as_ref().unwrap().top, 0);
+        // keys the picker has no use for do nothing
+        key(&mut app, KeyCode::F(1), none);
+        key(&mut app, KeyCode::Char('x'), ctrl);
+        assert!(app.picker.as_ref().unwrap().query.is_empty());
+        // Tab marks, again unmarks; a shown signal can't be marked
+        key(&mut app, KeyCode::Tab, none);
+        key(&mut app, KeyCode::Up, none);
+        key(&mut app, KeyCode::Tab, none);
+        assert!(app.picker.as_ref().unwrap().marked.is_empty());
+        app.run("add top.clk").unwrap();
+        app.open_picker("signals").unwrap();
+        for c in "top.clk".chars() {
+            key(&mut app, KeyCode::Char(c), none);
+        }
+        key(&mut app, KeyCode::Tab, none);
+        assert_eq!(app.msg.as_ref().unwrap().0, "nothing to mark: already shown");
+        key(&mut app, KeyCode::Esc, none);
+        assert!(app.picker.is_none());
+        // Tab on other sources, and a picker already closed, are ignored
+        app.open_picker("commands").unwrap();
+        key(&mut app, KeyCode::Tab, none);
+        key(&mut app, KeyCode::Esc, none);
+        key(&mut app, KeyCode::Down, none);
+    }
+
+    #[test]
+    fn picker_mouse_wheel_and_gaps() {
+        let mut app = app("simple.vcd");
+        app.open_picker("signals").unwrap();
+        crate::snapshot(&mut app, 100, Some(20));
+        let ev = |kind, x, y| MouseEvent { kind, column: x, row: y, modifiers: KeyModifiers::NONE };
+        let now = Instant::now();
+        app.picker_mouse(ev(MouseEventKind::ScrollDown, 20, 5), (20, 5), now);
+        assert_eq!(hl(&app), 1);
+        app.picker_mouse(ev(MouseEventKind::ScrollUp, 20, 5), (20, 5), now);
+        assert_eq!(hl(&app), 0);
+        // inside the box but on no entry (the query line): nothing
+        let b = app.hit.boxed.unwrap();
+        let (x, y) = (b.x + 3, b.y + 1);
+        app.picker_mouse(ev(MouseEventKind::Down(MouseButton::Left), x, y), (x as usize, y as usize), now);
+        assert!(app.picker.is_some());
+    }
+
+    #[test]
+    fn picker_previews() {
+        let mut app = app("axilite.vcd");
+        app.preview_wait = std::time::Duration::ZERO;
+        app.run("decode bus axilite clock=aclk prefix=s_axi_").unwrap();
+        app.run("decode bus2 axilite clock=aclk prefix=s_axi_").unwrap();
+        app.keys(":pick signals\ns_axi_arvalid").unwrap();
+        let s = crate::snapshot(&mut app, 120, Some(30));
+        assert!(s.contains("1 bit") && s.contains("decodes") && s.contains("bus") && s.contains("Enter adds it"), "{s}");
+        // a stream: how many records; below a group, Enter adds below the group
+        app.run("add top.aclk").unwrap();
+        app.run("group g").unwrap();
+        let s = crate::snapshot(&mut app, 120, Some(30));
+        assert!(s.contains("Enter adds it below the group g") || s.contains("Enter adds it below"), "{s}");
+        app.picker = None;
+        app.keys(":pick signals\nbus.rd").unwrap();
+        let s = crate::snapshot(&mut app, 120, Some(30));
+        assert!(s.contains("stream, "), "{s}");
+        // decodes cut off by a short screen
+        let s = crate::snapshot(&mut app, 120, Some(9));
+        assert!(!s.is_empty());
+    }
+
+    #[test]
+    fn picker_sources_nerd_and_picks() {
+        // every source drawn with the icons; Enter on a record selects its stream and jumps
+        let mut app = app("axilite.vcd");
+        app.run("decode bus axilite clock=aclk prefix=s_axi_").unwrap();
+        app.run("add bus.rd").unwrap();
+        app.run("cursor 2 60ns name=late note=the read came after the write was accepted").unwrap();
+        app.ws.trail = vec![wtf_core::workspace::Step { tool: "find".into(), ask: "x".into(), answer: "no time".into(), time: None }];
+        crate::draw::set_glyphs(&crate::draw::NERD);
+        // an agent on this trace and one on another
+        app.ws.trace_path = "tests/data/axilite.vcd".into();
+        let (here, there) = (app.ws.trace_path.clone(), std::path::PathBuf::from("tests/data/simple.vcd"));
+        let id = std::process::id();
+        let mine = crate::live::listen(&format!("pk{id}a"), "agent", &here, |_| Err("busy".into())).unwrap();
+        let other = crate::live::listen(&format!("pk{id}b"), "agent", &there, |_| Ok(String::new())).unwrap();
+        app.open_picker("signals").unwrap();
+        for _ in 0..SOURCES.len() {
+            let s = crate::snapshot(&mut app, 120, Some(24));
+            let p = app.picker.as_ref().unwrap();
+            assert!(s.contains(SOURCES[p.source]), "{s}");
+            if p.source == 4 {
+                assert!(s.contains(&format!("pk{id}a")) && s.contains("this trace"), "{s}");
+            }
+            key(&mut app, KeyCode::Char('s'), KeyModifiers::CONTROL);
+        }
+        app.open_picker("marks").unwrap();
+        key(&mut app, KeyCode::Down, KeyModifiers::NONE);
+        let s = crate::snapshot(&mut app, 120, Some(24));
+        assert!(s.contains("the read came after") && s.contains("mark 2: late"), "{s}");
+        // the agent here is followed; its refusal is shown, the picker closed
+        app.open_picker("sessions").unwrap();
+        for c in format!("pk{id}a").chars() {
+            key(&mut app, KeyCode::Char(c), KeyModifiers::NONE);
+        }
+        key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
+        assert!(app.picker.is_none() && app.msg.is_some());
+        // the other trace's: say to open that trace
+        app.open_picker("sessions").unwrap();
+        for c in format!("pk{id}b").chars() {
+            key(&mut app, KeyCode::Char(c), KeyModifiers::NONE);
+        }
+        key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
+        assert!(app.msg.as_ref().unwrap().0.contains("works on another trace"), "{:?}", app.msg);
+        drop((mine, other));
+        // a step about no time
+        app.open_picker("trail").unwrap();
+        key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
+        assert_eq!(app.msg.as_ref().unwrap().0, "this step is about no time");
+        // a record: its stream's row is selected and the cursor at its start
+        app.run("add top.aclk").unwrap();
+        app.run("select top.aclk").unwrap();
+        app.open_picker("records bus.rd").unwrap();
+        let t = match app.picker.as_ref().unwrap().entries[0].act { Act::Record(t) => t, _ => panic!() };
+        key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
+        let Row::Signal(sel) = &app.ws.rows[app.ws.sel] else { panic!() };
+        assert_eq!((app.ws.trace.vars[sel.var].path.as_str(), app.ws.view.cursor), ("bus.rd", t));
+        assert!(app.open_picker("records nope").unwrap_err().starts_with("unknown stream: nope"));
+        crate::draw::set_glyphs(&crate::draw::UNICODE);
+    }
+
+    #[test]
+    fn picker_decode_without_clock_prefills() {
+        // spec §5: an interface whose clock isn't found puts its line on the command line
+        let mut a = app("axilite.vcd");
+        a.open_picker("commands").unwrap();
+        let line = "decode bus axilite clock= prefix=top.s_axi_".to_string();
+        a.picker.as_mut().unwrap().entries[0].act = Act::Decode { line: line.clone(), name: "bus".into(), ready: false, done: None };
+        key(&mut a, KeyCode::Enter, KeyModifiers::NONE);
+        assert_eq!(a.line, line);
+    }
+
+    #[test]
+    fn picker_empty_small_and_undecoded() {
+        let mut a = app("axilite.vcd");
+        a.open_picker("signals").unwrap();
+        for c in "zzzz".chars() {
+            key(&mut a, KeyCode::Char(c), KeyModifiers::NONE);
+        }
+        assert!(crate::snapshot(&mut a, 100, Some(20)).contains("nothing matches"));
+        // too small for the box: the rows alone
+        assert!(!crate::snapshot(&mut a, 30, Some(8)).contains("nothing matches"));
+        // an interface not decoded yet, with the icons
+        crate::draw::set_glyphs(&crate::draw::NERD);
+        a.open_picker("interfaces").unwrap();
+        let s = crate::snapshot(&mut a, 100, Some(20));
+        crate::draw::set_glyphs(&crate::draw::UNICODE);
+        assert!(s.contains("axilite at top.s_axi_") && !s.contains("axilite \u{2192}"), "{s}");
     }
 }

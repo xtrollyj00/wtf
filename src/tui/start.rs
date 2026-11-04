@@ -584,4 +584,43 @@ mod tests {
         assert_eq!(press(&mut s, "a"), None);
         assert!(screen(&s, 100, 32).contains("no agent works on this machine"));
     }
+
+    #[test]
+    fn more_keys() {
+        let mut s = start();
+        assert_eq!(press(&mut s, "<C-c>"), Some(Choice::Quit));
+        // Esc leaves typing, and the list Keys; any other key does nothing
+        assert_eq!(press(&mut s, "ox<Esc><CR>"), None);
+        // a key that is no character, while typing, does nothing
+        assert_eq!(press(&mut s, "o<Tab><Esc>"), None);
+        assert!(s.typing.is_none());
+        press(&mut s, "?");
+        assert!(s.list == List::Keys);
+        assert_eq!(press(&mut s, "<Esc>z"), None);
+        assert!(s.list == List::Recent);
+        // `~/` is the home directory
+        let home = std::env::var_os("HOME").map_or(PathBuf::from("~"), PathBuf::from);
+        assert_eq!(press(&mut s, "o~/a.vcd<CR>"), Some(Choice::Open { trace: home.join("a.vcd"), session: None }));
+        // agents, with icons; a screen too small for a big logo takes the small one in a corner
+        s.agents.push(live::Session { id: "5000-2".into(), kind: "agent".into(), trace: "/w/b.fst".into() });
+        press(&mut s, "a");
+        draw::set_glyphs(&draw::NERD);
+        let nerd = screen(&s, 100, 32);
+        draw::set_glyphs(&draw::UNICODE);
+        assert!(nerd.contains(&icon::AGENT.to_string()) && nerd.contains("5000-2"), "{nerd}");
+        let mut buf = Buffer::empty(Rect::new(0, 0, 3, 1));
+        let area = buf.area;
+        small_logo(&mut buf, area, 0, 0);
+        assert!(buf[(0, 0)].symbol() == " ");
+        // the agents are listed again on a refresh
+        s.refresh_agents();
+        assert!(s.agents.iter().all(|a| a.kind == "agent"));
+        assert!(s.height() > LOGO_H as u16);
+        Start::load();
+    }
+
+    #[test]
+    fn times_ago() {
+        assert_eq!([0, 59, 60, 3599, 3600, 86399, 86400, 1_209_599, 1_209_600].map(ago), ["now", "now", "1m ago", "59m ago", "1h ago", "23h ago", "1d ago", "13d ago", "2w ago"]);
+    }
 }

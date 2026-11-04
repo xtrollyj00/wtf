@@ -715,9 +715,6 @@ fn which_key(app: &App, buf: &mut Buffer, w: usize, body: usize) {
             lines.push((k, None, Keymap::desc(a).into(), String::new()));
         }
     }
-    if lines.is_empty() {
-        return;
-    }
     let ix = if gl().icons && lines.iter().any(|l| l.1.is_some()) { 2 } else { 0 };
     let kw = lines.iter().map(|l| l.0.chars().count()).max().unwrap_or(0);
     let dw = lines.iter().map(|l| l.2.chars().count()).max().unwrap_or(0);
@@ -1199,6 +1196,93 @@ mod tests {
         assert_eq!(faded(pal().unknown, 1.0, false), back);
         let mid = faded(panel, 0.5, true);
         assert!(mid != panel && mid != back, "{mid:?}");
+        // without RGB colours there is nothing to blend: it holds, then goes at the end
+        let mut p = crate::theme::builtin("dark", false).unwrap();
+        (p.mono, p.background, p.dim) = (false, Color::Indexed(0), Color::Indexed(8));
+        draw::set_palette(p);
+        let c = Color::Indexed(5);
+        assert_eq!((faded(c, 0.5, false), faded(c, 0.9, false), faded(c, 0.9, true)), (c, Color::Indexed(8), Color::Indexed(0)));
         draw::set_palette(crate::theme::builtin("dark", true).unwrap());
+    }
+
+    fn nerd_app(file: &str) -> App {
+        draw::set_glyphs(&draw::NERD);
+        let t = wtf_core::trace::Trace::open(format!("tests/data/{file}").as_ref()).unwrap();
+        App::new(wtf_core::workspace::Workspace::new(t, "x".into()))
+    }
+
+    /// Characters in the private-use range: the Nerd Font icons (spec §14).
+    fn icons(t: &str) -> usize {
+        t.chars().filter(|c| ('\u{e000}'..='\u{f8ff}').contains(c)).count()
+    }
+
+    #[test]
+    fn icons_and_small_screens() {
+        let mut a = nerd_app("simple.vcd");
+        a.keys(":add top.clk top.cpu.data\n").unwrap();
+        // the panel: a scope's and a signal's chip; the card over the cursor: the kind's chip
+        a.keys("a").unwrap();
+        assert!(icons(&crate::snapshot(&mut a, 100, Some(16))) > 2);
+        a.keys("<Esc>").unwrap();
+        a.keys("e").unwrap();
+        assert!(a.examine.is_some());
+        assert!(icons(&crate::snapshot(&mut a, 100, Some(16))) > 0);
+        a.keys("<Esc>").unwrap();
+        // which-key over the jump key lists the cursor and the marks, each with its chip
+        a.keys(":cursor 2 20ns\n'").unwrap();
+        a.which_key = true;
+        let s = crate::snapshot(&mut a, 100, Some(16));
+        assert!(s.contains("mark 2") && s.contains("cursor") && icons(&s) >= 2, "{s}");
+        // too small for the card: nothing is drawn of it
+        assert!(!crate::snapshot(&mut a, 12, Some(16)).contains("mark 2"));
+        assert!(!crate::snapshot(&mut a, 100, Some(3)).contains("mark 2"));
+        a.keys("<Esc>").unwrap();
+        // the leader menu: a chip for each group, a folder for any other; none where it doesn't fit
+        let mut w = Vec::new();
+        a.keymap.set_leader(&"[z]\nname = \"mine\"\nq = [\"quit\", \":q\"]".parse().unwrap(), &mut w);
+        assert!(w.is_empty(), "{w:?}");
+        a.keys("<Space>").unwrap();
+        let s = crate::snapshot(&mut a, 120, Some(24));
+        assert!(icons(&s) > 4, "{s}");
+        assert!(!crate::snapshot(&mut a, 15, Some(24)).contains("Esc"));
+        assert!(!crate::snapshot(&mut a, 120, Some(3)).contains("Esc"));
+        a.keys("<Esc>").unwrap();
+        // notifications: a chip in the title; a long one is cut with an ellipsis
+        a.keys(&format!(":zoom {}\n", "x".repeat(300))).unwrap();
+        let s = crate::snapshot(&mut a, 60, Some(16));
+        assert!(s.contains(draw::gl().cut) && icons(&s) > 0, "{s}");
+        // :messages: a chip per row; not under 30 columns
+        a.keys(":messages\n").unwrap();
+        let s = crate::snapshot(&mut a, 100, Some(16));
+        assert!(s.contains("you") && icons(&s) > 0, "{s}");
+        assert!(!crate::snapshot(&mut a, 20, Some(16)).contains("you"));
+        draw::set_glyphs(&draw::UNICODE);
+    }
+
+    #[test]
+    fn start_screen_and_completions() {
+        let mut a = nerd_app("simple.vcd");
+        // the start screen with a long path: cut at the left, the file kept
+        a.ws.trace_path = std::path::PathBuf::from(format!("/{}/simple.vcd", "d".repeat(80)));
+        let s = crate::snapshot(&mut a, 70, Some(24));
+        assert!(s.contains(draw::gl().cut) && s.contains("simple.vcd"), "{s}");
+        // a big logo where it fits
+        let big = crate::snapshot(&mut a, 120, Some(40));
+        assert!(big.lines().filter(|l| !l.trim().is_empty()).count() > s.lines().filter(|l| !l.trim().is_empty()).count());
+        // a leader without the interfaces entry: the action is left out
+        let mut w = Vec::new();
+        a.keymap.set_leader(&"[d]\nd = \"\"".parse().unwrap(), &mut w);
+        assert!(!crate::snapshot(&mut a, 100, Some(24)).contains("Decode an interface"));
+        // interfaces found in the trace are counted in the action
+        let mut b = nerd_app("axilite.vcd");
+        assert!(crate::snapshot(&mut b, 100, Some(24)).contains("found"));
+        // command line completions: an icon per item, and the docs card of a protocol
+        b.keys(":decode bus axil").unwrap();
+        let s = crate::snapshot(&mut b, 120, Some(24));
+        assert!(icons(&s) > 0 && s.contains("Tab takes it"), "{s}");
+        // no room above the line for the docs card: the list alone
+        assert!(!crate::snapshot(&mut b, 120, Some(4)).contains("Tab takes it"));
+        b.keys("<Esc>").unwrap();
+        draw::set_glyphs(&draw::UNICODE);
     }
 }
