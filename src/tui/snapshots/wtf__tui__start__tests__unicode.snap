@@ -30,4 +30,4 @@ expression: "screen(&start(), 100, 32)"
                        eth_parser.fst        ···━···━·━····    2d ago       3
                        tx_drift.fst          ·━············    6d ago       4
 
-                                wtf 0.2.0   1 agent on this machine
+                                wtf x.y.z   1 agent on this machine

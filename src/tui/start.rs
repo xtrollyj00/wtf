@@ -526,7 +526,9 @@ mod tests {
         let mut buf = Buffer::empty(Rect::new(0, 0, w, h));
         s.draw(buf.area, &mut buf);
         // the cells as drawn: `draw::text` would read the logo's colours as cursor columns
-        (0..h).map(|y| (0..w).map(|x| buf[(x, y)].symbol()).collect::<String>().trim_end().to_string() + "\n").collect()
+        let text: String = (0..h).map(|y| (0..w).map(|x| buf[(x, y)].symbol()).collect::<String>().trim_end().to_string() + "\n").collect();
+        // the snapshots outlive a release: the version as a placeholder
+        text.replace(&format!("wtf {}", env!("CARGO_PKG_VERSION")), "wtf x.y.z")
     }
 
     fn press(s: &mut Start, keys: &str) -> Option<Choice> {
