@@ -3,6 +3,55 @@
 What changed in each release. Commits follow [Conventional Commits](https://www.conventionalcommits.org/),
 so `git log v0.1.0..` has the details.
 
+## 0.3.0 (2026-11-04)
+
+wtf opens to a start screen and works from a menu on Space. A picker finds signals and decodes
+the interfaces wtf found in the trace, and `:records` opens a table that sorts, groups and
+filters. An agent working on a trace shows in every window on it, step by step.
+
+Breaking:
+
+- Enter folds groups, buses, streams and composite rows, as Space is now the leader key. A click
+  on the fold marker still folds.
+- `wtf --attach` is gone. Open the trace with `wtf <trace>`: an agent working on it joins the
+  window, and `:follow` follows it.
+- `:protocol`, a session's `[[protocol]]` and the `workspace` tool's protocols take `roles` and no
+  `clock`. The clock goes on the decode: `:decode req hs clock=clk valid=req_valid`.
+- `:records` opens the records table. A `where` that keeps no records is no longer an error; the
+  table says none match.
+- The decode answers of `command` list the results, then the violations, then the streams they
+  are made from.
+
+New:
+
+- A start screen when wtf opens without a trace, with the recent traces and the agents on this
+  machine. A trace without a session opens to where to start and the interfaces wtf found.
+- Space opens a menu of commands in groups, and which-key shows what can follow a key.
+  `[keys]` and `[leader]` in the config move them.
+- One picker (`Space f`) for signals, marks, records, commands, sessions, the agent's trail and
+  the interfaces found, with a preview. `Tab` marks several signals, `Ctrl-s` changes the source.
+- `Space d d` decodes one of the interfaces wtf found, and `Space d D` starts a `:decode` line.
+- The records table: `s` sorts, `=` groups by the sorted field, `/` filters, `Tab` goes to the
+  next set and `Enter` jumps to a record. `records` takes a decode name, a glob or several names.
+- The command line completes every command's arguments and shows short docs in a card.
+- Notifications fade out, and `:messages` lists them again.
+- A new look: cards, Nerd Font icons (`--glyphs nerd`), a status line in segments, Name and
+  Value headers, a value column of stable width and marks as tabs on the ruler.
+- Marks have a name and a note (`:cursor 2 60ns name=late note=...`), and undo covers marks.
+- An agent's queries and changes are a trail in the user's window (`:trail`). When no window is
+  open, `present` keeps the evidence for the next one opened on the trace.
+- A site with a quick start, recipes and every key: https://xtrollyj00.github.io/wtf
+
+Fixed:
+
+- `:group` on rows inside a group moves them out into the new group.
+- `zoom` given two times points to `fit`.
+- A record's field that really is z draws; only the time between records is blank (#28).
+- Computed signals nothing uses are dropped, and `present` replaces the window's decodes.
+- The signal panel keeps its place when computed signals are added (#35).
+- A session from a newer wtf changes nothing.
+- An agent's message never replaces the user's own on the status line.
+
 ## 0.2.0 (2026-10-31)
 
 The mouse does what GTKWave and Surfer users reach for, the keys have one mode, and structs,
