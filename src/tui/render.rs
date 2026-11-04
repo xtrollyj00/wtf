@@ -254,10 +254,11 @@ pub(crate) fn help_text(app: &App) -> (&'static str, Vec<Section>, &'static str,
     let m = &app.keymap;
     let k = |acts: &[A], d: &'static str| {
         let keys: Vec<String> = acts.iter().map(|&a| m.show(a)).collect();
-        // `Ctrl-d/u`: one Ctrl for both, so the column stays narrow
+        // `Ctrl-d/u`, `Tab/S-Tab`: shortened, so the column stays narrow
         let rest: Option<Vec<&str>> = keys.iter().map(|k| k.strip_prefix("Ctrl-")).collect();
         match rest {
             Some(r) if r.len() > 1 => (format!("Ctrl-{}", r.join("/")), d),
+            _ if keys.len() == 2 && keys[1] == format!("Shift-{}", keys[0]) => (format!("{0}/S-{0}", keys[0]), d),
             _ => (keys.join(" "), d),
         }
     };
@@ -301,7 +302,7 @@ pub(crate) fn help_text(app: &App) -> (&'static str, Vec<Section>, &'static str,
             "Marks",
             vec![
                 k(&[A::Mark, A::Unmark], "put / remove a mark"),
-                k(&[A::NextMark], "next mark"),
+                k(&[A::NextMark, A::PrevMark], "next / previous mark"),
                 (format!("{j}2..{j}9"), "jump to a mark"),
                 k(&[A::JumpBack], "back before the jump"),
             ],
@@ -766,7 +767,7 @@ fn leader(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
     if !name.is_empty() {
         title.push((format!("  {name}"), acc));
     }
-    card_frame(buf, r, pal().dim, &title, "", &format!("Esc close   Backspace {}", if path.is_empty() { "close" } else { "up" }));
+    card_frame(buf, r, pal().dim, &title, "", if path.is_empty() { "Esc close" } else { "Esc close   Backspace back" });
     let st = card_style();
     let ix = if gl().icons { 2 } else { 0 };
     let cw = if why { w - 6 } else { (w - 6) / cols };

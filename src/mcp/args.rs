@@ -5,7 +5,7 @@ use serde::Deserialize;
 
 #[derive(Deserialize, schemars::JsonSchema)]
 pub struct OpenArgs {
-    /// Path of a VCD or FST file, best absolute.
+    /// Path of a VCD, FST or GHW file, best absolute.
     pub trace: String,
 }
 

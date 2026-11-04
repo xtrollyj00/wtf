@@ -157,7 +157,7 @@ pub struct Trace {
 }
 
 impl Trace {
-    /// wellen detects VCD / FST from the content, not the extension (spec §13).
+    /// wellen detects VCD / FST / GHW from the content, not the extension (spec §13).
     pub fn open(path: &std::path::Path) -> Result<Self, String> {
         // wellen panics on a missing file, so check first
         std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -165,7 +165,7 @@ impl Trace {
         Ok(Self::of(wave))
     }
 
-    /// A trace held in memory, VCD or FST as in a file.
+    /// A trace held in memory, VCD, FST or GHW as in a file.
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, String> {
         unpanic(|| simple::read_from_reader(std::io::Cursor::new(bytes))).map(Self::of)
     }

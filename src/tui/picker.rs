@@ -304,6 +304,18 @@ impl App {
         Ok(())
     }
 
+    /// The picker's keys, as the keys page lists them; keep in step with `picker_key`.
+    #[cfg(test)]
+    pub const PICKER_KEYS: &[(&str, &str)] = &[
+        ("Ctrl-n Ctrl-p Down Up", "move"),
+        ("PageDown PageUp", "a box of entries"),
+        ("Backspace", "delete a character of the query"),
+        ("Tab", "mark the signal and move on"),
+        ("Ctrl-s", "next source"),
+        ("Enter", "pick and close"),
+        ("Esc", "close"),
+    ];
+
     /// The picker has the keys (spec §5 "Picker"); they are fixed.
     pub fn picker_key(&mut self, k: KeyEvent) {
         let Some(p) = &mut self.picker else { return };

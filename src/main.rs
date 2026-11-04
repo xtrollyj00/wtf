@@ -17,7 +17,7 @@ use std::path::PathBuf;
 #[derive(Parser)]
 #[command(name = "wtf", version, about = "Waveform Terminal Frontend")]
 struct Args {
-    /// The VCD or FST file to open
+    /// The VCD, FST or GHW file to open
     trace: Option<PathBuf>,
     /// Load this session instead of <trace>.session.toml
     #[arg(short = 'S', value_name = "session", requires = "trace")]

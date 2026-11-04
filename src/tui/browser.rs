@@ -237,6 +237,21 @@ impl App {
         }
     }
 
+    /// The browser's keys, as the keys page lists them; keep in step with `browser_key`.
+    #[cfg(test)]
+    pub const BROWSER_KEYS: &[(&str, &str)] = &[
+        ("j k", "move"),
+        ("Ctrl-f Ctrl-b", "a screen of records"),
+        ("g G", "first / last record"),
+        ("h l", "scroll the columns"),
+        ("/", "filter; Enter or Esc stops, Ctrl-u clears"),
+        ("s S", "sort by the next column / reverse"),
+        ("=", "group by the sorted field; again to ungroup"),
+        ("Tab Shift-Tab", "next / previous set"),
+        ("Enter", "jump to a record; on a group, keep its records"),
+        ("Esc q", "close"),
+    ];
+
     /// The browser has the keys; they are fixed (spec §5 "Records").
     pub fn browser_key(&mut self, k: KeyEvent) {
         let Some(b) = &mut self.browser else { return };

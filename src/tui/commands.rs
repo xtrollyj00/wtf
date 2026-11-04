@@ -26,7 +26,7 @@ pub const COMMANDS: &[Command] = &[
     Command { name: "scope", usage: ":scope [path]", desc: "Resolve names under a scope first, e.g. :scope top.cpu makes state top.cpu.state; none without a path", args: true },
     Command { name: "radix", usage: ":radix <name>", desc: "Set the radix: hex bin dec sdec oct ascii float enum, q4.12 / uq4.12 fixed point", args: true },
     Command { name: "color", usage: ":color <name|off>", desc: "Colour the selected row or group: red orange yellow green cyan blue magenta gray; off for the theme's", args: true },
-    Command { name: "group", usage: ":group <name>", desc: "Group the selected rows (V in Edit mode)", args: true },
+    Command { name: "group", usage: ":group <name>", desc: "Group the selected rows (V selects them)", args: true },
     Command { name: "rename", usage: ":rename <name>", desc: "Rename the group the selected row is in", args: true },
     Command { name: "ungroup", usage: ":ungroup", desc: "Dissolve the group the selected row is in, keeping its signals", args: false },
     Command { name: "select", usage: ":select <row> [<last row>]", desc: "Select a signal or group by name, or the rows from one to another", args: true },

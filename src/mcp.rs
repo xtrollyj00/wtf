@@ -960,7 +960,7 @@ impl ServerHandler for Wtf {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("wtf", env!("CARGO_PKG_VERSION")))
             .with_instructions(
-            "wtf reads VCD and FST waveforms from digital simulations. The usual path: `open` a trace \
+            "wtf reads VCD, FST and GHW waveforms from digital simulations. The usual path: `open` a trace \
              (`sessions` lists the user's windows and their traces); it lists the interfaces a built-in \
              protocol decodes, each with its line. Decode first, with `command` (`decode bus axilite \
              clock=aclk prefix=s_axi_`): records are exact and the handshake checks built in. Read them \

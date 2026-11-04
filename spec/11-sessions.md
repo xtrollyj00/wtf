@@ -134,7 +134,7 @@ wtf --version
 
 | Option | Meaning |
 |---|---|
-| `<trace>` | the VCD or FST file to open; without it, the start screen (section 4), also as a `--snapshot` |
+| `<trace>` | the VCD, FST or GHW file to open; without it, the start screen (section 4), also as a `--snapshot` |
 | `-S <session>` | load this session instead of `<trace>.session.toml`; needs `<trace>` |
 | `--glyphs <set>` | draw with this glyph set: `unicode`, `box`, `ascii` or `nerd` (section 14), over the config file's (section 19) |
 | `--snapshot <width>[x<height>]` | render one screen as plain text to stdout and exit, without the terminal UI; without a height, as tall as the content |
@@ -155,5 +155,5 @@ wtf --version
 
 ## 13. Formats
 
-- VCD and FST. No other formats are planned.
+- VCD, FST and GHW (GHDL's own format). No other formats are planned.
 - The format is detected from the file's content, not its extension.

@@ -84,6 +84,16 @@ pub fn keys_page(app: &mut App) -> String {
     let adding = std::mem::replace(&mut app.adding, true);
     sections(&mut out, app);
     app.adding = adding;
+    for (head, intro, keys) in [
+        ("In the records table", "`:records` opens it on a set of streams. The keys are fixed.", crate::tui::app::App::BROWSER_KEYS),
+        ("In the picker", "`:pick <source>` opens it: typing edits the query. The keys are fixed.", crate::tui::app::App::PICKER_KEYS),
+    ] {
+        out.push_str(&format!("## {head}\n\n{intro}\n\n| Keys | Does |\n|---|---|\n"));
+        for (k, d) in keys {
+            out.push_str(&format!("| {} | {} |\n", kbd(k), cell(d)));
+        }
+        out.push('\n');
+    }
     out.push_str("## The Space menu\n\n`Space` opens a menu of everything that has no key of its own. Groups open with their key; `Backspace` goes back up.\n\n");
     if let Entry::Group { items, .. } = &Keymap::default().leader {
         leader(&mut out, items);

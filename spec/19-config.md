@@ -141,7 +141,7 @@ x = ["save and quit", ":wq"]
 Q = ["quit without saving", ":q!", "unsaved changes are lost"]
 ```
 
-- A key is one key, as for `[keys]`, but not `Esc` or `Backspace` (they close and go up).
+- A key is one key, as for `[keys]`, but not `Esc` or `Backspace` (they close and go back).
 - A bad entry is skipped and named: `config: leader.x = ["x", "q"]? (["what it does",
   ":command"] and maybe what happens, a table for a group, or "" to remove)`.
 

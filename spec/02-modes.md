@@ -91,7 +91,7 @@ entry a line: what it does, its command in blue, and what happens, dim:
 ╭─ Space a  agent ──────────────────────────────────────────────────────────────────────────────╮
 │  f → follow…                     :follow             the window shows its workspace as it works │
 │  t → trail                       :pick trail         its steps; Enter jumps to one's time       │
-╰─────────────────────────────────────────────────────────────────────── Esc close   Backspace up ─╯
+╰───────────────────────────────────────────────────────────────────── Esc close   Backspace back ─╯
 ```
 
 ```
@@ -102,7 +102,7 @@ entry a line: what it does, its command in blue, and what happens, dim:
 │  a → +agent                                   n → messages                    :messages      │
 │  q → +session                                 ? → keys                            :help      │
 │  f → find a signal           :pick signals                                                   │
-╰─────────────────────────────────────────────────────────────── Esc close   Backspace close ─╯
+╰───────────────────────────────────────────────────────────────────────────────── Esc close ─╯
 ```
 
 - An entry runs its `:` command, as typed on the command line. A command ending in a space
