@@ -418,6 +418,14 @@ mod tests {
         assert_eq!(fixed(App::PICKER_KEYS, ev("s")), None);
     }
 
+    /// The const constructors the fixed tables are written with build the keys parsing gives.
+    #[test]
+    fn key_constructors() {
+        assert_eq!(Key::ch('G'), keys("G")[0]);
+        assert_eq!(Key::ctrl('f'), keys("<C-f>")[0]);
+        assert_eq!(Key::code(KeyCode::Tab), keys("<Tab>")[0]);
+    }
+
     fn keys(text: &str) -> Vec<Key> {
         crate::tui::app::parse_keys(text).unwrap().into_iter().map(Key::of).collect()
     }
