@@ -83,13 +83,15 @@ pub fn keys_page(app: &mut App) -> String {
     let adding = std::mem::replace(&mut app.adding, true);
     sections(&mut out, app);
     app.adding = adding;
+    let browser: Vec<_> = App::BROWSER_KEYS.iter().map(|(k, d)| (crate::tui::keys::fixed_keys(k), *d)).collect();
+    let picker: Vec<_> = App::PICKER_KEYS.iter().map(|(k, d)| (crate::tui::keys::fixed_keys(k), *d)).collect();
     for (head, intro, keys) in [
-        ("In the records table", "`:records` opens it on a set of streams. The keys are fixed.", crate::tui::app::App::BROWSER_KEYS),
-        ("In the picker", "`:pick <source>` opens it: typing edits the query. The keys are fixed.", crate::tui::app::App::PICKER_KEYS),
+        ("In the records table", "`:records` opens it on a set of streams. The keys are fixed.", browser),
+        ("In the picker", "`:pick <source>` opens it: typing edits the query. The keys are fixed.", picker),
     ] {
         out.push_str(&format!("## {head}\n\n{intro}\n\n| Keys | Does |\n|---|---|\n"));
         for (k, d) in keys {
-            out.push_str(&format!("| {} | {} |\n", kbd(k), cell(d)));
+            out.push_str(&format!("| {} | {} |\n", kbd(&k), cell(d)));
         }
         out.push('\n');
     }

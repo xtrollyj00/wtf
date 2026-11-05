@@ -3,6 +3,7 @@
 
 use crate::draw::{self, gl, pal, put};
 use crate::tui::app::{App, Target};
+use crate::tui::keys::{self, Fixed, Key};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
@@ -120,6 +121,20 @@ fn wrap(s: &str, w: usize) -> Vec<String> {
         }
     }
     out
+}
+
+/// What a key does in the picker (`App::PICKER_KEYS`).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Pick {
+    Down,
+    Up,
+    PageDown,
+    PageUp,
+    Delete,
+    Mark,
+    Source,
+    Choose,
+    Close,
 }
 
 impl App {
@@ -302,32 +317,38 @@ impl App {
         Ok(())
     }
 
-    /// The picker's keys, as the keys page lists them; keep in step with `picker_key`.
-    #[cfg(test)]
-    pub const PICKER_KEYS: &[(&str, &str)] = &[
-        ("Ctrl-n Ctrl-p Down Up", "move"),
-        ("PageDown PageUp", "a box of entries"),
-        ("Backspace", "delete a character of the query"),
-        ("Tab", "mark the signal and move on"),
-        ("Ctrl-s", "next source"),
-        ("Enter", "pick and close"),
-        ("Esc", "close"),
+    /// The picker's keys (spec §5 "Picker"): `picker_key` and the keys page both read them.
+    pub const PICKER_KEYS: &Fixed<Pick> = &[
+        (&[(Key::ctrl('n'), Pick::Down), (Key::ctrl('p'), Pick::Up), (Key::code(KeyCode::Down), Pick::Down), (Key::code(KeyCode::Up), Pick::Up)], "move"),
+        (&[(Key::code(KeyCode::PageDown), Pick::PageDown), (Key::code(KeyCode::PageUp), Pick::PageUp)], "a box of entries"),
+        (&[(Key::code(KeyCode::Backspace), Pick::Delete)], "delete a character of the query"),
+        (&[(Key::code(KeyCode::Tab), Pick::Mark)], "mark the signal and move on"),
+        (&[(Key::ctrl('s'), Pick::Source)], "next source"),
+        (&[(Key::code(KeyCode::Enter), Pick::Choose)], "pick and close"),
+        (&[(Key::code(KeyCode::Esc), Pick::Close)], "close"),
     ];
 
-    /// The picker has the keys (spec §5 "Picker"); they are fixed.
+    /// The picker has the keys (spec §5 "Picker"); they are fixed. A key the table doesn't have
+    /// types into the query.
     pub fn picker_key(&mut self, k: KeyEvent) {
         let Some(p) = &mut self.picker else { return };
-        let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
-        match k.code {
-            KeyCode::Esc => self.picker = None,
-            KeyCode::Enter => self.pick(),
-            KeyCode::Down => p.step(1),
-            KeyCode::Up => p.step(-1),
-            KeyCode::Char('n') if ctrl => p.step(1),
-            KeyCode::Char('p') if ctrl => p.step(-1),
-            KeyCode::PageDown => p.step(p.page as isize),
-            KeyCode::PageUp => p.step(-(p.page as isize)),
-            KeyCode::Char('s') if ctrl => {
+        let Some(act) = keys::fixed(Self::PICKER_KEYS, k) else {
+            if let KeyCode::Char(c) = k.code
+                && !k.modifiers.contains(KeyModifiers::CONTROL)
+            {
+                p.query.push(c);
+                p.filter();
+            }
+            return;
+        };
+        match act {
+            Pick::Close => self.picker = None,
+            Pick::Choose => self.pick(),
+            Pick::Down => p.step(1),
+            Pick::Up => p.step(-1),
+            Pick::PageDown => p.step(p.page as isize),
+            Pick::PageUp => p.step(-(p.page as isize)),
+            Pick::Source => {
                 // the next source; an empty one shows why
                 let mut p = self.picker.take().expect("checked above");
                 (p.source, p.marked) = ((p.source + 1) % SOURCES.len(), Vec::new());
@@ -338,7 +359,7 @@ impl App {
                 p.filter();
                 self.picker = Some(p);
             }
-            KeyCode::Tab => {
+            Pick::Mark => {
                 // signals only: mark or unmark the highlighted one, then the next
                 let Some(&Entry { act: Act::Var(v), .. }) = p.current() else { return };
                 if self.ws.shown(v) {
@@ -350,15 +371,10 @@ impl App {
                 }
                 p.step(1);
             }
-            KeyCode::Backspace => {
+            Pick::Delete => {
                 p.query.pop();
                 p.filter();
             }
-            KeyCode::Char(c) if !ctrl => {
-                p.query.push(c);
-                p.filter();
-            }
-            _ => {}
         }
     }
 

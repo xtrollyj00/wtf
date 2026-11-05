@@ -160,10 +160,10 @@ New signals go below the selected row, at the accent line.
 
 | Keys | Does |
 |---|---|
-| <kbd>j</kbd> <kbd>k</kbd> | move |
+| <kbd>j</kbd> <kbd>k</kbd> <kbd>Down</kbd> <kbd>Up</kbd> | move |
 | <kbd>Ctrl-f</kbd> <kbd>Ctrl-b</kbd> | a screen of records |
 | <kbd>g</kbd> <kbd>G</kbd> | first / last record |
-| <kbd>h</kbd> <kbd>l</kbd> | scroll the columns |
+| <kbd>h</kbd> <kbd>l</kbd> <kbd>Left</kbd> <kbd>Right</kbd> | scroll the columns |
 | <kbd>/</kbd> | filter; Enter or Esc stops, Ctrl-u clears |
 | <kbd>s</kbd> <kbd>S</kbd> | sort by the next column / reverse |
 | <kbd>=</kbd> | group by the sorted field; again to ungroup |
