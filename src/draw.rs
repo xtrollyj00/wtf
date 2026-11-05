@@ -384,7 +384,13 @@ pub fn line() -> Style {
     Style::new().fg(pal().line)
 }
 
+/// Writes `s` at `x`, `y`, cut at the buffer's edge; text starting outside it is dropped, so a
+/// screen too small for its content draws what fits (spec §11 `--snapshot`).
 pub fn put(buf: &mut Buffer, x: usize, y: usize, s: &str, style: Style) {
+    let a = buf.area;
+    if x >= (a.x + a.width) as usize || y >= (a.y + a.height) as usize {
+        return;
+    }
     buf.set_string(x as u16, y as u16, s, style);
 }
 

@@ -1070,6 +1070,32 @@ fn snapshot_ansi_and_start_keys() {
     assert!(typing.contains("x.vcd"), "{typing}");
 }
 
+/// A screen too small for its content draws what fits, in every mode and on the start screen
+/// (spec §11 `--snapshot`).
+#[test]
+fn snapshot_smaller_than_content() {
+    let dir = Dir::new("small");
+    let trace = std::fs::canonicalize("tests/data/reqresp.vcd").unwrap();
+    for size in ["1x1", "20x3", "80x3", "200x4", "10x10"] {
+        for keys in ["", "?", ":", "<Space>", "a", "e", ":records<CR>"] {
+            for with_trace in [true, false] {
+                let mut cmd = wtf(&dir.0);
+                if with_trace {
+                    cmd.arg(&trace);
+                }
+                cmd.args(["--snapshot", size]);
+                if !keys.is_empty() {
+                    cmd.args(["--keys", keys]);
+                }
+                let out = cmd.output().unwrap();
+                assert!(out.status.success(), "{size} {keys:?} trace={with_trace}: {}", String::from_utf8_lossy(&out.stderr));
+                let height: usize = size.split('x').nth(1).unwrap().parse().unwrap();
+                assert_eq!(String::from_utf8(out.stdout).unwrap().lines().count(), height, "{size} {keys:?}");
+            }
+        }
+    }
+}
+
 /// A trace with an interface a built-in protocol decodes says so once (spec §4).
 #[test]
 fn found_interfaces_are_offered() {
