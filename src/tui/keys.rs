@@ -30,6 +30,35 @@ impl Key {
         };
         if self.ctrl { format!("Ctrl-{name}") } else { name }
     }
+
+    pub const fn ch(c: char) -> Self {
+        Key { code: KeyCode::Char(c), ctrl: false }
+    }
+
+    pub const fn ctrl(c: char) -> Self {
+        Key { code: KeyCode::Char(c), ctrl: true }
+    }
+
+    pub const fn code(code: KeyCode) -> Self {
+        Key { code, ctrl: false }
+    }
+}
+
+/// The keys of a mode whose keys are fixed (the records browser, the picker; spec §5): a line of
+/// the keys page each, its keys with what each does and the line's text. The handler looks a key
+/// up here and the page prints the same lines, so a key the page leaves out does nothing.
+pub type Fixed<A> = [(&'static [(Key, A)], &'static str)];
+
+/// What `k` does in a `Fixed` table, if anything.
+pub fn fixed<A: Copy>(table: &Fixed<A>, k: KeyEvent) -> Option<A> {
+    let k = Key::of(k);
+    table.iter().flat_map(|(keys, _)| keys.iter()).find(|(key, _)| *key == k).map(|&(_, a)| a)
+}
+
+/// A `Fixed` line's keys as the keys page shows them: `j k Down Up`.
+#[cfg(test)]
+pub fn fixed_keys<A>(keys: &[(Key, A)]) -> String {
+    keys.iter().map(|(k, _)| k.show()).collect::<Vec<_>>().join(" ")
 }
 
 macro_rules! actions {
@@ -366,6 +395,28 @@ impl Keymap {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The fixed tables (spec §5 "Records", "Picker"): no key on two lines, and a key in none
+    /// does nothing.
+    #[test]
+    fn fixed_tables() {
+        use crate::tui::app::App;
+        fn unique<A>(table: &Fixed<A>) {
+            let all: Vec<Key> = table.iter().flat_map(|(k, _)| k.iter().map(|(k, _)| *k)).collect();
+            for (i, k) in all.iter().enumerate() {
+                assert!(!all[..i].contains(k), "{} is on two lines", k.show());
+            }
+        }
+        unique(App::BROWSER_KEYS);
+        unique(App::PICKER_KEYS);
+        let ev = |s: &str| crate::tui::app::parse_keys(s).unwrap()[0];
+        assert_eq!(fixed(App::BROWSER_KEYS, ev("G")), Some(crate::tui::browser::Browse::Last));
+        assert_eq!(fixed(App::BROWSER_KEYS, ev("<C-f>")), Some(crate::tui::browser::Browse::PageDown));
+        assert_eq!(fixed(App::BROWSER_KEYS, ev("f")), None);
+        assert_eq!(fixed(App::BROWSER_KEYS, ev("x")), None);
+        assert_eq!(fixed(App::PICKER_KEYS, ev("<C-s>")), Some(crate::tui::picker::Pick::Source));
+        assert_eq!(fixed(App::PICKER_KEYS, ev("s")), None);
+    }
 
     fn keys(text: &str) -> Vec<Key> {
         crate::tui::app::parse_keys(text).unwrap().into_iter().map(Key::of).collect()

@@ -177,9 +177,11 @@ person to look through.
   its count and first and last start, the commonest first. `Enter` on a group keeps its records
   (adds `field == value` to the filter; a value with spaces can't be, and says so); `=` again
   ungroups. Sorted by `stream`, `n`, `start` or `length`, `=` says to sort by a field first.
-- **Keys**: `j` / `k`, `Ctrl-f` / `Ctrl-b`, `g` / `G` move; `Enter` on a record jumps the cursor
+- **Keys**: `j` / `k` or the arrows, `Ctrl-f` / `Ctrl-b`, `g` / `G` move; `Enter` on a record jumps the cursor
   to its start (a jump, so `''` comes back), selects its stream's row if shown and closes; `Esc`
-  or `q` closes. The mouse: section 2.
+  or `q` closes. The mouse: section 2. The browser's and the picker's keys are fixed, one table
+  each that the keys page prints; a key not in it does nothing (in the picker, a character types
+  into the query).
 
 ### Rows
 

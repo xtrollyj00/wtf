@@ -5,6 +5,7 @@
 
 use crate::draw::{gl, pal, put};
 use crate::tui::app::App;
+use crate::tui::keys::{self, Fixed, Key};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -210,6 +211,27 @@ fn key(v: Option<&Val>, signed: bool) -> (u8, i128, String) {
     }
 }
 
+/// What a key does in the records browser (`App::BROWSER_KEYS`).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Browse {
+    Down,
+    Up,
+    PageDown,
+    PageUp,
+    First,
+    Last,
+    Left,
+    Right,
+    Filter,
+    Sort,
+    Reverse,
+    Group,
+    NextSet,
+    PrevSet,
+    Pick,
+    Close,
+}
+
 impl App {
     /// `:records <streams> [where <expr>]`: the browser on a set of streams (spec §5 "Records").
     pub fn open_browser(&mut self, arg: &str) -> Result<(), String> {
@@ -237,19 +259,18 @@ impl App {
         }
     }
 
-    /// The browser's keys, as the keys page lists them; keep in step with `browser_key`.
-    #[cfg(test)]
-    pub const BROWSER_KEYS: &[(&str, &str)] = &[
-        ("j k", "move"),
-        ("Ctrl-f Ctrl-b", "a screen of records"),
-        ("g G", "first / last record"),
-        ("h l", "scroll the columns"),
-        ("/", "filter; Enter or Esc stops, Ctrl-u clears"),
-        ("s S", "sort by the next column / reverse"),
-        ("=", "group by the sorted field; again to ungroup"),
-        ("Tab Shift-Tab", "next / previous set"),
-        ("Enter", "jump to a record; on a group, keep its records"),
-        ("Esc q", "close"),
+    /// The browser's keys (spec §5 "Records"): `browser_key` and the keys page both read them.
+    pub const BROWSER_KEYS: &Fixed<Browse> = &[
+        (&[(Key::ch('j'), Browse::Down), (Key::ch('k'), Browse::Up), (Key::code(KeyCode::Down), Browse::Down), (Key::code(KeyCode::Up), Browse::Up)], "move"),
+        (&[(Key::ctrl('f'), Browse::PageDown), (Key::ctrl('b'), Browse::PageUp)], "a screen of records"),
+        (&[(Key::ch('g'), Browse::First), (Key::ch('G'), Browse::Last)], "first / last record"),
+        (&[(Key::ch('h'), Browse::Left), (Key::ch('l'), Browse::Right), (Key::code(KeyCode::Left), Browse::Left), (Key::code(KeyCode::Right), Browse::Right)], "scroll the columns"),
+        (&[(Key::ch('/'), Browse::Filter)], "filter; Enter or Esc stops, Ctrl-u clears"),
+        (&[(Key::ch('s'), Browse::Sort), (Key::ch('S'), Browse::Reverse)], "sort by the next column / reverse"),
+        (&[(Key::ch('='), Browse::Group)], "group by the sorted field; again to ungroup"),
+        (&[(Key::code(KeyCode::Tab), Browse::NextSet), (Key::code(KeyCode::BackTab), Browse::PrevSet)], "next / previous set"),
+        (&[(Key::code(KeyCode::Enter), Browse::Pick)], "jump to a record; on a group, keep its records"),
+        (&[(Key::code(KeyCode::Esc), Browse::Close), (Key::ch('q'), Browse::Close)], "close"),
     ];
 
     /// The browser has the keys; they are fixed (spec §5 "Records").
@@ -267,41 +288,41 @@ impl App {
             return self.browser_refresh();
         }
         let ncols = b.fixed() + b.set(&self.ws).columns.len();
-        match k.code {
-            KeyCode::Esc | KeyCode::Char('q') => self.browser = None,
-            KeyCode::Char('j') | KeyCode::Down => b.step(1),
-            KeyCode::Char('k') | KeyCode::Up => b.step(-1),
-            KeyCode::Char('f') if ctrl => b.step(b.page as isize),
-            KeyCode::Char('b') if ctrl => b.step(-(b.page as isize)),
-            KeyCode::Char('g') => b.hl = 0,
-            KeyCode::Char('G') => b.hl = usize::MAX,
-            KeyCode::Char('h') | KeyCode::Left => b.left = b.left.saturating_sub(1),
-            KeyCode::Char('l') | KeyCode::Right => b.left = (b.left + 1).min(b.widths.len().saturating_sub(b.pinned() + 1)),
-            KeyCode::Char('/') => b.typing = true,
-            KeyCode::Char('s') => {
+        let Some(act) = keys::fixed(Self::BROWSER_KEYS, k) else { return };
+        match act {
+            Browse::Close => self.browser = None,
+            Browse::Down => b.step(1),
+            Browse::Up => b.step(-1),
+            Browse::PageDown => b.step(b.page as isize),
+            Browse::PageUp => b.step(-(b.page as isize)),
+            Browse::First => b.hl = 0,
+            Browse::Last => b.hl = usize::MAX,
+            Browse::Left => b.left = b.left.saturating_sub(1),
+            Browse::Right => b.left = (b.left + 1).min(b.widths.len().saturating_sub(b.pinned() + 1)),
+            Browse::Filter => b.typing = true,
+            Browse::Sort => {
                 b.sort = ((b.sort.0 + 1) % ncols, false);
                 self.browser_refresh();
             }
-            KeyCode::Char('S') => {
+            Browse::Reverse => {
                 b.sort.1 = !b.sort.1;
                 self.browser_refresh();
             }
-            KeyCode::Char('=') if b.sort.0 < b.fixed() => self.msg = Some(("= groups by the sorted column, a field: s sorts by one".into(), true)),
-            KeyCode::Char('=') => {
+            Browse::Group if b.sort.0 < b.fixed() => self.msg = Some(("= groups by the sorted column, a field: s sorts by one".into(), true)),
+            Browse::Group => {
                 (b.group, b.hl, b.left) = (!b.group, 0, 0);
                 self.browser_refresh();
             }
-            KeyCode::Tab | KeyCode::BackTab => {
+            Browse::NextSet | Browse::PrevSet => {
                 // the next set, its filter and sort fresh
-                let d = if k.code == KeyCode::Tab { 1 } else { b.tabs.len() - 1 };
+                let d = if act == Browse::NextSet { 1 } else { b.tabs.len() - 1 };
                 let (tabs, tab) = (b.tabs.clone(), (b.tab + d) % b.tabs.len());
                 let mut next = Browser::new(&self.ws, &tabs[tab], "");
                 (next.tabs, next.tab) = (tabs, tab);
                 *b = next;
                 self.browser_refresh();
             }
-            KeyCode::Enter => self.browser_pick(),
-            _ => {}
+            Browse::Pick => self.browser_pick(),
         }
         if let Some(b) = &mut self.browser {
             b.hl = b.hl.min(b.len().saturating_sub(1));
