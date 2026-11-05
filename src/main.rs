@@ -43,11 +43,17 @@ struct Args {
 }
 
 fn parse_size(s: &str) -> Result<(u16, Option<u16>), String> {
-    let num = |x: &str| x.parse::<u16>().ok().filter(|n| *n > 0).ok_or(format!("bad size: {s}"));
-    match s.split_once('x') {
-        Some((w, h)) => Ok((num(w)?, Some(num(h)?))),
-        None => Ok((num(s)?, None)),
+    let num = |x: &str| x.parse::<u16>().ok().filter(|n| *n > 0).ok_or(format!("bad size: {s}; give <width> or <width>x<height>, e.g. 100x30"));
+    let (w, h) = match s.split_once('x') {
+        Some((w, h)) => (num(w)?, Some(num(h)?)),
+        None => (num(s)?, None),
+    };
+    // the window's smallest screen (spec §4 "Too small"); without a height, as tall as the content
+    let (mw, mh) = draw::MIN_SIZE;
+    if w < mw || h.is_some_and(|h| h < mh) {
+        return Err(format!("{s} is too small; the smallest screen is {mw}x{mh}"));
     }
+    Ok((w, h))
 }
 
 fn main() {

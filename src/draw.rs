@@ -384,7 +384,44 @@ pub fn line() -> Style {
     Style::new().fg(pal().line)
 }
 
+/// The smallest screen wtf draws on (spec §4 "Too small"): the time axis, one row, the status
+/// line and the command line, the launch guide with its first actions, and the signal panel
+/// beside the rows.
+pub const MIN_SIZE: (u16, u16) = (40, 10);
+
+/// On a screen smaller than `MIN_SIZE`, says so in place of the screen, its size and the one
+/// needed, each number that falls short in red (spec §4 "Too small"). True if it did.
+pub fn too_small(area: Rect, buf: &mut Buffer) -> bool {
+    let (w, h) = (area.width, area.height);
+    if w >= MIN_SIZE.0 && h >= MIN_SIZE.1 {
+        return false;
+    }
+    let short = |ok: bool| if ok { Style::new().add_modifier(Modifier::BOLD) } else { red().add_modifier(Modifier::BOLD) };
+    let lines: [Vec<(String, Style)>; 4] = [
+        vec![("Terminal too small".into(), Style::new().add_modifier(Modifier::BOLD))],
+        vec![("width ".into(), Style::new()), (w.to_string(), short(w >= MIN_SIZE.0)), ("  height ".into(), Style::new()), (h.to_string(), short(h >= MIN_SIZE.1))],
+        vec![("wtf needs".into(), Style::new().fg(pal().dim))],
+        vec![("width ".into(), Style::new()), (MIN_SIZE.0.to_string(), Style::new()), ("  height ".into(), Style::new()), (MIN_SIZE.1.to_string(), Style::new())],
+    ];
+    let y0 = (h as usize).saturating_sub(lines.len()) / 2;
+    for (i, line) in lines.iter().enumerate() {
+        let len: usize = line.iter().map(|(s, _)| s.chars().count()).sum();
+        let mut x = area.x as usize + (w as usize).saturating_sub(len) / 2;
+        for (s, style) in line {
+            put(buf, x, area.y as usize + y0 + i, s, *style);
+            x += s.chars().count();
+        }
+    }
+    true
+}
+
+/// Writes `s` at `x`, `y`, cut at the buffer's edge; text starting outside it is dropped, so a
+/// screen too small for its content draws what fits (spec §11 `--snapshot`).
 pub fn put(buf: &mut Buffer, x: usize, y: usize, s: &str, style: Style) {
+    let a = buf.area;
+    if x >= (a.x + a.width) as usize || y >= (a.y + a.height) as usize {
+        return;
+    }
     buf.set_string(x as u16, y as u16, s, style);
 }
 
@@ -1120,6 +1157,23 @@ fn activity(trace: &Trace, view: &View, vars: &[usize], ww: usize) -> Vec<[(char
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Below the smallest screen, the message with both sizes, cut to what fits; at it, nothing
+    /// (spec §4 "Too small").
+    #[test]
+    fn too_small_says_the_sizes() {
+        let mut buf = Buffer::empty(Rect::new(0, 0, 30, 6));
+        assert!(too_small(buf.area, &mut buf));
+        let screen = text(&buf);
+        assert_eq!(screen.lines().map(str::trim).filter(|l| !l.is_empty()).collect::<Vec<_>>(), ["Terminal too small", "width 30  height 6", "wtf needs", "width 40  height 10"], "{screen}");
+        for (w, h) in [(1, 1), (12, 2), (39, 40)] {
+            let mut buf = Buffer::empty(Rect::new(0, 0, w, h));
+            assert!(too_small(buf.area, &mut buf));
+        }
+        let mut buf = Buffer::empty(Rect::new(0, 0, 40, 10));
+        assert!(!too_small(buf.area, &mut buf));
+        assert!(text(&buf).trim().is_empty());
+    }
 
     #[test]
     fn colours_come_from_bits() {

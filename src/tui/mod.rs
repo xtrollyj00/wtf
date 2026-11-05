@@ -52,6 +52,9 @@ pub fn run(app: &mut App) -> Result<(), String> {
     let res = (|| -> std::io::Result<()> {
         while !app.quit {
             term.draw(|f| {
+                if crate::draw::too_small(f.area(), f.buffer_mut()) {
+                    return;
+                }
                 if let Some((x, y)) = render::draw(app, f.area(), f.buffer_mut()) {
                     f.set_cursor_position((x, y));
                 }

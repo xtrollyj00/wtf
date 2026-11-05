@@ -28,10 +28,17 @@ impl Term {
     /// `wtf <args>` in a `COLS` x `ROWS` terminal, with a config of its own (no first-start
     /// questions) and no colour (no background query to wait on).
     fn spawn(name: &str, args: &[&str]) -> Term {
+        Term::spawn_with(name, args, true)
+    }
+
+    /// `spawn`, without the config file when `config` is false: the first start's setup.
+    fn spawn_with(name: &str, args: &[&str], config: bool) -> Term {
         let dir = std::env::temp_dir().join(format!("wtf-term-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("wtf")).unwrap();
-        std::fs::write(dir.join("wtf/config.toml"), "glyphs = \"unicode\"\ntheme = \"dark\"\n").unwrap();
+        if config {
+            std::fs::write(dir.join("wtf/config.toml"), "glyphs = \"unicode\"\ntheme = \"dark\"\n").unwrap();
+        }
         let (mut master, mut slave) = (0, 0);
         let mut size = libc::winsize { ws_row: ROWS, ws_col: COLS, ws_xpixel: 0, ws_ypixel: 0 };
         // SAFETY: openpty writes the two descriptors; no name, default termios
@@ -91,6 +98,16 @@ impl Term {
     /// column `x`, line `y` (from 0), pressed or let go.
     fn mouse(&mut self, button: u8, (x, y): (usize, usize), press: bool) {
         self.send(&format!("\x1b[<{button};{};{}{}", x + 1, y + 1, if press { 'M' } else { 'm' }));
+    }
+
+    /// The terminal's window made `cols` x `rows`: the pty's size set, as a terminal emulator
+    /// does, so wtf gets SIGWINCH and redraws.
+    fn resize(&mut self, cols: u16, rows: u16) {
+        let size = libc::winsize { ws_row: rows, ws_col: cols, ws_xpixel: 0, ws_ypixel: 0 };
+        // SAFETY: the master side of a pty owned here, and a winsize to read
+        let r = unsafe { libc::ioctl(std::os::fd::AsRawFd::as_raw_fd(&self.input), libc::TIOCSWINSZ, &raw const size) };
+        assert_eq!(r, 0, "TIOCSWINSZ: {}", std::io::Error::last_os_error());
+        self.screen.lock().unwrap().set_size(rows.try_into().unwrap(), cols.try_into().unwrap());
     }
 
     /// Press at `from`, move to `to`, let go there.
@@ -286,4 +303,30 @@ fn start_screen_quits() {
     t.wait("the start screen", |s| s.contents().contains("Open a trace"));
     t.send("q");
     assert!(t.child.wait().unwrap().success());
+}
+
+/// A terminal made smaller than wtf's smallest screen shows the message with its size, keys
+/// still work there, and the screen comes back when it is made bigger (spec §4 "Too small").
+#[test]
+fn too_small_and_back() {
+    for (name, args, back) in [("smallw", &["tests/data/simple.vcd"][..], "NORMAL"), ("smalls", &[][..], "Open a trace")] {
+        let mut t = Term::spawn(name, args);
+        t.wait("the screen", |s| s.contents().contains(back));
+        t.resize(30, 6);
+        let s = t.wait("too small", |s| s.contents().contains("Terminal too small"));
+        assert!(s.contains("width 30  height 6") && s.contains("width 40  height 10") && !s.contains(back), "{s}");
+        t.resize(COLS, ROWS);
+        t.wait("the screen again", |s| s.contents().contains(back) && !s.contents().contains("too small"));
+        t.resize(30, 6);
+        t.wait("too small", |s| s.contents().contains("Terminal too small"));
+        t.send(if args.is_empty() { "q" } else { ":q!\r" });
+        assert!(t.child.wait().unwrap().success());
+    }
+    // the first start's setup
+    let mut t = Term::spawn_with("smallsetup", &[], false);
+    t.wait("the setup", |s| s.contents().contains("draw cleanly"));
+    t.resize(30, 6);
+    t.wait("too small", |s| s.contents().contains("Terminal too small"));
+    t.resize(COLS, ROWS);
+    t.wait("the setup again", |s| s.contents().contains("draw cleanly"));
 }
