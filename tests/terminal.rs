@@ -28,10 +28,17 @@ impl Term {
     /// `wtf <args>` in a `COLS` x `ROWS` terminal, with a config of its own (no first-start
     /// questions) and no colour (no background query to wait on).
     fn spawn(name: &str, args: &[&str]) -> Term {
+        Term::spawn_with(name, args, true)
+    }
+
+    /// `spawn`, without the config file when `config` is false: the first start's setup.
+    fn spawn_with(name: &str, args: &[&str], config: bool) -> Term {
         let dir = std::env::temp_dir().join(format!("wtf-term-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("wtf")).unwrap();
-        std::fs::write(dir.join("wtf/config.toml"), "glyphs = \"unicode\"\ntheme = \"dark\"\n").unwrap();
+        if config {
+            std::fs::write(dir.join("wtf/config.toml"), "glyphs = \"unicode\"\ntheme = \"dark\"\n").unwrap();
+        }
         let (mut master, mut slave) = (0, 0);
         let mut size = libc::winsize { ws_row: ROWS, ws_col: COLS, ws_xpixel: 0, ws_ypixel: 0 };
         // SAFETY: openpty writes the two descriptors; no name, default termios
@@ -315,4 +322,11 @@ fn too_small_and_back() {
         t.send(if args.is_empty() { "q" } else { ":q!\r" });
         assert!(t.child.wait().unwrap().success());
     }
+    // the first start's setup
+    let mut t = Term::spawn_with("smallsetup", &[], false);
+    t.wait("the setup", |s| s.contents().contains("draw cleanly"));
+    t.resize(30, 6);
+    t.wait("too small", |s| s.contents().contains("Terminal too small"));
+    t.resize(COLS, ROWS);
+    t.wait("the setup again", |s| s.contents().contains("draw cleanly"));
 }
