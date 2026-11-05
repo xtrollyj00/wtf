@@ -63,9 +63,10 @@ start = "<C-g>"
 | `end` | `G` | `undo` | `u` | `command` | `:` |
 | `half_right` | `<C-d>` | `redo` | `<C-r>` | `help` | `?` |
 | `half_left` | `<C-u>` | `copy_value` | `yy` | `quit` | `q` |
-| `screen_left` | `H` | `copy_time` | `yt` | | |
-| `screen_right` | `L` | `center` | `c` | `leader` | `<Space>` |
-| `page_down` | `<C-f>` | | | | |
+| `screen_left` | `H` | `copy_time` | `yt` | `group` | `>` |
+| `screen_right` | `L` | `center` | `c` | `ungroup` | `<` |
+| `page_down` | `<C-f>` | `put` | `p` | `rename` | `R` |
+| `leader` | `<Space>` | `put_above` | `P` | | |
 
 - A key is one key or two. `jump` is followed by the cursor's number, as `'2` is.
 - An action left out keeps its key. A moved action's old key does nothing, unless another action

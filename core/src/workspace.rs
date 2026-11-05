@@ -896,6 +896,39 @@ impl Workspace {
     }
 
 
+    /// The selected rows out of their groups (`<`, `rows::ungroup`).
+    pub fn ungroup_rows(&mut self) -> Result<(), String> {
+        if self.rows.is_empty() {
+            return Err("no rows".into());
+        }
+        let r = self.selection();
+        self.sel = rows::ungroup(&mut self.rows, r)?;
+        self.anchor = None;
+        self.fix_sel();
+        Ok(())
+    }
+
+    /// Rows removed earlier put back below or above the selected row (`p` / `P`), selected.
+    pub fn put(&mut self, block: Vec<Row>, below: bool) -> Result<(), String> {
+        if block.is_empty() {
+            return Err("nothing to put: dd removes rows, then p puts them below a row".into());
+        }
+        let r = self.put_target(below);
+        let at = rows::put(&mut self.rows, block, r, below);
+        (self.sel, self.anchor, self.bit) = (at.start, None, None);
+        Ok(())
+    }
+
+    /// The row `p` / `P` puts next to, as a drop on it would: the selected one, or a `V` range's
+    /// last or first.
+    fn put_target(&self, below: bool) -> usize {
+        match self.anchor {
+            Some(a) if below => a.max(self.sel),
+            Some(a) => a.min(self.sel),
+            None => self.sel,
+        }
+    }
+
     pub fn group(&mut self, name: &str) -> Result<(), String> {
         if self.rows.is_empty() {
             return Err("no rows".into());

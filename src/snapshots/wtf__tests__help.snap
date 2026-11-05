@@ -6,19 +6,19 @@ expression: "snapshot(&mut app, 100, Some(20))"
 │ Move                            Rows                            Change                           │
 │ h l       cursor left / right   j k       select a row          a          add signals           │
 │ w b       next / prev change    Ctrl-f/b  a screen of rows      dd         remove                │
-│ gg G      start / end           Enter     fold a group or bus   J K        move down / up        │
-│ z x       zoom in / out         e         the whole value       V          select rows; Esc ends │
-│ c         center the cursor     yy yt     copy value / time     r          next radix            │
-│ H L       screen left / right                                   u Ctrl-r   undo / redo           │
-│ Ctrl-d/u  half a screen                                                                          │
+│ gg G      start / end           Enter     fold a group or bus   p P        put below / above     │
+│ z x       zoom in / out         e         the whole value       J K        move down / up        │
+│ c         center the cursor     yy yt     copy value / time     > <        group / ungroup       │
+│ H L       screen left / right                                   R          rename the group      │
+│ Ctrl-d/u  half a screen                                         V          select rows; Esc ends │
+│                                                                 r          next radix            │
+│                                                                 u Ctrl-r   undo / redo           │
+│                                                                                                  │
 │                                                                 Search                           │
 │                                                                 /          search                │
 │                                                                 n N        next / previous match │
 │                                                                                                  │
 │                                                                 Marks                            │
 │                                                                 m M        put / remove a mark   │
-│                                                                 Tab/S-Tab  next / previous mark  │
-│                                                                 '2..'9     jump to a mark        │
-│                                                                 ''         back before the jump  │
-╰──────────────────────────────────────────────────────────── 1–17 of 29  j k scroll  ? Esc close ─╯
+╰──────────────────────────────────────────────────────────── 1–17 of 32  j k scroll  ? Esc close ─╯
  NORMAL   signals ▸  top.clk                                                 12ns  1ns/col  simple

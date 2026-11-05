@@ -99,6 +99,11 @@ actions! {
     MoveUp "move_up" "K" "move the row up" true,
     Range "range" "V" "select rows" false,
     Radix "radix" "r" "next radix" false,
+    Group "group" ">" "group the rows" false,
+    Ungroup "ungroup" "<" "out of the group" false,
+    Rename "rename" "R" "rename the group" false,
+    Put "put" "p" "put removed rows below" false,
+    PutAbove "put_above" "P" "put removed rows above" false,
     Undo "undo" "u" "undo" false,
     Redo "redo" "<C-r>" "redo" false,
     CopyValue "copy_value" "yy" "copy the value" false,
@@ -174,7 +179,7 @@ m = ["mark at a time…", ":cursor "]
 [d]
 name = "decode"
 d = ["decode an interface", ":pick interfaces", "the ones found in the trace, each with its line"]
-D = ["decode with a form…", ":decode", "name, protocol, clock and roles as fields, tried as you fill them in"]
+D = ["decode with a form…", ":decode", "name, protocol, clock and roles as fields, checked as you fill them in"]
 p = ["protocol…", ":protocol "]
 s = ["computed signal…", ":signal "]
 n = ["name values…", ":names "]

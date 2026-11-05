@@ -1,7 +1,7 @@
 ## 5. Editing rows
 
 The **rows** (the signals being shown) are changed with Normal mode keys (section 3): `dd`,
-`J` / `K`, `r`, `V`, `u`. Adding happens in the **signal panel** (all signals in the file), which
+`p` / `P`, `J` / `K`, `>` / `<`, `R`, `r`, `V`, `u`. Adding happens in the **signal panel** (all signals in the file), which
 `a` or a click on the status line's `signals ▸` opens on the left, and `a`, the button or `Esc`
 closes. It has the keys while it is open; when it closes, they go back to the rows.
 
@@ -234,9 +234,9 @@ person to look through.
 
 ### Rows
 
-The keys that change the rows are in section 3 with the others: `dd` removes, `J` / `K` move, `r`
-cycles the radix, `V` selects a range of rows for them and for `:group`, `u` / `Ctrl-r` undo and
-redo. In the panel, `/` searches the signals; on the rows it searches values (section 8), so
+The keys that change the rows are in section 3 with the others: `dd` removes and `p` / `P` put
+what it removed elsewhere, `J` / `K` move, `>` / `<` group and ungroup, `R` renames a group, `r`
+cycles the radix, `V` selects a range of rows for them, `u` / `Ctrl-r` undo and redo. In the panel, `/` searches the signals; on the rows it searches values (section 8), so
 adding by name is `a` then `/`.
 
 ### Undo
@@ -283,11 +283,21 @@ A group is a named set of rows with a header row. Groups have one level (no nest
 - A collapsed header shows the number of signals in it: `▸ stream (4)`.
 - With a header selected, the status line shows the group's name and `/` shows an error.
 
-On the rows (section 3): `V` then `j` / `k` select rows and `:group <name>` groups them; `dd` on
-a header removes the group and its signals; `J` / `K` on a header move the whole group, and on a
-signal next to a group's edge move it into or out of the group.
+On the rows (section 3), as in vim's indenting:
 
-- `:group` on a selection that includes a header shows an error, since groups don't nest yet.
+- `>` groups the selected row or `V` range under a name it gives (the start the signals' names
+  share, `s_axi_aw` for `s_axi_awvalid` and `s_axi_awready`; else `group`), and the name is typed
+  in place on the header: the status line shows `NAME` and what the keys do, the first character
+  replaces the name, `Backspace` and `Ctrl-u` edit it, `Enter` keeps it and `Esc` leaves the
+  name it had. `R` types a new name for the group the selected row is in the same way. Grouping
+  and naming are an undo step each. `:group <name>` and `:rename <name>` do it in one line.
+- `<` takes the selected signals out of their group, placed right after it (a group left empty
+  goes); on a header, it dissolves the group, its signals staying where they are, as `:ungroup`.
+- `dd` on a header removes the group and its signals; `p` / `P` put them back elsewhere as a
+  group. `J` / `K` on a header move the whole group, and on a signal next to a group's edge move
+  it into or out of the group.
+
+- `>` or `:group` on a selection that includes a header shows an error, since groups don't nest yet.
 - `:group` on signals all inside one group takes them out of it into the new group, placed right
   after it, so a group is split without rebuilding it; a group left empty goes. A selection
   partly inside a group shows an error naming the group.

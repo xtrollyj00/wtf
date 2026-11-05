@@ -49,7 +49,10 @@ These are wtf's defaults. `?` in the window shows the keys of where you are; `[k
 |---|---|
 | <kbd>a</kbd> | add signals |
 | <kbd>dd</kbd> | remove |
+| <kbd>p</kbd> <kbd>P</kbd> | put below / above |
 | <kbd>J</kbd> <kbd>K</kbd> | move down / up |
+| <kbd>></kbd> <kbd>&lt;</kbd> | group / ungroup |
+| <kbd>R</kbd> | rename the group |
 | <kbd>V</kbd> | select rows; Esc ends |
 | <kbd>r</kbd> | next radix |
 | <kbd>u</kbd> <kbd>Ctrl-r</kbd> | undo / redo |
@@ -236,7 +239,7 @@ New signals go below the selected row, at the accent line.
 | Keys | Does | Runs |
 |---|---|---|
 | <kbd>Space</kbd> <kbd>d</kbd> <kbd>d</kbd> | decode an interface: the ones found in the trace, each with its line | `:pick interfaces` |
-| <kbd>Space</kbd> <kbd>d</kbd> <kbd>D</kbd> | decode with a form…: name, protocol, clock and roles as fields, tried as you fill them in | `:decode` |
+| <kbd>Space</kbd> <kbd>d</kbd> <kbd>D</kbd> | decode with a form…: name, protocol, clock and roles as fields, checked as you fill them in | `:decode` |
 | <kbd>Space</kbd> <kbd>d</kbd> <kbd>p</kbd> | protocol… | `:protocol` |
 | <kbd>Space</kbd> <kbd>d</kbd> <kbd>s</kbd> | computed signal… | `:signal` |
 | <kbd>Space</kbd> <kbd>d</kbd> <kbd>n</kbd> | name values… | `:names` |
@@ -337,6 +340,11 @@ start = "<C-g>"     # gg
 | `move_up` | `K` | move the row up, *count* |
 | `range` | `V` | select rows |
 | `radix` | `r` | next radix |
+| `group` | `>` | group the rows |
+| `ungroup` | `<` | out of the group |
+| `rename` | `R` | rename the group |
+| `put` | `p` | put removed rows below |
+| `put_above` | `P` | put removed rows above |
 | `undo` | `u` | undo |
 | `redo` | `<C-r>` | redo |
 | `copy_value` | `yy` | copy the value |

@@ -258,6 +258,65 @@ fn groups_and_selection() {
     assert_eq!(ws.group("g"), Err("no rows".into()));
 }
 
+/// `<` (spec §6): signals out of their group, placed after it, or a header's group dissolved;
+/// `p` / `P` put removed rows next to a row, joining a group as a drop there would.
+#[test]
+fn ungroup_and_put() {
+    let mut ws = with(&["top.clk", "top.cpu"]);
+    // the header selected: after the group
+    ws.sel = 1;
+    ws.add_rows(&[var(&ws, "top.rst")]);
+    assert_eq!(names(&ws), ["clk", "▾ cpu", "  state", "  data", "  busy", "rst"]);
+    // one signal out, after the group
+    ws.sel = 2;
+    ws.ungroup_rows().unwrap();
+    assert_eq!(names(&ws), ["clk", "▾ cpu", "  data", "  busy", "state", "rst"]);
+    assert_eq!(selected(&ws), "state");
+    assert_eq!(ws.ungroup_rows(), Err("not in a group".into()));
+    // partly in a group
+    (ws.sel, ws.anchor) = (4, Some(3));
+    assert!(ws.ungroup_rows().unwrap_err().starts_with("the selection is partly in group cpu"));
+    // the last ones out: the group goes
+    (ws.sel, ws.anchor) = (3, Some(2));
+    ws.ungroup_rows().unwrap();
+    assert_eq!(names(&ws), ["clk", "data", "busy", "state", "rst"]);
+    // a header: the group dissolved, its signals where they are
+    (ws.sel, ws.anchor) = (2, Some(1));
+    ws.group("g").unwrap();
+    ws.sel = 1;
+    ws.ungroup_rows().unwrap();
+    assert_eq!(names(&ws), ["clk", "data", "busy", "state", "rst"]);
+    // put: nothing removed yet, then rows put below and above, into a group below its row
+    assert_eq!(ws.put(Vec::new(), true), Err("nothing to put: dd removes rows, then p puts them below a row".into()));
+    (ws.sel, ws.anchor) = (2, Some(1));
+    ws.group("g").unwrap();
+    ws.sel = 0;
+    let clk = ws.rows[0].clone();
+    ws.delete().unwrap();
+    ws.sel = 1;
+    ws.put(vec![clk.clone()], true).unwrap();
+    assert_eq!(names(&ws), ["▾ g", "  data", "  clk", "  busy", "state", "rst"]);
+    assert_eq!(selected(&ws), "clk");
+    // a whole group, above a row: never into another group
+    ws.sel = 0;
+    let g: Vec<_> = ws.rows[ws.selection()].to_vec();
+    ws.delete().unwrap();
+    ws.sel = 1;
+    ws.put(g, false).unwrap();
+    assert_eq!(names(&ws), ["state", "▾ g", "  data", "  clk", "  busy", "rst"]);
+    // with a `V` range: below its last row, above its first
+    (ws.sel, ws.anchor) = (5, Some(4));
+    ws.put(vec![clk.clone()], true).unwrap();
+    assert_eq!(names(&ws)[4..], ["  busy", "rst", "top.clk"]);
+    (ws.sel, ws.anchor) = (5, Some(6));
+    ws.put(vec![clk.clone()], false).unwrap();
+    assert_eq!(names(&ws)[4..], ["  busy", "top.clk", "rst", "top.clk"]);
+    ws.rows.clear();
+    assert_eq!(ws.ungroup_rows(), Err("no rows".into()));
+    ws.put(vec![clk], true).unwrap();
+    assert_eq!(names(&ws), ["clk"]);
+}
+
 #[test]
 fn radixes() {
     let mut ws = with(&["top.cpu.data", "top.clk", "top.cpu.state"]);
