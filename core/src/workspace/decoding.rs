@@ -108,6 +108,87 @@ impl Workspace {
         Ok(var)
     }
 
+    /// The decodes that read decode `name`'s streams: their signals, clock or rules name one, or a
+    /// stream of theirs is made from one.
+    fn readers(&self, name: &str) -> Vec<String> {
+        let mine = |p: &str| p == name || p.strip_prefix(name).is_some_and(|r| r.starts_with('.'));
+        let named = self.decodes.iter().filter(|d| d.name != name).filter(|d| mine(&d.clock) || d.signals.iter().any(|(_, s)| mine(s)) || d.params.iter().any(|(_, v)| v.contains(&format!("{name}."))));
+        let made = self.streams.iter().filter(|s| !mine(&s.name) && s.inputs.iter().any(|x| mine(x))).filter_map(|s| self.decodes.iter().find(|d| s.name == d.name || s.name.starts_with(&format!("{}.", d.name))));
+        let mut out: Vec<String> = named.chain(made).map(|d| d.name.clone()).collect();
+        out.dedup();
+        out
+    }
+
+    /// The rows showing a stream of decode `name`, or a field of one, that isn't one now.
+    fn drop_rows_of(&mut self, name: &str) {
+        let mut now = HashSet::new();
+        for i in self.streams_of_decode(name) {
+            let s = &self.streams[i];
+            now.insert(s.name.clone());
+            now.extend(s.schema.iter().map(|f| format!("{}.{}", s.name, f.name)));
+        }
+        let gone = |p: &str| (p == name || p.starts_with(&format!("{name}."))) && !now.contains(p);
+        let keep: Vec<bool> = self.rows.iter().map(|r| r.sig().is_none_or(|s| !gone(&self.trace.vars[s.var].path))).collect();
+        let mut k = keep.into_iter();
+        self.rows.retain(|_| k.next().expect("one per row"));
+        rows::tidy(&mut self.rows);
+        self.anchor = None;
+        self.fix_sel();
+    }
+
+    /// Remove decode `name` (`:decode <name> off`, spec §16): the instance, its streams and the
+    /// rows showing them. A decode another reads stays, naming the readers to remove first.
+    pub fn remove_decode(&mut self, name: &str) -> Result<(), String> {
+        let Some(i) = self.decodes.iter().position(|d| d.name == name) else {
+            let all: Vec<&str> = self.decodes.iter().map(|d| d.name.as_str()).collect();
+            return Err(match all.is_empty() {
+                true => format!("no decode {name}: there are none yet"),
+                false => format!("no decode {name} (decodes: {})", all.join(", ")),
+            });
+        };
+        let readers = self.readers(name);
+        if !readers.is_empty() {
+            return Err(format!("{name} is read by {}: remove {} first", readers.join(", "), if readers.len() > 1 { "them" } else { "it" }));
+        }
+        self.decodes.remove(i);
+        let mine: Vec<usize> = self.streams_of_decode(name);
+        let mut k = 0;
+        self.streams.retain(|_| {
+            k += 1;
+            !mine.contains(&(k - 1))
+        });
+        self.drop_rows_of(name);
+        Ok(())
+    }
+
+    /// Decode `d` again under its name, as edited (the decode form, spec §5): the streams it
+    /// makes now replace the old ones, rows showing the old ones it doesn't make go, and the
+    /// decodes that read it are made again. If it fails, the old one stays.
+    pub fn redecode(&mut self, d: Decode) -> Result<String, String> {
+        let name = d.name.clone();
+        let Some(at) = self.decodes.iter().position(|x| x.name == name) else { return self.add_decode(d).map(|_| String::new()) };
+        let mine = self.streams_of_decode(&name);
+        let (mut old, mut kept) = (Vec::new(), Vec::new());
+        for (i, s) in std::mem::take(&mut self.streams).into_iter().enumerate() {
+            if mine.contains(&i) { old.push(s) } else { kept.push(s) }
+        }
+        self.streams = kept;
+        let was = self.decodes.remove(at);
+        if let Err(e) = self.add_decode(d) {
+            self.streams.retain(|s| !(s.name == name || s.name.starts_with(&format!("{name}."))));
+            self.streams.extend(old);
+            self.decodes.insert(at, was);
+            return Err(e);
+        }
+        // made last by add_decode: back in its place, before the decodes that read it
+        let d = self.decodes.pop().expect("just made");
+        self.decodes.insert(at, d);
+        self.drop_rows_of(&name);
+        let again: Vec<Decode> = self.decodes[at + 1..].iter().filter(|x| self.readers(&name).contains(&x.name)).cloned().collect();
+        let failed: Vec<String> = again.into_iter().filter_map(|x| self.add_decode(x).err()).collect();
+        Ok(failed.join("; "))
+    }
+
     /// The mistakes in an instance's names, without reading a value: its protocol, roles,
     /// prefix, params and clock, as `add_decode` reports them before it decodes (the decode form
     /// checks as it is filled in, spec §5 "Decode form").

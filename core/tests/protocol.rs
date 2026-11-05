@@ -246,6 +246,56 @@ fn check_decode_names_only() {
     assert!(!ws.trace.vars.iter().any(|v| v.path.contains("s_axi_") && ws.trace.loaded(ws.trace.by_path[&v.path])), "no value read");
 }
 
+/// `:decode <name> off` (spec §16): the instance, its streams and their rows go, the vars after;
+/// a decode another reads stays, naming it. Made again under its name, rows of streams it still
+/// makes stay, those of streams it no longer makes go.
+#[test]
+fn remove_and_redecode() {
+    let mut ws = open("axilite.vcd");
+    ws.add_decode(decode("s", "axilite", "aclk", &[], &[("prefix", "s_axi_")])).unwrap();
+    let io = [("request", "s.aw"), ("response", "s.b")];
+    ws.add_decode(decode("lat", "pair", "", &io, &[])).unwrap();
+    let wr = ws.trace.by_path["s.wr"];
+    ws.add_rows(&[wr, ws.trace.by_path["top.aclk"]]);
+    assert_eq!(wtf_core::command::run(&mut ws, "decode s off"), Err("s is read by lat: remove it first".into()));
+    assert_eq!(wtf_core::command::run(&mut ws, "decode nope off"), Err("no decode nope (decodes: s, lat)".into()));
+    wtf_core::command::run(&mut ws, "decode lat off").unwrap();
+    let mark = ws.mark();
+    assert_eq!(wtf_core::command::run(&mut ws, "decode s off"), Ok(Some(("s: removed".into(), false))));
+    ws.record(mark);
+    assert!(ws.decodes.is_empty() && ws.streams.is_empty());
+    assert_eq!(ws.rows.len(), 1, "s.wr's row gone, aclk's kept");
+    // the rows come back with undo
+    ws.undo().unwrap();
+    assert_eq!(ws.rows.len(), 2);
+    ws.redo().unwrap();
+    assert_eq!(wtf_core::command::run(&mut ws, "decode s off"), Err("no decode s: there are none yet".into()));
+    // once nothing holds them, its vars go
+    let mut fresh = open("axilite.vcd");
+    fresh.add_decode(decode("s", "axilite", "aclk", &[], &[("prefix", "s_axi_")])).unwrap();
+    fresh.remove_decode("s").unwrap();
+    fresh.drop_unused();
+    assert_eq!(fresh.trace.vars.len(), fresh.trace.fixed);
+    // made again: a protocol with other fields; the row of a field it no longer has goes
+    let p = |name: &str, field: &str| Sampler { name: name.into(), when: "valid && ready".into(), fields: vec![(field.into(), "valid".into())], roles: vec!["valid".into(), "ready".into()] };
+    ws.add_protocol(p("pa", "a")).unwrap();
+    ws.add_protocol(p("pb", "b")).unwrap();
+    let w = [("valid", "s_axi_wvalid"), ("ready", "s_axi_wready")];
+    ws.add_decode(decode("x", "pa", "aclk", &w, &[])).unwrap();
+    let (x, xa) = (ws.trace.by_path["x"], ws.trace.by_path["x.a"]);
+    ws.add_rows(&[x, xa]);
+    assert_eq!(ws.redecode(decode("x", "pb", "aclk", &w, &[])), Ok(String::new()));
+    let paths: Vec<&str> = ws.rows.iter().filter_map(|r| r.sig()).map(|s| ws.trace.vars[s.var].path.as_str()).collect();
+    assert!(paths.contains(&"x") && !paths.contains(&"x.a"), "{paths:?}");
+    assert_eq!((ws.decodes.len(), ws.streams.len(), ws.streams[0].schema[0].name.as_str()), (1, 1, "b"));
+    // a failing one leaves the old
+    assert!(ws.redecode(decode("x", "pb", "nope", &w, &[])).is_err());
+    assert_eq!((ws.decodes[0].clock.as_str(), ws.streams.len()), ("top.aclk", 1));
+    // not made yet: made
+    assert_eq!(ws.redecode(decode("y", "pa", "aclk", &w, &[])), Ok(String::new()));
+    assert_eq!(ws.decodes.len(), 2);
+}
+
 /// AXI4 in axi4.vcd: write 1 (two beats to 0x100) and write 2 (one beat to 0x200, SLVERR), whose B
 /// responses come back in the other order; reads 3 and 4 (two beats each), whose R beats
 /// interleave; and an AR valid dropped before its ready.

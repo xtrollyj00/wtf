@@ -215,6 +215,9 @@ impl App {
             self.picker_mouse(m, at, now);
             return self.ws.record(mark);
         }
+        if self.decodes.is_some() {
+            return self.decodes_mouse(m, at, now);
+        }
         // the decode form: a click on a field fills that one in; nothing under it takes the mouse
         if let Some(f) = &mut self.form {
             if m.kind == MouseEventKind::Down(MouseButton::Left)

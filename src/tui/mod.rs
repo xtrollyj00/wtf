@@ -3,6 +3,7 @@
 
 pub mod app;
 pub mod browser;
+pub mod decodes;
 pub mod form;
 pub mod commands;
 pub mod keys;

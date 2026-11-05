@@ -179,6 +179,7 @@ m = ["mark at a time…", ":cursor "]
 [d]
 name = "decode"
 d = ["decode an interface", ":pick interfaces", "the ones found in the trace, each with its line"]
+l = ["decodes", ":decodes", "the ones made: records, rows, edit, remove"]
 D = ["decode with a form…", ":decode", "name, protocol, clock and roles as fields, checked as you fill them in"]
 p = ["protocol…", ":protocol "]
 s = ["computed signal…", ":signal "]

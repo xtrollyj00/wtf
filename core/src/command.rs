@@ -102,7 +102,7 @@ pub fn run(app: &mut Workspace, line: &str) -> Result<Option<Msg>, String> {
 /// runs to the closing quote, so it can hold a `key=` (`bad="x=1"`).
 /// Answers with the streams the instance made and how many records each has, violations apart,
 /// so what there is to look at shows: `bus: records bus.aw 2, ...; violations bus.errors 2, ...`.
-/// A `:decode` line's argument as an instance, not made yet (the TUI's decode form tries it).
+/// A `:decode` line's argument as an instance, not made yet (the TUI's decode form checks it).
 pub fn parse_decode(arg: &str) -> Result<crate::stream::Decode, String> {
     let usage = "usage: :decode <name> <protocol> <role>=<signal>...";
     let (name, rest) = word(arg);
@@ -122,6 +122,11 @@ pub fn parse_decode(arg: &str) -> Result<crate::stream::Decode, String> {
 }
 
 fn decode(app: &mut Workspace, arg: &str) -> Result<String, String> {
+    // `:decode <name> off` removes it, as `:names <signal> off` does
+    if let (name, "off") = (word(arg).0, word(arg).1.trim()) {
+        app.remove_decode(name)?;
+        return Ok(format!("{name}: removed"));
+    }
     let d = parse_decode(arg)?;
     let name = d.name.clone();
     let name = name.as_str();

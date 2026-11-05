@@ -187,6 +187,22 @@ using it.
   fields, `Backspace` deletes, `Ctrl-u` clears the field, `Esc` closes. A click on a field fills
   that one in.
 
+### Decodes
+
+`:decodes` (`Space d l`) lists the decodes made, a line each: its name, protocol, where it is (its
+prefix, else its clock, else the signals or streams it takes), and its records, results then
+violations that hold any (`wr 2  rd 8  · errors 2`).
+
+- `Enter` opens its records (section 5 "Records"); `a` adds its results and violations as a group
+  of its name, as the interfaces picker does, or says they are shown already.
+- `e` opens the decode form on it, titled `edit decode <name>`, its name not taken; `Enter` there
+  decodes it again in place (section 16): rows of streams it still makes stay.
+- `dd` removes it, as `:decode <name> off`: after the first `d` the footer says `d again removes
+  it`. One another decode reads stays, the status line naming the readers.
+- `j` / `k` or the arrows move, `Esc` / `q` close; the keys are fixed (section 5 "Records"). The
+  mouse: the wheel moves, a click highlights, a double click opens the records, a click outside
+  closes it. With no decodes, `:decodes` says how to make one.
+
 ### Records
 
 `:records <streams> [where <expr>]` (section 7) opens the records browser: a card over the

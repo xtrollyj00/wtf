@@ -59,6 +59,9 @@ pub struct Form {
     pub error: Option<(Option<usize>, String)>,
     /// The first field shown, and the fields' screen lines (y, field) as last drawn.
     pub top: usize,
+    /// The decode being edited (from the decodes list): its name isn't taken, and `Enter`
+    /// decodes it again in place.
+    pub editing: Option<String>,
 }
 
 /// What a key does in the form (`App::FORM_KEYS`).
@@ -87,7 +90,7 @@ impl Form {
     /// interfaces picker's `clock=<clk>`) is left empty.
     pub fn new(ws: &mut Workspace, d: &Decode, found: &[Found]) -> Self {
         let value = |v: &str| if v.starts_with('<') && v.ends_with('>') { String::new() } else { v.to_string() };
-        let mut f = Form { fields: vec![Field::new("name", Kind::Name, &d.name), Field::new("protocol", Kind::Protocol, &d.protocol)], at: 0, hints: Vec::new(), hint: 0, check: Ok(()), error: None, top: 0 };
+        let mut f = Form { fields: vec![Field::new("name", Kind::Name, &d.name), Field::new("protocol", Kind::Protocol, &d.protocol)], at: 0, hints: Vec::new(), hint: 0, check: Ok(()), error: None, top: 0, editing: None };
         let given: Vec<(String, String)> = std::iter::once(("clock".to_string(), d.clock.clone())).chain(d.signals.iter().cloned()).chain(d.params.iter().cloned()).collect();
         f.reshape(ws);
         for (k, v) in given {
@@ -241,6 +244,16 @@ impl App {
         Ok(())
     }
 
+    /// The form on decode `name`, to edit it (the decodes list's `e`).
+    pub fn edit_decode(&mut self, name: &str) -> Result<(), String> {
+        let d = self.ws.decodes.iter().find(|d| d.name == name).cloned().ok_or_else(|| format!("no decode {name}"))?;
+        let mut f = Form::new(&mut self.ws, &d, &self.found);
+        (f.editing, f.at) = (Some(name.to_string()), 1);
+        self.form = Some(f);
+        self.form_check();
+        Ok(())
+    }
+
     /// The form has the keys; they are fixed. A character the table doesn't have types into the
     /// field.
     pub fn form_key(&mut self, k: KeyEvent) {
@@ -319,7 +332,8 @@ impl App {
             return f.check = Ok(());
         }
         let (line, name) = (f.line(), f.value("name").to_string());
-        let r = match self.ws.decodes.iter().any(|d| d.name == name) {
+        let taken = self.ws.decodes.iter().any(|d| d.name == name) && f.editing.as_deref() != Some(name.as_str());
+        let r = match taken {
             true => Err(format!("{name}: the name is taken; give another")),
             false => wtf_core::command::parse_decode(&line["decode ".len()..]).and_then(|d| self.ws.check_decode(&d)),
         };
@@ -337,11 +351,22 @@ impl App {
             return (f.at, f.error) = (at, Some((Some(at), m)));
         }
         let (line, name) = (f.line(), f.value("name").to_string());
-        if self.ws.decodes.iter().any(|d| d.name == name) {
+        let editing = f.editing.as_deref() == Some(name.as_str());
+        if self.ws.decodes.iter().any(|d| d.name == name) && !editing {
             let f = self.form.as_mut().expect("checked above");
             return (f.at, f.error) = (0, Some((Some(0), format!("{name}: the name is taken; give another"))));
         }
-        match self.decode_and_show(&line, &name) {
+        // edited: made again in place, its rows kept where it still makes their streams
+        let r = match editing {
+            true => wtf_core::command::parse_decode(&line["decode ".len()..]).and_then(|d| self.ws.redecode(d)).map(|failed| {
+                self.msg = Some(match failed.is_empty() {
+                    true => (format!("{name}: decoded again"), false),
+                    false => (format!("{name}: decoded again, but its readers failed: {failed}"), true),
+                });
+            }),
+            false => self.decode_and_show(&line, &name),
+        };
+        match r {
             Ok(()) => self.form = None,
             Err(e) => {
                 let f = self.form.as_mut().expect("checked above");
@@ -374,7 +399,7 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
         // at most three lines of it, broken at its parts
         (Some((e, _)), _) => result.extend(wrap(e, bw - 4).into_iter().take(3).map(|l| (l, red))),
         (_, Some(m)) => result.push((m, dim)),
-        _ => result.push(("the names match: Enter decodes".into(), card)),
+        _ => result.push((format!("the names match: Enter decodes{}", if f.editing.is_some() { " it again" } else { "" }), card)),
     }
     let bad: Vec<usize> = failed.map_or(Vec::new(), |(_, b)| b);
     let line = format!(":{}", f.line());
@@ -392,7 +417,11 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
             }
         }
     }
-    let title = vec![(format!("{}decode", crate::tui::render::icon_text(crate::draw::icon::RECORD)), acc)];
+    let what = match &f.editing {
+        Some(n) => format!("edit decode {n}"),
+        None => "decode".into(),
+    };
+    let title = vec![(format!("{}{what}", crate::tui::render::icon_text(crate::draw::icon::RECORD)), acc)];
     let keys = format!(
         "Tab next  {}{}{}Enter run  Esc close",
         if f.hint().is_some() { "→ take  " } else { "" },

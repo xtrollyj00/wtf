@@ -120,6 +120,8 @@ pub struct App {
     pub picker: Option<crate::tui::picker::Picker>,
     /// The decode form (`:decode` alone, spec §5 "Decode form").
     pub form: Option<crate::tui::form::Form>,
+    /// The decodes list (`:decodes`, spec §5 "Decodes").
+    pub decodes: Option<crate::tui::decodes::Decodes>,
     /// The rows `dd` removed last, for `p` / `P` (spec §6).
     pub removed: Vec<Row>,
     /// A group's name being typed on its header (`>`, `R`): the header, the name it had, and
@@ -273,6 +275,7 @@ impl App {
             menu: None,
             picker: None,
             form: None,
+            decodes: None,
             removed: Vec::new(),
             naming: None,
         }
@@ -375,6 +378,7 @@ impl App {
             "records" => return self.open_browser(arg.trim()),
             "pick" => return self.open_picker(arg.trim()),
             "decode" if arg.trim().is_empty() => return self.open_form(""),
+            "decodes" => return self.open_decodes(),
             // the window picks the unit that fits; `unit` is for agents' answers (spec §15)
             "unit" => return Err("unit sets the time unit of an agent's answers; the window picks what fits".into()),
             _ => command::run(&mut self.ws, line)?,
@@ -583,6 +587,7 @@ impl App {
         }
         match self.mode {
             _ if self.picker.is_some() => self.picker_key(k),
+            _ if self.decodes.is_some() => self.decodes_key(k),
             _ if self.form.is_some() => self.form_key(k),
             Mode::Normal if self.adding => self.panel_key(k),
             Mode::Normal => self.normal_key(k),
@@ -847,7 +852,7 @@ impl App {
     }
 
 
-    fn report(&mut self, r: Result<(), String>) {
+    pub(crate) fn report(&mut self, r: Result<(), String>) {
         if let Err(e) = r {
             self.msg = Some((e, true));
         }

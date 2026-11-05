@@ -133,6 +133,12 @@ checks that return only violations.
   This makes the streams `rx.beat`, `rx.frame` and `rx.errors`. Each stream is also a signal
   (`rx.frame`, its segments the records) with a signal per field (`rx.frame.len`), holding the
   field's value during each record.
+  `:decode <name> off` removes an instance: its streams and the rows showing them go (an undo
+  step for the rows; the signals go once nothing holds them). An instance another reads (its
+  signals, clock or rules name a stream of it, or a stream of its is made from one) stays, the
+  error naming the readers to remove first. `:decode` under a name taken replaces that instance;
+  the decode form's edit (section 5 "Decodes") also drops the rows of streams it no longer makes
+  and makes the instances that read it again.
 - **TUI.** A stream row draws like a bus, a segment per record with a short label
   (`#3 64B`); `Enter` expands it into a row per field. Violation records draw red. Field
   signals search like any other (`/len == 64`). `:decode <name> <protocol> <role>=<signal>...`
