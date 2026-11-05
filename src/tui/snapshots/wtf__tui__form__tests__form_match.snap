@@ -1,0 +1,34 @@
+---
+source: src/tui/form.rs
+expression: "crate::snapshot(&mut a, 100, Some(30))"
+---
+
+     ╭─ decode ───────────────────────────────────────────────────────────────────────────────╮
+     │ name       s                                                                           │
+     │ protocol   axilite  AXI4-Lite: write and read transactions with their delay, handshak  │
+     │ clock      aclk                                                                        │
+     │▌prefix     s_axi_   → top.s_axi_                                                       │
+     │ awvalid    top.s_axi_awvalid                                                           │
+     │ awready    top.s_axi_awready                                                           │
+     │ awaddr     top.s_axi_awaddr                                                            │
+     │ wvalid     top.s_axi_wvalid                                                            │
+     │ wready     top.s_axi_wready                                                            │
+     │ wdata      top.s_axi_wdata                                                             │
+     │ bvalid     top.s_axi_bvalid                                                            │
+     │ bready     top.s_axi_bready                                                            │
+     │ arvalid    top.s_axi_arvalid                                                           │
+     │ arready    top.s_axi_arready                                                           │
+     │ araddr     top.s_axi_araddr                                                            │
+     │ rvalid     top.s_axi_rvalid                                                            │
+     │ rready     top.s_axi_rready                                                            │
+     │ rdata      top.s_axi_rdata                                                             │
+     │ awprot                                                                                 │
+     │ wstrb      top.s_axi_wstrb                                                             │
+     │ bresp      top.s_axi_bresp                                                             │
+     │ arprot                                                                                 │
+     │────────────────────────────────────────────────────────────────────────────────────────│
+     │ the names match: Enter decodes                                                         │
+     │ :decode s axilite clock=aclk prefix=s_axi_                                             │
+     ╰─────────────────────────────────────────────── Tab next  → take  Enter run  Esc close ─╯
+
+ NORMAL   signals ▸                                                                  0  5ns/col  x

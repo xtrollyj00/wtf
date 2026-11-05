@@ -108,6 +108,42 @@ impl Workspace {
         Ok(var)
     }
 
+    /// The mistakes in an instance's names, without reading a value: its protocol, roles,
+    /// prefix, params and clock, as `add_decode` reports them before it decodes (the decode form
+    /// checks as it is filled in, spec §5 "Decode form").
+    pub fn check_decode(&mut self, d: &Decode) -> Result<(), String> {
+        let mut errors = Vec::new();
+        let clocked = if let Some(b) = protocol::builtin(&d.protocol) {
+            let required = self.required(d, &b);
+            self.bind(d, &required, b.optional, b.params, &mut errors);
+            b.clocked
+        } else if let Some(p) = self.protocols.iter().find(|p| p.name == d.protocol).cloned() {
+            let roles: Vec<&str> = p.roles.iter().map(String::as_str).collect();
+            self.bind(d, &roles, &[], &[], &mut errors);
+            true
+        } else {
+            errors.push(protocol::unknown(&d.protocol, &self.protocols));
+            false
+        };
+        self.roles.clear();
+        if clocked && d.clock.is_empty() {
+            errors.push("no clock".into());
+        } else if clocked && let Err(e) = self.resolve(&d.clock) {
+            errors.push(format!("clock: {e}"));
+        }
+        match errors.is_empty() {
+            true => Ok(()),
+            false => Err(format!("{}: {}", d.name, errors.join("; "))),
+        }
+    }
+
+    /// A built-in protocol's required roles for this instance: a side none of whose roles is
+    /// given, explicitly or under the prefix, may be left out (spec §16).
+    fn required(&mut self, d: &Decode, b: &protocol::Builtin) -> Vec<&'static str> {
+        let prefix = d.params.iter().find(|p| p.0 == "prefix").map(|p| p.1.clone());
+        b.needed(|r| d.signals.iter().any(|s| s.0 == r) || prefix.as_ref().is_some_and(|p| self.resolve(&format!("{p}{r}")).is_ok()))
+    }
+
     /// An instance's signals for the roles: each role's width, and the mistakes (a role without a
     /// signal, a signal for no role, a signal that isn't one).
     /// The roles map to the signals' full paths, so names made by an earlier step can't change them.
@@ -251,8 +287,7 @@ impl Workspace {
     /// A protocol written in Rust on signals: its steps' streams, `<instance>.<step>`.
     fn decode_builtin(&mut self, d: &Decode, b: protocol::Builtin) -> Result<usize, String> {
         let mut errors = Vec::new();
-        let prefix = d.params.iter().find(|p| p.0 == "prefix").map(|p| p.1.clone());
-        let required = b.needed(|r| d.signals.iter().any(|s| s.0 == r) || prefix.as_ref().is_some_and(|p| self.resolve(&format!("{p}{r}")).is_ok()));
+        let required = self.required(d, &b);
         let given = self.bind(d, &required, b.optional, b.params, &mut errors);
         if d.clock.is_empty() && b.clocked {
             errors.push("no clock".into());

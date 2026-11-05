@@ -216,6 +216,15 @@ impl App {
             self.picker_mouse(m, at, now);
             return self.ws.record(mark);
         }
+        // the decode form: a click on a field fills that one in; nothing under it takes the mouse
+        if let Some(f) = &mut self.form {
+            if m.kind == MouseEventKind::Down(MouseButton::Left)
+                && let Some(&(_, i)) = self.hit.records.iter().find(|(y, _)| *y == at.1).filter(|_| inside(self.hit.boxed, at.0, at.1))
+            {
+                f.at = i;
+            }
+            return;
+        }
         // the status line's button opens and closes the panel
         if m.kind == MouseEventKind::Down(MouseButton::Left) && inside(self.hit.button, at.0, at.1) {
             self.drag = None;
