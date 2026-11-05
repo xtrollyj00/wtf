@@ -118,6 +118,8 @@ pub struct App {
     pub menu: Option<Menu>,
     /// The picker (`:pick`, spec §5 "Picker").
     pub picker: Option<crate::tui::picker::Picker>,
+    /// The decode form (`:decode` alone, spec §5 "Decode form").
+    pub form: Option<crate::tui::form::Form>,
 }
 
 /// The agent a window follows (`:follow`, spec §15 "Following"): each change it makes to its
@@ -258,6 +260,7 @@ impl App {
             click: None,
             menu: None,
             picker: None,
+            form: None,
         }
     }
 
@@ -357,6 +360,7 @@ impl App {
             "agent" => return self.show_agent_file(),
             "records" => return self.open_browser(arg.trim()),
             "pick" => return self.open_picker(arg.trim()),
+            "decode" if arg.trim().is_empty() => return self.open_form(""),
             // the window picks the unit that fits; `unit` is for agents' answers (spec §15)
             "unit" => return Err("unit sets the time unit of an agent's answers; the window picks what fits".into()),
             _ => command::run(&mut self.ws, line)?,
@@ -562,6 +566,7 @@ impl App {
         }
         match self.mode {
             _ if self.picker.is_some() => self.picker_key(k),
+            _ if self.form.is_some() => self.form_key(k),
             Mode::Normal if self.adding => self.panel_key(k),
             Mode::Normal => self.normal_key(k),
             Mode::Command | Mode::Search => self.command_key(k),
@@ -1459,9 +1464,14 @@ pub fn parse_keys(s: &str) -> Result<Vec<KeyEvent>, String> {
             Some("bs") => Some(key(KeyCode::Backspace, none)),
             Some("lt") => Some(key(KeyCode::Char('<'), none)),
             Some("space") => Some(key(KeyCode::Char(' '), none)),
+            Some("c-space") => Some(key(KeyCode::Char(' '), KeyModifiers::CONTROL)),
+            Some("left") => Some(key(KeyCode::Left, none)),
+            Some("right") => Some(key(KeyCode::Right, none)),
+            Some("up") => Some(key(KeyCode::Up, none)),
+            Some("down") => Some(key(KeyCode::Down, none)),
             Some(n) if n.len() == 3 && n.starts_with("c-") => Some(key(KeyCode::Char(n.chars().nth(2).unwrap()), KeyModifiers::CONTROL)),
             Some(n) if !n.is_empty() && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') => {
-                return Err(format!("unknown key <{}> (keys: <Esc> <CR> <Tab> <S-Tab> <BS> <Space> <lt> <C-x>; < itself is <lt>)", name.unwrap()));
+                return Err(format!("unknown key <{}> (keys: <Esc> <CR> <Tab> <S-Tab> <BS> <Space> <C-Space> <Left> <Right> <Up> <Down> <lt> <C-x>; < itself is <lt>)", name.unwrap()));
             }
             _ => None,
         };

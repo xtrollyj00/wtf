@@ -19,7 +19,7 @@ pub const COMMANDS: &[Command] = &[
     Command { name: "add", usage: ":add <path|pattern>...", desc: "Add signals below the selected row (after a selected group); a scope becomes a group, e.g. :add top.cpu.*", args: true },
     Command { name: "rm", usage: ":rm [path|pattern]...", desc: "Remove matching rows, or the selected row; :rm ** removes all", args: true },
     Command { name: "signal", usage: ":signal <name> = <signal>", desc: "Name a computed signal, e.g. :signal op = cmd[7:0] or :signal hdr = {a, b}", args: true },
-    Command { name: "decode", usage: ":decode <name> <protocol> <role>=<signal>...", desc: "Decode a protocol into streams, e.g. :decode rx axis clock=clk tvalid=rx_tvalid tready=rx_tready tdata=rx_tdata tlast=rx_tlast", args: true },
+    Command { name: "decode", usage: ":decode <name> <protocol> <role>=<signal>...", desc: "Decode a protocol into streams, e.g. :decode rx axis clock=clk tvalid=rx_tvalid tready=rx_tready tdata=rx_tdata tlast=rx_tlast; alone, a form that fills it in", args: true },
     Command { name: "protocol", usage: ":protocol <name> roles=<a,b> when=<expr> <field>=<expr>...", desc: "Define a protocol on its roles, a record per cycle where when holds, e.g. :protocol cmd roles=valid,ready,data when=valid && ready op=data[7:0]; :decode puts it on signals", args: true },
     Command { name: "names", usage: ":names <signal> <value>=<name>...", desc: "Name a signal's values, shown by the enum radix and searched by name, e.g. :names state 0=IDLE 1=BUSY; off removes them", args: true },
     Command { name: "records", usage: ":records <streams> [where <expr>]", desc: "Browse records as a table: a stream, a decode's results (:records bus), a glob; / filters, s sorts, = groups", args: true },

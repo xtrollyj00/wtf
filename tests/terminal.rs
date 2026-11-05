@@ -330,3 +330,17 @@ fn too_small_and_back() {
     t.resize(COLS, ROWS);
     t.wait("the setup again", |s| s.contents().contains("draw cleanly"));
 }
+
+/// The decode form checks the names as typed, and `Enter` decodes (spec §5 "Decode form").
+#[test]
+fn decode_form_checks_as_typed() {
+    let mut t = Term::spawn("form", &["tests/data/axilite.vcd"]);
+    t.wait("the screen", |s| s.contents().contains("NORMAL"));
+    t.send(":decode\r");
+    t.wait("the form", |s| s.contents().contains("name the decode"));
+    t.send("s\taxilite\taclk\ts_axi_");
+    let s = t.wait("the names checked", |s| s.contents().contains("the names match: Enter decodes"));
+    assert!(s.contains(":decode s axilite clock=aclk prefix=s_axi_"), "{s}");
+    t.send("\r");
+    t.wait("the results", |s| !s.contents().contains("the names match") && s.contents().contains("s.wr"));
+}

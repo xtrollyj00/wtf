@@ -69,6 +69,9 @@ pub struct Picker {
     /// read yet is read only once the highlight rests on it (`PREVIEW_WAIT`), so holding `j`
     /// over a big trace doesn't read every signal it passes.
     pub rest: Option<(usize, std::time::Instant, bool)>,
+    /// Opened from the decode form for its field: `Enter` puts the signal there (spec §5 "Decode
+    /// form").
+    pub fill: Option<usize>,
 }
 
 /// How long the highlight rests on a signal not read yet before its preview reads it.
@@ -85,6 +88,12 @@ impl Picker {
         }
         self.shown = scored.into_iter().map(|(_, i)| i).collect();
         (self.hl, self.top) = (0, 0);
+    }
+
+    /// The query as typed, ranked.
+    pub fn set_query(&mut self, q: &str) {
+        self.query = q.into();
+        self.filter();
     }
 
     fn current(&self) -> Option<&Entry> {
@@ -144,7 +153,7 @@ impl App {
         let name = if name.is_empty() { "signals" } else { name };
         let source = SOURCES.iter().position(|s| *s == name).ok_or_else(|| format!("no picker source {name} ({})", SOURCES.join(", ")))?;
         let stream = Some(rest.trim().to_string()).filter(|s| !s.is_empty());
-        let mut p = Picker { source, stream, query: String::new(), entries: Vec::new(), shown: Vec::new(), empty: String::new(), hl: 0, top: 0, page: 1, marked: Vec::new(), rest: None };
+        let mut p = Picker { source, stream, query: String::new(), entries: Vec::new(), shown: Vec::new(), empty: String::new(), hl: 0, top: 0, page: 1, marked: Vec::new(), rest: None, fill: None };
         p.entries = self.entries(&mut p)?;
         p.filter();
         // the trail opens on its newest step, as `:trail`
@@ -306,7 +315,7 @@ impl App {
 
     /// Runs a decode line from the interfaces, then adds its results and violations (spec §16
     /// "Results") below the selected row as a group named after it, the group selected.
-    fn decode_and_show(&mut self, line: &str, name: &str) -> Result<(), String> {
+    pub(crate) fn decode_and_show(&mut self, line: &str, name: &str) -> Result<(), String> {
         self.run(line)?;
         let vars: Vec<usize> = self.ws.results(name).into_iter().filter_map(|i| self.ws.trace.by_path.get(&self.ws.streams[i].name).copied()).filter(|&v| !self.ws.shown(v)).collect();
         let (Some(&first), Some(&last)) = (vars.first(), vars.last()) else { return Ok(()) };
@@ -348,6 +357,8 @@ impl App {
             Pick::Up => p.step(-1),
             Pick::PageDown => p.step(p.page as isize),
             Pick::PageUp => p.step(-(p.page as isize)),
+            // the form's signal, from signals only
+            Pick::Source | Pick::Mark if p.fill.is_some() => {}
             Pick::Source => {
                 // the next source; an empty one shows why
                 let mut p = self.picker.take().expect("checked above");
@@ -382,6 +393,10 @@ impl App {
     fn pick(&mut self) {
         let Some(p) = self.picker.take() else { return };
         let Some(e) = p.current() else { return self.picker = Some(p) };
+        if let (Some(i), Act::Var(v)) = (p.fill, &e.act) {
+            let path = self.ws.trace.vars[*v].path.clone();
+            return self.form_fill(i, path);
+        }
         let r = match e.act.clone() {
             Act::Var(v) => {
                 // the marked, or the highlighted; below the selected row, as the signal panel adds
@@ -415,10 +430,8 @@ impl App {
             }
             Act::Step(None) => Err("this step is about no time".into()),
             Act::Decode { done: Some(d), .. } => self.open_browser(&d),
-            Act::Decode { line, ready: false, .. } => {
-                self.prefill(&line);
-                Ok(())
-            }
+            // the clock left to name: the form, with the rest filled in
+            Act::Decode { line, ready: false, .. } => self.open_form(line.strip_prefix("decode ").unwrap_or(&line)),
             Act::Decode { line, name, .. } => self.decode_and_show(&line, &name),
         };
         if let Err(e) = r {
@@ -506,6 +519,7 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
         x += s.chars().count();
     }
     let keys = match p.source {
+        _ if p.fill.is_some() => " Enter fill it in  Esc back ".into(),
         0 if !p.marked.is_empty() => format!(" {} marked  Enter add  Tab mark  C-s source  Esc close ", p.marked.len()),
         0 => " Enter add  Tab mark  C-s source  Esc close ".into(),
         3 => " Enter type it  C-s source  Esc close ".into(),
@@ -715,7 +729,7 @@ mod tests {
     #[test]
     fn ranks() {
         let paths = ["top.s_axi_rdata", "top.s_axi_rready", "top.bus.rd", "top.cpu.state"];
-        let mut p = Picker { source: 0, stream: None, query: "rd".into(), entries: Vec::new(), shown: Vec::new(), empty: String::new(), hl: 0, top: 0, page: 1, marked: Vec::new(), rest: None };
+        let mut p = Picker { source: 0, stream: None, query: "rd".into(), entries: Vec::new(), shown: Vec::new(), empty: String::new(), hl: 0, top: 0, page: 1, marked: Vec::new(), rest: None, fill: None };
         p.entries = paths.iter().enumerate().map(|(i, s)| Entry { text: s.to_string(), head: 0, right: String::new(), act: Act::Var(i), preview: Vec::new() }).collect();
         p.filter();
         // a word boundary first; state has no r then d
@@ -895,14 +909,15 @@ mod tests {
     }
 
     #[test]
-    fn picker_decode_without_clock_prefills() {
-        // spec §5: an interface whose clock isn't found puts its line on the command line
+    fn picker_decode_without_clock_opens_the_form() {
+        // spec §5: an interface whose clock isn't found opens the decode form on the clock
         let mut a = app("axilite.vcd");
         a.open_picker("commands").unwrap();
-        let line = "decode bus axilite clock= prefix=top.s_axi_".to_string();
-        a.picker.as_mut().unwrap().entries[0].act = Act::Decode { line: line.clone(), name: "bus".into(), ready: false, done: None };
+        let line = "decode bus axilite clock=<clk> prefix=top.s_axi_".to_string();
+        a.picker.as_mut().unwrap().entries[0].act = Act::Decode { line, name: "bus".into(), ready: false, done: None };
         key(&mut a, KeyCode::Enter, KeyModifiers::NONE);
-        assert_eq!(a.line, line);
+        let f = a.form.as_ref().expect("the form");
+        assert_eq!((f.fields[f.at].key.as_str(), f.line()), ("clock", "decode bus axilite prefix=top.s_axi_".into()));
     }
 
     #[test]

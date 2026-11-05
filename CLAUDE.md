@@ -31,6 +31,7 @@ cargo test -q --test mcp <name>      # one MCP integration test (tests/mcp.rs)
 cargo test -p wtf-core --test session round_trip   # one core integration test
 cargo test <name>                    # unit / TUI tests in src/main.rs by name
 cargo clippy -q --all-targets        # keep it clean
+cargo llvm-cov --workspace --exclude wtf-bench   # line coverage of wtf and wtf-core, as CI measures it
 INSTA_UPDATE=always cargo test <name>  # accept changed insta snapshots (check the diff)
 cargo run -- tests/data/simple.vcd --snapshot 100   # render one screen as text
 cargo run -p wtf-bench --release -- gen --size 1G --format fst /tmp/b   # a huge trace (spec §18)

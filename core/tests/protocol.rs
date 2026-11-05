@@ -226,6 +226,26 @@ fn axilite_transactions_and_errors() {
     assert!(err.starts_with("t: awvalid: unknown signal: m_axi_awvalid"), "{err}");
 }
 
+/// The names of an instance checked without decoding (the decode form, spec §5): the same
+/// mistakes `add_decode` reports, nothing made, no value read.
+#[test]
+fn check_decode_names_only() {
+    let mut ws = open("axilite.vcd");
+    let vars = ws.trace.vars.len();
+    assert_eq!(ws.check_decode(&decode("s", "axilite", "aclk", &[], &[("prefix", "s_axi_")])), Ok(()));
+    let e = ws.check_decode(&decode("t", "axilite", "", &[], &[("prefix", "m_axi_")])).unwrap_err();
+    assert!(e.starts_with("t: awvalid: unknown signal: m_axi_awvalid") && e.ends_with("; no clock"), "{e}");
+    assert_eq!(ws.check_decode(&decode("t", "axilite", "nope", &[], &[("prefix", "s_axi_")])), Err("t: clock: unknown signal: nope".into()));
+    assert!(ws.check_decode(&decode("t", "nope", "aclk", &[], &[])).unwrap_err().starts_with("t: unknown protocol: nope"));
+    // a session protocol: its roles; a role it hasn't
+    ws.add_protocol(Sampler { name: "w".into(), when: "valid && ready".into(), fields: vec![], roles: vec!["valid".into(), "ready".into()] }).unwrap();
+    assert_eq!(ws.check_decode(&decode("w1", "w", "aclk", &[("valid", "s_axi_wvalid"), ("ready", "s_axi_wready")], &[])), Ok(()));
+    let e = ws.check_decode(&decode("w1", "w", "aclk", &[("valid", "s_axi_wvalid"), ("go", "s_axi_wready")], &[])).unwrap_err();
+    assert!(e.contains("no signal for ready") && e.contains("w has no role go"), "{e}");
+    assert!(ws.streams.is_empty() && ws.decodes.is_empty() && ws.trace.vars.len() == vars);
+    assert!(!ws.trace.vars.iter().any(|v| v.path.contains("s_axi_") && ws.trace.loaded(ws.trace.by_path[&v.path])), "no value read");
+}
+
 /// AXI4 in axi4.vcd: write 1 (two beats to 0x100) and write 2 (one beat to 0x200, SLVERR), whose B
 /// responses come back in the other order; reads 3 and 4 (two beats each), whose R beats
 /// interleave; and an AR valid dropped before its ready.

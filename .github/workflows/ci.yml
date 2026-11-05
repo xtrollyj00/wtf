@@ -37,7 +37,8 @@ jobs:
           components: llvm-tools-preview
       - uses: taiki-e/install-action@cargo-llvm-cov
       - uses: Swatinem/rust-cache@v2
-      - run: cargo llvm-cov --locked --lcov --output-path lcov.info
+      # the workspace, so wtf-core is measured too; the bench has no tests worth it
+      - run: cargo llvm-cov --locked --workspace --exclude wtf-bench --lcov --output-path lcov.info
       - uses: codecov/codecov-action@v5
         with:
           files: lcov.info

@@ -70,7 +70,7 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
         put(buf, x, y, &text, Style::new().bg(pal().cursor).fg(pal().cursor_text).add_modifier(Modifier::BOLD));
     }
     // under what has the keys, so they don't show around its edges
-    let covered = app.help || app.examine.is_some() || app.records.is_some() || app.browser.is_some() || app.messages.is_some() || app.menu.is_some() || app.leader.is_some() || app.picker.is_some();
+    let covered = app.help || app.examine.is_some() || app.records.is_some() || app.browser.is_some() || app.messages.is_some() || app.menu.is_some() || app.leader.is_some() || app.picker.is_some() || app.form.is_some();
     app.hit.notes = if covered { Vec::new() } else { notes(app, buf, w, body) };
     let drawn = app.hit.notes.len();
     app.hit.unshown = drawn == 0 && !app.shown_notes(std::time::Instant::now()).is_empty();
@@ -126,6 +126,7 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
     }
     crate::tui::browser::draw(app, buf, w, body);
     messages(app, buf, w, body);
+    crate::tui::form::draw(app, buf, w, body);
     crate::tui::picker::draw(app, buf, w, body);
     if app.leader.is_some() {
         leader(app, buf, w, body);

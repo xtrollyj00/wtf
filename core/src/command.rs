@@ -101,7 +101,8 @@ pub fn run(app: &mut Workspace, line: &str) -> Result<Option<Msg>, String> {
 /// runs to the closing quote, so it can hold a `key=` (`bad="x=1"`).
 /// Answers with the streams the instance made and how many records each has, violations apart,
 /// so what there is to look at shows: `bus: records bus.aw 2, ...; violations bus.errors 2, ...`.
-fn decode(app: &mut Workspace, arg: &str) -> Result<String, String> {
+/// A `:decode` line's argument as an instance, not made yet (the TUI's decode form tries it).
+pub fn parse_decode(arg: &str) -> Result<crate::stream::Decode, String> {
     let usage = "usage: :decode <name> <protocol> <role>=<signal>...";
     let (name, rest) = word(arg);
     let (protocol, rest) = word(rest);
@@ -116,7 +117,13 @@ fn decode(app: &mut Workspace, arg: &str) -> Result<String, String> {
         // a built-in's params (`mode=0`, `baud=115200`) aren't roles
         false => k != "prefix" && !crate::protocol::builtin(protocol).is_some_and(|b| b.params.contains(&k.as_str())),
     });
-    let d = crate::stream::Decode { name: name.into(), protocol: protocol.into(), clock, signals, params };
+    Ok(crate::stream::Decode { name: name.into(), protocol: protocol.into(), clock, signals, params })
+}
+
+fn decode(app: &mut Workspace, arg: &str) -> Result<String, String> {
+    let d = parse_decode(arg)?;
+    let name = d.name.clone();
+    let name = name.as_str();
     app.add_decode(d)?;
     // its results first, then violations, then the streams they are made from (spec §16 "Results")
     let made = app.streams_of_decode(name);

@@ -404,16 +404,19 @@ impl Workspace {
     /// its own, its signals do.
     fn not_a_signal(&self, name: &str) -> String {
         let key = crate::trace::parts(&crate::trace::canon(name)).into_iter().map(str::to_string).collect::<Vec<_>>();
-        let inside: Vec<&str> = self
-            .trace
-            .vars
-            .iter()
-            .map(|v| v.path.as_str())
-            .filter(|p| {
-                let c = crate::trace::canon(p);
-                let parts = crate::trace::parts(&c);
+        let canon = self.trace.canon_paths();
+        let last = key.last().map_or("", String::as_str);
+        let inside: Vec<&str> = (0..self.trace.vars.len())
+            .filter(|&v| {
+                // split only the paths the name's last part is in
+                let c = &canon[v];
+                if !c.contains(last) {
+                    return false;
+                }
+                let parts = crate::trace::parts(c);
                 parts.len() > key.len() && parts.windows(key.len()).take(parts.len() - key.len()).any(|w| w == key)
             })
+            .map(|v| self.trace.vars[v].path.as_str())
             .collect();
         match inside.len() {
             0 => format!("unknown signal: {name}"),
@@ -432,9 +435,7 @@ impl Workspace {
         let end = format!(".{name}");
         let mut found: Vec<usize> = vars.clone().filter(|&v| self.trace.vars[v].path.ends_with(&end)).collect();
         if found.is_empty() {
-            // shortcut (#14): every path in canonical form on each such lookup, O(signals); keep the
-            // forms in the trace if names that match only this way get slow on huge traces
-            let canon: Vec<String> = self.trace.vars.iter().map(|v| crate::trace::canon(&v.path)).collect();
+            let canon = self.trace.canon_paths();
             let key = crate::trace::canon(name);
             let scoped = self.scope.as_ref().map(|s| crate::trace::canon(&format!("{s}.{name}")));
             found = vars.clone().filter(|&v| canon[v] == key || scoped.as_ref() == Some(&canon[v])).collect();

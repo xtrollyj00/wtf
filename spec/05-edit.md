@@ -130,13 +130,62 @@ border, the current one highlighted.
 | `commands` | the `:` commands | the usage and what it does | puts it on the command line, to finish and run |
 | `sessions` | the agents' workspaces on this machine (section 15) | its trace, and whether it is this one | follows it, as `:follow <id>`; an agent on another trace says to open that trace |
 | `trail` | the agent's steps, newest highlighted | what it asked and the answer | jumps to its time, as `:trail` |
-| `interfaces` | the interfaces built-in protocols decode in the trace (section 16, as the agents' `open` lists them), each its name and prefix, the protocol at the right (`→ bus` once decoded) | its `:decode` line, each role and the signal it takes, the clock (or that none was found) | decodes it, named after its prefix (`s_axi`, a number after a name taken), and adds its results and violations (section 16 "Results") below the selected row as a group of that name; without a clock found, puts the line on the command line to name it; decoded already, opens the records browser on the decode |
+| `interfaces` | the interfaces built-in protocols decode in the trace (section 16, as the agents' `open` lists them), each its name and prefix, the protocol at the right (`→ bus` once decoded) | its `:decode` line, each role and the signal it takes, the clock (or that none was found) | decodes it, named after its prefix (`s_axi`, a number after a name taken), and adds its results and violations (section 16 "Results") below the selected row as a group of that name; without a clock found, opens the decode form on the clock, the rest filled in; decoded already, opens the records browser on the decode |
 
 The picker's keys are fixed: typing edits the query, `Backspace` deletes, `Ctrl-n` / `Ctrl-p`
 or the arrows move, `PageDown` / `PageUp` a box of entries, `Tab` marks the highlighted signal
 and moves on, `Ctrl-s` goes to the next source (an empty one says why), `Enter` picks and closes,
 `Esc` closes. Adding is one undo step. A query matches its characters in order, not
 necessarily together (`cpust` matches `top.cpu.state`); a tie goes to the shorter entry.
+
+### Decode form
+
+`:decode` without arguments (`Space d D`) opens the **decode form**: a card with a new instance's
+fields, for a person who doesn't know the protocol's roles and params, so `:decode` is learnt by
+using it.
+
+```
+╭─ decode ───────────────────────────────────────────────────────────────╮
+│ name       s                                                           │
+│ protocol   axilite  AXI4-Lite: write and read transactions with their  │
+│ clock      top.aclk                                                    │
+│▌prefix     s_axi_   plays 17 of 19 roles                               │
+│ awvalid    top.s_axi_awvalid                                           │
+│ …                                                                      │
+│────────────────────────────────────────────────────────────────────────│
+│ the names match: Enter decodes                                         │
+│ :decode s axilite clock=top.aclk prefix=s_axi_                         │
+╰─────────────────── Tab next  → take  C-Space pick  Enter run  Esc close ─╯
+```
+
+- **Fields**: `name`, `protocol`, then the protocol's: `clock` (a clocked one), `prefix` (a
+  built-in), its required roles, its optional roles and params dim. The built-in protocols and the
+  session's sampled ones (section 16); `frame`, `pair` and `check` work on streams and rules, and
+  are typed as `:decode` lines. Changing the protocol keeps the values of the fields it still has.
+- **Filling in**: typing edits the field; each field suggests, `→` takes the suggestion and
+  `Ctrl-n` / `Ctrl-p` go through the others (`2/5` beside it), so a form is mostly filled in
+  without typing a name. Left empty, a field suggests what fits it: the protocol, those of the
+  interfaces found (section 4, as `Space d d` lists them); the prefix, those interfaces' prefixes
+  for the protocol; the clock, the one found with that prefix, then the file's signals ending in
+  `clk` or `clock`; a role, the file's signals whose name ends in it, shortest first; the name, the
+  prefix's last part (`s_axi`). Typed, the text matches as the picker's query does (`awv` matches
+  `top.s_axi_awvalid`), signals ending in the role first. Nothing is filled in without `→`, and
+  nothing is guessed beyond a name's exact ending. `Ctrl-Space` opens the signals picker on the
+  role's name, its `Enter` fills the field in; on the protocol, it goes to the next one.
+- **The prefix** plays each role left empty by `<prefix><role>`, as in `:decode`: the role shows
+  that signal dim, the prefix how many roles it plays. Nothing is guessed beyond that.
+- **Checked as filled in**: after each key the form checks the names as `:decode` would before
+  decoding (the protocol, each role's signal, the prefix, the params, the clock, and that the
+  instance's name is new) and says what is wrong, the fields it names in red, or that the names
+  match. It reads no signal's values, so it is as quick on a 1 GB trace as on a small one; the
+  decode, which walks every clock cycle, runs on `Enter` only.
+- **The line** under it is the `:decode` line the fields make, `Enter` runs it: the instance's
+  results and violations are added as a group of its name, as the interfaces picker does. An error
+  keeps the form open on the first field it names. A name taken by another instance is refused:
+  the form makes new instances, it doesn't replace one.
+- **Keys** are fixed (section 5 "Records"): `Tab` / `Down` and `Shift-Tab` / `Up` go between the
+  fields, `Backspace` deletes, `Ctrl-u` clears the field, `Esc` closes. A click on a field fills
+  that one in.
 
 ### Records
 
