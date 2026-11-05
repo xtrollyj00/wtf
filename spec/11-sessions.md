@@ -137,7 +137,7 @@ wtf --version
 | `<trace>` | the VCD, FST or GHW file to open; without it, the start screen (section 4), also as a `--snapshot` |
 | `-S <session>` | load this session instead of `<trace>.session.toml`; needs `<trace>` |
 | `--glyphs <set>` | draw with this glyph set: `unicode`, `box`, `ascii` or `nerd` (section 14), over the config file's (section 19) |
-| `--snapshot <width>[x<height>]` | render one screen as plain text to stdout and exit, without the terminal UI; without a height, as tall as the content; a screen smaller than its content shows what fits |
+| `--snapshot <width>[x<height>]` | render one screen as plain text to stdout and exit, without the terminal UI; without a height, as tall as the content. Smaller than the window's smallest screen (40x10, section 4 "Too small") is an error |
 | `--ansi` | with `--snapshot`: print the screen in its colours, as SGR escape codes, with the configured theme (section 19); `NO_COLOR` gives the reversed cells of a terminal without colour |
 | `--keys <keys>` | with `--snapshot`: press these keys first, the screen drawn before each as the window draws it, so a mode or an overlay can be shown (`?`, `a`, `:` with its completions, `e`). Written as in Vim's mappings: plain characters, `<Esc>`, `<CR>`, `<Tab>`, `<S-Tab>`, `<BS>`, `<Space>`, `<lt>` for `<`, `<C-x>`; another `<name>` is an error, a `<` that starts no name is typed as it is |
 | `--setup` | ask again which glyphs and theme to use, as on the first start (section 19), then open `<trace>` if given |

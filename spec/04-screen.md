@@ -2,6 +2,16 @@
 
 wtf is started like Vim: `wtf <path to file>`. Without a path it shows the start screen.
 
+### Too small
+
+wtf draws on a screen of at least 40 columns by 10 lines: the time axis, a row, the status line
+and the command line, the launch guide with its first actions, and the signal panel beside the
+rows. On a smaller terminal, the start screen, the first-start setup and the trace's screen all
+give way to one message in the middle, as btop does: "Terminal too small", the terminal's width
+and height (the one that falls short in red) and the size wtf needs. Keys still work; the screen
+comes back when the terminal is made bigger. A card bigger than the screen it is on (which-key,
+the leader menu, completions) shows what fits or is left out, never more.
+
 ### Start screen
 
 `wtf` without a trace shows, as one block centred on the screen:

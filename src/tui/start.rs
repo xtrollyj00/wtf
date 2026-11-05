@@ -478,6 +478,9 @@ pub fn run(start: &mut Start) -> Result<Choice, String> {
     let res = (|| -> std::io::Result<Choice> {
         loop {
             term.draw(|f| {
+                if crate::draw::too_small(f.area(), f.buffer_mut()) {
+                    return;
+                }
                 if let Some(at) = start.draw(f.area(), f.buffer_mut()) {
                     f.set_cursor_position(at);
                 }

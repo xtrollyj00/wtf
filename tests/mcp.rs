@@ -1070,13 +1070,18 @@ fn snapshot_ansi_and_start_keys() {
     assert!(typing.contains("x.vcd"), "{typing}");
 }
 
-/// A screen too small for its content draws what fits, in every mode and on the start screen
-/// (spec §11 `--snapshot`).
+/// `--snapshot` takes no screen smaller than the window's smallest (spec §4 "Too small", §11);
+/// at that size, every mode and the start screen draw what fits.
 #[test]
-fn snapshot_smaller_than_content() {
+fn snapshot_smallest_screen() {
     let dir = Dir::new("small");
     let trace = std::fs::canonicalize("tests/data/reqresp.vcd").unwrap();
-    for size in ["1x1", "20x3", "80x3", "200x4", "10x10"] {
+    for size in ["39", "80x3", "39x10", "40x9"] {
+        let out = wtf(&dir.0).arg(&trace).args(["--snapshot", size]).output().unwrap();
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success() && err.contains(&format!("{size} is too small; the smallest screen is 40x10")), "{size}: {err}");
+    }
+    for size in ["40x10", "41x10", "200x10", "40x30"] {
         for keys in ["", "?", ":", "<Space>", "a", "e", ":records<CR>"] {
             for with_trace in [true, false] {
                 let mut cmd = wtf(&dir.0);

@@ -93,6 +93,16 @@ impl Term {
         self.send(&format!("\x1b[<{button};{};{}{}", x + 1, y + 1, if press { 'M' } else { 'm' }));
     }
 
+    /// The terminal's window made `cols` x `rows`: the pty's size set, as a terminal emulator
+    /// does, so wtf gets SIGWINCH and redraws.
+    fn resize(&mut self, cols: u16, rows: u16) {
+        let size = libc::winsize { ws_row: rows, ws_col: cols, ws_xpixel: 0, ws_ypixel: 0 };
+        // SAFETY: the master side of a pty owned here, and a winsize to read
+        let r = unsafe { libc::ioctl(std::os::fd::AsRawFd::as_raw_fd(&self.input), libc::TIOCSWINSZ, &raw const size) };
+        assert_eq!(r, 0, "TIOCSWINSZ: {}", std::io::Error::last_os_error());
+        self.screen.lock().unwrap().set_size(rows.try_into().unwrap(), cols.try_into().unwrap());
+    }
+
     /// Press at `from`, move to `to`, let go there.
     fn drag(&mut self, from: (usize, usize), to: (usize, usize)) {
         self.mouse(0, from, true);
@@ -286,4 +296,23 @@ fn start_screen_quits() {
     t.wait("the start screen", |s| s.contents().contains("Open a trace"));
     t.send("q");
     assert!(t.child.wait().unwrap().success());
+}
+
+/// A terminal made smaller than wtf's smallest screen shows the message with its size, keys
+/// still work there, and the screen comes back when it is made bigger (spec §4 "Too small").
+#[test]
+fn too_small_and_back() {
+    for (name, args, back) in [("smallw", &["tests/data/simple.vcd"][..], "NORMAL"), ("smalls", &[][..], "Open a trace")] {
+        let mut t = Term::spawn(name, args);
+        t.wait("the screen", |s| s.contents().contains(back));
+        t.resize(30, 6);
+        let s = t.wait("too small", |s| s.contents().contains("Terminal too small"));
+        assert!(s.contains("width 30  height 6") && s.contains("width 40  height 10") && !s.contains(back), "{s}");
+        t.resize(COLS, ROWS);
+        t.wait("the screen again", |s| s.contents().contains(back) && !s.contents().contains("too small"));
+        t.resize(30, 6);
+        t.wait("too small", |s| s.contents().contains("Terminal too small"));
+        t.send(if args.is_empty() { "q" } else { ":q!\r" });
+        assert!(t.child.wait().unwrap().success());
+    }
 }

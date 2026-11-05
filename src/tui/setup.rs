@@ -200,7 +200,11 @@ pub fn run(mono: bool, bg: Option<crate::theme::Rgb>) -> Option<String> {
     let mut setup = Setup::new(mono, draw::truecolor(), bg);
     let mut term = ratatui::init();
     let answer = loop {
-        if let Err(e) = term.draw(|f| setup.draw(f.area(), f.buffer_mut())) {
+        if let Err(e) = term.draw(|f| {
+            if !draw::too_small(f.area(), f.buffer_mut()) {
+                setup.draw(f.area(), f.buffer_mut());
+            }
+        }) {
             break Err(e.to_string());
         }
         match crossterm::event::read() {
