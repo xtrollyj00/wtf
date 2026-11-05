@@ -463,7 +463,7 @@ fn streams_of(b: &Builtin) -> Vec<About<String>> {
 /// An interface in a trace that a built-in protocol decodes: its signals' common prefix
 /// (`top.s_axi_`, playing each role as `<prefix><role>`), the protocol, and its clock if one
 /// stands out.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Found {
     pub prefix: String,
     pub protocol: &'static str,
@@ -492,8 +492,12 @@ impl Found {
 /// The interfaces of the file's signals that built-in protocols decode: wherever every required
 /// role is a signal `<prefix><role>`. A prefix goes to the protocol needing most roles (AXI4's
 /// wlast / rlast over AXI-Lite). Protocols whose roles are too generic to tell (UART's `line`) are
-/// left out.
+/// left out. Worked out once per trace: the file's signals don't change.
 pub fn detect(trace: &crate::trace::Trace) -> Vec<Found> {
+    trace.found.get_or_init(|| find(trace)).clone()
+}
+
+fn find(trace: &crate::trace::Trace) -> Vec<Found> {
     let mut protocols: Vec<(&'static str, Builtin)> = BUILTINS.iter().filter_map(|&n| Some((n, builtin(n)?))).filter(|(_, b)| b.required.len() > 1).collect();
     protocols.sort_by_key(|(_, b)| std::cmp::Reverse(b.required.len()));
     let file = |v: &usize| !trace.is_computed(*v);

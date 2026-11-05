@@ -154,6 +154,11 @@ pub struct Trace {
     /// Clocks' rising edges by (var, bit), worked out once (`query::edges`): every clocked search
     /// walks them.
     pub(crate) edges: std::cell::RefCell<HashMap<(usize, Option<u32>), Edges>>,
+    /// The interfaces built-in protocols decode in the file (`protocol::detect`), found once.
+    pub(crate) found: std::cell::OnceCell<Vec<crate::protocol::Found>>,
+    /// Each var's path in canonical form (`canon`), for names written in the other HDL's form;
+    /// worked out once per var, as vars are only added.
+    canon: std::cell::RefCell<Vec<String>>,
 }
 
 impl Trace {
@@ -191,7 +196,7 @@ impl Trace {
             .collect();
         let mut by_path: HashMap<String, usize> = vars.iter().enumerate().map(|(i, v)| (v.path.clone(), i)).collect();
         composites(&mut vars, &mut by_path);
-        Trace { wave, fs_per_tick, fixed: vars.len(), vars, by_path, version: 0, edges: Default::default() }
+        Trace { wave, fs_per_tick, fixed: vars.len(), vars, by_path, version: 0, edges: Default::default(), found: Default::default(), canon: Default::default() }
     }
 
     pub fn end(&self) -> Tick {
@@ -307,6 +312,16 @@ impl Trace {
 
     /// Add a computed signal from its values in time order (`changes`, times may repeat: the last
     /// value at a time counts), or replace the one with that path. Returns its var.
+    /// Every var's path in canonical form, by var (`canon`).
+    pub(crate) fn canon_paths(&self) -> std::cell::Ref<'_, Vec<String>> {
+        {
+            let mut c = self.canon.borrow_mut();
+            let n = c.len();
+            c.extend(self.vars[n..].iter().map(|v| canon(&v.path)));
+        }
+        self.canon.borrow()
+    }
+
     pub fn add_computed(&mut self, path: &str, width: Option<u32>, changes: Vec<(Tick, Val)>) -> Result<usize, String> {
         let mut list: Vec<(Tick, Val)> = Vec::with_capacity(changes.len());
         for (t, v) in changes {
