@@ -177,116 +177,91 @@ fn plural(n: usize, noun: &str) -> String {
 /// Lines a `signals` answer folds to: below the deepest level that fits, a scope is one line.
 const FOLD_LINES: usize = 200;
 
-/// The `signals` answer for a regex (spec §15): the signals whose path it matches, with widths, a
-/// struct or array one line unless the pattern names inside it; before them each scope whose
-/// name it matches (its path, not its parent's). Over `FOLD_LINES`, the scopes below the deepest
-/// level that fits are one line each, counting their matches; never above the scope all matches
-/// share, so asking for one scope lists it. Empty if nothing matches.
-fn design(t: &wtf_core::trace::Trace, re: &regex::Regex) -> String {
-    use wtf_core::trace::{join, parts};
+/// The `signals` answer: the design's nodes a search matched, as the hierarchy sent to the agent
+/// (spec §15). A signal with its width; a struct or array one line, what is in it hidden unless
+/// only that matched; a scope the search names before its signals, when it doesn't name the
+/// scope it is in. Over `FOLD_LINES`, the scopes below the deepest level that fits are a line
+/// each counting their matches, never above the scope all matches share, so asking for one
+/// scope lists it. Empty if nothing matched.
+fn hierarchy(t: &wtf_core::trace::Trace, matched: &[usize]) -> String {
+    let d = t.design();
+    let nodes = &d.nodes;
+    let mut hit = vec![false; nodes.len()];
+    matched.iter().for_each(|&i| hit[i] = true);
+    let up = |mut i: usize| std::iter::from_fn(move || nodes[i].parent.inspect(|&p| i = p));
     let what = |v: &wtf_core::trace::Var| match v.width {
-        Some(w) => format!("{w} bit{}", if w == 1 { "" } else { "s" }),
+        Some(w) => plural(w as usize, "bit"),
         None if v.real => "real".into(),
         None => "string".into(),
     };
-    // a var's first signal in the file, which orders the lines
-    let first = |mut x: usize| {
-        while let Some(&c) = t.vars[x].children.first() {
-            x = c;
-        }
-        x
-    };
-    // the scope a var is in: its path but its HDL name (`types` for `types.pkt.valid`)
-    let scope = |v: usize| {
-        let p = parts(&t.vars[v].path);
-        let n = p.len().saturating_sub(t.vars[v].decl.max(1));
-        p[..n].to_vec()
-    };
-    let hits: Vec<usize> = (0..t.vars.len()).filter(|&v| re.is_match(&t.vars[v].path)).collect();
-    let wholes: Vec<&str> = hits.iter().filter(|&&v| t.is_composite(v)).map(|&v| t.vars[v].path.as_str()).collect();
-    let inside = |path: &str| wholes.iter().any(|w| path.len() > w.len() && path.starts_with(w) && path[w.len()..].starts_with(['.', '[']));
-    // a line: a signal's scope is the one it is in, a scope's itself; `n` the signals it counts
-    struct Item<'a> {
-        order: (usize, usize, usize),
-        path: std::borrow::Cow<'a, str>,
-        text: String,
-        scope: Vec<&'a str>,
-        n: usize,
-    }
-    let mut items: Vec<Item> = Vec::new();
-    for &v in hits.iter().filter(|&&v| !inside(&t.vars[v].path)) {
-        let var = &t.vars[v];
-        let text = match t.is_composite(v) {
-            true => format!("{}, {}, {} signals", if t.is_array(v) { "array" } else { "struct" }, if var.width.is_some() { what(var) } else { "text".into() }, t.leaves(v).len()),
-            false => what(var),
-        };
-        let n = if t.is_composite(v) { t.leaves(v).len() } else { 1 };
-        items.push(Item { order: (first(v), 1, 0), path: var.path.as_str().into(), text, scope: scope(v), n });
-    }
-    // every scope: its signals and its first; listed when the pattern matches its own name
-    let mut scopes: std::collections::BTreeMap<Vec<&str>, (usize, usize)> = std::collections::BTreeMap::new();
-    for v in (0..t.vars.len()).filter(|&v| !t.is_composite(v)) {
-        let s = scope(v);
-        for k in 1..=s.len() {
-            let e = scopes.entry(s[..k].to_vec()).or_insert((0, v));
-            e.0 += 1;
-        }
-    }
-    for (s, &(n, at)) in &scopes {
-        let path = join(s.iter().copied());
-        let parent = join(s[..s.len() - 1].iter().copied());
-        if re.is_match(&path) && !re.is_match(&parent) {
-            items.push(Item { order: (at, 0, s.len()), path: path.into(), text: format!("scope of {}", plural(n, "signal")), scope: s.clone(), n: 0 });
+    // a line: (order, node, text); a var's ordered by its first signal, a scope before them
+    let mut items: Vec<((usize, usize, usize), usize, String)> = Vec::new();
+    for &i in matched {
+        let n = &nodes[i];
+        match n.var {
+            // inside a struct or array that matched: that is its line
+            Some(_) if up(i).take_while(|&p| nodes[p].var.is_some()).any(|p| hit[p]) => {}
+            Some(v) => {
+                let var = &t.vars[v];
+                let text = match t.is_composite(v) {
+                    true => format!("{}, {}, {}", if t.is_array(v) { "array" } else { "struct" }, if var.width.is_some() { what(var) } else { "text".into() }, plural(n.signals, "signal")),
+                    false => what(var),
+                };
+                items.push(((n.first, 1, n.depth), i, text));
+            }
+            None if n.parent.is_some_and(|p| hit[p]) => {}
+            None => items.push(((n.first, 0, n.depth), i, format!("scope of {}", plural(n.signals, "signal")))),
         }
     }
     if items.is_empty() {
         return String::new();
     }
-    items.sort_by_key(|i| i.order);
-    // the scope every match is in: folding stops there
-    let mut common: &[&str] = &items[0].scope;
-    for i in &items {
-        let k = common.iter().zip(&i.scope).take_while(|(a, b)| a == b).count();
-        common = &common[..k];
-    }
-    let common = common.len();
-    let deepest = items.iter().map(|i| i.scope.len()).max().unwrap_or(0);
-    // at level d: what is in scopes d deep or less is listed, the rest counted in its scope d + 1 deep
-    let fold = |d: usize| -> (Vec<String>, Option<String>) {
-        let mut lines: Vec<(std::borrow::Cow<str>, String)> = Vec::new();
-        let mut folded: Vec<(Vec<&str>, usize)> = Vec::new();
-        for i in &items {
-            if i.scope.len() <= d {
-                lines.push((i.path.clone(), i.text.clone()));
+    items.sort_by_key(|x| x.0);
+    // the scopes a line is in, from the top; a scope's line is in itself
+    let scopes = |i: usize| {
+        let mut s: Vec<usize> = std::iter::once(i).chain(up(i)).filter(|&p| nodes[p].var.is_none()).collect();
+        s.reverse();
+        s
+    };
+    let chains: Vec<Vec<usize>> = items.iter().map(|x| scopes(x.1)).collect();
+    // the scope every line is in: folding stops there
+    let common = chains.iter().map(|c| c.iter().zip(&chains[0]).take_while(|(a, b)| a == b).count()).min().unwrap_or(0);
+    let deepest = chains.iter().map(Vec::len).max().unwrap_or(0);
+    // at level `k`, what is in `k` scopes or fewer is listed, the rest counted in its scope k + 1 deep
+    let fold = |k: usize| -> (Vec<String>, Option<String>) {
+        let mut lines: Vec<(usize, Option<String>)> = Vec::new();
+        let mut folded: std::collections::HashMap<usize, (usize, usize)> = Default::default();
+        for (x, chain) in items.iter().zip(&chains) {
+            if chain.len() <= k {
+                lines.push((x.1, Some(x.2.clone())));
                 continue;
             }
-            let key = i.scope[..d + 1].to_vec();
-            match folded.iter().position(|(k, _)| *k == key) {
-                Some(f) => folded[f].1 += i.n,
-                None => {
-                    lines.push((join(key.iter().copied()).into(), String::new()));
-                    folded.push((key, i.n));
-                }
+            let s = chain[k];
+            let count = folded.entry(s).or_insert_with(|| {
+                lines.push((s, None));
+                (0, 0)
+            });
+            match nodes[x.1].var {
+                Some(_) => count.0 += nodes[x.1].signals,
+                None => count.1 += 1,
             }
         }
-        // a folded scope's line, now its count is known
-        let mut f = folded.iter();
-        let lines: Vec<(&str, String)> = lines
-            .iter()
-            .map(|(p, text)| match text.is_empty() {
-                true => (p.as_ref(), format!("scope, {}", plural(f.next().map_or(0, |x| x.1), "matching signal"))),
-                false => (p.as_ref(), text.clone()),
-            })
-            .collect();
-        let one = folded.first().map(|(k, _)| format!("^{}\\.", regex::escape(&join(k.iter().copied()))));
-        (collapse(lines.into_iter()), one)
+        let first = lines.iter().find(|l| l.1.is_none()).map(|l| format!("^{}\\.", regex::escape(&nodes[l.0].canon)));
+        let lines = lines.into_iter().map(|(i, text)| {
+            let text = text.unwrap_or_else(|| match folded[&i] {
+                (0, s) => format!("scope, {}", plural(s, "matching scope")),
+                (n, _) => format!("scope, {}", plural(n, "matching signal")),
+            });
+            (nodes[i].path.as_str(), text)
+        });
+        (collapse(lines), first)
     };
     let (mut lines, mut one) = fold(deepest);
-    for d in (common..deepest).rev() {
+    for k in (common..deepest).rev() {
         if lines.len() <= FOLD_LINES {
             break;
         }
-        (lines, one) = fold(d);
+        (lines, one) = fold(k);
     }
     let more = lines.len().saturating_sub(MAX_LINES);
     let mut out = lines.into_iter().take(MAX_LINES).collect::<Vec<_>>().join("\n");
@@ -541,7 +516,7 @@ impl Wtf {
             format!("not a regex: {} ({why}); `signals` takes a regex, not a glob{fix}: `.*` for any text, `a|b` for either, `\\[` for a bracket", a.pattern)
         })?;
         let t = &app.trace;
-        Ok(match design(t, &re) {
+        Ok(match hierarchy(t, &t.design().matching(|path| re.is_match(path))) {
             out if out.is_empty() => wtf_core::command::no_match(t, &a.pattern),
             out => budget(out),
         })

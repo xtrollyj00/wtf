@@ -562,3 +562,15 @@ fn computed_signals_load_with_their_parts() {
     ws.trace.load(&[file]);
     assert!(ws.trace.loaded(file));
 }
+
+/// Dropping a computed var moves the ones after it: a name matched in the other HDL's form (`Y`)
+/// still finds the one that moved.
+#[test]
+fn canonical_names_after_a_drop() {
+    let mut ws = open();
+    ws.resolve("data[7:4]").unwrap();
+    wtf_core::command::run(&mut ws, "signal y = data[3:0]").unwrap();
+    assert!(ws.resolve("Y").is_ok());
+    ws.drop_unused();
+    assert!(ws.resolve("Y").is_ok());
+}

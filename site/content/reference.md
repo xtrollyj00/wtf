@@ -28,7 +28,7 @@ signal ends that way (`s_axi_awaddr`); an ambiguous name is an error listing the
   adds a line per field; `signals` lists it as one line, its fields with `pkt\.`.
 - `signals` takes a regex, found anywhere in the path in any case, as grep finds it: `uart`,
   `_valid$`, `^top\.cpu\.` (a scope's signals), `mem\[0\]` (brackets escaped); `.*` lists
-  everything. A scope it names is a line of its own, `top.cpu (scope of 3 signals)`, and an
+  everything. Paths are matched lowercase, indices in brackets, whichever HDL wrote them. A scope it names is a line of its own, `top.cpu (scope of 3 signals)`, and an
   answer too long is folded to a line per scope below the deepest level that fits.
 - A name or pattern that matches nothing lists the nearest scopes and signals.
 

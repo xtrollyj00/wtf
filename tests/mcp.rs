@@ -205,6 +205,12 @@ fn reading_tools() {
     s.ok("open", json!({"trace": std::fs::canonicalize("tests/data/vhdl.fst").unwrap()}));
     assert_eq!(s.ok("signals", json!({"pattern": "vhdl"})), "vhdl (scope of 5 signals)\nvhdl.clk (1 bit)\nvhdl.arr (array, 8 bits, 2 signals)\nvhdl.gen[0..1].x (1 bit, 2 signals)");
     assert_eq!(s.ok("signals", json!({"pattern": "arr\\["})), "vhdl.arr[0..1] (4 bits, 2 signals)");
+    // a regex is matched against paths in one form, either HDL's written as `canon` writes it:
+    // lowercase, indices in brackets (the file has `gen_stages(0)`, `headers_vld`)
+    s.ok("open", json!({"trace": std::fs::canonicalize("tests/data/hdl.vcd").unwrap()}));
+    assert_eq!(s.ok("signals", json!({"pattern": "gen_stages\\[0\\]"})), "dut.gen_stages[0] (scope of 1 signal)\ndut.gen_stages[0].x (1 bit)");
+    assert_eq!(s.ok("signals", json!({"pattern": "HEADERS_VLD"})), "dut.headers_vld (1 bit)");
+    assert_eq!(s.ok("signals", json!({"pattern": "gen_stages\\(0\\)"})), "no match: gen_stages\\(0\\) (nearest: dut.gen_stages)");
     // without a width: a real, or a string (nvc dumps an enum as one, its type not kept)
     let reals = dir.0.join("real.vcd");
     std::fs::write(&reals, "$timescale 1ns $end\n$scope module top $end\n$var real 64 r level $end\n$upscope $end\n$enddefinitions $end\n#0\nr1.5 r\n").unwrap();
@@ -488,7 +494,7 @@ fn signals_fold() {
     let note = "folded to fit: a scope's line counts its matches; ask for one by its path";
     assert_eq!(
         s.ok("signals", json!({})),
-        format!("top.clk (1 bit)\ntop.core0 (scope, 181 matching signals)\ntop.core1 (scope, 181 matching signals)\ntop.core2 (scope, 181 matching signals)\ntop.core3 (scope, 181 matching signals)\n{note}, `^top\\.core0\\.`")
+        format!("top (scope of 725 signals)\ntop.clk (1 bit)\ntop.core0 (scope, 181 matching signals)\ntop.core1 (scope, 181 matching signals)\ntop.core2 (scope, 181 matching signals)\ntop.core3 (scope, 181 matching signals)\n{note}, `^top\\.core0\\.`")
     );
     let core = s.ok("signals", json!({"pattern": "^top\\.core1\\."}));
     assert_eq!(core.lines().count(), 62, "{core}");
@@ -507,7 +513,8 @@ fn answers_are_capped() {
     s.ok("open", json!({"trace": big_trace(&dir.0)}));
     let all = s.ok("signals", json!({}));
     assert_eq!(all.lines().count(), 1001);
-    assert!(all.ends_with("\n... 101 more; narrow the pattern"), "{}", &all[all.len() - 60..]);
+    assert!(all.starts_with("top (scope of 1101 signals)\n"), "{}", &all[..60]);
+    assert!(all.ends_with("\n... 102 more; narrow the pattern"), "{}", &all[all.len() - 60..]);
     let clk = s.ok("values", json!({"signals": ["clk"], "from": "0ns", "to": "2100ns"}));
     // the name, the value at `from`, 1000 changes, the note
     assert_eq!(clk.lines().count(), 1003);
