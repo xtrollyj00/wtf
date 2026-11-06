@@ -394,14 +394,29 @@ pub fn add(app: &mut Workspace, arg: &str) -> Result<Option<Msg>, String> {
     }
 }
 
-/// The error for a name or pattern that matches nothing, with a hint for patterns: they match
-/// the whole path.
-pub fn no_match(arg: &str) -> String {
+/// The error for a name or pattern that matches nothing: why a pattern missed (it matches the
+/// whole path, `*` is one level of it, braces are no pattern), and the nearest scopes and signals.
+pub fn no_match(trace: &crate::trace::Trace, arg: &str) -> String {
     let core = arg.trim_matches(['*', '.']);
-    if arg.contains('*') && !arg.starts_with("**.") && !core.is_empty() {
-        format!("no match: {arg} (a pattern matches the whole path: **.*{core}* for {core} anywhere)")
-    } else {
-        format!("no match: {arg}")
+    let mut hints = Vec::new();
+    if arg.contains(['{', '}']) {
+        hints.push("braces are no pattern: one name or pattern each".to_string());
+    } else if arg.contains('*') && core.is_empty() {
+        hints.push("`*` is one level of the path, `**` any number: `**` matches every signal".to_string());
+    } else if arg.contains('*') && !arg.starts_with("**.") {
+        // the pattern that does match: signals named so, or the signals in a scope named so
+        let any = |p: &str| trace.vars.iter().any(|v| v.children.is_empty() && glob(p, &v.path));
+        let fix = [format!("**.*{core}*"), format!("**.*{core}*.*")].into_iter().find(|p| any(p));
+        let fix = fix.map_or(String::new(), |p| format!(": {p} for {core} anywhere"));
+        hints.push(format!("a pattern matches the whole path{fix}"));
+    }
+    let near = trace.nearest(arg, 3);
+    if !near.is_empty() {
+        hints.push(format!("nearest: {}", near.join(", ")));
+    }
+    match hints.is_empty() {
+        true => format!("no match: {arg}"),
+        false => format!("no match: {arg} ({})", hints.join("; ")),
     }
 }
 
@@ -449,7 +464,7 @@ fn add_one(app: &mut Workspace, arg: &str) -> Result<(), String> {
             let list = inner.iter().take(5).cloned().collect::<Vec<_>>().join(", ");
             return Err(format!("no signals directly in {here}: add {here}.** for all of it, or one of its scopes: {list}"));
         }
-        return Err(no_match(arg));
+        return Err(no_match(&app.trace, arg));
     }
     let new: Vec<usize> = found.into_iter().filter(|v| !app.shown(*v)).collect();
     if new.is_empty() {

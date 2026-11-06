@@ -64,7 +64,7 @@ fn adding_and_removing() {
     assert_eq!(names(&ws), ["▾ cpu", "  state", "  data", "  busy"]);
     assert_eq!(run(&mut ws, "add top.cpu.*"), Err("already shown: top.cpu.*".into()));
     assert_eq!(run(&mut ws, "add top.nope"), Err("no match: top.nope".into()));
-    assert_eq!(run(&mut ws, "add top.zz*"), Err("no match: top.zz* (a pattern matches the whole path: **.*top.zz* for top.zz anywhere)".into()));
+    assert_eq!(run(&mut ws, "add top.zz*"), Err("no match: top.zz* (a pattern matches the whole path)".into()));
     assert_eq!(run(&mut ws, "add top.clk nope"), Ok(Some(("no match: nope".into(), true))));
     assert_eq!(run(&mut ws, "rm top.cpu.*a*"), Ok(None));
     // clk went in below busy, a row of the group, so it joined the group
@@ -142,8 +142,15 @@ fn patterns() {
     assert_eq!(paths("**.state"), ["top.cpu.state", "top.dma.state"]);
     assert_eq!(paths("top.clk"), ["top.clk"]);
     assert!(paths("top.nope").is_empty());
+    let no_match = |arg| no_match(&ws.trace, arg);
     assert_eq!(no_match("x"), "no match: x");
     assert_eq!(no_match("**.x*"), "no match: **.x*");
+    assert_eq!(no_match("*"), "no match: * (`*` is one level of the path, `**` any number: `**` matches every signal)");
+    // a scope named so: the signals in it; a signal named so: it
+    assert_eq!(no_match("*cpu*"), "no match: *cpu* (a pattern matches the whole path: **.*cpu*.* for cpu anywhere; nearest: top.cpu)");
+    assert_eq!(no_match("*stat*"), "no match: *stat* (a pattern matches the whole path: **.*stat* for stat anywhere; nearest: top.cpu.state, top.dma.state)");
+    assert_eq!(no_match("**.{busy,data}"), "no match: **.{busy,data} (braces are no pattern: one name or pattern each; nearest: top.cpu.data)");
+    assert_eq!(no_match("top.bsy"), "no match: top.bsy (nearest: top.cpu.busy)");
 }
 
 /// `:decode` and `:protocol` values: to the next `key=`, or in quotes to the closing one.

@@ -42,11 +42,11 @@ The reference: a topic per concept (names, times, radix, expressions, decode, re
 
 ### `info`
 
-The trace: file, time range, signals, and the interfaces a built-in protocol decodes, each with its `decode` line.
+The open waveform: file, time range, signals, and the interfaces a built-in protocol decodes, each with its `decode` line.
 
 ### `open`
 
-Open a trace in a new workspace, the current one from then on. Answers with `info`, which lists the interfaces to decode.
+Open a waveform (VCD, FST or GHW file) in a new workspace, the current one from then on. Answers with `info`, which lists the interfaces to decode.
 
 | Argument | Means |
 |---|---|
@@ -102,11 +102,11 @@ The open sessions: the user's wtf windows and agents' workspaces, with ids and t
 
 ### `signals`
 
-List signals with their widths; arrays and generate instances fold to one line (`gen[0..4].x`).
+Search the waveform's design, scopes (instances) and signals, by a regex anywhere in the path, as grep does (`uart`, `_valid$`); `.*` lists it all, folded to fit.
 
 | Argument | Means |
 |---|---|
-| `pattern` | `*` within a scope level, `**` across (`**.s_axi_*`); without `*`, any path containing the text. Empty lists all. |
+| `pattern` | A regex, found anywhere in the path in any case (`s_axi_.*valid`, `^top\.cpu\.`); empty or `.*` lists all. |
 
 ### `use`
 

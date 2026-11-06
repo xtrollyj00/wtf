@@ -213,7 +213,7 @@ fn reloads() {
     let short: String = text.lines().filter(|l| !l.contains("dma") && !l.ends_with('&')).take_while(|l| *l != "#60").map(|l| format!("{l}\n")).collect();
     std::fs::write(&trace, short).unwrap();
     let (msg, _) = ws.reload().unwrap();
-    assert_eq!(msg, "reloaded; not in trace: d (d: busy: unknown signal: top.dma.state), dp (dp: state: unknown signal: top.dma.state), top.dma.state");
+    assert_eq!(msg, "reloaded; not in trace: d (d: busy: unknown signal: top.dma.state (nearest: top.state, top.cpu.state)), dp (dp: state: unknown signal: top.dma.state (nearest: top.state, top.cpu.state)), top.dma.state");
     assert_eq!(names(&ws), ["clk", "rst"]);
     assert_eq!((ws.trace.end(), ws.marks[1]), (55, Some(55)));
     // the instance that failed is kept, and made again once it can be
@@ -507,7 +507,7 @@ fn reloads_and_reports_whats_left() {
     }
     std::fs::write(&trace, text.lines().filter(|l| !l.contains("dma") && !l.ends_with('&')).map(|l| format!("{l}\n")).collect::<String>()).unwrap();
     let (msg, _) = ws.reload().unwrap();
-    assert_eq!(msg, "reloaded; not in trace: ds (unknown signal: top.dma.state[0]), dd (unknown signal: ds[0])");
+    assert_eq!(msg, "reloaded; not in trace: ds (unknown signal: top.dma.state[0] (nearest: top.state, top.cpu.state)), dd (unknown signal: ds[0])");
     assert!(ws.trace.by_path.contains_key("lo"), "lo is made in a second pass");
 }
 

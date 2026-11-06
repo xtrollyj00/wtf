@@ -110,5 +110,5 @@ fn names_lost_on_reload() {
     std::fs::write(&trace, text.lines().filter(|l| !l.contains("dma") && !l.ends_with('&')).map(|l| format!("{l}\n")).collect::<String>()).unwrap();
     let (msg, _) = ws.reload().unwrap();
     std::fs::remove_dir_all(&dir).unwrap();
-    assert_eq!(msg, "reloaded; not in trace: names of top.dma.state (unknown signal: top.dma.state)");
+    assert_eq!(msg, "reloaded; not in trace: names of top.dma.state (unknown signal: top.dma.state (nearest: top.state, top.cpu.state))");
 }

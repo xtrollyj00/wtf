@@ -66,7 +66,7 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 /// The current workspace's app.
 fn current(w: &Wtf) -> Result<Arc<Mutex<Workspace>>, String> {
     let st = lock(&w.state);
-    let ws = st.workspaces.get(st.current).ok_or("no trace is open: `open` one (`sessions` lists the user's windows and their traces)")?;
+    let ws = st.workspaces.get(st.current).ok_or("no trace is open: `open` a VCD, FST or GHW waveform (`sessions` lists the user's windows and their traces)")?;
     Ok(ws.app.clone())
 }
 
@@ -145,6 +145,160 @@ fn field_radixes(s: &wtf_core::stream::Set, asked: Option<&str>) -> Result<Vec<O
     Ok(out)
 }
 
+/// A glob as the regex an agent meant (`*uart*` is `uart`, `**.{a,b}` is `\\.(a|b)`), if it is
+/// one: agents write globs out of habit.
+fn glob_regex(glob: &str) -> Option<String> {
+    if !glob.contains(['*', '{']) {
+        return None;
+    }
+    let core = glob.trim_start_matches("**.").trim_matches('*');
+    let mut out = String::new();
+    let mut chars = core.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '*' => {
+                chars.next_if_eq(&'*');
+                out += ".*";
+            }
+            '{' => out.push('('),
+            '}' => out.push(')'),
+            ',' => out.push('|'),
+            '?' => out.push('.'),
+            c => out += &regex::escape(&c.to_string()),
+        }
+    }
+    (!out.is_empty()).then_some(out)
+}
+
+fn plural(n: usize, noun: &str) -> String {
+    format!("{n} {noun}{}", if n == 1 { "" } else { "s" })
+}
+
+/// Lines a `signals` answer folds to: below the deepest level that fits, a scope is one line.
+const FOLD_LINES: usize = 200;
+
+/// The `signals` answer for a regex (spec §15): the signals whose path it matches, with widths, a
+/// struct or array one line unless the pattern names inside it; before them each scope whose
+/// name it matches (its path, not its parent's). Over `FOLD_LINES`, the scopes below the deepest
+/// level that fits are one line each, counting their matches; never above the scope all matches
+/// share, so asking for one scope lists it. Empty if nothing matches.
+fn design(t: &wtf_core::trace::Trace, re: &regex::Regex) -> String {
+    use wtf_core::trace::{join, parts};
+    let what = |v: &wtf_core::trace::Var| match v.width {
+        Some(w) => format!("{w} bit{}", if w == 1 { "" } else { "s" }),
+        None if v.real => "real".into(),
+        None => "string".into(),
+    };
+    // a var's first signal in the file, which orders the lines
+    let first = |mut x: usize| {
+        while let Some(&c) = t.vars[x].children.first() {
+            x = c;
+        }
+        x
+    };
+    // the scope a var is in: its path but its HDL name (`types` for `types.pkt.valid`)
+    let scope = |v: usize| {
+        let p = parts(&t.vars[v].path);
+        let n = p.len().saturating_sub(t.vars[v].decl.max(1));
+        p[..n].to_vec()
+    };
+    let hits: Vec<usize> = (0..t.vars.len()).filter(|&v| re.is_match(&t.vars[v].path)).collect();
+    let wholes: Vec<&str> = hits.iter().filter(|&&v| t.is_composite(v)).map(|&v| t.vars[v].path.as_str()).collect();
+    let inside = |path: &str| wholes.iter().any(|w| path.len() > w.len() && path.starts_with(w) && path[w.len()..].starts_with(['.', '[']));
+    // a line: a signal's scope is the one it is in, a scope's itself; `n` the signals it counts
+    struct Item<'a> {
+        order: (usize, usize, usize),
+        path: std::borrow::Cow<'a, str>,
+        text: String,
+        scope: Vec<&'a str>,
+        n: usize,
+    }
+    let mut items: Vec<Item> = Vec::new();
+    for &v in hits.iter().filter(|&&v| !inside(&t.vars[v].path)) {
+        let var = &t.vars[v];
+        let text = match t.is_composite(v) {
+            true => format!("{}, {}, {} signals", if t.is_array(v) { "array" } else { "struct" }, if var.width.is_some() { what(var) } else { "text".into() }, t.leaves(v).len()),
+            false => what(var),
+        };
+        let n = if t.is_composite(v) { t.leaves(v).len() } else { 1 };
+        items.push(Item { order: (first(v), 1, 0), path: var.path.as_str().into(), text, scope: scope(v), n });
+    }
+    // every scope: its signals and its first; listed when the pattern matches its own name
+    let mut scopes: std::collections::BTreeMap<Vec<&str>, (usize, usize)> = std::collections::BTreeMap::new();
+    for v in (0..t.vars.len()).filter(|&v| !t.is_composite(v)) {
+        let s = scope(v);
+        for k in 1..=s.len() {
+            let e = scopes.entry(s[..k].to_vec()).or_insert((0, v));
+            e.0 += 1;
+        }
+    }
+    for (s, &(n, at)) in &scopes {
+        let path = join(s.iter().copied());
+        let parent = join(s[..s.len() - 1].iter().copied());
+        if re.is_match(&path) && !re.is_match(&parent) {
+            items.push(Item { order: (at, 0, s.len()), path: path.into(), text: format!("scope of {}", plural(n, "signal")), scope: s.clone(), n: 0 });
+        }
+    }
+    if items.is_empty() {
+        return String::new();
+    }
+    items.sort_by_key(|i| i.order);
+    // the scope every match is in: folding stops there
+    let mut common: &[&str] = &items[0].scope;
+    for i in &items {
+        let k = common.iter().zip(&i.scope).take_while(|(a, b)| a == b).count();
+        common = &common[..k];
+    }
+    let common = common.len();
+    let deepest = items.iter().map(|i| i.scope.len()).max().unwrap_or(0);
+    // at level d: what is in scopes d deep or less is listed, the rest counted in its scope d + 1 deep
+    let fold = |d: usize| -> (Vec<String>, Option<String>) {
+        let mut lines: Vec<(std::borrow::Cow<str>, String)> = Vec::new();
+        let mut folded: Vec<(Vec<&str>, usize)> = Vec::new();
+        for i in &items {
+            if i.scope.len() <= d {
+                lines.push((i.path.clone(), i.text.clone()));
+                continue;
+            }
+            let key = i.scope[..d + 1].to_vec();
+            match folded.iter().position(|(k, _)| *k == key) {
+                Some(f) => folded[f].1 += i.n,
+                None => {
+                    lines.push((join(key.iter().copied()).into(), String::new()));
+                    folded.push((key, i.n));
+                }
+            }
+        }
+        // a folded scope's line, now its count is known
+        let mut f = folded.iter();
+        let lines: Vec<(&str, String)> = lines
+            .iter()
+            .map(|(p, text)| match text.is_empty() {
+                true => (p.as_ref(), format!("scope, {}", plural(f.next().map_or(0, |x| x.1), "matching signal"))),
+                false => (p.as_ref(), text.clone()),
+            })
+            .collect();
+        let one = folded.first().map(|(k, _)| format!("^{}\\.", regex::escape(&join(k.iter().copied()))));
+        (collapse(lines.into_iter()), one)
+    };
+    let (mut lines, mut one) = fold(deepest);
+    for d in (common..deepest).rev() {
+        if lines.len() <= FOLD_LINES {
+            break;
+        }
+        (lines, one) = fold(d);
+    }
+    let more = lines.len().saturating_sub(MAX_LINES);
+    let mut out = lines.into_iter().take(MAX_LINES).collect::<Vec<_>>().join("\n");
+    if more > 0 {
+        out += &format!("\n... {more} more; narrow the pattern");
+    }
+    if let Some(one) = one {
+        out += &format!("\nfolded to fit: a scope's line counts its matches; ask for one by its path, `{one}`");
+    }
+    out
+}
+
 /// Paths with their widths as `signals` lines: those differing only in indices (`[3]`, `(3)`) and
 /// of one width are one line, each index a range: `mux_in[0..15][0..15] (8 bits, 256 signals)`.
 /// A barrel shifter's 256 elements, one line each, were most of an agent's answer.
@@ -177,7 +331,9 @@ fn collapse<'a>(vars: impl Iterator<Item = (&'a str, String)>) -> Vec<String> {
             _ => {
                 let mut ranges = ranges.into_iter().map(|(a, b)| if a == b { a.to_string() } else { format!("{a}..{b}") });
                 let path: String = key.split('\0').enumerate().map(|(i, part)| if i == 0 { part.to_string() } else { format!("{}{part}", ranges.next().unwrap_or_default()) }).collect();
-                format!("{path} ({width}, {n} signals)")
+                // a group of scopes, structs or arrays says so: it counts their signals already
+                let noun = ["scope", "struct", "array"].into_iter().find(|k| width.starts_with(k)).map_or("signals".into(), |k| format!("{k}s"));
+                format!("{path} ({width}, {n} {noun})")
             }
         })
         .collect()
@@ -307,7 +463,7 @@ impl Wtf {
         if lines.is_empty() { "no sessions: the user has no wtf window open; `open` a trace".into() } else { lines.join("\n") }
     }
 
-    #[tool(description = "Open a trace in a new workspace, the current one from then on. Answers with `info`, which lists the interfaces to decode.")]
+    #[tool(description = "Open a waveform (VCD, FST or GHW file) in a new workspace, the current one from then on. Answers with `info`, which lists the interfaces to decode.")]
     fn open(&self, Parameters(a): Parameters<OpenArgs>) -> Result<String, String> {
         let app = Arc::new(Mutex::new(Workspace::open(std::path::Path::new(&a.trace))?));
         // the user's start screen shows what agents opened (spec §4 "Start screen")
@@ -351,7 +507,7 @@ impl Wtf {
         help::answer(a.topic.as_deref())
     }
 
-    #[tool(description = "The trace: file, time range, signals, and the interfaces a built-in protocol decodes, each with its `decode` line.")]
+    #[tool(description = "The open waveform: file, time range, signals, and the interfaces a built-in protocol decodes, each with its `decode` line.")]
     fn info(&self) -> Result<String, String> {
         let a = current(self)?;
         let app = lock(&a);
@@ -373,52 +529,22 @@ impl Wtf {
         Ok(out)
     }
 
-    #[tool(description = "List signals with their widths; arrays and generate instances fold to one line (`gen[0..4].x`).")]
+    #[tool(description = "Search the waveform's design, scopes (instances) and signals, by a regex anywhere in the path, as grep does (`uart`, `_valid$`); `.*` lists it all, folded to fit.")]
     fn signals(&self, Parameters(a): Parameters<SignalsArgs>) -> Result<String, String> {
         let w = current(self)?;
         let mut app = lock(&w);
         // not the slices earlier queries made (spec §16)
         app.drop_unused();
-        let p = a.pattern.to_lowercase();
+        let re = regex::RegexBuilder::new(&a.pattern).case_insensitive(true).build().map_err(|e| {
+            let why = e.to_string().lines().rev().find(|l| !l.trim().is_empty()).unwrap_or_default().trim_start_matches("error: ").to_string();
+            let fix = glob_regex(&a.pattern).filter(|r| regex::Regex::new(r).is_ok()).map_or(String::new(), |r| format!(" (`{r}` for that glob)"));
+            format!("not a regex: {} ({why}); `signals` takes a regex, not a glob{fix}: `.*` for any text, `a|b` for either, `\\[` for a bracket", a.pattern)
+        })?;
         let t = &app.trace;
-        let what = |v: &wtf_core::trace::Var| match v.width {
-            Some(w) => format!("{w} bit{}", if w == 1 { "" } else { "s" }),
-            None if v.real => "real".into(),
-            None => "string".into(),
-        };
-        // a pattern lists signals; a text a struct or array as one line, not the signals in it
-        let mut hits: Vec<usize> = match p.contains('*') {
-            true => (0..t.vars.len()).filter(|&v| !t.is_composite(v) && wtf_core::command::glob(&a.pattern, &t.vars[v].path)).collect(),
-            false => (0..t.vars.len()).filter(|&v| t.vars[v].path.to_lowercase().contains(&p)).collect(),
-        };
-        // a composite where its first signal is in the file
-        hits.sort_by_key(|&v| {
-            let mut x = v;
-            while let Some(&c) = t.vars[x].children.first() {
-                x = c;
-            }
-            x
-        });
-        let wholes: Vec<&str> = hits.iter().filter(|&&v| t.is_composite(v)).map(|&v| t.vars[v].path.as_str()).collect();
-        let inside = |path: &str| wholes.iter().any(|w| path.len() > w.len() && path.starts_with(w) && path[w.len()..].starts_with(['.', '[']));
-        let mut shown: Vec<(&str, String)> = Vec::new();
-        for &v in hits.iter().filter(|&&v| !inside(&t.vars[v].path)) {
-            let var = &t.vars[v];
-            if t.is_composite(v) {
-                let kind = if t.is_array(v) { "array" } else { "struct" };
-                let text = if var.width.is_some() { what(var) } else { "text".into() };
-                shown.push((&var.path, format!("{kind}, {text}, {} signals", t.leaves(v).len())));
-            } else {
-                shown.push((&var.path, what(var)));
-            }
-        }
-        let found = collapse(shown.into_iter());
-        let more = found.len().saturating_sub(MAX_LINES);
-        let mut out = found.into_iter().take(MAX_LINES).collect::<Vec<_>>().join("\n");
-        if more > 0 {
-            out += &format!("\n... {more} more; narrow the pattern");
-        }
-        Ok(if out.is_empty() { wtf_core::command::no_match(&a.pattern) } else { budget(out) })
+        Ok(match design(t, &re) {
+            out if out.is_empty() => wtf_core::command::no_match(t, &a.pattern),
+            out => budget(out),
+        })
     }
 
     #[tool(description = "Values of signals over a time range: the value at `from`, then each change, as `time value` lines.")]
@@ -960,7 +1086,8 @@ impl ServerHandler for Wtf {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("wtf", env!("CARGO_PKG_VERSION")))
             .with_instructions(
-            "wtf reads VCD, FST and GHW waveforms from digital simulations. The usual path: `open` a trace \
+            "wtf reads VCD, FST and GHW waveforms from digital simulations: read them with these tools, not \
+             the shell (`signals` searches the design by regex). The usual path: `open` a trace \
              (`sessions` lists the user's windows and their traces); it lists the interfaces a built-in \
              protocol decodes, each with its line. Decode first, with `command` (`decode bus axilite \
              clock=aclk prefix=s_axi_`): records are exact and the handshake checks built in. Read them \

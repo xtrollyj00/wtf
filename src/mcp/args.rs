@@ -17,8 +17,8 @@ pub struct UseArgs {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 pub struct SignalsArgs {
-    /// `*` within a scope level, `**` across (`**.s_axi_*`); without `*`, any path
-    /// containing the text. Empty lists all.
+    /// A regex, found anywhere in the path in any case (`s_axi_.*valid`, `^top\.cpu\.`);
+    /// empty or `.*` lists all.
     #[serde(default)]
     pub pattern: String,
 }

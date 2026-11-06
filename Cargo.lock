@@ -2606,6 +2606,7 @@ dependencies = [
  "libc",
  "nucleo-matcher",
  "ratatui",
+ "regex",
  "rmcp",
  "serde",
  "serde_json",

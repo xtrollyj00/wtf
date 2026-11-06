@@ -419,7 +419,10 @@ impl Workspace {
             .map(|v| self.trace.vars[v].path.as_str())
             .collect();
         match inside.len() {
-            0 => format!("unknown signal: {name}"),
+            0 => match self.trace.nearest(name, 3) {
+                near if near.is_empty() => format!("unknown signal: {name}"),
+                near => format!("unknown signal: {name} (nearest: {})", near.join(", ")),
+            },
             n => format!(
                 "unknown signal: {name} is a scope of {n} signals ({}{}); name one, or `add` the scope to show them all",
                 inside.iter().take(4).copied().collect::<Vec<_>>().join(", "),
