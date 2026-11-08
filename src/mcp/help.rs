@@ -32,7 +32,7 @@ signal ends that way (`s_axi_awaddr`); an ambiguous name is an error listing the
         "times",
         "time units, the workspace's unit and rounding",
         "\
-Times take units: `120ns`, `1.5us`, `2595ps`; a plain number is file ticks.
+Times take units: `120ns`, `1.5us`, `2595ps` (no quotes, no space); a plain number is file ticks.
 - Answers use one unit per workspace, so they compare across calls: once a search names a clock
   (`@clk`, also in a protocol or a decode), the unit is the largest that keeps that clock's
   shortest phase at 1 or more (`ns` for a 10 ns or a 200 MHz clock). `command` `unit ns` sets

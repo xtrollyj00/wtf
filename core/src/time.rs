@@ -69,7 +69,7 @@ pub fn unit_name(unit: usize) -> &'static str {
 
 /// A unit by name, e.g. `ns`.
 pub fn unit_named(name: &str) -> Result<usize, String> {
-    UNITS.iter().position(|(n, _)| *n == name).ok_or(format!("bad time unit: {name} (s, ms, us, ns, ps, fs)"))
+    UNITS.iter().position(|(n, _)| *n == name).ok_or(BadTime::Unit(name.to_string()).to_string())
 }
 
 /// Whether `text` is a time with a unit (`40ns`, `1.5us`), not a number.
@@ -78,17 +78,59 @@ pub fn has_unit(text: &str) -> bool {
     UNITS.iter().any(|(u, _)| t.strip_suffix(u).is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit() || c == '.')))
 }
 
+/// Why a text is no time, worked out by `parse` apart from how it is said (`Display`), so an
+/// agent's habits (`"20ns"` in quotes, `None`, `20 ns`) get the fix (spec §15 times).
+#[derive(Debug, PartialEq)]
+pub enum BadTime {
+    /// In quotes: the time inside them.
+    Quoted(String),
+    /// A space between the number and the unit: the time without it.
+    Spaced(String),
+    /// A unit wtf doesn't know.
+    Unit(String),
+    /// No number where one starts (`None`, `soon`, `-1`).
+    NotANumber(String),
+    /// A unit in a file without a timescale, whose times are ticks.
+    NoTimescale,
+}
+
+impl std::fmt::Display for BadTime {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let units = UNITS.iter().map(|(n, _)| *n).collect::<Vec<_>>().join(", ");
+        match self {
+            BadTime::Quoted(t) => write!(f, "bad time: \"{t}\": without quotes, {t}"),
+            BadTime::Spaced(t) => write!(f, "bad time: a space before the unit: {t}"),
+            BadTime::Unit(u) => write!(f, "bad time unit: {u} ({units})"),
+            BadTime::NotANumber(t) => write!(f, "bad time: {t} (a number and a unit, 20ns or 1.5us; a plain number is file ticks)"),
+            BadTime::NoTimescale => write!(f, "file has no timescale; use ticks"),
+        }
+    }
+}
+
+impl From<BadTime> for String {
+    fn from(e: BadTime) -> String {
+        e.to_string()
+    }
+}
+
 /// Parse `2000ns`, `1.5us`, or a plain tick count. Returns ticks, possibly fractional.
-pub fn parse(s: &str, fpt: Option<u128>) -> Result<f64, String> {
+pub fn parse(s: &str, fpt: Option<u128>) -> Result<f64, BadTime> {
     let s = s.trim();
+    if let Some(inner) = s.strip_prefix(['"', '\'']).and_then(|r| r.strip_suffix(['"', '\''])) {
+        return Err(BadTime::Quoted(inner.trim().to_string()));
+    }
     let split = s.find(|c: char| !(c.is_ascii_digit() || c == '.')).unwrap_or(s.len());
     let (num, unit) = s.split_at(split);
-    let v: f64 = num.parse().map_err(|_| format!("bad time: {s}"))?;
+    let v: f64 = num.parse().map_err(|_| BadTime::NotANumber(s.to_string()))?;
     if unit.is_empty() {
         return Ok(v);
     }
-    let ufs = UNITS.iter().find(|(n, _)| *n == unit).ok_or(format!("bad time unit: {unit}"))?.1;
-    let fpt = fpt.ok_or("file has no timescale; use ticks")?;
+    let ufs = match UNITS.iter().find(|(n, _)| *n == unit) {
+        Some(u) => u.1,
+        None if UNITS.iter().any(|(n, _)| *n == unit.trim()) => return Err(BadTime::Spaced(format!("{num}{}", unit.trim()))),
+        None => return Err(BadTime::Unit(unit.to_string())),
+    };
+    let fpt = fpt.ok_or(BadTime::NoTimescale)?;
     // in whole femtoseconds when it is one, so long exact times (`69.360000001us`) don't lose
     // their last digits to floating point
     let (int, frac) = num.split_once('.').unwrap_or((num, ""));

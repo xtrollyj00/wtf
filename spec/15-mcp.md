@@ -52,6 +52,10 @@ reuse wtf's own pieces:
 - Signals are named by full path or by the end of a path if only one signal ends that way; `data[3]`
   is one bit. Names may be written as in VHDL or Verilog (section 8): any case, `gen(4)` or
   `gen[4]`, `data(7 downto 4)` or `data[7:4]`. Times take units; radixes are those of section 10.
+  A bad time says what a time is, with the fix where there is one: in quotes (`"20ns"`: without
+  quotes, 20ns), a space before the unit (`20 ns`), an unknown unit (the units listed), no
+  number (`None`: a number and a unit, 20ns or 1.5us; a plain number is file ticks). In the
+  bench, agents wrote the quoted form and `None`, and took 2 calls to recover each time.
 - Agents pay for round trips and for every byte they read, and can't un-read an answer, so
   answers are dense and bounded: at most 1000 lines with a note (`values`: 1000 changes in all),
   and at most 24000 bytes, cut at a line with a note saying how much more there was.

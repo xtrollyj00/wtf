@@ -1906,7 +1906,7 @@ mod tests {
         snapshot(&mut app, 80, Some(14));
         snapshot(&mut app, 80, Some(14));
         let said: Vec<_> = app.notes.iter().map(|n| (n.text.as_str(), n.err, n.who.clone())).collect();
-        assert_eq!(said, [("bad time: nope", true, None), ("copied: 12ns", false, None)]);
+        assert_eq!(said, [("bad time: nope (a number and a unit, 20ns or 1.5us; a plain number is file ticks)", true, None), ("copied: 12ns", false, None)]);
         let now = Instant::now();
         assert_eq!(app.shown_notes(now).len(), 2);
         assert_eq!(app.shown_notes(now + Duration::from_secs(5)).len(), 1); // the error stays longer

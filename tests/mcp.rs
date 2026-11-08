@@ -311,6 +311,12 @@ fn find_runs_values_and_counts() {
     // a window of the trace, and a unit of the agent's
     assert_eq!(s.ok("find", json!({"expr": "@clk !busy", "from": "30ns", "to": "50ns", "unit": "us"})), "from\tlast\tcycles\n0.035us\t0.045us\t2");
     assert_eq!(s.tool("find", json!({"expr": "busy", "unit": "parsec"})), Err("bad time unit: parsec (s, ms, us, ns, ps, fs)".into()));
+    // a bad time says the form, with the fix where there is one (spec §15 times)
+    let at = |s: &mut Server, t: &str| s.tool("value_at", json!({"signals": ["data"], "time": t})).unwrap_err();
+    assert_eq!(at(&mut s, "\"20ns\""), "bad time: \"20ns\": without quotes, 20ns");
+    assert_eq!(at(&mut s, "None"), "bad time: None (a number and a unit, 20ns or 1.5us; a plain number is file ticks)");
+    assert_eq!(at(&mut s, "20 ns"), "bad time: a space before the unit: 20ns");
+    assert_eq!(at(&mut s, "20nsec"), "bad time unit: nsec (s, ms, us, ns, ps, fs)");
     assert_eq!(s.tool("find", json!({"expr": "busy", "show": ["state"]})), Err("ambiguous: state (2 signals: top.cpu.state, top.dma.state)".into()));
 }
 
@@ -375,7 +381,7 @@ fn workspace_in_one_call() {
     assert_eq!(s.tool("command", json!({"line": "undo"})), Ok("removed 5: top.clk, group cpu, top.cpu.data, top.cpu.busy, top.dma.state".into()));
     // every mistake at once, and nothing changes
     let bad = s.tool("workspace", json!({"rows": ["state", "top.clk:float", "nope", "data[3]"], "cursors": {"12": "1ns", "2": "soon"}, "range": ["50ns", "10ns"]}));
-    assert_eq!(bad, Err("ambiguous: state (2 signals: top.cpu.state, top.dma.state)\nfloat doesn't fit top.clk (1 bits)\nunknown signal: nope\ndata[3]: a bit can't be a row; add its bus\ncursors: no cursor 12 (1-9)\nsoon: bad time: soon\nrange: the end must be after the start".into()));
+    assert_eq!(bad, Err("ambiguous: state (2 signals: top.cpu.state, top.dma.state)\nfloat doesn't fit top.clk (1 bits)\nunknown signal: nope\ndata[3]: a bit can't be a row; add its bus\ncursors: no cursor 12 (1-9)\nsoon: bad time: soon (a number and a unit, 20ns or 1.5us; a plain number is file ticks)\nrange: the end must be after the start".into()));
     assert!(s.ok("view", json!({})).starts_with("rows (> selected):\n  (none)\n"));
     // view in a unit of the agent's
     s.ok("workspace", json!({"rows": ["top.clk"], "cursors": {"2": "35ns"}}));

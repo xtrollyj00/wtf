@@ -874,7 +874,7 @@ fn sized(text: &str, bits: String, size: Option<u32>, signed: bool) -> Result<Sv
 /// negative, or a time (ticks).
 fn number_text(text: &str, fpt: Option<u128>) -> Result<i128, String> {
     if crate::time::has_unit(text) {
-        return crate::time::parse(text, fpt).map(|t| t.round() as i128);
+        return crate::time::parse(text, fpt).map(|t| t.round() as i128).map_err(String::from);
     }
     if let Some(sv) = sv_literal(text.trim_start_matches('-')) {
         let n = match sv? {
