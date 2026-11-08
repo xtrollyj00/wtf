@@ -233,15 +233,23 @@ impl Workspace {
     }
 
     /// The streams named for `records` (spec §16 "Records of a set"), each name a stream, a
-    /// decode's name (its results and violations) or a glob (`bus.*`), separated by spaces.
+    /// decode's name (its results and violations) or a pattern in the workspace's syntax
+    /// (`bus.*`, `/^bus\./`), separated by spaces.
     pub fn stream_set(&self, names: &str) -> Result<Vec<usize>, String> {
+        use crate::pattern::Pattern;
         let mut out: Vec<usize> = Vec::new();
         for name in names.split_whitespace() {
+            let hit = |p: &Pattern, s: &str| match p {
+                Pattern::Glob(g) => crate::command::glob(g, s),
+                Pattern::Regex(re) => re.is_match(&crate::trace::canon(s)),
+            };
             let found = match self.streams.iter().position(|s| s.name == name) {
                 Some(i) => vec![i],
                 None if self.decodes.iter().any(|d| d.name == name) => self.results(name),
-                None if name.contains('*') => (0..self.streams.len()).filter(|&i| crate::command::glob(name, &self.streams[i].name)).collect(),
-                None => vec![],
+                None => match self.patterns.pattern(name)? {
+                    Some(p) => (0..self.streams.len()).filter(|&i| hit(&p, &self.streams[i].name)).collect(),
+                    None => vec![],
+                },
             };
             if found.is_empty() {
                 let all: Vec<&str> = self.streams.iter().map(|s| s.name.as_str()).collect();

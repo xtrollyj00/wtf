@@ -15,7 +15,7 @@ Run one of wtf's `:` commands on the workspace: `decode`, `protocol`, rows, curs
 
 | Argument | Means |
 |---|---|
-| `line` (required) | A `:` command without the colon: `decode ...`, `add ...`, `cursor 2 80ns` (`help commands`). |
+| `line` (required) | A `:` command without the colon: `decode ...`, `add top.cpu /_valid$/`, `cursor 2 80ns` (`help commands`). |
 
 ### `find`
 
@@ -75,7 +75,7 @@ Records of a decoded stream, or of several in start order (a decode's name: its 
 | `from` | Records starting at or after this time; default the start. |
 | `group_by` | Fields to group by: a line per distinct value, with its count. |
 | `radix` | hex, dec, ... for every field (`help radix`); `len:dec` for one, several with commas. |
-| `stream` (required) | A stream, e.g. `bus.wr`; a decode's name for its results, `bus`; a glob, `bus.*`; or several, space-separated (`help records`). |
+| `stream` (required) | A stream, e.g. `bus.wr`; a decode's name for its results, `bus`; a pattern, `/^bus\./`; or several, space-separated (`help records`). |
 | `to` | Records starting at or before this time; default the end. |
 | `unit` | As for `values`. |
 | `where` | Only the records this holds for: `resp != 0`, `n == 138`, `req_addr != resp_addr` (`help records`). |
@@ -92,7 +92,7 @@ Draw signals over a time range as text, as wtf's screen does; without signals, t
 |---|---|
 | `from` | Start of the range; default the start, or the workspace's range. |
 | `signals` | Signals drawn top to bottom; none: the workspace. |
-| `to` | End of the time range shown. |
+| `to` | End of the range; default the end, or the workspace's range. |
 | `unit` | The unit of the range in the heading; as for `values`. |
 | `width` | Width in characters; default 120. |
 
@@ -102,11 +102,11 @@ The open sessions: the user's wtf windows and agents' workspaces, with ids and t
 
 ### `signals`
 
-Search the waveform's design, scopes (instances) and signals, by a regex anywhere in the path, as grep does (`uart`, `_valid$`); `.*` lists it all, folded to fit.
+Search the waveform's design, scopes (instances) and signals, by a regex in slashes found anywhere in the path, as grep does (`/uart/`, `/_valid$/`); none lists it all, folded to fit.
 
 | Argument | Means |
 |---|---|
-| `pattern` | A regex, found anywhere in the path in any case, indices in brackets (`s_axi_.*valid`, `^top\.cpu\.`, `gen\[0\]`); empty or `.*` lists all. |
+| `pattern` | A regex in slashes, found anywhere in the path in any case, indices in brackets (`/s_axi_.*valid/`, `/^top\.cpu\./`, `/gen\[0\]/`); none lists all. |
 
 ### `use`
 
@@ -132,7 +132,7 @@ Values of signals at one time.
 |---|---|
 | `radix` | As for `values`. |
 | `signals` (required) | Signals, named as for `values`. |
-| `time` (required) | The time, e.g. `120ns`. |
+| `time` (required) | The time, `120ns` (`help times`). |
 | `unit` | As for `values`. |
 
 ### `values`
@@ -141,7 +141,7 @@ Values of signals over a time range: the value at `from`, then each change, as `
 
 | Argument | Means |
 |---|---|
-| `from` (required) | Start time with a unit (`help times`). |
+| `from` (required) | Start time, `120ns` (`help times`). |
 | `radix` | hex, bin, dec, ... (`help radix`); `data:dec` for one signal. |
 | `signals` (required) | Signals by path or path end (`help names`). |
 | `to` (required) | End time, inclusive. |

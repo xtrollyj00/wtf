@@ -17,8 +17,8 @@ pub struct UseArgs {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 pub struct SignalsArgs {
-    /// A regex, found anywhere in the path in any case, indices in brackets (`s_axi_.*valid`,
-    /// `^top\.cpu\.`, `gen\[0\]`); empty or `.*` lists all.
+    /// A regex in slashes, found anywhere in the path in any case, indices in brackets
+    /// (`/s_axi_.*valid/`, `/^top\.cpu\./`, `/gen\[0\]/`); none lists all.
     #[serde(default)]
     pub pattern: String,
 }
@@ -39,7 +39,7 @@ pub struct ProtocolsArgs {
 pub struct ValuesArgs {
     /// Signals by path or path end (`help names`).
     pub signals: Vec<String>,
-    /// Start time with a unit (`help times`).
+    /// Start time, `120ns` (`help times`).
     pub from: String,
     /// End time, inclusive.
     pub to: String,
@@ -53,7 +53,7 @@ pub struct ValuesArgs {
 pub struct ValueAtArgs {
     /// Signals, named as for `values`.
     pub signals: Vec<String>,
-    /// The time, e.g. `120ns`.
+    /// The time, `120ns` (`help times`).
     pub time: String,
     /// As for `values`.
     pub radix: Option<String>,
@@ -91,7 +91,7 @@ pub struct RenderArgs {
     pub signals: Vec<String>,
     /// Start of the range; default the start, or the workspace's range.
     pub from: Option<String>,
-    /// End of the time range shown.
+    /// End of the range; default the end, or the workspace's range.
     pub to: Option<String>,
     /// Width in characters; default 120.
     pub width: Option<u16>,
@@ -160,8 +160,8 @@ pub struct DecodeSpec {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 pub struct RecordsArgs {
-    /// A stream, e.g. `bus.wr`; a decode's name for its results, `bus`; a glob, `bus.*`; or
-    /// several, space-separated (`help records`).
+    /// A stream, e.g. `bus.wr`; a decode's name for its results, `bus`; a pattern, `/^bus\./`;
+    /// or several, space-separated (`help records`).
     pub stream: String,
     /// Records starting at or after this time; default the start.
     pub from: Option<String>,
@@ -216,7 +216,8 @@ pub struct UserViewArgs {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 pub struct CommandArgs {
-    /// A `:` command without the colon: `decode ...`, `add ...`, `cursor 2 80ns` (`help commands`).
+    /// A `:` command without the colon: `decode ...`, `add top.cpu /_valid$/`, `cursor 2 80ns`
+    /// (`help commands`).
     pub line: String,
 }
 

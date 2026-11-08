@@ -9,3 +9,4 @@ description = "wtf's core: traces, rows, cursors, sessions, the `:` commands and
 [dependencies]
 toml = { version = "1.1.8", features = ["preserve_order"] }
 wellen = "0.25"
+regex = "1.13.1"

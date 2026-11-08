@@ -57,6 +57,9 @@ pub struct Workspace {
     /// Names resolve under this scope first (`:scope dut`), so `s_axi_awvalid` is
     /// `dut.s_axi_awvalid`; saved in the session.
     pub scope: Option<String>,
+    /// How its interface writes patterns: globs in the window, regexes from an agent (spec §15).
+    /// Not saved: it is the interface's, not the session's.
+    pub patterns: crate::pattern::Syntax,
     pub rows: Vec<Row>,
     /// Named computed signals (`:signal name = expr`) in the order defined, made again on `:e`.
     pub signals: Vec<(String, String)>,
@@ -168,6 +171,7 @@ impl Workspace {
             unit: None,
             clock_unit: None,
             scope: None,
+            patterns: Default::default(),
             rows: Vec::new(),
             signals: Vec::new(),
             value_names: Vec::new(),

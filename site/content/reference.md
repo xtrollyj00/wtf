@@ -25,12 +25,17 @@ signal ends that way (`s_axi_awaddr`); an ambiguous name is an error listing the
 - A struct, record or array, or part of one (`pkt`, `pkts[1]`, `grid[1]`), is a signal of its
   whole value: its fields joined, the first the most significant (`pkt == 0x5A5`, `pkt[10]`);
   with a text field (an nvc enum) text, `'{valid:1, state:busy, pair:'{hi:A, lo:5}}`. `value_at`
-  adds a line per field; `signals` lists it as one line, its fields with `pkt\.`.
-- `signals` takes a regex, found anywhere in the path in any case, as grep finds it: `uart`,
-  `_valid$`, `^top\.cpu\.` (a scope's signals), `mem\[0\]` (brackets escaped); `.*` lists
-  everything. Paths are matched lowercase, indices in brackets, whichever HDL wrote them. A scope it names is a line of its own, `top.cpu (scope of 3 signals)`, and an
-  answer too long is folded to a line per scope below the deepest level that fits.
-- A name or pattern that matches nothing lists the nearest scopes and signals.
+  adds a line per field; `signals` lists it as one line, its fields with `/pkt\./`.
+- A pattern is a regex in slashes, found anywhere in the path in any case, the path
+  lowercase with indices in brackets whichever HDL wrote it: `/uart/`, `/_valid$/`,
+  `/^top\.cpu\./` (a scope's signals), `/mem\[0\]/`. `signals`, `add`, `rm` and
+  `records` take them; a bare word is always a name.
+- `signals` lists what a pattern matches, or with none everything: a scope it names is a line
+  of its own, `top.cpu (scope of 3 signals)`, and an answer too long is folded to a line per
+  scope below the deepest level that fits.
+- An unknown name says what the trace has instead: a scope's signals, a struct's or array's
+  fields, a signal without fields (a packed struct in a VCD: slice it), or the nearest scopes
+  and signals; so does a pattern that matches nothing.
 
 ## times
 
@@ -133,7 +138,7 @@ Decoding doesn't touch the rows. Read a stream with `records` (`help records`).
 
 `records` lists a stream as a table: n (the record's number), start, end and a field per column,
 headed `20 of 157`. `stream` may name a set: a decode (`bus`: its results and violations, not the
-streams they are made from), a glob (`bus.*`) or several (`bus.wr bus.rd`); their records come
+streams they are made from), a pattern (`/^bus\./`, `help names`) or several (`bus.wr bus.rd`); their records come
 in order of start with a `stream` column, fields of the same name and kind sharing a column, empty
 where a stream has none. `start` is the rising edge that starts the record's first clock cycle, as
 `find @clk` reports a match; `end` is the edge that samples its last. With more than one record long values are shortened (a frame's data to 8
@@ -155,10 +160,10 @@ bytes and its size); `count: 1` with `from` shows one whole.
 *Showing evidence: the `workspace` declaration, `view`, `render`, `present`.*
 
 To show the user evidence, declare the workspace, check it with `view` / `render`, then `present`
-it into the user's wtf windows on the trace (they can undo with u). With none open, present
-writes a session file that `wtf <trace>` shows when the user opens the trace: tell them so. The user also sees each query and change
-you make as a step (`:trail`), with its time, so ask what you mean to show. `workspace` replaces everything at once, as
-one undo step:
+it into the user's wtf windows on the trace (`:undo` takes it back). With none open, present
+writes a session file that `wtf <trace>` shows when the user opens the trace: tell them so. The
+user also sees each query and change you make as a step (`:trail`), with its time, so each query
+is part of what they see. `workspace` replaces everything at once, as one undo step:
 - `rows`, top to bottom: `"name"`, `"name:radix"`, `"name:radix:colour"` (`help radix`), or a
   group `{"group": "write", "rows": ["awaddr", "awvalid"], "collapsed": false}`. Groups
   hold signals only. A struct or array is one row (`"pkts"`); `{"signal": "pkts", "open":
@@ -183,7 +188,7 @@ edits the workspace step by step instead (`help commands`).
 
 `command` runs one of wtf's `:` commands, without the colon, on the workspace.
 - Rows: `add <path|pattern>...` (below the selected row, joining its group; a scope becomes a
-  group of its direct signals, a struct or array one row), `rm <path|pattern>...` (`rm **` clears), `select <row> [<last row>]` (the rows the next
+  group of its direct signals, a struct or array one row), `rm <path|pattern>...` (`rm /.*/` clears; patterns: `help names`), `select <row> [<last row>]` (the rows the next
   commands act on), `group <name>`, `rename <name>`, `ungroup`, `radix <radix>`, `color
   <colour|off>` (`help radix`), `names <signal> <value>=<name>...` (names for its values, as an
   FST enum table gives them; `off` removes them), `undo`, `redo`. The answer lists the rows added and removed.

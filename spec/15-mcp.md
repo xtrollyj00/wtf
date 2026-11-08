@@ -10,7 +10,7 @@ reuse wtf's own pieces:
 | `open(trace)` | open a trace in a new workspace of the agent's, which becomes the current one |
 | `use(session)` | make another of this server's workspaces the current one |
 | `info` | file, time range, timescale, number of signals, and the interfaces a built-in protocol decodes, each with its `decode` line (`open` answers with it too) |
-| `signals(pattern)` | search the design, scopes (instances) and signals, by a regex found anywhere in the path, in any case, as grep finds it (`uart`, `_valid$`, `^top\.cpu\.`); `.*` or no pattern matches everything. Paths are matched in one form, either HDL's as section 8 writes it: lowercase, indices in brackets (`gen\[0\]` for `gen(0)`). The design (every scope and signal of the file, its path in that form, its parent, how many signals it holds) is worked out once per trace; each search is a pass over it. A signal is listed with its width; a scope whose name the pattern matches (it matches its path, not its parent's; a top scope has none) is listed before its signals, `top.cpu (scope of 3 signals)`; array elements and generate instances of one width are one line, the indices as ranges (`mux_in[0..15] (8 bits, 16 signals)`, `gen[0..4].x`); a struct, record or array is one line, `types.grid (array, 24 bits, 6 signals)`, its signals listed when the pattern names inside it (`types\.grid\.`). An answer over 200 lines is folded: below the deepest level that fits, a scope is one line counting its matches, `top.cpu (scope, 120 matching signals)`, and a last line says how to list one. A pattern that doesn't parse says so, and that it is a regex, not a glob (`.*` for any text) |
+| `signals(pattern)` | search the design, scopes (instances) and signals, by a pattern, a regex in slashes found anywhere in the path, in any case, as grep finds it (`/uart/`, `/_valid$/`, `/^top\.cpu\./`); no pattern matches everything. Paths are matched in one form, either HDL's as section 8 writes it: lowercase, indices in brackets (`/gen\[0\]/` for `gen(0)`). The design (every scope and signal of the file, its path in that form, its parent, how many signals it holds) is worked out once per trace; each search is a pass over it. A signal is listed with its width; a scope whose name the pattern matches (it matches its path, not its parent's; a top scope has none) is listed before its signals, `top.cpu (scope of 3 signals)`; array elements and generate instances of one width are one line, the indices as ranges (`mux_in[0..15] (8 bits, 16 signals)`, `gen[0..4].x`); a struct, record or array is one line, `types.grid (array, 24 bits, 6 signals)`, its signals listed when the pattern names inside it (`types\.grid\.`). An answer over 200 lines is folded: below the deepest level that fits, a scope is one line counting its matches, `top.cpu (scope, 120 matching signals)`, and a last line says how to list one. A pattern that doesn't parse says so, and that it is a regex, not a glob (`.*` for any text) |
 | `values(signals, from, to, radix, unit)` | the value at `from`, then each change up to `to`, as `time value` lines |
 | `value_at(signals, time, radix, unit)` | values at one time; a struct, record or array its whole value, then a line per signal in it (`pkt.valid = 1`, `pkt.pair.hi = 0xA`) |
 | `find(expr, from, to, backward, count, show, count_only, unit)` | match times of a search expression (section 8), `@clk` included, as a table |
@@ -49,6 +49,14 @@ reuse wtf's own pieces:
   shell. The README tells users to keep wtf's tools loaded (Claude Code: `ENABLE_TOOL_SEARCH=false`)
   or to say so in their project's agent instructions.
 
+- **An agent writes every pattern one way: a regex in slashes** (`/^top\.cpu\./`), in
+  `signals`, `command`'s `add` and `rm`, and `records`' stream sets alike; a bare word is always
+  a name. The window keeps globs (section 7), as people write them; the core matches either,
+  the workspace saying which its interface writes (`Syntax`), so `:add` and `command add` run
+  the same code. Agents once met globs in commands and a regex in `signals`, and wrote one for
+  the other; a word in the other syntax is an error giving this one's form (`top.cpu.* is a
+  glob; a pattern is a regex in slashes: /top\.cpu\./`). The `help` topics are written for the
+  interface reading them: the window's `:help` speaks of globs, the agent's `help` of regexes.
 - Signals are named by full path or by the end of a path if only one signal ends that way; `data[3]`
   is one bit. Names may be written as in VHDL or Verilog (section 8): any case, `gen(4)` or
   `gen[4]`, `data(7 downto 4)` or `data[7:4]`. Times take units; radixes are those of section 10.

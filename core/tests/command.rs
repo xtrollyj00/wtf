@@ -2,6 +2,7 @@
 
 mod common;
 use common::*;
+use wtf_core::workspace::Workspace;
 use wtf_core::command::{self, no_match};
 
 fn run(ws: &mut wtf_core::workspace::Workspace, line: &str) -> Result<Option<(String, bool)>, String> {
@@ -137,12 +138,12 @@ fn reload_answers() {
 #[test]
 fn patterns() {
     let ws = open();
-    let paths = |arg: &str| command::resolve(&ws, arg).into_iter().map(|v| ws.trace.vars[v].path.clone()).collect::<Vec<_>>();
+    let paths = |arg: &str| command::resolve(&ws, arg).unwrap().into_iter().map(|v| ws.trace.vars[v].path.clone()).collect::<Vec<_>>();
     assert_eq!(paths("top.cpu"), ["top.cpu.state", "top.cpu.data", "top.cpu.busy"]);
     assert_eq!(paths("**.state"), ["top.cpu.state", "top.dma.state"]);
     assert_eq!(paths("top.clk"), ["top.clk"]);
     assert!(paths("top.nope").is_empty());
-    let no_match = |arg| no_match(&ws.trace, arg);
+    let no_match = |arg| no_match(&ws, arg);
     assert_eq!(no_match("x"), "no match: x");
     assert_eq!(no_match("**.x*"), "no match: **.x*");
     assert_eq!(no_match("*"), "no match: * (`*` is one level of the path, `**` any number: `**` matches every signal)");
@@ -151,6 +152,25 @@ fn patterns() {
     assert_eq!(no_match("*stat*"), "no match: *stat* (a pattern matches the whole path: **.*stat* for stat anywhere; nearest: top.cpu.state, top.dma.state)");
     assert_eq!(no_match("**.{busy,data}"), "no match: **.{busy,data} (braces are no pattern: one name or pattern each; nearest: top.cpu.data)");
     assert_eq!(no_match("top.bsy"), "no match: top.bsy (nearest: top.cpu.busy)");
+}
+
+/// An agent's workspace writes patterns as regexes in slashes, matched in the canonical path; a
+/// glob there is an error giving the regex (spec §15).
+#[test]
+fn regex_patterns() {
+    let mut ws = open();
+    ws.patterns = wtf_core::pattern::Syntax::Regex;
+    let paths = |ws: &Workspace, arg: &str| command::resolve(ws, arg).map(|f| f.into_iter().map(|v| ws.trace.vars[v].path.clone()).collect::<Vec<_>>());
+    assert_eq!(paths(&ws, "/state$/"), Ok(vec!["top.cpu.state".to_string(), "top.dma.state".to_string()]));
+    assert_eq!(paths(&ws, "/^TOP\\.CPU\\./").unwrap().len(), 3);
+    // a bare word is a name, as in the window
+    assert_eq!(paths(&ws, "top.cpu").unwrap().len(), 3);
+    assert_eq!(paths(&ws, "**.state"), Err("**.state is a glob; a pattern is a regex in slashes: /state/".into()));
+    assert_eq!(run(&mut ws, "add /^top\\.cpu\\./"), Ok(None));
+    assert_eq!(names(&ws), ["state", "data", "busy"]);
+    assert_eq!(run(&mut ws, "add /nope/"), Err("no match: /nope/".into()));
+    assert_eq!(run(&mut ws, "rm /.*/"), Ok(None));
+    assert!(ws.rows.is_empty());
 }
 
 /// `:decode` and `:protocol` values: to the next `key=`, or in quotes to the closing one.

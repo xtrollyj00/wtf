@@ -145,31 +145,6 @@ fn field_radixes(s: &wtf_core::stream::Set, asked: Option<&str>) -> Result<Vec<O
     Ok(out)
 }
 
-/// A glob as the regex an agent meant (`*uart*` is `uart`, `**.{a,b}` is `\\.(a|b)`), if it is
-/// one: agents write globs out of habit.
-fn glob_regex(glob: &str) -> Option<String> {
-    if !glob.contains(['*', '{']) {
-        return None;
-    }
-    let core = glob.trim_start_matches("**.").trim_matches('*');
-    let mut out = String::new();
-    let mut chars = core.chars().peekable();
-    while let Some(c) = chars.next() {
-        match c {
-            '*' => {
-                chars.next_if_eq(&'*');
-                out += ".*";
-            }
-            '{' => out.push('('),
-            '}' => out.push(')'),
-            ',' => out.push('|'),
-            '?' => out.push('.'),
-            c => out += &regex::escape(&c.to_string()),
-        }
-    }
-    (!out.is_empty()).then_some(out)
-}
-
 fn plural(n: usize, noun: &str) -> String {
     format!("{n} {noun}{}", if n == 1 { "" } else { "s" })
 }
@@ -440,7 +415,10 @@ impl Wtf {
 
     #[tool(description = "Open a waveform (VCD, FST or GHW file) in a new workspace, the current one from then on. Answers with `info`, which lists the interfaces to decode.")]
     fn open(&self, Parameters(a): Parameters<OpenArgs>) -> Result<String, String> {
-        let app = Arc::new(Mutex::new(Workspace::open(std::path::Path::new(&a.trace))?));
+        let mut ws = Workspace::open(std::path::Path::new(&a.trace))?;
+        // an agent writes patterns as regexes, everywhere (spec §15)
+        ws.patterns = wtf_core::pattern::Syntax::Regex;
+        let app = Arc::new(Mutex::new(ws));
         // the user's start screen shows what agents opened (spec §4 "Start screen")
         crate::history::opened(std::path::Path::new(&a.trace), None, true);
         let mut st = lock(&self.state);
@@ -479,7 +457,7 @@ impl Wtf {
 
     #[tool(description = "The reference: a topic per concept (names, times, radix, expressions, decode, records, workspace, commands); none lists them.")]
     fn help(&self, Parameters(a): Parameters<HelpArgs>) -> Result<String, String> {
-        help::answer(a.topic.as_deref())
+        help::answer(a.topic.as_deref(), wtf_core::pattern::Syntax::Regex)
     }
 
     #[tool(description = "The open waveform: file, time range, signals, and the interfaces a built-in protocol decodes, each with its `decode` line.")]
@@ -504,20 +482,23 @@ impl Wtf {
         Ok(out)
     }
 
-    #[tool(description = "Search the waveform's design, scopes (instances) and signals, by a regex anywhere in the path, as grep does (`uart`, `_valid$`); `.*` lists it all, folded to fit.")]
+    #[tool(description = "Search the waveform's design, scopes (instances) and signals, by a regex in slashes found anywhere in the path, as grep does (`/uart/`, `/_valid$/`); none lists it all, folded to fit.")]
     fn signals(&self, Parameters(a): Parameters<SignalsArgs>) -> Result<String, String> {
         let w = current(self)?;
         let mut app = lock(&w);
         // not the slices earlier queries made (spec §16)
         app.drop_unused();
-        let re = regex::RegexBuilder::new(&a.pattern).case_insensitive(true).build().map_err(|e| {
-            let why = e.to_string().lines().rev().find(|l| !l.trim().is_empty()).unwrap_or_default().trim_start_matches("error: ").to_string();
-            let fix = glob_regex(&a.pattern).filter(|r| regex::Regex::new(r).is_ok()).map_or(String::new(), |r| format!(" (`{r}` for that glob)"));
-            format!("not a regex: {} ({why}); `signals` takes a regex, not a glob{fix}: `.*` for any text, `a|b` for either, `\\[` for a bracket", a.pattern)
-        })?;
+        // a pattern as everywhere else an agent writes one, in slashes; none lists everything
+        let re = match a.pattern.trim() {
+            "" => wtf_core::pattern::regex("").map_err(|e| e.to_string())?,
+            p => match wtf_core::pattern::Syntax::Regex.pattern(p)? {
+                Some(wtf_core::pattern::Pattern::Regex(re)) => re,
+                _ => return Err(format!("{p} is no pattern: a pattern is a regex in slashes, /{p}/")),
+            },
+        };
         let t = &app.trace;
         Ok(match hierarchy(t, &t.design().matching(|path| re.is_match(path))) {
-            out if out.is_empty() => wtf_core::command::no_match(t, &a.pattern),
+            out if out.is_empty() => wtf_core::command::no_match(&app, &a.pattern),
             out => budget(out),
         })
     }
@@ -1062,7 +1043,7 @@ impl ServerHandler for Wtf {
             .with_server_info(Implementation::new("wtf", env!("CARGO_PKG_VERSION")))
             .with_instructions(
             "wtf reads VCD, FST and GHW waveforms from digital simulations: read them with these tools, not \
-             the shell (`signals` searches the design by regex). The usual path: `open` a trace \
+             the shell (`signals` searches the design; a pattern is a regex in slashes, `/uart/`, wherever one goes). The usual path: `open` a trace \
              (`sessions` lists the user's windows and their traces); it lists the interfaces a built-in \
              protocol decodes, each with its line. Decode first, with `command` (`decode bus axilite \
              clock=aclk prefix=s_axi_`): records are exact and the handshake checks built in. Read them \

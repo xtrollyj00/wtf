@@ -1,6 +1,7 @@
 //! `:` commands (spec §7), run on a workspace.
 
 use crate::workspace::{Msg, Workspace};
+use crate::pattern::{Pattern, Syntax};
 use crate::rows::{self, Row};
 use crate::radix;
 use crate::session;
@@ -299,10 +300,20 @@ pub fn save(app: &mut Workspace, arg: &str) -> Result<Msg, String> {
     Ok((msg, false))
 }
 
-/// Vars an `:add` / `:rm` argument names: an exact path, a pattern, or a scope's direct signals;
-/// under the workspace's scope first.
-pub fn resolve(app: &Workspace, arg: &str) -> Vec<usize> {
-    paths(app, &scoped(app, arg))
+/// Vars an `:add` / `:rm` argument names: an exact path, a pattern in the workspace's syntax, or
+/// a scope's direct signals; a name or glob under the workspace's scope first.
+pub fn resolve(app: &Workspace, arg: &str) -> Result<Vec<usize>, String> {
+    Ok(match app.patterns.pattern(arg)? {
+        Some(Pattern::Regex(re)) => regex_matches(app, &re, false),
+        _ => paths(app, &scoped(app, arg)),
+    })
+}
+
+/// The vars a regex finds in their canonical path (spec §15); with `leaves`, the signals only,
+/// not the structs and arrays they make up.
+fn regex_matches(app: &Workspace, re: &regex::Regex, leaves: bool) -> Vec<usize> {
+    let canon = app.trace.canon_paths();
+    (0..app.trace.vars.len()).filter(|&v| !(leaves && app.trace.is_composite(v)) && re.is_match(&canon[v])).collect()
 }
 
 /// `arg` under the workspace's scope (`:scope`) if it names something there, else as it is.
@@ -383,7 +394,10 @@ fn scopes_ending(app: &Workspace, arg: &str) -> Vec<String> {
 /// if all do).
 pub fn add(app: &mut Workspace, arg: &str) -> Result<Option<Msg>, String> {
     if arg.is_empty() {
-        return Err("usage: :add <path|pattern>...".into());
+        return Err(match app.patterns {
+            Syntax::Glob => "usage: :add <path|pattern>...".into(),
+            Syntax::Regex => "usage: add <path|/regex/>...".into(),
+        });
     }
     let words = words(arg);
     let errors: Vec<String> = words.iter().filter_map(|w| add_one(app, w).err()).collect();
@@ -394,16 +408,19 @@ pub fn add(app: &mut Workspace, arg: &str) -> Result<Option<Msg>, String> {
     }
 }
 
-/// The error for a name or pattern that matches nothing: why a pattern missed (it matches the
-/// whole path, `*` is one level of it, braces are no pattern), and the nearest scopes and signals.
-pub fn no_match(trace: &crate::trace::Trace, arg: &str) -> String {
+/// The error for a name or pattern that matches nothing, in the workspace's syntax: why a glob
+/// missed (it matches the whole path, `*` is one level of it, braces are no pattern), and the
+/// nearest scopes and signals.
+pub fn no_match(app: &Workspace, arg: &str) -> String {
+    let trace = &app.trace;
     let core = arg.trim_matches(['*', '.']);
     let mut hints = Vec::new();
-    if arg.contains(['{', '}']) {
+    let glob_syntax = app.patterns == Syntax::Glob;
+    if glob_syntax && arg.contains(['{', '}']) {
         hints.push("braces are no pattern: one name or pattern each".to_string());
-    } else if arg.contains('*') && core.is_empty() {
+    } else if glob_syntax && arg.contains('*') && core.is_empty() {
         hints.push("`*` is one level of the path, `**` any number: `**` matches every signal".to_string());
-    } else if arg.contains('*') && !arg.starts_with("**.") {
+    } else if glob_syntax && arg.contains('*') && !arg.starts_with("**.") {
         // the pattern that does match: signals named so, or the signals in a scope named so
         let any = |p: &str| trace.vars.iter().any(|v| v.children.is_empty() && glob(p, &v.path));
         let fix = [format!("**.*{core}*"), format!("**.*{core}*.*")].into_iter().find(|p| any(p));
@@ -421,6 +438,19 @@ pub fn no_match(trace: &crate::trace::Trace, arg: &str) -> String {
 }
 
 fn add_one(app: &mut Workspace, arg: &str) -> Result<(), String> {
+    let pattern = app.patterns.pattern(arg)?;
+    if let Some(Pattern::Regex(re)) = &pattern {
+        let found = regex_matches(app, re, true);
+        if found.is_empty() {
+            return Err(no_match(app, arg));
+        }
+        let new: Vec<usize> = found.into_iter().filter(|v| !app.shown(*v)).collect();
+        if new.is_empty() {
+            return Err(format!("already shown: {arg}"));
+        }
+        app.add_rows(&new);
+        return Ok(());
+    }
     if crate::computed::form(arg).is_some() {
         let (v, _) = app.resolve(arg)?;
         if app.shown(v) {
@@ -431,7 +461,7 @@ fn add_one(app: &mut Workspace, arg: &str) -> Result<(), String> {
     }
     let mut arg = scoped(app, arg);
     let mut found = paths(app, &arg);
-    if found.is_empty() && !arg.contains('*') {
+    if found.is_empty() && pattern.is_none() {
         // the end of a scope's path, as a signal can be named by the end of its path
         match &scopes_ending(app, &arg)[..] {
             [one] => {
@@ -462,9 +492,13 @@ fn add_one(app: &mut Workspace, arg: &str) -> Result<(), String> {
         if !inner.is_empty() {
             // named as the trace writes it
             let list = inner.iter().take(5).cloned().collect::<Vec<_>>().join(", ");
-            return Err(format!("no signals directly in {here}: add {here}.** for all of it, or one of its scopes: {list}"));
+            let all = match app.patterns {
+                Syntax::Glob => format!("{here}.**"),
+                Syntax::Regex => format!("/^{}\\./", regex::escape(&crate::trace::canon(&here))),
+            };
+            return Err(format!("no signals directly in {here}: add {all} for all of it, or one of its scopes: {list}"));
         }
-        return Err(no_match(&app.trace, arg));
+        return Err(no_match(app, arg));
     }
     let new: Vec<usize> = found.into_iter().filter(|v| !app.shown(*v)).collect();
     if new.is_empty() {
@@ -472,7 +506,7 @@ fn add_one(app: &mut Workspace, arg: &str) -> Result<(), String> {
     }
     // a scope (neither a signal nor a pattern) becomes a group named after it
     let signal = matches!(new[..], [v] if crate::trace::canon(&app.trace.vars[v].path) == crate::trace::canon(arg));
-    if signal || arg.contains('*') {
+    if signal || pattern.is_some() {
         app.add_rows(&new);
     } else {
         // named as in the trace, whichever form it was named in
@@ -491,7 +525,7 @@ fn rm(app: &mut Workspace, arg: &str) -> Result<(), String> {
     } else {
         let mut found = Vec::new();
         for w in words(arg) {
-            match resolve(app, w)[..] {
+            match resolve(app, w)?[..] {
                 // a name as search names it: as shown, a slice, the end of a path
                 [] => found.extend(app.resolve(w).ok().filter(|p| p.1.is_none()).map(|p| p.0)),
                 ref f => found.extend(f),

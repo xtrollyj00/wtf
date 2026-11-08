@@ -33,6 +33,9 @@
 | `:q` | quit; refuses if the session has unsaved changes |
 | `:q!` | quit without saving |
 
+A pattern here is a glob: `*` within a level of the path, `**` across. An agent's `command` writes
+the same commands with a regex in slashes instead (section 15).
+
 The command line shows the description column of this table next to each matching command.
 
 Times accept `fs`, `ps`, `ns`, `us`, `ms`, `s`. A number without a unit means file ticks.
