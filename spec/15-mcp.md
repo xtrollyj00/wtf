@@ -133,8 +133,14 @@ reuse wtf's own pieces:
   dut`, or `scope` in `workspace`, kept for every later call and in the session), then the
   signal the workspace shows, if it shows just one of them, then the only one under the scope,
   then the shallowest, if just one is (`clk`, passed down to every instance, is the top's);
-  otherwise the error lists the candidates. A name or pattern that matches nothing (`unknown
-  signal`, `no match`) lists the nearest scopes and signals, at most 3: those whose last part
+  otherwise the error lists the candidates. An unknown name says what the trace has instead,
+  worked out apart from how the error says it: a scope, its signals (`cpu is a scope of 3
+  signals`); a start of the name that is one signal without fields or elements (Verilator's VCD
+  dumps a packed struct as one vector), its width and a slice (`top.cpu.data is one 8-bit
+  signal in this trace, without fields or elements; slice it, cpu.data[7:0]`); a struct, array
+  or stream without that part, the parts it has (`types.pkt.pair has no mid; it has hi, lo`);
+  else, as for a pattern that matches nothing (`no match`), the nearest scopes and signals, at
+  most 3: those whose last part
   holds its last word of two letters or more (`clk_i` for `clk`), else whose last part is that
   word with letters left out or added, half of it at least (`busy` for `bsy`, `clk` for
   `clock`), else with few letters changed (one in five, plus one); those holding the most of its

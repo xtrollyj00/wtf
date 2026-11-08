@@ -16,6 +16,7 @@ use crate::view::View;
 use std::path::PathBuf;
 
 mod decoding;
+pub mod unknown;
 
 /// A message for the user: the text, and whether it is an error or a warning.
 pub type Msg = (String, bool);
@@ -400,37 +401,6 @@ impl Workspace {
         self.by_end(name).map(|v| (v, None))
     }
 
-    /// `unknown signal`, naming the signals in it when `name` is a scope: a module has no value of
-    /// its own, its signals do.
-    fn not_a_signal(&self, name: &str) -> String {
-        let key = crate::trace::parts(&crate::trace::canon(name)).into_iter().map(str::to_string).collect::<Vec<_>>();
-        let canon = self.trace.canon_paths();
-        let last = key.last().map_or("", String::as_str);
-        let inside: Vec<&str> = (0..self.trace.vars.len())
-            .filter(|&v| {
-                // split only the paths the name's last part is in
-                let c = &canon[v];
-                if !c.contains(last) {
-                    return false;
-                }
-                let parts = crate::trace::parts(c);
-                parts.len() > key.len() && parts.windows(key.len()).take(parts.len() - key.len()).any(|w| w == key)
-            })
-            .map(|v| self.trace.vars[v].path.as_str())
-            .collect();
-        match inside.len() {
-            0 => match self.trace.nearest(name, 3) {
-                near if near.is_empty() => format!("unknown signal: {name}"),
-                near => format!("unknown signal: {name} (nearest: {})", near.join(", ")),
-            },
-            n => format!(
-                "unknown signal: {name} is a scope of {n} signals ({}{}); name one, or `add` the scope to show them all",
-                inside.iter().take(4).copied().collect::<Vec<_>>().join(", "),
-                if n > 4 { ", ..." } else { "" }
-            ),
-        }
-    }
-
     /// The signal a path ends with, as written or else in either HDL's form; of several, the one
     /// in the rows, in the scope, of the file, or the shallowest.
     fn by_end(&self, name: &str) -> Result<usize, String> {
@@ -449,7 +419,7 @@ impl Workspace {
         }
         match found[..] {
             [v] => Ok(v),
-            [] => Err(self.not_a_signal(name)),
+            [] => Err(self.unknown(name).to_string()),
             _ => {
                 // the only one of them in the rows is the one meant; else the only one of the file
                 // (decoding `tdata` makes `rx.beat.tdata`, which mustn't make `tdata` ambiguous)
