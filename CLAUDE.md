@@ -39,6 +39,7 @@ cargo build --release && cargo run -p wtf-bench --release -- run /tmp/b/bench.fs
 cargo run -p wtf-bench --release -- mcp /tmp/b/bench.fst   # time the MCP tools on it
 cargo build --release && cargo run -p wtf-bench --release -- agent run [--runs 3] [--review] [<task>...]
                                      # agent benchmark: claude -p solves bench/agent/tasks (costs money)
+                                     # fix tasks need nvc, cocotb and more: bench/agent/SETUP.md
 cargo run -p wtf-bench --release -- agent report           # results.jsonl per task, commit, model
 python3 site/tools/screens.py && (cd site && zola serve)    # the site, its screens from target/release/wtf
 ```

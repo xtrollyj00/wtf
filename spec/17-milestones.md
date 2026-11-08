@@ -80,7 +80,7 @@ Each milestone ends with something usable for day-to-day debugging.
       errors, and medians of the costs. Upstreams are
       permissively licensed, so patches can live in the repo. The first, `head-trimmer-boundary`,
       is ndk-fpga's AXIS head trimmer (VHDL, cocotb on nvc; the cocotb packages in a Python venv
-      on `PATH`).
+      on `PATH`). What the fix tasks need and how to set it up is in `bench/agent/SETUP.md`.
     - **Agent support**: how to tell agents to use wtf well, judged by the benchmark: the server's
       instructions and tool descriptions first; then a skill (a debugging workflow: find
       transfers, check handshakes, pair requests, declare the workspace, present); then a Claude
