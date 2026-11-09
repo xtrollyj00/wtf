@@ -141,6 +141,25 @@ pub enum Changes {
 /// A clock's rising edges, shared by the searches that walk them.
 pub(crate) type Edges = std::sync::Arc<Vec<Tick>>;
 
+/// One thing inside a struct, record or array (spec §6 "Composite rows"), as `Trace::fields`
+/// walks it.
+pub struct Field {
+    pub var: usize,
+    /// Levels below the composite: 0 for its own fields or elements.
+    pub depth: usize,
+    /// The last of its `parts`: `valid`, `[0]`.
+    pub name: String,
+    /// Its path under the composite, `parts` joined: `pair.hi`, `[1].pair.lo`.
+    pub rel: String,
+}
+
+impl Field {
+    /// Its name under the composite as `spelled`: `pkt` → `pkt.pair.hi`, `pkts` → `pkts[1].pair.lo`.
+    pub fn under(&self, spelled: &str) -> String {
+        join([spelled, self.rel.as_str()])
+    }
+}
+
 pub struct Trace {
     wave: simple::Waveform,
     pub fs_per_tick: Option<u128>,
@@ -159,7 +178,7 @@ pub struct Trace {
     /// Each var's path in canonical form (`canon`), for names written in the other HDL's form;
     /// worked out once per var; the computed ones' again when they are dropped and move.
     canon: std::cell::RefCell<Vec<String>>,
-    /// The file's design (`design`), worked out once.
+    /// The file's design (`design`), worked out again when the computed vars change.
     design: std::cell::OnceCell<crate::design::Design>,
 }
 
@@ -300,22 +319,33 @@ impl Trace {
         self.vars[var].children.iter().any(|&c| self.vars[c].path.ends_with(']'))
     }
 
-    /// The signals in a struct or array, nested ones' included, in order; a signal is its own.
-    pub fn leaves(&self, var: usize) -> Vec<usize> {
-        let (mut out, mut stack) = (Vec::new(), vec![var]);
-        while let Some(v) = stack.pop() {
-            match self.is_composite(v) {
-                true => stack.extend(self.vars[v].children.iter().rev()),
-                false => out.push(v),
+    /// What is in a struct, record or array (spec §6 "Composite rows"): its fields or elements
+    /// in declaration order, each before what is nested in it. Empty for a signal.
+    pub fn fields(&self, var: usize) -> Vec<Field> {
+        let base = parts(&self.vars[var].path).len();
+        let (mut out, mut stack): (Vec<Field>, Vec<(usize, usize)>) = (Vec::new(), Vec::new());
+        stack.extend(self.vars[var].children.iter().rev().map(|&c| (c, 0)));
+        while let Some((c, depth)) = stack.pop() {
+            let path = parts(&self.vars[c].path);
+            let rel = &path[base..];
+            out.push(Field { var: c, depth, name: rel.last().copied().unwrap_or_default().to_string(), rel: join(rel.iter().copied()) });
+            if self.is_composite(c) {
+                stack.extend(self.vars[c].children.iter().rev().map(|&g| (g, depth + 1)));
             }
         }
         out
     }
 
-    /// The file's design, its scopes and signals, worked out the first time it is asked for: the
-    /// file's hierarchy never changes.
+    /// The file's design, its scopes and signals: the file's, and the computed ones it holds,
+    /// worked out the first time it is asked for and again when the computed vars change.
     pub fn design(&self) -> &crate::design::Design {
-        self.design.get_or_init(|| crate::design::Design::of(&self.vars[..self.fixed]))
+        self.design.get_or_init(|| crate::design::Design::of(&self.vars, self.fixed))
+    }
+
+    /// The computed vars were added, replaced or dropped: what was worked out from them is stale.
+    fn changed(&mut self) {
+        self.version += 1;
+        self.design.take();
     }
 
     /// The scopes and signals nearest to a name that matched nothing (`Design::nearest`).
@@ -353,7 +383,7 @@ impl Trace {
             Some(&i) if matches!(self.vars[i].source, Source::Computed(_)) && !self.is_composite(i) => {
                 self.vars[i] = var;
                 // new values: what was worked out from the old ones is stale
-                self.version += 1;
+                self.changed();
                 // its edges, if it was a clock, are another signal's now
                 self.edges.get_mut().retain(|k, _| k.0 != i);
                 Ok(i)
@@ -362,7 +392,7 @@ impl Trace {
             None => {
                 self.vars.push(var);
                 self.by_path.insert(path.to_string(), self.vars.len() - 1);
-                self.version += 1;
+                self.changed();
                 Ok(self.vars.len() - 1)
             }
         }
@@ -387,7 +417,7 @@ impl Trace {
         }
         let edges = std::mem::take(self.edges.get_mut());
         *self.edges.get_mut() = edges.into_iter().filter_map(|((v, b), e)| Some(((to[v]?, b), e))).collect();
-        self.version += 1;
+        self.changed();
         Some(to)
     }
 

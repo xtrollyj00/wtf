@@ -2,7 +2,8 @@
 //! (`Display`): the error lists what is there instead, so the next try is a pick (spec §15).
 
 use super::Workspace;
-use crate::trace::{canon, join, parts};
+use crate::protocol::Found;
+use crate::trace::{join, parts};
 use std::fmt;
 
 /// A name that resolves to no signal, and what the trace has instead.
@@ -35,28 +36,11 @@ impl Workspace {
     /// Why `name` names no signal: a scope, a signal or whole without that field, or else the
     /// nearest names.
     pub fn unknown(&self, name: &str) -> Unknown {
-        let why = self.scope_of(name).or_else(|| self.no_field(name)).unwrap_or_else(|| Why::Nearest(self.trace.nearest(name, 3)));
+        let d = self.trace.design();
+        let inside = d.leaves(&d.ending(name));
+        let scope = (!inside.is_empty()).then(|| Why::Scope { signals: inside.len(), first: inside.iter().take(LISTED).map(|&v| self.trace.vars[v].path.clone()).collect() });
+        let why = scope.or_else(|| self.no_field(name)).unwrap_or_else(|| Why::Nearest(self.trace.nearest(name, 3)));
         Unknown { name: name.to_string(), why }
-    }
-
-    /// The signals in the scope `name` names, if it names one: a part of the paths, at the end of
-    /// none.
-    fn scope_of(&self, name: &str) -> Option<Why> {
-        let key = parts(&canon(name)).into_iter().map(str::to_string).collect::<Vec<_>>();
-        let canon = self.trace.canon_paths();
-        let last = key.last().map_or("", String::as_str);
-        let inside: Vec<usize> = (0..self.trace.vars.len())
-            .filter(|&v| {
-                // split only the paths the name's last part is in
-                let c = &canon[v];
-                if !c.contains(last) {
-                    return false;
-                }
-                let p = parts(c);
-                p.len() > key.len() && p.windows(key.len()).take(p.len() - key.len()).any(|w| w == key)
-            })
-            .collect();
-        (!inside.is_empty()).then(|| Why::Scope { signals: inside.len(), first: inside.iter().take(LISTED).map(|&v| self.trace.vars[v].path.clone()).collect() })
     }
 
     /// The longest start of `name` that is one signal, when the rest is a field or element of it
@@ -113,6 +97,43 @@ impl fmt::Display for Unknown {
             }
             Why::Nearest(near) if near.is_empty() => write!(f, "unknown signal: {name}"),
             Why::Nearest(near) => write!(f, "unknown signal: {name} (nearest: {})", near.join(", ")),
+        }
+    }
+}
+
+/// A name that names no stream (spec §16 "Records of a set"), apart from how it is said.
+#[derive(Debug, PartialEq)]
+pub enum NoStream {
+    /// No name at all.
+    Empty,
+    /// The pattern that doesn't parse, its error as it says it.
+    Pattern(String),
+    /// A name with no stream yet to match it.
+    NoneYet { name: String },
+    /// The streams there are.
+    Unknown { name: String, streams: Vec<String> },
+    /// An interface the file has that no decode made: the rest of the name, and the interfaces.
+    NotDecoded { name: String, part: String, found: Vec<Found> },
+}
+
+impl fmt::Display for NoStream {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            NoStream::Empty => write!(f, "records of which stream? (a stream, a decode's name or a glob)"),
+            NoStream::Pattern(e) => f.write_str(e),
+            NoStream::NoneYet { name } => write!(f, "unknown stream: {name} (none yet; make one with decode or protocol)"),
+            NoStream::Unknown { name, streams } => write!(f, "unknown stream: {name} (streams: {}; or a decode's name for its results)", streams.join(", ")),
+            NoStream::NotDecoded { name, part, found } => {
+                let how: Vec<String> = found
+                    .iter()
+                    .take(3)
+                    .map(|f| match part.is_empty() {
+                        true => format!("`{}` makes its streams", f.decode_line()),
+                        false => format!("`{}` makes {}.{part}", f.decode_line(), f.name()),
+                    })
+                    .collect();
+                write!(f, "unknown stream: {name}: its interface isn't decoded yet; {}", how.join("; or "))
+            }
         }
     }
 }

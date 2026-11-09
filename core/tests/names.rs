@@ -12,6 +12,8 @@ use wtf_core::query::{self, Search};
 use wtf_core::trace::{Val, brackets};
 use wtf_core::workspace::Workspace;
 
+mod common;
+
 fn fixture(name: &str) -> Workspace {
     Workspace::open(&PathBuf::from(format!("{}/../tests/data/{name}", env!("CARGO_MANIFEST_DIR")))).unwrap()
 }
@@ -88,6 +90,26 @@ fn add_either_form() {
     let names: Vec<&str> = names.iter().map(|n| n.trim()).collect();
     // a scope is a group, a signal a row of its own
     assert_eq!(names, ["▾ gen_stages[0]", "x", "headers_vld", "y"]);
+}
+
+#[test]
+fn scope_group_names() {
+    let ws = open();
+    let x = ws.trace.by_path["dut.gen_stages[0].x"];
+    // a scope's tail, from its last part that isn't an index, indices kept, in either form
+    assert_eq!(wtf_core::command::group_name(&ws, "dut.gen_stages[0]", x), "gen_stages[0]");
+    assert_eq!(wtf_core::command::group_name(&ws, "dut.GEN_STAGES(1)", ws.trace.by_path["dut.gen_stages[1].x"]), "gen_stages[1]");
+    // no scope shares a name: `group`
+    assert_eq!(wtf_core::command::group_name(&ws, "", x), "group");
+    let simple = common::open();
+    assert_eq!(wtf_core::command::group_name(&simple, "top.cpu", simple.trace.by_path["top.cpu.state"]), "cpu");
+}
+
+#[test]
+fn shared_scope() {
+    assert_eq!(wtf_core::command::common_scope(&["top.cpu.a", "top.cpu.sub.b"]), "top.cpu");
+    assert_eq!(wtf_core::command::common_scope(&["top.cpu.a", "top.dma.b"]), "top");
+    assert_eq!(wtf_core::command::common_scope(&["a", "top.b"]), "");
 }
 
 #[test]

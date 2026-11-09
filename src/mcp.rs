@@ -2,7 +2,8 @@
 //! read values, search with wtf's expressions, look at waveforms drawn as text, and show the user
 //! what it found. Each trace it opens is a workspace, listening for `wtf --attach` like a window.
 
-use wtf_core::workspace::Workspace;
+use wtf_core::workspace::{Kind, Workspace};
+use wtf_core::workspace::unknown::NoStream;
 use crate::draw;
 use crate::live;
 use wtf_core::session;
@@ -24,6 +25,7 @@ pub mod help;
 mod trail;
 pub use args::*;
 use declare::declared;
+use trail::Answer;
 
 /// Most lines one answer gives, so a busy clock can't flood the agent.
 const MAX_LINES: usize = 1000;
@@ -169,7 +171,8 @@ const FOLD_LINES: usize = 200;
 /// scope it is in. Over `FOLD_LINES`, the scopes below the deepest level that fits are a line
 /// each counting their matches, never above the scope all matches share, so asking for one
 /// scope lists it. Empty if nothing matched.
-fn hierarchy(t: &wtf_core::trace::Trace, matched: &[usize]) -> String {
+fn hierarchy(ws: &Workspace, matched: &[usize]) -> String {
+    let t = &ws.trace;
     let d = t.design();
     let nodes = &d.nodes;
     let mut hit = vec![false; nodes.len()];
@@ -189,9 +192,9 @@ fn hierarchy(t: &wtf_core::trace::Trace, matched: &[usize]) -> String {
             Some(_) if up(i).take_while(|&p| nodes[p].var.is_some()).any(|p| hit[p]) => {}
             Some(v) => {
                 let var = &t.vars[v];
-                let text = match t.is_composite(v) {
-                    true => format!("{}, {}, {}", if t.is_array(v) { "array" } else { "struct" }, if var.width.is_some() { what(var) } else { "text".into() }, plural(n.signals, "signal")),
-                    false => what(var),
+                let text = match ws.kind(v, None) {
+                    k @ (Kind::Array | Kind::Struct) => format!("{}, {}, {}", if k == Kind::Array { "array" } else { "struct" }, if var.width.is_some() { what(var) } else { "text".into() }, plural(n.signals, "signal")),
+                    _ => what(var),
                 };
                 items.push(((n.first, 1, n.depth), i, text));
             }
@@ -508,14 +511,17 @@ impl Wtf {
             },
         };
         let t = &app.trace;
-        Ok(match hierarchy(t, &t.design().matching(|path| re.is_match(path))) {
+        let d = t.design();
+        // a scope's count is the file's signals: the computed slices are rows, not the file's
+        let matched: Vec<usize> = d.matching(|path| re.is_match(path)).into_iter().filter(|&i| d.nodes[i].file).collect();
+        Ok(match hierarchy(&app, &matched) {
             out if out.is_empty() => wtf_core::command::no_match(&app, &a.pattern),
             out => budget(out),
         })
     }
 
     #[tool(description = "Values of signals over a time range: the value at `from`, then each change, as `time value` lines.")]
-    fn values(&self, Parameters(a): Parameters<ValuesArgs>) -> Result<String, String> {
+    fn values(&self, Parameters(a): Parameters<ValuesArgs>) -> Result<Answer, String> {
         let w = current(self)?;
         let mut app = lock(&w);
         let (from, to) = (at(&app, &a.from)?.0, at(&app, &a.to)?.1);
@@ -542,32 +548,32 @@ impl Wtf {
         if cut {
             out += &format!("  ... more changes until {}; narrow the range, or `find` the events\n", show(&app, to, u));
         }
-        Ok(budget(out))
+        Ok(Answer { text: budget(out), time: Some(from) })
     }
 
     #[tool(description = "Records of a decoded stream, or of several in start order (a decode's name: its results), as a table: n, start (the rising edge that starts the record's first clock cycle), end (the edge that samples its last) and the fields; `where`, `group_by`, `count_only` (`help records`).")]
-    fn records(&self, Parameters(a): Parameters<RecordsArgs>) -> Result<String, String> {
+    fn records(&self, Parameters(a): Parameters<RecordsArgs>) -> Result<Answer, String> {
         let w = current(self)?;
         let app = lock(&w);
         let ids = match app.stream_set(&a.stream) {
             Ok(ids) => ids,
             Err(e) => {
-                // an interface `open` listed, not decoded yet (`top.s_axi.wr`, `s_axi.wr`): its line
-                let (base, part) = a.stream.rsplit_once('.').unwrap_or((&a.stream, ""));
-                let named = |f: &protocol::Found| [a.stream.as_str(), base].iter().any(|&n| n == f.name() || n == f.prefix.trim_end_matches(['_', '.']));
-                let found: Vec<protocol::Found> = protocol::detect(&app.trace).into_iter().filter(named).collect();
-                if found.is_empty() {
-                    return Err(e.replace("decode or protocol", "`command`: `decode <name> <protocol> ...`"));
-                }
-                let how: Vec<String> = found
-                    .iter()
-                    .take(3)
-                    .map(|f| match part {
-                        "" => format!("`{}` makes its streams (`protocols {}`)", f.decode_line(), f.protocol),
-                        _ => format!("`{}` makes {}.{part}", f.decode_line(), f.name()),
-                    })
-                    .collect();
-                return Err(format!("unknown stream: {}: its interface isn't decoded yet; with `command`, {}", a.stream, how.join("; or ")));
+                return Err(match e {
+                    // an interface `open` listed, not decoded yet (`top.s_axi.wr`, `s_axi.wr`): its line
+                    NoStream::NotDecoded { name, part, found } => {
+                        let how: Vec<String> = found
+                            .iter()
+                            .take(3)
+                            .map(|f| match part.as_str() {
+                                "" => format!("`{}` makes its streams (`protocols {}`)", f.decode_line(), f.protocol),
+                                _ => format!("`{}` makes {}.{part}", f.decode_line(), f.name()),
+                            })
+                            .collect();
+                        format!("unknown stream: {name}: its interface isn't decoded yet; with `command`, {}", how.join("; or "))
+                    }
+                    NoStream::NoneYet { name } => format!("unknown stream: {name} (none yet; make one with `command`: `decode <name> <protocol> ...`)"),
+                    e => e.to_string(),
+                });
             }
         };
         let set = wtf_core::stream::Set::new(ids.iter().map(|&i| &app.streams[i]).collect());
@@ -587,18 +593,19 @@ impl Wtf {
         };
         let (Some(&first), Some(&last)) = (picked.first(), picked.last()) else {
             // a check's empty answer is its result, not a sign it didn't run
-            return Ok(match (matching, set.streams.iter().all(|s| s.violations)) {
-                ("", true) => "no records: no violations".into(),
-                ("", false) => "no records".into(),
+            let text = match (matching, set.streams.iter().all(|s| s.violations)) {
+                ("", true) => "no records: no violations".to_string(),
+                ("", false) => "no records".to_string(),
                 _ => format!("no matching records{of}"),
-            });
+            };
+            return Ok(Answer { text, time: None });
         };
         let count = a.count.unwrap_or(20).min(MAX_LINES);
         if !a.group_by.is_empty() {
             let groups = set.group_by(&picked, &a.group_by)?;
             let what = format!("{} distinct, of {}{matching} records{of}", groups.len(), picked.len());
             if a.count_only {
-                return Ok(what);
+                return Ok(Answer { text: what, time: None });
             }
             let page = &groups[..groups.len().min(count)];
             let u = unit(&app, &a.unit, page.iter().flat_map(|g| [g.first, g.last]))?;
@@ -608,12 +615,13 @@ impl Wtf {
                 let values: Vec<String> = cols.iter().zip(&g.values).map(|(&k, v)| format!("{}={}", set.columns[k].name, field_text(&app, &set.columns[k].field, v, u, radixes[k]))).collect();
                 lines.push(format!("{} × {} ({} .. {})", g.count, values.join(" "), show(&app, g.first, u), show(&app, g.last, u)));
             }
-            return Ok(budget(lines.join("\n")));
+            // the first group listed, and the record that starts it
+            return Ok(Answer { text: budget(lines.join("\n")), time: Some(page[0].first) });
         }
         let (first, last) = (set.record(first), set.record(last));
         if a.count_only {
             let u = unit(&app, &a.unit, [first.start, last.start])?;
-            return Ok(format!("{}{matching} records{of}, first {}, last {}", picked.len(), show(&app, first.start, u), show(&app, last.start, u)));
+            return Ok(Answer { text: format!("{}{matching} records{of}, first {}, last {}", picked.len(), show(&app, first.start, u), show(&app, last.start, u)), time: Some(first.start) });
         }
         let page = &picked[..picked.len().min(count)];
         let u = unit(&app, &a.unit, page.iter().flat_map(|&at| [set.record(at).start, set.record(at).end]))?;
@@ -636,11 +644,12 @@ impl Wtf {
             let stream = multi.then(|| set.streams[s].name.clone());
             lines.push(stream.into_iter().chain([format!("{n}\t{}\t{}", show(&app, r.start, u), show(&app, r.end, u))]).chain(texts).collect::<Vec<_>>().join("\t"));
         }
-        Ok(budget(lines.join("\n")))
+        // the record that starts the first row
+        Ok(Answer { text: budget(lines.join("\n")), time: Some(set.record(page[0]).start) })
     }
 
     #[tool(description = "Values of signals at one time.")]
-    fn value_at(&self, Parameters(a): Parameters<ValueAtArgs>) -> Result<String, String> {
+    fn value_at(&self, Parameters(a): Parameters<ValueAtArgs>) -> Result<Answer, String> {
         let w = current(self)?;
         let mut app = lock(&w);
         // after everything that prints as the time, and a change among it said
@@ -652,10 +661,8 @@ impl Wtf {
             .flat_map(|(n, p, s)| {
                 let mut out = vec![(n.clone(), p, s)];
                 if p.1.is_none() && app.trace.is_composite(p.0) {
-                    let base = app.trace.vars[p.0].path.len();
-                    for v in app.trace.leaves(p.0) {
-                        let var = &app.trace.vars[v];
-                        out.push((format!("{n}{}", &var.path[base..]), (v, None), Sig::of(v, var)));
+                    for f in app.trace.fields(p.0).into_iter().filter(|f| !app.trace.is_composite(f.var)) {
+                        out.push((f.under(&n), (f.var, None), Sig::of(f.var, &app.trace.vars[f.var])));
                     }
                 }
                 out
@@ -676,11 +683,11 @@ impl Wtf {
             Some(index) => Unit { index, decimals: Some(3) },
             None => unit(&app, &a.unit, [t])?,
         };
-        Ok(budget(format!("at {}:\n{}", show(&app, t, u), lines.join("\n"))))
+        Ok(Answer { text: budget(format!("at {}:\n{}", show(&app, t, u), lines.join("\n"))), time: Some(t) })
     }
 
     #[tool(description = "When a search expression holds, as a table of times; `show` adds values, `count_only` counts. With `@<clock> ` first, a match is a cycle whose ending edge samples it true (`@clk x`: the cycles x is high), reported at the cycle's start; without, where it becomes true (`rose(x)`: x's edges). A bus: decode it (`help decode`).")]
-    fn find(&self, Parameters(a): Parameters<FindArgs>) -> Result<String, String> {
+    fn find(&self, Parameters(a): Parameters<FindArgs>) -> Result<Answer, String> {
         let w = current(self)?;
         let mut app = lock(&w);
         let q = app.query(&a.expr)?;
@@ -710,7 +717,7 @@ impl Wtf {
         let query::Found { runs, total, more } = query::find(&app.trace, &q, &search);
         let merge = q.clock.is_some() && search.merge;
         if runs.is_empty() {
-            return Ok("no match".into());
+            return Ok(Answer { text: "no match".into(), time: None });
         }
         if a.count_only {
             let first = runs.iter().map(|r| r.span().0).min().unwrap_or(0);
@@ -722,7 +729,7 @@ impl Wtf {
             };
             let more = if more { " (stopped counting there)" } else { "" };
             let u = unit(&app, &a.unit, [first, last])?;
-            return Ok(format!("{total} matches{cycles}, first {}, last {}{more}", show(&app, first, u), show(&app, last, u)));
+            return Ok(Answer { text: format!("{total} matches{cycles}, first {}, last {}{more}", show(&app, first, u), show(&app, last, u)), time: Some(first) });
         }
         let u = unit(&app, &a.unit, runs.iter().flat_map(|r| [r.first, r.last]))?;
         let mut head = if merge { vec!["from", "last", "cycles"] } else { vec!["time"] };
@@ -749,11 +756,12 @@ impl Wtf {
             let (p, d) = app.protocol_of("ev", "s", &a.expr, &names)?;
             lines.push(format!("as records (`help decode`): `{}` then `{}`", p.line(), d.line()));
         }
-        Ok(budget(lines.join("\n")))
+        // the first run listed, which backward is the latest
+        Ok(Answer { text: budget(lines.join("\n")), time: Some(runs[0].span().0) })
     }
 
     #[tool(description = "Draw signals over a time range as text, as wtf's screen does; without signals, the workspace.")]
-    fn render(&self, Parameters(a): Parameters<RenderArgs>) -> Result<String, String> {
+    fn render(&self, Parameters(a): Parameters<RenderArgs>) -> Result<Answer, String> {
         let w = current(self)?;
         let mut app = lock(&w);
         let w = a.width.unwrap_or(120).clamp(40, 1000);
@@ -771,11 +779,15 @@ impl Wtf {
             if app.rows.is_empty() {
                 return Err("the workspace has no signals yet: set it up with `workspace` or `command`".into());
             }
-            if let Some((from, to)) = range(&app)? {
-                app.view.start = from;
-                app.view.show_until(to);
-            }
-            return Ok(budget(screen(&mut app, w, &a.unit)?));
+            let time = match range(&app)? {
+                Some((from, to)) => {
+                    app.view.start = from;
+                    app.view.show_until(to);
+                    a.from.as_ref().map(|_| from)
+                }
+                None => None,
+            };
+            return Ok(Answer { text: budget(screen(&mut app, w, &a.unit)?), time });
         }
         let (from, to) = range(&app)?.unwrap_or((app.trace.start(), app.trace.end().max(1)));
         let rows: Vec<Row> = probes(&mut app, &a.signals, &None)?.into_iter().map(|(_, _, s)| Row::Signal(s)).collect();
@@ -789,7 +801,8 @@ impl Wtf {
         let text = screen(&mut app, w, &a.unit);
         (app.rows, app.sel, app.view) = saved;
         app.marks = saved_marks;
-        Ok(budget(text?))
+        // the asked start, not the trace's own
+        Ok(Answer { text: budget(text?), time: a.from.as_ref().map(|_| from) })
     }
 
     #[tool(description = "Run one of wtf's `:` commands on the workspace: `decode`, `protocol`, rows, cursors (`help commands`).")]
@@ -991,12 +1004,16 @@ impl ServerHandler for Wtf {
         context: rmcp::service::RequestContext<rmcp::RoleServer>,
     ) -> Result<rmcp::model::CallToolResponse, rmcp::ErrorData> {
         let (tool, args) = (request.name.to_string(), request.arguments.clone());
-        let r = self.tool_router.call(rmcp::handler::server::tool::ToolCallContext::new(self, request, context)).await;
-        if let (Ok(rmcp::model::CallToolResponse::Complete(res)), Ok(w)) = (&r, current(self)) {
-            let text: String = res.content.iter().filter_map(|c| c.as_text()).map(|t| t.text.as_str()).collect();
-            let mut app = lock(&w);
-            if let Some(step) = trail::step(&app, &tool, args.as_ref(), &text, res.is_error == Some(true)) {
-                app.add_step(step);
+        let mut r = self.tool_router.call(rmcp::handler::server::tool::ToolCallContext::new(self, request, context)).await;
+        if let Ok(rmcp::model::CallToolResponse::Complete(res)) = &mut r {
+            // the time is the trail's: out of `_meta` before the client sees the result
+            let time = trail::take_time(res);
+            if let Ok(w) = current(self) {
+                let text: String = res.content.iter().filter_map(|c| c.as_text()).map(|t| t.text.as_str()).collect();
+                let mut app = lock(&w);
+                if let Some(step) = trail::step(&tool, args.as_ref(), &text, res.is_error == Some(true), time) {
+                    app.add_step(step);
+                }
             }
         }
         r
@@ -1074,7 +1091,7 @@ mod tests {
         // what a window on the trace reads from the workspace (spec §15 "Joining")
         let attached = live::request(&id, live::Request::Get).unwrap();
         assert!(attached.starts_with(&view) && attached.contains("\nto = \"79ns\"\n"), "{attached}");
-        assert!(agent.render(Parameters(RenderArgs { signals: vec![], from: None, to: None, width: Some(80), unit: None })).unwrap().contains("▾ evidence"));
+        assert!(agent.render(Parameters(RenderArgs { signals: vec![], from: None, to: None, width: Some(80), unit: None })).unwrap().text.contains("▾ evidence"));
         assert_eq!(agent.present().unwrap(), "shown in the user's window: agent: presented 2 signals, 2 cursors");
         let seen = agent.user_view(Parameters(UserViewArgs { adopt: true })).unwrap();
         assert!(seen.contains("▾ evidence") && seen.contains("2: 20ns") && seen.contains("adopted"), "{seen}");

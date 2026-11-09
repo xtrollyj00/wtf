@@ -7,7 +7,7 @@ use wtf_core::stream::Stream;
 use wtf_core::time::{self, Tick};
 use wtf_core::trace::{Changes, Trace, Val};
 use wtf_core::view::View;
-use wtf_core::workspace::{Sub, Workspace};
+use wtf_core::workspace::{Kind, Sub, Workspace};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -282,29 +282,23 @@ pub mod icon {
 const NAME_HEAD: &str = "Name";
 const VALUE_HEAD: &str = "Value";
 
-/// What a var is, as its icon and colour (spec §14): a clock (some decode's), a 1-bit signal or
-/// a bit of a bus, a bus, one with value names, a real, text, a struct or an array, a computed
-/// signal, a stream (its violations apart) or a stream's field. None without the `nerd` glyphs.
+/// What a var is (its `Kind`), as its icon and colour (spec §14). None without the `nerd` glyphs.
 pub fn kind(ws: &Workspace, var: usize, bit: Option<u32>) -> Option<(char, Color)> {
     gl().icons.then_some(())?;
-    let (t, p) = (&ws.trace, pal());
-    let v = &t.vars[var];
-    let stream = ws.stream_of(var);
-    let field = ws.streams.iter().any(|s| v.path.strip_prefix(s.name.as_str()).is_some_and(|f| f.starts_with('.')));
-    Some(match () {
-        _ if bit.is_some() => (icon::WIRE, p.line),
-        _ if stream.is_some_and(|s| s.violations) => (icon::VIOLATION, p.unknown),
-        _ if stream.is_some() => (icon::RECORDS, p.hues[5]),
-        _ if field => (icon::FIELD, p.hues[5]),
-        _ if t.is_composite(var) && t.is_array(var) => (icon::ARRAY, p.bus),
-        _ if t.is_composite(var) => (icon::STRUCT, p.bus),
-        _ if ws.decodes.iter().any(|d| d.clock == v.path) => (icon::CLOCK_WAVE, p.line),
-        _ if t.is_computed(var) => (icon::COMPUTED, p.dim),
-        _ if v.real => (icon::REAL, p.bus),
-        _ if v.width.is_none() => (icon::TEXT, p.bus),
-        _ if v.names.is_some() => (icon::ENUM, p.bus),
-        _ if v.width == Some(1) => (icon::WIRE, p.line),
-        _ => (icon::BUS, p.bus),
+    let p = pal();
+    Some(match ws.kind(var, bit) {
+        Kind::Wire => (icon::WIRE, p.line),
+        Kind::Violations => (icon::VIOLATION, p.unknown),
+        Kind::Stream => (icon::RECORDS, p.hues[5]),
+        Kind::Field => (icon::FIELD, p.hues[5]),
+        Kind::Array => (icon::ARRAY, p.bus),
+        Kind::Struct => (icon::STRUCT, p.bus),
+        Kind::Clock => (icon::CLOCK_WAVE, p.line),
+        Kind::Computed => (icon::COMPUTED, p.dim),
+        Kind::Real => (icon::REAL, p.bus),
+        Kind::Text => (icon::TEXT, p.bus),
+        Kind::Enum => (icon::ENUM, p.bus),
+        Kind::Bus => (icon::BUS, p.bus),
     })
 }
 

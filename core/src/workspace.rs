@@ -16,6 +16,7 @@ use crate::view::View;
 use std::path::PathBuf;
 
 mod decoding;
+pub mod reason;
 pub mod unknown;
 
 /// A message for the user: the text, and whether it is an error or a warning.
@@ -27,6 +28,23 @@ pub struct Sub {
     pub var: usize,
     pub bit: Option<u32>,
     pub depth: usize,
+}
+
+/// What a var is (spec §14 "Icons"), the first that holds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    Wire,
+    Violations,
+    Stream,
+    Field,
+    Array,
+    Struct,
+    Clock,
+    Computed,
+    Real,
+    Text,
+    Enum,
+    Bus,
 }
 
 pub struct Workspace {
@@ -800,6 +818,28 @@ impl Workspace {
     /// The stream a var shows, if it is one's own var.
     pub fn stream_of(&self, var: usize) -> Option<&Stream> {
         self.streams.iter().find(|s| s.name == self.trace.vars[var].path)
+    }
+
+    /// What a var is (spec §14 "Icons"), the first that holds.
+    pub fn kind(&self, var: usize, bit: Option<u32>) -> Kind {
+        let v = &self.trace.vars[var];
+        let stream = self.stream_of(var);
+        let field = self.streams.iter().any(|s| v.path.strip_prefix(s.name.as_str()).is_some_and(|f| f.starts_with('.')));
+        match () {
+            _ if bit.is_some() => Kind::Wire,
+            _ if stream.is_some_and(|s| s.violations) => Kind::Violations,
+            _ if stream.is_some() => Kind::Stream,
+            _ if field => Kind::Field,
+            _ if self.trace.is_composite(var) && self.trace.is_array(var) => Kind::Array,
+            _ if self.trace.is_composite(var) => Kind::Struct,
+            _ if self.decodes.iter().any(|d| d.clock == v.path) => Kind::Clock,
+            _ if self.trace.is_computed(var) => Kind::Computed,
+            _ if v.real => Kind::Real,
+            _ if v.width.is_none() => Kind::Text,
+            _ if v.names.is_some() => Kind::Enum,
+            _ if v.width == Some(1) => Kind::Wire,
+            _ => Kind::Bus,
+        }
     }
 
     /// The record of a stream's own var at the cursor, if there is one there.

@@ -653,6 +653,51 @@ fn trail_reaches_the_window() {
     assert!(window.recv().is_ok() && second.recv().is_ok());
 }
 
+/// The steps a workspace holds, as their `[[trail]]` text: what a window following it reads.
+fn trail_steps(runtime: &Path, pid: u32, n: usize) -> Vec<String> {
+    let mut ws = BufReader::new(UnixStream::connect(runtime.join(format!("wtf-{pid}-{n}.sock"))).unwrap());
+    writeln!(ws.get_mut(), "GET").unwrap();
+    let mut toml = String::new();
+    ws.read_to_string(&mut toml).unwrap();
+    toml.split("\n[[trail]]\n").skip(1).map(str::to_string).collect()
+}
+
+#[test]
+fn trail_steps_carry_their_time() {
+    // spec §15 "Trail": the time a step is about, not one read back out of the answer's words
+    let dir = Dir::new("trail-time");
+    let mut s = Server::start(&dir.0);
+    let trace = dir.0.join("simple.vcd");
+    std::fs::copy("tests/data/simple.vcd", &trace).unwrap();
+    s.ok("open", json!({"trace": trace}));
+    // under a coarse unit the answer prints `0ms`; the step keeps the exact tick
+    assert!(s.ok("find", json!({"expr": "top.cpu.busy", "count_only": true, "unit": "ms"})).contains("first 0ms"));
+    // one text block and no `_meta`: the time is the trail's, not the client's
+    let r = s.call("tools/call", json!({"name": "find", "arguments": {"expr": "top.cpu.busy", "count_only": true}}));
+    assert_eq!(r["content"].as_array().unwrap().len(), 1, "{r}");
+    assert!(r.get("_meta").is_none(), "{r}");
+    let steps = trail_steps(&dir.0, s.child.id(), 1);
+    assert!(steps[0].starts_with("tool = \"find\"") && steps[0].ends_with("time = \"20ns\"\n"), "{}", steps[0]);
+
+    // a merged `@clk` listing has neither a `first ` nor a `time` column to read the time back from
+    s.ok("open", json!({"trace": std::fs::canonicalize("tests/data/handshake.vcd").unwrap()}));
+    let decl = json!({
+        "protocols": [{"name": "beat", "roles": ["valid", "ready", "data"], "when": "valid && ready", "fields": ["tdata = data", "low = data[3:0]"]}],
+        "decode": [{"name": "rx", "protocol": "beat", "clock": "clk", "signals": ["valid = valid", "ready = ready", "data = data"]}],
+        "rows": ["rx"],
+    });
+    s.ok("workspace", decl);
+    let merged = s.ok("find", json!({"expr": "@clk valid", "unit": "ns"}));
+    assert!(merged.starts_with("from\tlast\tcycles\n"), "{merged}");
+    let found = merged.lines().nth(1).unwrap().split('\t').next().unwrap().to_string();
+    // a `group_by` listing: the record that starts its first group
+    let grouped = s.ok("records", json!({"stream": "rx", "group_by": ["low"], "unit": "ns"}));
+    let group = grouped.lines().nth(1).unwrap().split_once(" (").unwrap().1.split(" .. ").next().unwrap().to_string();
+    let steps = trail_steps(&dir.0, s.child.id(), 2);
+    assert!(steps.iter().any(|st| st.starts_with("tool = \"find\"") && st.ends_with(&format!("time = \"{found}\"\n"))), "{steps:?}");
+    assert!(steps.iter().any(|st| st.starts_with("tool = \"records\"") && st.ends_with(&format!("time = \"{group}\"\n"))), "{steps:?}");
+}
+
 #[test]
 fn present_and_user_view() {
     let dir = Dir::new("present");

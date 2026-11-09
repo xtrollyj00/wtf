@@ -174,14 +174,12 @@ fn arguments(c: &Command, line: &str, app: &crate::tui::app::App) -> Completion 
             let items = fuzzy(&word[skip..], fields).into_iter().map(|f| item(format!("{}{f} ", &word[..skip]), "")).collect();
             return Completion { what: "field", start, items };
         }
+        // the design's scopes: the paths it holds under itself (spec §15)
         ("scope", 1) => {
-            let mut scopes: Vec<String> = ws.trace.vars.iter().filter(|v| !v.path.is_empty()).flat_map(|v| {
-                let parts = wtf_core::trace::parts(&v.path);
-                (1..parts.len()).map(move |k| parts[..k].join(".")).collect::<Vec<_>>()
-            }).collect();
+            let mut scopes: Vec<&str> = ws.trace.design().nodes.iter().filter(|n| !n.children.is_empty()).map(|n| n.path.as_str()).collect();
             scopes.sort();
             scopes.dedup();
-            ("scope", fuzzy(word, scopes.iter().map(|s| s.as_str())).into_iter().take(200).map(|s| item(s, "")).collect())
+            ("scope", fuzzy(word, scopes).into_iter().take(200).map(|s| item(s, "")).collect())
         }
         ("select", 1 | 2) => {
             let rows: Vec<String> = ws.rows.iter().map(|r| match r {
@@ -406,6 +404,18 @@ mod tests {
         assert_eq!(names("records bus.rd w"), ["where "]);
         assert!(names("records bus.rd where !(add").contains(&"!(addr ".to_string()));
         assert_eq!(names("select bus.r"), ["bus.rd "]);
+    }
+
+    /// `:scope` offers what the design says has something under it (spec §15).
+    #[test]
+    fn scope_completions_walk_the_design() {
+        let app = |file: &str| crate::tui::app::App::new(wtf_core::workspace::Workspace::open(std::path::Path::new(file)).unwrap());
+        let names = |app: &crate::tui::app::App, line: &str| complete(line, app).items.into_iter().map(|i| i.text).collect::<Vec<_>>();
+        let simple = app("tests/data/simple.vcd");
+        assert!(names(&simple, "scope ").contains(&"top.cpu".to_string()));
+        // a struct inside an array: the last part before it, not a dot before the index
+        let types = app("tests/data/types-nvc.fst");
+        assert!(names(&types, "scope ").contains(&"types.gen[0]".to_string()));
     }
 
     #[test]

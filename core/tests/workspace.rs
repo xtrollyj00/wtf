@@ -2,7 +2,33 @@
 
 mod common;
 use common::*;
-use wtf_core::workspace::Workspace;
+use wtf_core::workspace::{Kind, Workspace};
+
+#[test]
+fn kind_of_a_var() {
+    let mut ws = open();
+    assert_eq!(ws.kind(var(&ws, "top.clk"), None), Kind::Wire);
+    assert_eq!(ws.kind(var(&ws, "top.cpu.data"), Some(7)), Kind::Wire);
+    assert_eq!(ws.kind(var(&ws, "top.cpu.data"), None), Kind::Bus);
+    // a decode's clock is a clock; a check's stream is violations, its field a field
+    wtf_core::command::run(&mut ws, "decode c check clock=clk busy=cpu.busy").unwrap();
+    assert_eq!(ws.kind(var(&ws, "top.clk"), None), Kind::Clock);
+    assert_eq!(ws.kind(var(&ws, "c"), None), Kind::Violations);
+    assert_eq!(ws.kind(var(&ws, "c.rule"), None), Kind::Field);
+    // a stream that isn't violations, and its field
+    let mut axis = Workspace::open(&fixture("vcd").with_file_name("axis.vcd")).unwrap();
+    wtf_core::command::run(&mut axis, "decode rx axis clock=clk tvalid=tvalid tready=tready tdata=tdata").unwrap();
+    assert_eq!(axis.kind(var(&axis, "rx.beat"), None), Kind::Stream);
+    assert_eq!(axis.kind(var(&axis, "rx.beat.tdata"), None), Kind::Field);
+    // a computed signal is one, a struct and an array are theirs, a bus with names an enum
+    let computed = with(&["cpu.data[7:4]"]);
+    assert_eq!(computed.kind(var(&computed, "top.cpu.data[7:4]"), None), Kind::Computed);
+    let types = Workspace::open(&fixture("fst").with_file_name("types-verilator-structs.fst")).unwrap();
+    assert_eq!(types.kind(var(&types, "types.pkt"), None), Kind::Struct);
+    assert_eq!(types.kind(var(&types, "types.pkts"), None), Kind::Array);
+    let enums = Workspace::open(&fixture("fst").with_file_name("enum.fst")).unwrap();
+    assert_eq!(enums.kind(var(&enums, "top.state"), None), Kind::Enum);
+}
 
 #[test]
 fn opens_a_trace() {
@@ -377,6 +403,22 @@ fn computed_vars_work_like_file_vars() {
     assert_eq!(wtf_core::query::changes(&mut ws.trace, (v, None), 0, 80, &mut budget), (vec![25, 55], false));
     // in a session it is named like any signal
     assert!(wtf_core::session::rows_toml(&ws).contains("signal = \"calc.mode\""));
+}
+
+#[test]
+fn the_design_is_built_again_when_computed_vars_change() {
+    use wtf_core::trace::Val;
+    let mut ws = open();
+    // the file's design: no slice before it is made
+    assert!(!ws.trace.design().nodes.iter().any(|n| n.name == "data[7:4]"));
+    let v = ws.trace.add_computed("top.cpu.data[7:4]", Some(4), vec![(0, Val::Bits("0000".into()))]).unwrap();
+    // a leaf in its scope, and no signal of the file
+    let d = ws.trace.design();
+    let at = d.nodes.iter().position(|n| n.var == Some(v)).unwrap();
+    assert_eq!((d.nodes[at].name.as_str(), d.nodes[d.nodes[at].parent.unwrap()].path.as_str(), d.nodes[at].file), ("data[7:4]", "top.cpu", false));
+    // and gone again when the slice is: the design is built again, not kept
+    ws.trace.retain_computed(&Default::default());
+    assert!(!ws.trace.design().nodes.iter().any(|n| n.name == "data[7:4]"));
 }
 
 #[test]

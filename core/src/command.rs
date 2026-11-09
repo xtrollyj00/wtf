@@ -372,13 +372,18 @@ fn matching(app: &Workspace, arg: &str, form: &dyn Fn(&str) -> String) -> Vec<us
     app.trace.vars.iter().enumerate().filter(|(_, v)| hit(v)).map(|(i, _)| i).collect()
 }
 
-/// The group a scope's signals make: named after the scope, from where its HDL name starts if it
-/// is inside one (`grid[1]`, `pkt.pair`).
-fn group_name(app: &Workspace, arg: &str, var: usize) -> String {
-    let v = &app.trace.vars[var];
+/// The name of a group of a scope's signals (spec §5, §7): the scope's tail from its last part
+/// that isn't an index, indices kept (`top.cpu` → `cpu`, `dut.GEN_STAGES[0]` → `gen_stages[0]`),
+/// or from where its HDL name starts if inside a struct, record or array (`grid[1]`, `pkt.pair`);
+/// `group` for no scope. `scope` in either HDL's form; `var` is a signal inside it.
+pub fn group_name(ws: &Workspace, scope: &str, var: usize) -> String {
+    if crate::trace::canon(scope).is_empty() {
+        return "group".into();
+    }
+    let v = &ws.trace.vars[var];
     let p = crate::trace::parts(&v.path);
-    // the parts of the path `arg` names, in whichever form it was written
-    let key = crate::trace::canon(arg);
+    // the parts of the path `scope` names, in whichever form it was written
+    let key = crate::trace::canon(scope);
     let n = (1..=p.len()).find(|&k| crate::trace::canon(&crate::trace::join(p[..k].iter().copied())) == key).unwrap_or(p.len().saturating_sub(1)).max(1);
     let mut start = (p.len() - v.decl.min(p.len())).min(n - 1);
     while start > 0 && p[start].starts_with('[') {
@@ -387,21 +392,15 @@ fn group_name(app: &Workspace, arg: &str, var: usize) -> String {
     crate::trace::join(p[start..n.min(p.len())].iter().copied())
 }
 
-/// Scopes ending in `arg` (`pkt` for `top.pkt`), when no path is `arg`.
-fn scopes_ending(app: &Workspace, arg: &str) -> Vec<String> {
-    let a = crate::trace::canon(arg);
-    let mut out: Vec<String> = Vec::new();
-    for v in &app.trace.vars {
-        let p = crate::trace::parts(&v.path);
-        for k in 1..p.len() {
-            let scope = crate::trace::join(p[..k].iter().copied());
-            let c = crate::trace::canon(&scope);
-            if (c == a || c.ends_with(&format!(".{a}"))) && !out.contains(&scope) {
-                out.push(scope);
-            }
-        }
-    }
-    out
+/// The scope the paths share, part by part: `top.cpu.a`, `top.cpu.sub.b` → `top.cpu`.
+pub fn common_scope(paths: &[&str]) -> String {
+    let scopes: Vec<Vec<&str>> = paths.iter().map(|p| crate::trace::parts(p)).map(|mut v| {
+        v.pop();
+        v
+    }).collect();
+    let first = scopes.first().cloned().unwrap_or_default();
+    let n = (0..first.len()).take_while(|&i| scopes.iter().all(|s| s.get(i) == Some(&first[i]))).count();
+    crate::trace::join(first[..n].iter().copied())
 }
 
 /// `:add a b ...`: each in turn, below the previous. Names that fail are reported (as an error
@@ -479,7 +478,11 @@ fn add_one(app: &mut Workspace, arg: &str) -> Result<(), String> {
     let mut found = paths(app, &arg);
     if found.is_empty() && pattern.is_none() {
         // the end of a scope's path, as a signal can be named by the end of its path
-        match &scopes_ending(app, &arg)[..] {
+        let scopes: Vec<String> = {
+            let d = app.trace.design();
+            d.ending(&arg).into_iter().map(|i| d.nodes[i].path.clone()).collect()
+        };
+        match &scopes[..] {
             [one] => {
                 arg = one.clone();
                 found = paths(app, &arg);

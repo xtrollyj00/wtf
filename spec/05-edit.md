@@ -81,8 +81,11 @@ An array's elements nest under it, one level per index (`grid` > `[1]` > `[2]`).
 Adding several signals: mark them (`/state`, `Enter`, `Space`, `n`, `Space`), then `Enter` or `Ctrl-g`.
 There is no prompt; `u` takes a wrong add back. Marked signals show `+`, and the panel's lower border
 counts them. They are added in the order they were marked. A group from `Ctrl-g` goes below the group the selected row is in, if any.
-It is created at once with the name of the scope its signals share (`group` if none), and the command
-line opens with `:rename <that name>`: `Enter` keeps or applies the name, `Esc` keeps the suggestion.
+It is created at once with the name of the scope its signals share: that scope's last part that
+isn't an index, the indices after it kept (`dut.gen_stages[0]` → `gen_stages[0]`), or from where its
+HDL name starts inside a struct, record or array (`grid[1]`, `pkt.pair`); `group` if they share no
+scope — the rule `:add` names a scope's group by. The command line opens with `:rename <that name>`:
+`Enter` keeps or applies the name, `Esc` keeps the suggestion.
 The panel stays open after adding.
 
 - New rows go below the selected row, which a line in the rows marks while the panel is open
@@ -126,7 +129,7 @@ border, the current one highlighted.
 |---|---|---|---|
 | `signals` | every signal by full path, computed ones and streams too; `●` shown, `+` marked | its width, the decodes it is in, under a dim `decodes` heading, a line each with the decode, its protocol and the signal's role there (`bus  axilite  awvalid`: its records may be what is wanted), its value at the cursor and its waveform around the cursor, drawn as the rows draw it; a signal not read from the file yet is read once the highlight has rested on it 120 ms (`…` till then), so holding `j` over a big trace doesn't read every signal it passes | adds the marked signals, or the highlighted one, below the selected row as the signal panel's `Enter` does; a shown signal is not added twice |
 | `marks` | the cursor and each mark, with its name and time | its name, time and note | jumps to it, as `'n` |
-| `records` | a stream's records, `#n` and every field; every stream's, in time order and named by their stream (`bus.rd #3`), unless one is named or selected | its start, end and fields | jumps to its start and selects the stream's row, as the records browser does |
+| `records` | the records of the streams named (a stream, a decode's name, a glob, several, as `:records` takes them); without one, the selected row's stream or its field's; else every stream's, in time order and named by their stream (`bus.rd #3`) | its start, end and fields | jumps to its start and selects the stream's row, as the records browser does |
 | `commands` | the `:` commands | the usage and what it does | puts it on the command line, to finish and run |
 | `sessions` | the agents' workspaces on this machine (section 15) | its trace, and whether it is this one | follows it, as `:follow <id>`; an agent on another trace says to open that trace |
 | `trail` | the agent's steps, newest highlighted | what it asked and the answer | jumps to its time, as `:trail` |
@@ -187,10 +190,12 @@ using it.
   instance's name is new) and says what is wrong, the fields it names in red, or that the names
   match. It reads no signal's values, so it is as quick on a 1 GB trace as on a small one; the
   decode, which walks every clock cycle, runs on `Enter` only.
-- **The line** under it is the `:decode` line the fields make, `Enter` runs it: the instance's
-  results and violations are added as a group of its name, as the interfaces picker does. An error
-  keeps the form open on the first field it names. A name taken by another instance is refused:
-  the form makes new instances, it doesn't replace one.
+- **The line** under it is the `:decode` line the fields make. `Enter` runs it: the instance's
+  results and violations are added as a group of its name, as the interfaces picker does. While
+  the check says the names don't match, `Enter` decodes nothing and goes to the first field it
+  names, as the protocol form's does. An error keeps the form open on the first field it names.
+  A name taken by another instance is refused: the form makes new instances, it doesn't replace
+  one.
 - **Keys** are fixed (section 5 "Records"): `Tab` / `Down` and `Shift-Tab` / `Up` go between the
   fields, `Backspace` deletes, `Ctrl-u` clears the field, `Esc` closes. A click on a field fills
   that one in.
@@ -276,7 +281,8 @@ violations that hold any (`wr 2  rd 8  · errors 2`).
 `:records <streams> [where <expr>]` (section 7) opens the records browser: a card over the
 waveforms with the records of a set of streams (section 16 "Records of a set": a stream, a
 decode's name, a glob, several) as one table, as the agents' `records` tool gives them, for a
-person to look through.
+person to look through. A name of an interface the file has but nothing decoded yet is an error
+saying the `:decode` line that decodes it.
 
 ```
 ╭─ records · s_axi ───────────────────────────────────────────────── 13 records ─╮

@@ -1,6 +1,7 @@
 //! The signal panel of Edit mode (spec §5): the file's scope tree, searched as in vim.
 
 use std::collections::HashMap;
+use wtf_core::design::Design;
 use wtf_core::trace::Trace;
 
 pub struct Node {
@@ -38,52 +39,13 @@ pub struct Panel {
     pub anchor: Option<usize>,
 }
 
-#[derive(Default)]
-struct Scope<'a> {
-    scopes: Vec<(&'a str, Scope<'a>)>,
-    /// Where each subscope is in `scopes`: a scope can have tens of thousands.
-    index: HashMap<&'a str, usize>,
-    vars: Vec<(&'a str, usize)>,
-    /// Part of a signal's HDL name (a struct, record or array): listed in the file's order, its
-    /// fields as declared, not subscopes first.
-    composite: bool,
-    /// Subscopes (true) and signals in the file's order, as indices into `scopes` / `vars`.
-    order: Vec<(bool, usize)>,
-}
-
 impl Panel {
-    /// The tree is built from the signals' full paths, so scopes without signals don't appear.
+    /// The tree is the trace's design (spec §15): its roots and children, depth first.
     pub fn new(trace: &Trace) -> Self {
-        let mut root = Scope::default();
-        // a composite is its scope's node, not a signal of its own in the tree
-        for (i, v) in trace.vars.iter().enumerate().filter(|(i, _)| !trace.is_composite(*i)) {
-            // a concatenation `{top.a,top.b}` is a signal at the top
-            // an array's elements nest under it (`mem` > `[0]`); a computed slice `top.x[7:4]` stays whole
-            let mut parts: Vec<&str> = match () {
-                _ if v.path.starts_with('{') => vec![&v.path],
-                _ if trace.is_computed(i) => v.path.split('.').collect(),
-                _ => wtf_core::trace::parts(&v.path),
-            };
-            let leaf = parts.pop().unwrap_or_default();
-            // the scopes from here on are inside the signal's HDL name
-            let inside = (parts.len() + 1).saturating_sub(v.decl);
-            let mut s = &mut root;
-            for (depth, p) in parts.into_iter().enumerate() {
-                let k = *s.index.entry(p).or_insert_with(|| {
-                    s.scopes.push((p, Scope::default()));
-                    s.order.push((true, s.scopes.len() - 1));
-                    s.scopes.len() - 1
-                });
-                s = &mut s.scopes[k].1;
-                s.composite |= depth >= inside;
-            }
-            s.order.push((false, s.vars.len()));
-            s.vars.push((leaf, i));
-        }
+        let d = trace.design();
         let mut nodes = Vec::new();
-        flatten(&root, "", 0, &mut nodes);
-        for n in nodes.iter_mut().filter(|n| n.var.is_none()) {
-            n.whole = trace.by_path.get(&n.path).copied().filter(|&v| trace.is_composite(v));
+        for &root in &d.roots {
+            walk(d, trace, root, 0, &mut nodes);
         }
         Panel { nodes, sel: 0, query: None, pattern: String::new(), matches: Vec::new(), origin: 0, top: 0, version: trace.version, marked: Vec::new(), anchor: None }
     }
@@ -253,26 +215,19 @@ impl Panel {
     }
 }
 
-fn flatten(s: &Scope, prefix: &str, depth: usize, out: &mut Vec<Node>) {
-    let order: Vec<(bool, usize)> = match s.composite {
-        true => s.order.clone(),
-        false => (0..s.scopes.len()).map(|k| (true, k)).chain((0..s.vars.len()).map(|k| (false, k))).collect(),
-    };
-    for (scope, k) in order {
-        if scope {
-            let (name, sub) = &s.scopes[k];
-            let path = wtf_core::trace::join([prefix, name].into_iter().filter(|p| !p.is_empty()));
-            let at = out.len();
-            // top-level scopes start open, so the panel doesn't open on a single closed line
-            out.push(Node { name: name.to_string(), path: path.clone(), depth, var: None, end: 0, open: depth == 0, whole: None });
-            flatten(sub, &path, depth + 1, out);
-            out[at].end = out.len();
-        } else {
-            let (name, var) = s.vars[k];
-            let path = wtf_core::trace::join([prefix, name].into_iter().filter(|p| !p.is_empty()));
-            out.push(Node { name: name.to_string(), path, depth, var: Some(var), end: out.len() + 1, open: false, whole: None });
-        }
+/// One design node and, depth first, its children, as flat panel lines.
+fn walk(d: &Design, trace: &Trace, i: usize, depth: usize, out: &mut Vec<Node>) {
+    let n = &d.nodes[i];
+    let at = out.len();
+    let scope = !n.children.is_empty();
+    // a struct, record or array is its scope's line here, added as one row
+    let whole = n.var.filter(|&v| trace.is_composite(v));
+    // top-level scopes start open, so the panel doesn't open on a single closed line
+    out.push(Node { name: n.name.clone(), path: n.path.clone(), depth, var: if scope { None } else { n.var }, end: 0, open: depth == 0, whole: if scope { whole } else { None } });
+    for &c in &n.children {
+        walk(d, trace, c, depth + 1, out);
     }
+    out[at].end = out.len();
 }
 
 #[cfg(test)]
