@@ -78,6 +78,14 @@ reuse wtf's own pieces:
   quotes, 20ns), a space before the unit (`20 ns`), an unknown unit (the units listed), no
   number (`None`: a number and a unit, 20ns or 1.5us; a plain number is file ticks). In the
   bench, agents wrote the quoted form and `None`, and took 2 calls to recover each time.
+  A range written backwards (`to` before `from`) is an error giving the trace's range: it is
+  most likely a unit slip, `3386665ps` for a trace that runs to 3.386665ms, and an answer of one
+  line would read as a signal that never changes.
+- A search expression with a word of another language says the form meant, when the word is no
+  signal: an edge is `rose(x)` / `fell(x)` (for `rising`, `posedge`, `$rose(x)`; after `@clk`,
+  that the clock already samples at its rising edges), the value a cycle earlier `past(x)` (for
+  `prev(x)`, `previous(x)`, `$past(x)`), a comparison `==` (for `a=1`), and an expression reads
+  no later value (`next(x)`). On waveform questions agents wrote all of these, in 1 run of 5.
 - Agents pay for round trips and for every byte they read, and can't un-read an answer, so
   answers are dense and bounded: at most 1000 lines with a note (`values`: 1000 changes in all),
   and at most 24000 bytes, cut at a line with a note saying how much more there was.

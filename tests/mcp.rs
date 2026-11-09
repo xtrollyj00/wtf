@@ -465,6 +465,12 @@ fn errors() {
     assert_eq!(s.tool("values", json!({"signals": ["data"], "from": "0ns", "to": "9ns", "radix": "hexx"})), Err("unknown radix: hexx".into()));
     assert!(s.tool("find", json!({"expr": "data =="})).is_err());
     assert_eq!(s.tool("render", json!({"signals": ["clk"], "from": "40ns", "to": "10ns"})), Err("`to` must be after `from`".into()));
+    // a range written backwards, likely a unit slip: the trace's range to compare with
+    let back = s.tool("values", json!({"signals": ["data"], "from": "40ns", "to": "10ns"})).unwrap_err();
+    assert!(back.starts_with("`to` 10ns is before `from` 40ns; the trace runs 0"), "{back}");
+    assert!(s.tool("find", json!({"expr": "clk", "from": "40ns", "to": "10ns"})).unwrap_err().starts_with("`to` 10ns is before"));
+    assert!(s.tool("find", json!({"expr": "clk", "from": "40ns", "to": "10ns", "backward": true})).is_ok());
+    assert_eq!(s.tool("find", json!({"expr": "@clk rising"})).unwrap_err(), "rising: `@clk` already samples at the clock's rising edges; an edge of a signal is rose(x), SVA's $rose without the $");
     assert!(s.tool("render", json!({})).unwrap_err().starts_with("the workspace has no signals yet"));
     assert!(s.tool("present", json!({})).unwrap_err().starts_with("the workspace has no signals yet"));
     assert!(s.tool("command", json!({"line": ":w"})).unwrap_err().starts_with(":w belongs to the user's window"));

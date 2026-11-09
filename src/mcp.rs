@@ -77,6 +77,17 @@ fn at(app: &Workspace, s: &str) -> Result<(Tick, Tick), String> {
     Ok((lo.min(app.trace.end()), hi.min(app.trace.end())))
 }
 
+/// `to` not before `from`, as written: reversed, it is likely a unit slip (`3386665ps` for
+/// 3.386665ms), so the error gives the trace's range to compare with (spec §15 "Times").
+fn ordered(app: &Workspace, from: (&str, Tick), to: (&str, Tick)) -> Result<(), String> {
+    if to.1 >= from.1 {
+        return Ok(());
+    }
+    let t = &app.trace;
+    let u = unit(app, &None, [t.start(), t.end()])?;
+    Err(format!("`to` {} is before `from` {}; the trace runs {} - {}", to.0.trim(), from.0.trim(), show(app, t.start(), u), show(app, t.end(), u)))
+}
+
 /// The unit of an answer's times, and their precision.
 #[derive(Clone, Copy)]
 struct Unit {
@@ -508,6 +519,7 @@ impl Wtf {
         let w = current(self)?;
         let mut app = lock(&w);
         let (from, to) = (at(&app, &a.from)?.0, at(&app, &a.to)?.1);
+        ordered(&app, (&a.from, from), (&a.to, to))?;
         // the cap is for the whole answer: one busy signal mustn't hide behind a quiet one
         let (mut lists, mut budget_left, mut cut) = (Vec::new(), MAX_LINES, false);
         for (name, p, s) in probes(&mut app, &a.signals, &a.radix)? {
@@ -563,6 +575,9 @@ impl Wtf {
         let multi = set.streams.len() > 1;
         let from = a.from.as_deref().map(|f| at(&app, f)).transpose()?.map_or(0, |s| s.0);
         let to = a.to.as_deref().map(|t| at(&app, t)).transpose()?.map_or(app.trace.end(), |s| s.1);
+        if let (Some(f), Some(t)) = (&a.from, &a.to) {
+            ordered(&app, (f, from), (t, to))?;
+        }
         let (picked, of) = set.select(from, to, a.filter.as_deref(), app.trace.fs_per_tick)?;
         let radixes = field_radixes(&set, a.radix.as_deref())?;
         // with `where`: how many match, of how many there are
@@ -671,6 +686,14 @@ impl Wtf {
         let q = app.query(&a.expr)?;
         let shown = probes(&mut app, &a.show, &None)?;
         let forward = !a.backward;
+        // backward, the search runs from the later time down to the earlier
+        if let (Some(f), Some(t)) = (&a.from, &a.to) {
+            let (lo, hi) = (at(&app, f)?.0, at(&app, t)?.0);
+            match forward {
+                true => ordered(&app, (f, lo), (t, hi))?,
+                false => ordered(&app, (t, hi), (f, lo))?,
+            }
+        }
         let search = query::Search {
             // after (before) every tick the time stands for, so searching on from a match goes past it
             from: match &a.from {
