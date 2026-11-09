@@ -1,17 +1,19 @@
 //! The `help` tool's topics: the reference the tool descriptions point to, each concept explained
-//! once (spec §15), one Markdown file each in `guide/`. Kept in step with the spec, as the
-//! descriptions are.
+//! once (spec §15), one Markdown file each in `guide/`: a line on what it covers, then Form (how
+//! to write it), Recipes (a task and the call doing it, each from a real session) and Details.
+//! Kept in step with the spec, as the descriptions are.
 
 use wtf_core::pattern::Syntax;
 
 /// (topic, what it covers, the reference): each reference is `guide/<topic>.md`, compiled in.
 pub const TOPICS: &[(&str, &str, &str)] = &[
-    ("names", "naming signals: paths, bits, slices, VHDL forms, scope, streams", include_str!("guide/names.md")),
-    ("times", "time units, the workspace's unit and rounding", include_str!("guide/times.md")),
+    ("names", "naming signals: paths, bits, slices, VHDL forms, scope, structs, streams", include_str!("guide/names.md")),
+    ("patterns", "many signals at once, and searching the design with `signals`", include_str!("guide/patterns.md")),
+    ("times", "times you give and get back: units, the workspace's unit, rounding", include_str!("guide/times.md")),
     ("radix", "radixes and colours of values and rows", include_str!("guide/radix.md")),
-    ("expressions", "search expressions for `find`: operators, arithmetic, values, @clk, past / rose / fell / stable", include_str!("guide/expressions.md")),
+    ("expressions", "search expressions for `find`: @clk, rose / fell / past / stable, operators, values", include_str!("guide/expressions.md")),
     ("decode", "decoding interfaces into records: built-in protocols, protocol, frame, pair, check", include_str!("guide/decode.md")),
-    ("records", "reading streams: where, n, field comparisons, group_by, count_only", include_str!("guide/records.md")),
+    ("records", "reading streams: where, group_by, count_only, n", include_str!("guide/records.md")),
     ("workspace", "showing evidence: the `workspace` declaration, `view`, `render`, `present`", include_str!("guide/workspace.md")),
     ("commands", "the `:` commands `command` runs", include_str!("guide/commands.md")),
 ];
@@ -83,5 +85,15 @@ mod syntax_tests {
             }
         }
     }
-}
 
+    /// Every topic has the same shape and stays a page: Form, Recipes, Details, in that order.
+    #[test]
+    fn topics_have_one_shape() {
+        for (name, _, text) in TOPICS {
+            let at = |h: &str| text.lines().position(|l| l == h).unwrap_or_else(|| panic!("{name}: no {h}"));
+            assert!(at("Form") < at("Recipes") && at("Recipes") < at("Details"), "{name}: Form, Recipes, Details");
+            assert!(text.lines().count() <= 50, "{name}: {} lines, past 50", text.lines().count());
+            assert!(text.lines().all(|l| l.chars().count() <= 100), "{name}: a line past 100 characters");
+        }
+    }
+}

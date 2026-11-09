@@ -455,7 +455,7 @@ impl Wtf {
         }
     }
 
-    #[tool(description = "The reference: a topic per concept (names, times, radix, expressions, decode, records, workspace, commands); none lists them.")]
+    #[tool(description = "The reference: a topic per concept (names, patterns, times, radix, expressions, decode, records, workspace, commands), each its form, recipes and details; none lists them.")]
     fn help(&self, Parameters(a): Parameters<HelpArgs>) -> Result<String, String> {
         help::answer(a.topic.as_deref(), wtf_core::pattern::Syntax::Regex)
     }
@@ -664,7 +664,7 @@ impl Wtf {
         Ok(budget(format!("at {}:\n{}", show(&app, t, u), lines.join("\n"))))
     }
 
-    #[tool(description = "The times a search expression matches, as a table. With `@clk ` first, a match is a clock cycle whose ending edge samples it true, reported at the cycle's starting edge; without, where the expression becomes true, so back-to-back handshakes are one match. `show` adds values (and the `protocol` and `decode` lines making them records), `count_only` counts (`help expressions`). For a bus, decode it instead (`help decode`).")]
+    #[tool(description = "When a search expression holds, as a table of times; `show` adds values, `count_only` counts. With `@<clock> ` first, a match is a cycle whose ending edge samples it true (`@clk x`: the cycles x is high), reported at the cycle's start; without, where it becomes true (`rose(x)`: x's edges). A bus: decode it (`help decode`).")]
     fn find(&self, Parameters(a): Parameters<FindArgs>) -> Result<String, String> {
         let w = current(self)?;
         let mut app = lock(&w);

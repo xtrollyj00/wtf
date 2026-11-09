@@ -37,9 +37,9 @@ pub struct ProtocolsArgs {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 pub struct ValuesArgs {
-    /// Signals by path or path end (`help names`).
+    /// Signals by path or path end (`help names`); `signals` finds them.
     pub signals: Vec<String>,
-    /// Start time, `120ns` (`help times`).
+    /// Start time with its unit, any unit: `120ns`, `3.4ms` (`help times`).
     pub from: String,
     /// End time, inclusive.
     pub to: String,
@@ -63,7 +63,9 @@ pub struct ValueAtArgs {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 pub struct FindArgs {
-    /// A search expression, `@clk valid && ready` (`help expressions`).
+    /// A search expression as SystemVerilog writes it: `==` `!=` `<` `&&` `||` `!`; `rose(x)` `fell(x)`
+    /// `stable(x)` `past(x)` (SVA's, without the `$`); `@<clock> ` first samples each cycle:
+    /// `@top.clk valid && ready`, `rose(irq) && !past(busy)` (`help expressions`).
     pub expr: String,
     /// Search after (or with `backward`, before) this time; default the start.
     pub from: Option<String>,

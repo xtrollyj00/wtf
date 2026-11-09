@@ -59,7 +59,7 @@ Two crates (spec §1 "Architecture"):
 - **`src/` (`wtf-wave`, the `wtf` command)** — interfaces: `tui/` (modes and keys in `app.rs`, signal panel, command
   completions in `commands.rs`), `mcp.rs` (rmcp tools: parse args, call the core, format dense
   bounded answers; their argument structs in `mcp/args.rs`, the `workspace` declaration in
-  `mcp/declare.rs`, the `help` topics in `mcp/help.rs`), `draw.rs` (draws a workspace into a ratatui buffer, shared by the TUI, MCP
+  `mcp/declare.rs`, the `help` topics in `mcp/guide/*.md`, listed in `mcp/help.rs`), `draw.rs` (draws a workspace into a ratatui buffer, shared by the TUI, MCP
   `render` and `--snapshot`; glyph sets and the palette), `config.rs` / `theme.rs` (the config
   file and themes, spec §19; built-in themes are `themes/*.toml`, compiled in), `live.rs` (unix-socket link: windows and agent workspaces listen on
   `wtf-<id>.sock` in `$XDG_RUNTIME_DIR`; `GET` / `PUT` session TOML for `present`, `user_view`,
@@ -115,6 +115,8 @@ Ideas that span files:
   change to the session format or a tool's arguments gets `!` and a `BREAKING CHANGE:` footer.
   The body is prose paragraphs on why.
 - Prose (spec, comments, tool descriptions, error messages) is plain, short and concrete;
-  errors say what to do next and list candidates. MCP tool descriptions and the `help` topics
-  (`src/mcp/help.rs`) are the agent docs: a description is a line or two pointing to a topic,
-  each concept is explained in one topic, and both are kept in step with the spec.
+  errors say what to do next and list candidates. The agent docs are in layers (spec §15 "The
+  agent's guide"): the server's instructions are the map (`src/mcp/guide/instructions.md`); a
+  tool description says what it answers in a line or two; an argument doc how to write the value;
+  a `help` topic (`src/mcp/guide/<topic>.md`) one concept as Form, Recipes and Details. A recipe
+  comes from a real session, never a benchmark's question. All are kept in step with the spec.
