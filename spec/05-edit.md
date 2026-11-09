@@ -187,6 +187,40 @@ using it.
   fields, `Backspace` deletes, `Ctrl-u` clears the field, `Esc` closes. A click on a field fills
   that one in.
 
+### Protocol form
+
+`:protocol` without arguments (`Space d p`) opens the **protocol form**: the same card for a
+sampled protocol (section 16), so `:protocol` is learnt by using it.
+
+```
+╭─ protocol ─────────────────────────────────────────────────────────────╮
+│ name       w                                                           │
+│ roles      wvalid, wready, wdata                                       │
+│ wvalid     top.s_axi_wvalid                                            │
+│ …                                                                      │
+│ when       wvalid && wready                                            │
+│ field      lo = wdata[7:0]                                             │
+│▌field                                                                  │
+│────────────────────────────────────────────────────────────────────────│
+│ the names match: Enter defines it, then decodes it                     │
+│ :protocol w roles=wvalid,wready,wdata when="wvalid && wready" lo=wdata[7:0] │
+╰─────────────────────────────────────────── Tab next  Enter run  Esc close ─╯
+```
+
+- **Roles** come from the selected rows: a role per signal, named after it without the start the
+  names share (`rx_valid`, `rx_data`: `valid`, `data`), with the signal filled in. `roles` is a
+  comma list to edit; a row follows each role, its signal suggested as in the decode form.
+- **`when` and the fields** are expressions on the roles; a field is `name = expression` and may
+  name the fields before it. The word typed is completed to a role or a field, `→` takes it. An
+  empty field row stays last to add the next.
+- **Checked as filled in**: with a signal for each role, the form reads the expressions against
+  those signals' widths (a slice past a role's width, a name no role nor field before it) and
+  says what is wrong, the field it is in red. It reads no value. Without them, the expressions
+  are not checked and `Enter` defines the protocol as it is.
+- **`Enter`** runs the `:protocol` line under it, then opens the decode form on the new protocol
+  with each role's signal filled in. A name taken by a protocol is refused. Keys are the decode
+  form's.
+
 ### Decodes
 
 `:decodes` (`Space d l`) lists the decodes made, a line each: its name, protocol, where it is (its

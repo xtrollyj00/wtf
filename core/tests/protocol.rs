@@ -246,6 +246,28 @@ fn check_decode_names_only() {
     assert!(!ws.trace.vars.iter().any(|v| v.path.contains("s_axi_") && ws.trace.loaded(ws.trace.by_path[&v.path])), "no value read");
 }
 
+/// A protocol's expressions checked against its roles' signals without sampling (the protocol
+/// form, spec §5): widths come from the signals and earlier fields, a name no role is an error
+/// naming the role or field it is in, nothing is defined and no value read.
+#[test]
+fn check_protocol_names_only() {
+    let mut ws = open("axilite.vcd");
+    let vars = ws.trace.vars.len();
+    let p = |when: &str, fields: &[(&str, &str)]| Sampler { name: "w".into(), when: when.into(), fields: pairs(fields), roles: vec!["valid".into(), "ready".into(), "data".into()] };
+    let sigs = pairs(&[("valid", "s_axi_wvalid"), ("ready", "s_axi_wready"), ("data", "s_axi_wdata")]);
+    assert_eq!(ws.check_protocol(&p("valid && ready && lo != 0", &[("lo", "data[7:0]"), ("hi", "lo[3:0] + 1")]), &sigs), Ok(()));
+    let e = ws.check_protocol(&p("valid && go", &[("lo", "data[40:0]"), ("x", "aclk")]), &sigs).unwrap_err();
+    let parts: Vec<&str> = e.split("; ").collect();
+    assert!(parts.len() == 3 && parts[0].starts_with("lo: data[40:0]: data has no bits") && parts[1].starts_with("x: aclk is no role") && parts[2].starts_with("when: go is no role"), "{e}");
+    // a role without a signal, or with an unknown one
+    let e = ws.check_protocol(&p("valid", &[]), &sigs[..1]).unwrap_err();
+    assert!(e.starts_with("ready: no signal") && e.contains("; data: no signal"), "{e}");
+    assert!(ws.check_protocol(&p("valid", &[]), &pairs(&[("valid", "nope"), ("ready", "aclk"), ("data", "aclk")])).unwrap_err().starts_with("valid: unknown signal: nope"));
+    assert_eq!(ws.check_protocol(&Sampler { name: "axis".into(), ..p("valid", &[]) }, &sigs), Err("axis is a built-in protocol".into()));
+    assert!(ws.protocols.is_empty() && ws.trace.vars.len() == vars);
+    assert!(!ws.trace.vars.iter().any(|v| ws.trace.loaded(ws.trace.by_path[&v.path])), "no value read");
+}
+
 /// `:decode <name> off` (spec §16): the instance, its streams and their rows go, the vars after;
 /// a decode another reads stays, naming it. Made again under its name, rows of streams it still
 /// makes stay, those of streams it no longer makes go.

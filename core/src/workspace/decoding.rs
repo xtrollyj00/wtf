@@ -34,24 +34,8 @@ impl Workspace {
     /// Define a protocol, replacing one of that name: names only, its roles, which instances put
     /// on signals (`add_decode`).
     pub fn add_protocol(&mut self, p: Sampler) -> Result<(), String> {
+        protocol_names(&p)?;
         let name = &p.name;
-        if name.is_empty() || !name.chars().all(|c| c.is_alphanumeric() || "_.$".contains(c)) {
-            return Err(format!("not a protocol name: {name}"));
-        }
-        if protocol::reserved(name) {
-            return Err(format!("{name} is a built-in protocol"));
-        }
-        // a field is the last part of its signal's path; a role is a name in expressions
-        let plain = |f: &String| !f.is_empty() && f.chars().all(|c| c.is_alphanumeric() || c == '_');
-        if let Some((f, _)) = p.fields.iter().find(|(f, _)| !plain(f)) {
-            return Err(format!("{name}: not a field name: {f}"));
-        }
-        if let Some(r) = p.roles.iter().find(|r| !plain(r)) {
-            return Err(format!("{name}: not a role name: {r}"));
-        }
-        if p.roles.is_empty() {
-            return Err(format!("{name}: needs roles, the names its expressions use (roles=valid,ready,data); :decode puts them on signals"));
-        }
         // a type defined again: its instances sampled again, and those after them, which may stack on them
         let first = self.decodes.iter().position(|d| d.protocol == p.name);
         let name = name.clone();
@@ -67,6 +51,48 @@ impl Workspace {
             }
         }
         Ok(())
+    }
+
+    /// The mistakes in a protocol's names and expressions, reading no value (the protocol form
+    /// checks as it is filled in, spec §5 "Protocol form"): each role's signal (`signals`, role
+    /// and signal), then each field and `when`, which name only the roles and the fields before
+    /// them. Each mistake starts with what it is in: a role, a field, or `when`.
+    pub fn check_protocol(&mut self, p: &Sampler, signals: &[(String, String)]) -> Result<(), String> {
+        protocol_names(p)?;
+        let mut errors = Vec::new();
+        // a name's width, signedness and value names: its role's signal's, or its field's
+        let mut known: HashMap<String, (Option<u32>, Option<crate::trace::Names>, bool)> = HashMap::new();
+        for r in &p.roles {
+            match signals.iter().find(|s| s.0 == *r).map(|s| self.resolve(&s.1)) {
+                Some(Ok(probe)) => {
+                    let v = &self.trace.vars[probe.0];
+                    known.insert(r.clone(), if probe.1.is_some() { (Some(1), None, false) } else { (v.width, v.names.clone(), v.signed) });
+                }
+                Some(Err(e)) => errors.push(format!("{r}: {e}")),
+                None => errors.push(format!("{r}: no signal; :decode puts the protocol on signals, the form checks with one")),
+            }
+        }
+        if !errors.is_empty() {
+            return Err(errors.join("; "));
+        }
+        let fpt = self.trace.fs_per_tick;
+        let only = |known: &HashMap<_, (Option<u32>, Option<crate::trace::Names>, bool)>, name: &str| {
+            let names: Vec<&String> = known.keys().collect();
+            known.get(name).map(|k| ((0, None), k.0, k.1.clone(), k.2)).ok_or_else(|| format!("{name} is no role nor a field before it: {}", names.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")))
+        };
+        for (f, e) in &p.fields {
+            match search::parse_term(e, fpt, &mut |n| only(&known, n)) {
+                Ok((t, _)) => _ = known.insert(f.clone(), (Some(t.shape().bits), None, t.shape().signed)),
+                Err(err) => errors.push(format!("{f}: {err}")),
+            }
+        }
+        if let Err(err) = search::parse_query(&p.when, fpt, &mut |n| only(&known, n)) {
+            errors.push(format!("when: {err}"));
+        }
+        match errors.is_empty() {
+            true => Ok(()),
+            false => Err(errors.join("; ")),
+        }
     }
 
     /// Put a protocol on signals (or `frame` / `pair` on streams): the streams it makes, named after
@@ -565,4 +591,27 @@ impl Workspace {
         }
         Ok(vars[0])
     }
+}
+
+/// A protocol's own names: its name, its roles' and fields', and that it has roles.
+fn protocol_names(p: &Sampler) -> Result<(), String> {
+    let name = &p.name;
+    if name.is_empty() || !name.chars().all(|c| c.is_alphanumeric() || "_.$".contains(c)) {
+        return Err(format!("not a protocol name: {name}"));
+    }
+    if protocol::reserved(name) {
+        return Err(format!("{name} is a built-in protocol"));
+    }
+    // a field is the last part of its signal's path; a role is a name in expressions
+    let plain = |f: &String| !f.is_empty() && f.chars().all(|c| c.is_alphanumeric() || c == '_');
+    if let Some((f, _)) = p.fields.iter().find(|(f, _)| !plain(f)) {
+        return Err(format!("{name}: not a field name: {f}"));
+    }
+    if let Some(r) = p.roles.iter().find(|r| !plain(r)) {
+        return Err(format!("{name}: not a role name: {r}"));
+    }
+    if p.roles.is_empty() {
+        return Err(format!("{name}: needs roles, the names its expressions use (roles=valid,ready,data); :decode puts them on signals"));
+    }
+    Ok(())
 }
