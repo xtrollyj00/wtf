@@ -89,7 +89,7 @@ fn declare(app: &mut Workspace, a: &WorkspaceArgs) -> Result<String, String> {
         look_keys(app, var, name, radix, color, &mut row, &mut errors);
         Some(Value::Table(row))
     };
-    let (mut rows, mut opens, mut fields_of) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut rows, mut opens, mut with_fields) = (Vec::new(), Vec::new(), Vec::new());
     for spec in &a.rows {
         match spec {
             RowSpec::Signal(n) => rows.extend(signal(n)),
@@ -97,7 +97,7 @@ fn declare(app: &mut Workspace, a: &WorkspaceArgs) -> Result<String, String> {
                 let Some(Value::Table(mut row)) = signal(n) else { continue };
                 opens.push((n.clone(), row["signal"].as_str().unwrap_or_default().to_string(), open.clone()));
                 if !fields.is_empty() {
-                    fields_of.push((rows.len(), n.clone(), row["signal"].as_str().unwrap_or_default().to_string(), fields.clone()));
+                    with_fields.push((rows.len(), n.clone(), row["signal"].as_str().unwrap_or_default().to_string(), fields.clone()));
                 }
                 row.insert("open".into(), Value::Array(open.iter().map(|o| Value::String(o.clone())).collect()));
                 rows.push(Value::Table(row));
@@ -114,7 +114,7 @@ fn declare(app: &mut Workspace, a: &WorkspaceArgs) -> Result<String, String> {
         }
     }
     // each field as a row is written, named as `open` names its levels
-    for (k, n, path, fields) in fields_of {
+    for (k, n, path, fields) in with_fields {
         let var = app.trace.by_path[&path];
         let mut out = Vec::new();
         for spec in &fields {

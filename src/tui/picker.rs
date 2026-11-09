@@ -13,6 +13,7 @@ use ratatui::style::{Modifier, Style};
 use std::time::Instant;
 use wtf_core::rows::{self, Look, Row, Sig};
 use wtf_core::time::{self, Tick};
+use wtf_core::workspace::unknown::NoStream;
 
 /// The sources, in the order `Ctrl-s` goes through them.
 pub const SOURCES: [&str; 7] = ["signals", "marks", "records", "commands", "sessions", "trail", "interfaces"];
@@ -199,23 +200,22 @@ impl App {
             }
             2 => {
                 let names: Vec<&str> = self.ws.streams.iter().map(|s| s.name.as_str()).collect();
-                if names.is_empty() {
-                    return Err("no streams yet: make one with :decode or :protocol".into());
-                }
-                // the stream asked for, else the selected row's (or its field's), else them all
+                // a set as `:records` reads one; else the selected row's stream, else them all
                 if p.stream.is_none()
                     && let Some(rows::Row::Signal(r)) = self.ws.rows.get(self.ws.sel)
                 {
                     let path = &self.ws.trace.vars[r.var].path;
                     p.stream = names.iter().filter(|n| path == *n || path.strip_prefix(**n).is_some_and(|f| f.starts_with('.'))).max_by_key(|n| n.len()).map(|n| n.to_string());
                 }
-                let streams: Vec<&wtf_core::stream::Stream> = match &p.stream {
-                    Some(name) => vec![self.ws.streams.iter().find(|s| s.name == *name).ok_or_else(|| format!("unknown stream: {name} (streams: {})", names.join(", ")))?],
-                    None => self.ws.streams.iter().collect(),
+                let streams = match &p.stream {
+                    Some(name) => self.ws.stream_set(name).map_err(|e| super::browser::no_stream(&self.ws, &e))?,
+                    None if names.is_empty() => return Err(super::browser::no_stream(&self.ws, &NoStream::Empty)),
+                    None => (0..self.ws.streams.len()).collect(),
                 };
                 let all = streams.len() > 1;
                 let mut out: Vec<(u64, Entry)> = Vec::new();
-                for st in streams {
+                for i in streams {
+                    let st = &self.ws.streams[i];
                     out.extend((0..st.records.len()).map(|i| {
                         let r = &st.records[i];
                         let fields = st.fields_text(i, fpt);

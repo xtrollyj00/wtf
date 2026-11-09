@@ -16,6 +16,7 @@ use wtf_core::stream::{At, Group, Set};
 use wtf_core::time;
 use wtf_core::trace::Val;
 use wtf_core::workspace::Workspace;
+use wtf_core::workspace::unknown::NoStream;
 
 /// A column's widest, so a frame's bytes don't take the table.
 const CELL: usize = 24;
@@ -232,6 +233,26 @@ pub enum Browse {
     Close,
 }
 
+/// A `stream_set` error as the window says it (spec §5 "Records"): an interface the file has but
+/// nothing decoded yet names its `:decode` line, and no stream at all says how to make one.
+pub fn no_stream(ws: &Workspace, e: &NoStream) -> String {
+    match e {
+        NoStream::NotDecoded { name, part, found } => {
+            let how: Vec<String> = found
+                .iter()
+                .take(3)
+                .map(|f| match part.is_empty() {
+                    true => format!("`:{}` makes its streams", f.decode_line()),
+                    false => format!("`:{}` makes {}.{part}", f.decode_line(), f.name()),
+                })
+                .collect();
+            format!("unknown stream: {name}: its interface isn't decoded yet; {}", how.join("; or "))
+        }
+        _ if ws.streams.is_empty() => "no streams yet: make one with :decode or :protocol".to_string(),
+        e => e.to_string(),
+    }
+}
+
 impl App {
     /// `:records <streams> [where <expr>]`: the browser on a set of streams (spec §5 "Records").
     pub fn open_browser(&mut self, arg: &str) -> Result<(), String> {
@@ -239,10 +260,9 @@ impl App {
             Some((n, f)) => (n.trim(), f.trim()),
             None => (arg.trim(), ""),
         };
-        if self.ws.streams.is_empty() {
-            return Err("no streams yet: make one with :decode or :protocol".into());
+        if let Err(e) = self.ws.stream_set(names) {
+            return Err(no_stream(&self.ws, &e));
         }
-        self.ws.stream_set(names)?;
         let mut b = Browser::new(&self.ws, names, filter);
         b.refresh(&self.ws);
         // a filter typed with the command that fails is an error, as the command's

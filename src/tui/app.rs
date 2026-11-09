@@ -748,36 +748,28 @@ impl App {
         let mut lines: Vec<(String, String)> = value.into_iter().map(|v| (String::new(), v)).collect();
         if bit.is_none() && self.ws.trace.is_composite(var) {
             lines.push(Default::default());
-            lines.extend(self.fields(var));
+            lines.extend(self.fields(s, var));
         }
         self.examine = Some(Examine { title: name, at: time::format(self.ws.view.cursor, fpt), lines, of: (var, bit) });
     }
 
     /// A struct's or array's fields at the cursor, a line each, nested ones indented under their
     /// struct, an array's elements by index (spec §2 `e`).
-    fn fields(&self, var: usize) -> Vec<(String, String)> {
-        fn walk(app: &App, var: usize, depth: usize, out: &mut Vec<(String, Option<String>)>) {
-            let t = &app.ws.trace;
-            for &c in &t.vars[var].children {
-                let name = format!("{}{}", "  ".repeat(depth), wtf_core::trace::parts(&t.vars[c].path).last().copied().unwrap_or_default());
-                if t.is_composite(c) {
-                    out.push((name, None));
-                    walk(app, c, depth + 1, out);
-                } else {
-                    // in the look its line has under the selected row
-                    let v = &t.vars[c];
-                    let look = match app.ws.rows.get(app.ws.sel) {
-                        Some(Row::Signal(s)) => app.ws.look(s, c),
-                        _ => rows::Look::of(v),
-                    };
-                    let value = t.value_at(c, app.ws.view.cursor).map_or("-".into(), |x| rows::label(v, &look, &x));
-                    out.push((name, Some(value)));
+    fn fields(&self, s: &rows::Sig, var: usize) -> Vec<(String, String)> {
+        let t = &self.ws.trace;
+        t.fields(var)
+            .into_iter()
+            .map(|f| {
+                let name = format!("{}{}", "  ".repeat(f.depth), f.name);
+                if t.is_composite(f.var) {
+                    return (name, String::new());
                 }
-            }
-        }
-        let mut lines = Vec::new();
-        walk(self, var, 0, &mut lines);
-        lines.into_iter().map(|(n, v)| (n, v.unwrap_or_default())).collect()
+                // in the look its line has under the row
+                let v = &t.vars[f.var];
+                let value = t.value_at(f.var, self.ws.view.cursor).map_or("-".into(), |x| rows::label(v, &self.ws.look(s, f.var), &x));
+                (name, value)
+            })
+            .collect()
     }
 
     /// A value search (spec §8) that says where the match is: `match 3 of 157`.
@@ -1393,8 +1385,7 @@ impl App {
             return;
         }
         let paths: Vec<&str> = vars.iter().map(|&v| self.ws.trace.vars[v].path.as_str()).collect();
-        let scope = common_scope(&paths);
-        let name = wtf_core::trace::parts(&scope).into_iter().rfind(|n| !n.is_empty() && !n.starts_with('[')).unwrap_or("group").to_string();
+        let name = wtf_core::command::group_name(&self.ws, &wtf_core::command::common_scope(&paths), vars[0]);
         self.ws.add_group(&name, &vars);
         self.open_command();
         self.line = format!("rename {name}");
@@ -1536,7 +1527,6 @@ impl App {
 }
 
 
-/// The scope all these paths are in: `top.cpu.a`, `top.cpu.sub.b` -> `top.cpu`.
 /// A long value in lines: text by 16 words (a frame's bytes), digits by 64.
 fn wrap(v: &str) -> Vec<String> {
     let lines: Vec<String> = match v.contains(' ') {
@@ -1544,16 +1534,6 @@ fn wrap(v: &str) -> Vec<String> {
         false => v.chars().collect::<Vec<_>>().chunks(64).map(|c| c.iter().collect()).collect(),
     };
     if lines.is_empty() { vec![String::new()] } else { lines }
-}
-
-fn common_scope(paths: &[&str]) -> String {
-    let scopes: Vec<Vec<&str>> = paths.iter().map(|p| wtf_core::trace::parts(p)).map(|mut v| {
-        v.pop();
-        v
-    }).collect();
-    let first = scopes.first().cloned().unwrap_or_default();
-    let n = (0..first.len()).take_while(|&i| scopes.iter().all(|s| s.get(i) == Some(&first[i]))).count();
-    wtf_core::trace::join(first[..n].iter().copied())
 }
 
 /// `secs` since the epoch as the local clock shows it, `14:03:05`.
@@ -1714,12 +1694,5 @@ mod tests {
         app.ws.view.width = 80;
         app.keys("x").unwrap();
         assert!((app.ws.view.cols, app.ws.view.ticks) != (cols, ticks));
-    }
-
-    #[test]
-    fn common_scope() {
-        assert_eq!(super::common_scope(&["top.cpu.a", "top.cpu.sub.b"]), "top.cpu");
-        assert_eq!(super::common_scope(&["top.cpu.a", "top.dma.b"]), "top");
-        assert_eq!(super::common_scope(&["a", "top.b"]), "");
     }
 }

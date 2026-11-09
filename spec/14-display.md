@@ -94,7 +94,8 @@ Each set keeps every distinction the others make, so a drawing reads the same in
 ### Icons
 
 With the `nerd` glyphs, a row's name, a signal panel's node, a picker's signal and the `e` float's
-title have an icon telling what the signal is, in a colour of its kind. The first that holds:
+title have an icon telling what the signal is, in a colour of its kind. The core says what a var
+is (`Kind`), the interfaces pick its icon and colour. The first that holds:
 
 | What | Icon | Colour |
 |---|---|---|

@@ -287,6 +287,13 @@ fn add_a_composite() {
     let mut ws = fixture(vcd);
     let e = ws.resolve("pkt").unwrap_err();
     assert!(e.starts_with("unknown signal: pkt is a scope of 4 signals (types.pkt.valid"), "{e}");
+    // and an FST record tree: the same, its pair's fields counted once each, not the pair too
+    // (`pkt` resolves to the record itself there, so the count is asked apart from a name)
+    let ws = fixture("types-nvc.fst");
+    assert_eq!(
+        ws.unknown("pkt").to_string(),
+        "unknown signal: pkt is a scope of 4 signals (types.pkt.valid, types.pkt.state, types.pkt.pair.hi, types.pkt.pair.lo); name one, or `add` the scope to show them all"
+    );
 }
 
 /// The lines under a composite row as the window lists them, each a level deeper indented.
@@ -400,4 +407,25 @@ fn ghdl() {
 
     // GHDL's VCD drops records and arrays ("pkt is not handled"): only clk
     assert_eq!(row_names("types-ghdl.vcd"), "clk");
+}
+
+/// What is in a composite, as `e` lists it (spec §6 "Composite rows"): `name|depth|rel`.
+fn fields_of(ws: &Workspace, path: &str) -> Vec<String> {
+    ws.trace.fields(ws.trace.by_path[path]).into_iter().map(|f| format!("{}|{}|{}", f.name, f.depth, f.rel)).collect()
+}
+
+#[test]
+fn a_composites_fields() {
+    let ws = fixture("types-verilator-structs.fst");
+    // a struct's fields in order, a nested struct's a level deeper
+    assert_eq!(fields_of(&ws, "types.pkt"), ["valid|0|valid", "state|0|state", "pair|0|pair", "hi|1|pair.hi", "lo|1|pair.lo"]);
+    // an array's elements come first, their fields under them
+    let pkts = fields_of(&ws, "types.pkts");
+    assert_eq!(&pkts[..2], ["[0]|0|[0]", "valid|1|[0].valid"]);
+    // a signal has nothing in it
+    assert_eq!(fields_of(&ws, "types.pkt.valid"), Vec::<String>::new());
+    // a field's name under the composite as it is spelled
+    let f = ws.trace.fields(ws.trace.by_path["types.pkts"]).into_iter().find(|f| f.rel == "[1].pair.lo").unwrap();
+    assert_eq!(f.under("pkts"), "pkts[1].pair.lo");
+    assert_eq!(f.under("types.pkts"), "types.pkts[1].pair.lo");
 }

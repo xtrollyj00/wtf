@@ -1,17 +1,44 @@
 //! The agent's trail (spec §15 "Trail"): each query and change as one step the user's window
 //! shows, with the time it is about.
 
-use rmcp::model::JsonObject;
+use rmcp::handler::server::tool::IntoCallToolResult;
+use rmcp::model::{CallToolResult, ContentBlock, JsonObject, MetaObject};
 use rmcp::serde_json::Value;
-use wtf_core::time::{self, Tick};
-use wtf_core::workspace::{Step, Workspace};
+use wtf_core::time::Tick;
+use wtf_core::workspace::Step;
 
 /// The tools whose calls are steps: queries of the trace and changes to the workspace. Lookups
 /// (`help`, `info`, `signals`, `view`, ...) show nothing about the trace.
 const STEPS: [&str; 7] = ["find", "records", "values", "value_at", "render", "command", "workspace"];
 
+/// The `_meta` key a tool's time rides under from the tool to `call_tool`, which takes it out.
+const TIME: &str = "wtf/time";
+
+/// A step tool's answer: its text, and the time it is about, if any (spec §15 "Trail").
+pub struct Answer {
+    pub text: String,
+    pub time: Option<Tick>,
+}
+
+impl IntoCallToolResult for Answer {
+    fn into_call_tool_result(self) -> Result<rmcp::model::CallToolResponse, rmcp::ErrorData> {
+        let mut res = CallToolResult::success(vec![ContentBlock::text(self.text)]);
+        if let Some(t) = self.time {
+            let mut meta = JsonObject::new();
+            meta.insert(TIME.into(), Value::from(t));
+            res.meta = Some(MetaObject(meta));
+        }
+        Ok(res.into())
+    }
+}
+
+/// The time an answer carried, taken out so the client never sees it: `_meta` holds only it.
+pub fn take_time(res: &mut CallToolResult) -> Option<Tick> {
+    res.meta.take()?.0.get(TIME)?.as_u64()
+}
+
 /// The step a call of `tool` with `args` that answered `answer` makes, if it makes one.
-pub fn step(app: &Workspace, tool: &str, args: Option<&JsonObject>, answer: &str, error: bool) -> Option<Step> {
+pub fn step(tool: &str, args: Option<&JsonObject>, answer: &str, error: bool, time: Option<Tick>) -> Option<Step> {
     if !STEPS.contains(&tool) {
         return None;
     }
@@ -29,14 +56,7 @@ pub fn step(app: &Workspace, tool: &str, args: Option<&JsonObject>, answer: &str
         "render" => list("signals"),
         _ => format!("{} rows, {} cursors", count("rows"), args.and_then(|a| a.get("cursors")).and_then(Value::as_object).map_or(0, |c| c.len())),
     };
-    let fpt = app.trace.fs_per_tick;
-    let at = |s: &str| time::parse(s.trim(), fpt).ok().map(|t| (t.max(0.0).round() as Tick).min(app.trace.end()));
-    let time = match tool {
-        _ if error => None,
-        "value_at" => at(arg("time")),
-        "values" | "render" if !arg("from").is_empty() => at(arg("from")),
-        _ => first_time(answer, at),
-    };
+    let time = if error { None } else { time };
     let first = answer.lines().next().unwrap_or_default();
     let answer = match (error, tool) {
         (true, _) => format!("error: {first}"),
@@ -45,36 +65,4 @@ pub fn step(app: &Workspace, tool: &str, args: Option<&JsonObject>, answer: &str
         _ => first.to_string(),
     };
     Some(Step { tool: tool.into(), ask, answer, time })
-}
-
-/// The first time an answer lists: `first <time>` in a count, or the first value under a `time` or
-/// `start` column (`find`, `records`).
-fn first_time(answer: &str, at: impl Fn(&str) -> Option<Tick>) -> Option<Tick> {
-    if let Some(after) = answer.lines().next()?.split_once("first ") {
-        return at(after.1.split(',').next()?);
-    }
-    let mut lines = answer.lines();
-    while let Some(head) = lines.next() {
-        if let Some(k) = head.split('\t').position(|c| c == "time" || c == "start") {
-            return at(lines.next()?.split('\t').nth(k)?);
-        }
-    }
-    None
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn times(answer: &str) -> Option<Tick> {
-        first_time(answer, |s| s.trim().strip_suffix("ns")?.parse().ok())
-    }
-
-    #[test]
-    fn first_times() {
-        assert_eq!(times("3 matches, first 10ns, last 60ns"), Some(10));
-        assert_eq!(times("time\n20ns\n40ns"), Some(20));
-        assert_eq!(times("7 of 7\nn\tstart\tend\td\n0\t5ns\t15ns\t0x43"), Some(5));
-        assert_eq!(times("no matches"), None);
-    }
 }

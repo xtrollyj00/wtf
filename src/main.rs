@@ -432,6 +432,19 @@ mod tests {
         assert_eq!(labels(&app)[2..], ["Rename R", "Ungroup <", "Remove with its rows dd", "Put below p", "Put above P"]);
     }
 
+    /// Ctrl-g names a scope's group by the scope, indices kept (spec §5) — the same rule `:add` uses.
+    #[test]
+    fn ctrl_g_names_scope_group() {
+        let t = trace::Trace::open("tests/data/hdl.vcd".as_ref()).unwrap();
+        let mut app = App::new(workspace::Workspace::new(t, "hdl".into()));
+        keys(&mut app, "a");
+        app.panel.sel = app.panel.nodes.iter().position(|n| n.path == "dut.gen_stages[0]").unwrap();
+        keys(&mut app, "\x07");
+        assert_eq!(names(&app).split(',').next(), Some("▾ gen_stages[0]"));
+        assert_eq!(app.line, "rename gen_stages[0]");
+        assert_eq!(app.ws.rows.len(), 2); // the header and its one signal
+    }
+
     #[test]
     fn edit_rows() {
         let mut app = open("vcd", Some(SESSION));
@@ -2179,6 +2192,20 @@ mod tests {
         keys(&mut app, "a<Space>");
         let text = snapshot(&mut app, 120, Some(20));
         assert!(text.contains('\u{eb31}') && text.contains('\u{eb7c}') && icons(&text) > 10, "{text}");
+        // every kind of var has an icon of its own (spec §14)
+        let mut kinds = std::collections::BTreeSet::new();
+        for (file, lines) in [("simple.vcd", ":decode c check clock=clk busy=cpu.busy\n:add cpu.data[7:4]\n"), ("axis.vcd", ""), ("types-verilator-structs.fst", ""), ("enum.fst", ""), ("types-nvc.vcd", "")] {
+            let t = trace::Trace::open(format!("tests/data/{file}").as_ref()).unwrap();
+            let mut a = App::new(workspace::Workspace::new(t, file.into()));
+            keys(&mut a, lines);
+            kinds.extend((0..a.ws.trace.vars.len()).filter_map(|v| draw::kind(&a.ws, v, None).map(|k| k.0)));
+        }
+        // no fixture has a real: say one is
+        let mut t = trace::Trace::open("tests/data/simple.vcd".as_ref()).unwrap();
+        t.vars[0].real = true;
+        kinds.extend(draw::kind(&workspace::Workspace::new(t, "real".into()), 0, None).map(|k| k.0));
+        kinds.extend((0..axis.ws.trace.vars.len()).filter_map(|v| draw::kind(&axis.ws, v, None).map(|k| k.0)));
+        assert_eq!(kinds.len(), 12, "{kinds:?}");
         draw::set_glyphs(&draw::UNICODE);
         assert_eq!(icons(&snapshot(&mut app, 120, Some(20))), 0);
         keys(&mut app, "<Esc>");
@@ -2260,6 +2287,23 @@ mod tests {
         assert_eq!((b.tabs.clone(), b.tab, b.all.clone()), (vec!["lat lat.unmatched".into(), "lat".into(), "lat.unmatched".into()], 1, Some("lat lat.unmatched".into())));
         keys(&mut app, "<Esc>:records lat lat.unmatched\n");
         assert_eq!(app.browser.as_ref().unwrap().tab, 0);
+    }
+
+    #[test]
+    fn picker_records_undecoded() {
+        // spec §5 "Records": an interface the file has, no decode yet: the line that decodes it
+        let t = trace::Trace::open("tests/data/axilite.vcd".as_ref()).unwrap();
+        let mut app = App::new(workspace::Workspace::new(t, "axilite".into()));
+        let msg = |app: &App| app.msg.as_ref().map_or(String::new(), |m| m.0.clone());
+        let line = ":decode s_axi axilite clock=top.aclk prefix=top.s_axi_";
+        keys(&mut app, ":records s_axi.wr\n");
+        assert_eq!(msg(&app), format!("unknown stream: s_axi.wr: its interface isn't decoded yet; `{line}` makes s_axi.wr"));
+        keys(&mut app, ":pick records s_axi\n");
+        assert_eq!(msg(&app), format!("unknown stream: s_axi: its interface isn't decoded yet; `{line}` makes its streams"));
+        keys(&mut app, &format!("{line}\n"));
+        keys(&mut app, ":pick records s_axi\n");
+        let p = app.picker.as_ref().unwrap();
+        assert!(p.entries.iter().any(|e| e.text.starts_with("s_axi.wr #0")), "{:?}", p.entries.first().map(|e| &e.text));
     }
 
     #[test]

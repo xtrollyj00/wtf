@@ -233,15 +233,23 @@ fn check_decode_names_only() {
     let mut ws = open("axilite.vcd");
     let vars = ws.trace.vars.len();
     assert_eq!(ws.check_decode(&decode("s", "axilite", "aclk", &[], &[("prefix", "s_axi_")])), Ok(()));
-    let e = ws.check_decode(&decode("t", "axilite", "", &[], &[("prefix", "m_axi_")])).unwrap_err();
+    let r = ws.check_decode(&decode("t", "axilite", "", &[], &[("prefix", "m_axi_")])).unwrap_err();
+    let e = r.to_string();
     assert!(e.starts_with("t: awvalid: unknown signal: m_axi_awvalid") && e.ends_with("; no clock"), "{e}");
-    assert_eq!(ws.check_decode(&decode("t", "axilite", "nope", &[], &[("prefix", "s_axi_")])), Err("t: clock: unknown signal: nope".into()));
-    assert!(ws.check_decode(&decode("t", "nope", "aclk", &[], &[])).unwrap_err().starts_with("t: unknown protocol: nope"));
+    let on = r.fields();
+    assert!(on.starts_with(&["awvalid", "awready"]) && on.contains(&"clock"), "{on:?}");
+    assert_eq!(ws.check_decode(&decode("t", "axilite", "nope", &[], &[("prefix", "s_axi_")])).unwrap_err().to_string(), "t: clock: unknown signal: nope");
+    assert!(ws.check_decode(&decode("t", "nope", "aclk", &[], &[])).unwrap_err().to_string().starts_with("t: unknown protocol: nope"));
+    // no signal at all: one reason names every role the protocol needs
+    let on = ws.check_decode(&decode("t", "axilite", "aclk", &[], &[])).unwrap_err().fields().into_iter().map(str::to_string).collect::<Vec<_>>();
+    assert!(on.starts_with(&["awvalid".into(), "awready".into()]) && on.len() > 2, "{on:?}");
     // a session protocol: its roles; a role it hasn't
     ws.add_protocol(Sampler { name: "w".into(), when: "valid && ready".into(), fields: vec![], roles: vec!["valid".into(), "ready".into()] }).unwrap();
     assert_eq!(ws.check_decode(&decode("w1", "w", "aclk", &[("valid", "s_axi_wvalid"), ("ready", "s_axi_wready")], &[])), Ok(()));
-    let e = ws.check_decode(&decode("w1", "w", "aclk", &[("valid", "s_axi_wvalid"), ("go", "s_axi_wready")], &[])).unwrap_err();
+    let r = ws.check_decode(&decode("w1", "w", "aclk", &[("valid", "s_axi_wvalid"), ("go", "s_axi_wready")], &[])).unwrap_err();
+    let e = r.to_string();
     assert!(e.contains("no signal for ready") && e.contains("w has no role go"), "{e}");
+    assert_eq!(r.fields(), ["ready", "go"]);
     assert!(ws.streams.is_empty() && ws.decodes.is_empty() && ws.trace.vars.len() == vars);
     assert!(!ws.trace.vars.iter().any(|v| v.path.contains("s_axi_") && ws.trace.loaded(ws.trace.by_path[&v.path])), "no value read");
 }
@@ -256,14 +264,17 @@ fn check_protocol_names_only() {
     let p = |when: &str, fields: &[(&str, &str)]| Sampler { name: "w".into(), when: when.into(), fields: pairs(fields), roles: vec!["valid".into(), "ready".into(), "data".into()] };
     let sigs = pairs(&[("valid", "s_axi_wvalid"), ("ready", "s_axi_wready"), ("data", "s_axi_wdata")]);
     assert_eq!(ws.check_protocol(&p("valid && ready && lo != 0", &[("lo", "data[7:0]"), ("hi", "lo[3:0] + 1")]), &sigs), Ok(()));
-    let e = ws.check_protocol(&p("valid && go", &[("lo", "data[40:0]"), ("x", "aclk")]), &sigs).unwrap_err();
+    let r = ws.check_protocol(&p("valid && go", &[("lo", "data[40:0]"), ("x", "aclk")]), &sigs).unwrap_err();
+    let e = r.to_string();
     let parts: Vec<&str> = e.split("; ").collect();
     assert!(parts.len() == 3 && parts[0].starts_with("lo: data[40:0]: data has no bits") && parts[1].starts_with("x: aclk is no role") && parts[2].starts_with("when: go is no role"), "{e}");
+    assert_eq!(r.fields(), ["lo", "x", "when"]);
     // a role without a signal, or with an unknown one
-    let e = ws.check_protocol(&p("valid", &[]), &sigs[..1]).unwrap_err();
+    let e = ws.check_protocol(&p("valid", &[]), &sigs[..1]).unwrap_err().to_string();
     assert!(e.starts_with("ready: no signal") && e.contains("; data: no signal"), "{e}");
-    assert!(ws.check_protocol(&p("valid", &[]), &pairs(&[("valid", "nope"), ("ready", "aclk"), ("data", "aclk")])).unwrap_err().starts_with("valid: unknown signal: nope"));
-    assert_eq!(ws.check_protocol(&Sampler { name: "axis".into(), ..p("valid", &[]) }, &sigs), Err("axis is a built-in protocol".into()));
+    assert!(ws.check_protocol(&p("valid", &[]), &pairs(&[("valid", "nope"), ("ready", "aclk"), ("data", "aclk")])).unwrap_err().to_string().starts_with("valid: unknown signal: nope"));
+    let r = ws.check_protocol(&Sampler { name: "axis".into(), ..p("valid", &[]) }, &sigs).unwrap_err();
+    assert_eq!((r.to_string().as_str(), r.fields()), ("axis is a built-in protocol", vec!["name"]));
     assert!(ws.protocols.is_empty() && ws.trace.vars.len() == vars);
     assert!(!ws.trace.vars.iter().any(|v| ws.trace.loaded(ws.trace.by_path[&v.path])), "no value read");
 }
@@ -602,7 +613,7 @@ fn results_and_sets() {
     assert_eq!(names(&ws, ws.results("s")), ["s.wr", "s.rd", "s.errors", "s.wr.unmatched", "s.rd.unmatched"]);
     assert_eq!(names(&ws, ws.stream_set("s").unwrap()), names(&ws, ws.results("s")));
     assert_eq!(names(&ws, ws.stream_set("s.rd s.w* s.rd").unwrap()), ["s.rd", "s.w", "s.wr"]);
-    assert!(ws.stream_set("s.nope").unwrap_err().starts_with("unknown stream: s.nope (streams: s.aw,"));
+    assert!(ws.stream_set("s.nope").unwrap_err().to_string().starts_with("unknown stream: s.nope (streams: s.aw,"));
     // a frame on rd makes rd intermediate, across decodes
     ws.add_decode(decode("f", "frame", "", &[("input", "s.rd")], &[("gap", "100ns")])).unwrap();
     assert!(!names(&ws, ws.results("s")).contains(&"s.rd".to_string()));
@@ -629,7 +640,7 @@ fn results_and_sets() {
 #[test]
 fn set_errors_and_briefs() {
     let mut ws = open("axilite.vcd");
-    assert_eq!(ws.stream_set("  ").unwrap_err(), "records of which stream? (a stream, a decode's name or a glob)");
+    assert_eq!(ws.stream_set("  ").unwrap_err().to_string(), "records of which stream? (a stream, a decode's name or a glob)");
     ws.add_decode(decode("s", "axilite", "aclk", &[], &[("prefix", "s_axi_")])).unwrap();
     let one = wtf_core::stream::Set::new(vec![&ws.streams[ws.stream_set("s.wr").unwrap()[0]]]);
     assert!(one.group_by(&[], &["nope".into()]).err().unwrap().starts_with("s.wr: no field nope (fields: "));
@@ -643,6 +654,34 @@ fn set_errors_and_briefs() {
     assert_eq!(brief("cmd", &ws), None);
     ws.add_protocol(Sampler { name: "cmd".into(), when: "valid && ready".into(), fields: vec![("op".into(), "cmd[3:0]".into())], roles: vec!["valid".into(), "ready".into(), "cmd".into()] }).unwrap();
     assert_eq!(brief("cmd", &ws).unwrap(), "decode <name> cmd clock=<clk> valid=<signal> ready=<signal> cmd=<signal>\n\nA record where valid && ready\nFields: op");
+}
+
+/// Spec §16 "Records of a set": a name of an interface the file has but nothing decoded yet is an
+/// error saying the line that decodes it, and a part of a decoded interface is a name unknown.
+#[test]
+fn undecoded_interface_names() {
+    let mut ws = open("axilite.vcd");
+    let line = "decode s_axi axilite clock=top.aclk prefix=top.s_axi_";
+    let part = |ws: &Workspace, name: &str| match ws.stream_set(name).unwrap_err() {
+        wtf_core::workspace::unknown::NoStream::NotDecoded { name: n, part, found } => {
+            assert_eq!(n, name);
+            assert_eq!(found.iter().map(|f| f.decode_line()).collect::<Vec<_>>(), [line]);
+            part
+        }
+        e => panic!("{e}"),
+    };
+    assert_eq!(part(&ws, "top.s_axi.wr"), "wr");
+    assert_eq!(part(&ws, "s_axi.wr"), "wr");
+    assert_eq!(part(&ws, "s_axi"), "");
+    assert_eq!(part(&ws, "top.s_axi"), "");
+    // as core says it: the line, and the stream it makes or its streams
+    let said = |name: &str| ws.stream_set(name).unwrap_err().to_string();
+    assert_eq!(said("s_axi.wr"), format!("unknown stream: s_axi.wr: its interface isn't decoded yet; `{line}` makes s_axi.wr"));
+    assert_eq!(said("s_axi"), format!("unknown stream: s_axi: its interface isn't decoded yet; `{line}` makes its streams"));
+    assert_eq!(said("nope"), "unknown stream: nope (none yet; make one with decode or protocol)");
+    // decoded, its streams are what it makes; a part it has not is a name unknown
+    ws.add_decode(decode("s_axi", "axilite", "top.aclk", &[], &[("prefix", "top.s_axi_")])).unwrap();
+    assert!(matches!(ws.stream_set("s_axi.zz").unwrap_err(), wtf_core::workspace::unknown::NoStream::Unknown { name, .. } if name == "s_axi.zz"));
 }
 
 /// simple.vcd: a clocked search as a protocol, as `find` offers it (spec §15 `find`).

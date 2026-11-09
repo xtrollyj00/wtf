@@ -1,6 +1,7 @@
 //! Decoding in a workspace: protocols and decode instances made into streams, whose records and
 //! fields become vars (spec §16).
 
+use super::reason::{Reason, Reasons, Why};
 use super::*;
 
 impl Workspace {
@@ -34,7 +35,7 @@ impl Workspace {
     /// Define a protocol, replacing one of that name: names only, its roles, which instances put
     /// on signals (`add_decode`).
     pub fn add_protocol(&mut self, p: Sampler) -> Result<(), String> {
-        protocol_names(&p)?;
+        protocol_names(&p).map_err(|r| r.to_string())?;
         let name = &p.name;
         // a type defined again: its instances sampled again, and those after them, which may stack on them
         let first = self.decodes.iter().position(|d| d.protocol == p.name);
@@ -57,9 +58,9 @@ impl Workspace {
     /// checks as it is filled in, spec §5 "Protocol form"): each role's signal (`signals`, role
     /// and signal), then each field and `when`, which name only the roles and the fields before
     /// them. Each mistake starts with what it is in: a role, a field, or `when`.
-    pub fn check_protocol(&mut self, p: &Sampler, signals: &[(String, String)]) -> Result<(), String> {
-        protocol_names(p)?;
-        let mut errors = Vec::new();
+    pub fn check_protocol(&mut self, p: &Sampler, signals: &[(String, String)]) -> Result<(), Reasons> {
+        protocol_names(p).map_err(|r| Reasons { name: None, list: vec![r] })?;
+        let mut errors: Vec<Reason> = Vec::new();
         // a name's width, signedness and value names: its role's signal's, or its field's
         let mut known: HashMap<String, (Option<u32>, Option<crate::trace::Names>, bool)> = HashMap::new();
         for r in &p.roles {
@@ -68,12 +69,12 @@ impl Workspace {
                     let v = &self.trace.vars[probe.0];
                     known.insert(r.clone(), if probe.1.is_some() { (Some(1), None, false) } else { (v.width, v.names.clone(), v.signed) });
                 }
-                Some(Err(e)) => errors.push(format!("{r}: {e}")),
-                None => errors.push(format!("{r}: no signal; :decode puts the protocol on signals, the form checks with one")),
+                Some(Err(e)) => errors.push(Reason { on: vec![r.clone()], why: Why::In(e) }),
+                None => errors.push(Reason { on: vec![r.clone()], why: Why::In("no signal; :decode puts the protocol on signals, the form checks with one".into()) }),
             }
         }
         if !errors.is_empty() {
-            return Err(errors.join("; "));
+            return Err(Reasons { name: None, list: errors });
         }
         let fpt = self.trace.fs_per_tick;
         let only = |known: &HashMap<_, (Option<u32>, Option<crate::trace::Names>, bool)>, name: &str| {
@@ -83,15 +84,15 @@ impl Workspace {
         for (f, e) in &p.fields {
             match search::parse_term(e, fpt, &mut |n| only(&known, n)) {
                 Ok((t, _)) => _ = known.insert(f.clone(), (Some(t.shape().bits), None, t.shape().signed)),
-                Err(err) => errors.push(format!("{f}: {err}")),
+                Err(err) => errors.push(Reason { on: vec![f.clone()], why: Why::In(err) }),
             }
         }
         if let Err(err) = search::parse_query(&p.when, fpt, &mut |n| only(&known, n)) {
-            errors.push(format!("when: {err}"));
+            errors.push(Reason { on: vec!["when".into()], why: Why::In(err) });
         }
         match errors.is_empty() {
             true => Ok(()),
-            false => Err(errors.join("; ")),
+            false => Err(Reasons { name: None, list: errors }),
         }
     }
 
@@ -218,8 +219,8 @@ impl Workspace {
     /// The mistakes in an instance's names, without reading a value: its protocol, roles,
     /// prefix, params and clock, as `add_decode` reports them before it decodes (the decode form
     /// checks as it is filled in, spec §5 "Decode form").
-    pub fn check_decode(&mut self, d: &Decode) -> Result<(), String> {
-        let mut errors = Vec::new();
+    pub fn check_decode(&mut self, d: &Decode) -> Result<(), Reasons> {
+        let mut errors: Vec<Reason> = Vec::new();
         let clocked = if let Some(b) = protocol::builtin(&d.protocol) {
             let required = self.required(d, &b);
             self.bind(d, &required, b.optional, b.params, &mut errors);
@@ -229,18 +230,18 @@ impl Workspace {
             self.bind(d, &roles, &[], &[], &mut errors);
             true
         } else {
-            errors.push(protocol::unknown(&d.protocol, &self.protocols));
+            errors.push(Reason { on: vec!["protocol".into()], why: Why::Said(protocol::unknown(&d.protocol, &self.protocols)) });
             false
         };
         self.roles.clear();
         if clocked && d.clock.is_empty() {
-            errors.push("no clock".into());
+            errors.push(Reason { on: vec!["clock".into()], why: Why::NoClock });
         } else if clocked && let Err(e) = self.resolve(&d.clock) {
-            errors.push(format!("clock: {e}"));
+            errors.push(Reason { on: vec!["clock".into()], why: Why::In(e) });
         }
         match errors.is_empty() {
             true => Ok(()),
-            false => Err(format!("{}: {}", d.name, errors.join("; "))),
+            false => Err(Reasons { name: Some(d.name.clone()), list: errors }),
         }
     }
 
@@ -256,7 +257,7 @@ impl Workspace {
     /// The roles map to the signals' full paths, so names made by an earlier step can't change them.
     /// With the param `prefix` (`s_axi_`), a role not given is played by `<prefix><role>`, if there
     /// is one (the required roles must be).
-    fn bind(&mut self, d: &Decode, required: &[&str], optional: &[&str], allowed: &[&str], errors: &mut Vec<String>) -> Vec<(String, Option<u32>)> {
+    fn bind(&mut self, d: &Decode, required: &[&str], optional: &[&str], allowed: &[&str], errors: &mut Vec<Reason>) -> Vec<(String, Option<u32>)> {
         let mut signals = d.signals.clone();
         if let Some((_, prefix)) = d.params.iter().find(|p| p.0 == "prefix") {
             for r in required.iter().chain(optional) {
@@ -274,26 +275,25 @@ impl Workspace {
                 .filter(|f| f.protocol == d.protocol)
                 .map(|f| f.decode_line().replacen(&format!("decode {} ", f.name()), &format!("decode {} ", d.name), 1))
                 .collect();
-            let hint = if found.is_empty() { String::new() } else { format!(" (the file has: {})", found.join("; ")) };
-            errors.push(format!("no signal for {}{hint}", missing.join(", ")));
+            errors.push(Reason { on: missing.iter().map(|r| r.to_string()).collect(), why: Why::NoSignal { found } });
         }
         let (mut out, mut roles) = (Vec::new(), HashMap::new());
         for (role, sig) in &signals {
             if !required.contains(&role.as_str()) && !optional.contains(&role.as_str()) {
-                errors.push(format!("{} has no role {role}", d.protocol));
+                errors.push(Reason { on: vec![role.clone()], why: Why::NoRole { protocol: d.protocol.clone() } });
             } else {
                 match self.resolve(sig) {
                     Ok(p) => {
                         roles.insert(role.clone(), self.trace.probe_path(p));
                         out.push((role.clone(), self.trace.probe_width(p)));
                     }
-                    Err(e) => errors.push(format!("{role}: {e}")),
+                    Err(e) => errors.push(Reason { on: vec![role.clone()], why: Why::In(e) }),
                 }
             }
         }
         for (p, _) in d.params.iter().filter(|p| p.0 != "prefix" && !allowed.contains(&p.0.as_str())) {
-            let others: Vec<&str> = std::iter::once("prefix").chain(allowed.iter().copied()).collect();
-            errors.push(format!("{} has no param {p} (params: {})", d.protocol, others.join(", ")));
+            let others: Vec<String> = std::iter::once("prefix").chain(allowed.iter().copied()).map(str::to_string).collect();
+            errors.push(Reason { on: vec![p.clone()], why: Why::NoParam { protocol: d.protocol.clone(), params: others } });
         }
         // set after all are named, so a role isn't taken for a signal of the same name
         self.roles = roles;
@@ -451,7 +451,7 @@ impl Workspace {
     /// The streams named for `records` (spec §16 "Records of a set"), each name a stream, a
     /// decode's name (its results and violations) or a pattern in the workspace's syntax
     /// (`bus.*`, `/^bus\./`), separated by spaces.
-    pub fn stream_set(&self, names: &str) -> Result<Vec<usize>, String> {
+    pub fn stream_set(&self, names: &str) -> Result<Vec<usize>, unknown::NoStream> {
         use crate::pattern::Pattern;
         let mut out: Vec<usize> = Vec::new();
         for name in names.split_whitespace() {
@@ -462,24 +462,47 @@ impl Workspace {
             let found = match self.streams.iter().position(|s| s.name == name) {
                 Some(i) => vec![i],
                 None if self.decodes.iter().any(|d| d.name == name) => self.results(name),
-                None => match self.patterns.pattern(name)? {
+                None => match self.patterns.pattern(name).map_err(unknown::NoStream::Pattern)? {
                     Some(p) => (0..self.streams.len()).filter(|&i| hit(&p, &self.streams[i].name)).collect(),
                     None => vec![],
                 },
             };
             if found.is_empty() {
-                let all: Vec<&str> = self.streams.iter().map(|s| s.name.as_str()).collect();
-                return Err(match all.len() {
-                    0 => format!("unknown stream: {name} (none yet; make one with decode or protocol)"),
-                    _ => format!("unknown stream: {name} (streams: {}; or a decode's name for its results)", all.join(", ")),
+                // an interface the file has, no decode yet, names no stream
+                if let Some(e) = self.undecoded(name) {
+                    return Err(e);
+                }
+                return Err(match self.streams.is_empty() {
+                    true => unknown::NoStream::NoneYet { name: name.to_string() },
+                    false => unknown::NoStream::Unknown { name: name.to_string(), streams: self.streams.iter().map(|s| s.name.clone()).collect() },
                 });
             }
             out.extend(found.into_iter().filter(|i| !out.contains(i)).collect::<Vec<_>>());
         }
         if out.is_empty() {
-            return Err("records of which stream? (a stream, a decode's name or a glob)".into());
+            return Err(unknown::NoStream::Empty);
         }
         Ok(out)
+    }
+
+    /// The interface `name` names but nothing decoded yet: the rest of the name, and its interfaces.
+    /// A name that starts one (`s_axi.wr`, `top.s_axi.wr`) or is one (`s_axi`) does.
+    fn undecoded(&self, name: &str) -> Option<unknown::NoStream> {
+        let up_to_last = name.rsplit_once('.').map_or(name, |(b, _)| b);
+        let matched = |f: &protocol::Found, n: &str| n == f.name() || n == f.prefix.trim_end_matches(['_', '.']);
+        let (mut found, mut part) = (Vec::new(), String::new());
+        for f in protocol::detect(&self.trace) {
+            let Some(base) = [name, up_to_last].into_iter().find(|n| matched(&f, n)) else { continue };
+            // decoded under that name, its streams are what it makes
+            if self.decodes.iter().any(|d| d.name == f.name()) {
+                return None;
+            }
+            if found.is_empty() {
+                part = name.strip_prefix(base).unwrap_or("").trim_start_matches('.').to_string();
+            }
+            found.push(f);
+        }
+        (!found.is_empty()).then(|| unknown::NoStream::NotDecoded { name: name.to_string(), part, found })
     }
 
     /// The full path of a signal named as in a search.
@@ -490,15 +513,15 @@ impl Workspace {
     /// A protocol of the session's on signals: the stream of the instance's name.
     fn decode_user(&mut self, d: &Decode) -> Result<usize, String> {
         let p = self.protocols.iter().find(|p| p.name == d.protocol).cloned().ok_or_else(|| protocol::unknown(&d.protocol, &self.protocols))?;
-        let mut errors = Vec::new();
+        let mut errors: Vec<Reason> = Vec::new();
         let roles: Vec<&str> = p.roles.iter().map(String::as_str).collect();
         self.bind(d, &roles, &[], &[], &mut errors);
         if d.clock.is_empty() {
-            errors.push("no clock".into());
+            errors.push(Reason { on: vec!["clock".into()], why: Why::NoClock });
         }
         if !errors.is_empty() {
             self.roles.clear();
-            return Err(errors.join("; "));
+            return Err(Reasons { name: None, list: errors }.to_string());
         }
         // its expressions name roles and its own fields, never a signal
         self.only_roles = Some((format!("{} names only its roles ({}) and fields", p.name, p.roles.join(", ")), d.clock.clone()));
@@ -510,15 +533,15 @@ impl Workspace {
 
     /// A protocol written in Rust on signals: its steps' streams, `<instance>.<step>`.
     fn decode_builtin(&mut self, d: &Decode, b: protocol::Builtin) -> Result<usize, String> {
-        let mut errors = Vec::new();
+        let mut errors: Vec<Reason> = Vec::new();
         let required = self.required(d, &b);
         let given = self.bind(d, &required, b.optional, b.params, &mut errors);
         if d.clock.is_empty() && b.clocked {
-            errors.push("no clock".into());
+            errors.push(Reason { on: vec!["clock".into()], why: Why::NoClock });
         }
         if !errors.is_empty() {
             self.roles.clear();
-            return Err(errors.join("; "));
+            return Err(Reasons { name: None, list: errors }.to_string());
         }
         let given: Vec<(&str, Option<u32>)> = given.iter().map(|(r, w)| (r.as_str(), *w)).collect();
         let params: Vec<(String, String)> = d.params.iter().filter(|p| p.0 != "prefix").cloned().collect();
@@ -703,24 +726,25 @@ impl Workspace {
 }
 
 /// A protocol's own names: its name, its roles' and fields', and that it has roles.
-fn protocol_names(p: &Sampler) -> Result<(), String> {
+fn protocol_names(p: &Sampler) -> Result<(), Reason> {
+    let said = |on: &str, text: String| Reason { on: vec![on.to_string()], why: Why::Said(text) };
     let name = &p.name;
     if name.is_empty() || !name.chars().all(|c| c.is_alphanumeric() || "_.$".contains(c)) {
-        return Err(format!("not a protocol name: {name}"));
+        return Err(said("name", format!("not a protocol name: {name}")));
     }
     if protocol::reserved(name) {
-        return Err(format!("{name} is a built-in protocol"));
+        return Err(said("name", format!("{name} is a built-in protocol")));
     }
     // a field is the last part of its signal's path; a role is a name in expressions
     let plain = |f: &String| !f.is_empty() && f.chars().all(|c| c.is_alphanumeric() || c == '_');
     if let Some((f, _)) = p.fields.iter().find(|(f, _)| !plain(f)) {
-        return Err(format!("{name}: not a field name: {f}"));
+        return Err(said(f, format!("{name}: not a field name: {f}")));
     }
     if let Some(r) = p.roles.iter().find(|r| !plain(r)) {
-        return Err(format!("{name}: not a role name: {r}"));
+        return Err(said(r, format!("{name}: not a role name: {r}")));
     }
     if p.roles.is_empty() {
-        return Err(format!("{name}: needs roles, the names its expressions use (roles=valid,ready,data); :decode puts them on signals"));
+        return Err(said("roles", format!("{name}: needs roles, the names its expressions use (roles=valid,ready,data); :decode puts them on signals")));
     }
     Ok(())
 }
