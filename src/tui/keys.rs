@@ -99,6 +99,11 @@ actions! {
     MoveUp "move_up" "K" "move the row up" true,
     Range "range" "V" "select rows" false,
     Radix "radix" "r" "next radix" false,
+    Group "group" ">" "group the rows" false,
+    Ungroup "ungroup" "<" "out of the group" false,
+    Rename "rename" "R" "rename the group" false,
+    Put "put" "p" "put removed rows below" false,
+    PutAbove "put_above" "P" "put removed rows above" false,
     Undo "undo" "u" "undo" false,
     Redo "redo" "<C-r>" "redo" false,
     CopyValue "copy_value" "yy" "copy the value" false,
@@ -174,11 +179,12 @@ m = ["mark at a time…", ":cursor "]
 [d]
 name = "decode"
 d = ["decode an interface", ":pick interfaces", "the ones found in the trace, each with its line"]
-D = ["decode with a form…", ":decode", "name, protocol, clock and roles as fields, tried as you fill them in"]
-p = ["protocol…", ":protocol "]
+l = ["decodes", ":decodes", "the ones made: records, rows, edit, remove"]
+D = ["decode with a form…", ":decode", "name, protocol, clock and roles as fields, checked as you fill them in; on a V range, its rows play the roles"]
+p = ["protocol with a form…", ":protocol", "roles from the selected rows, when and the fields checked as you type"]
+m = ["records of the matches…", ":protocol search", "the last clocked search as a protocol: its when, the shown signals as fields"]
 s = ["computed signal…", ":signal "]
-n = ["name values…", ":names "]
-r = ["records where…", ":records "]
+n = ["name values…", ":names", "the values the selected signal takes, each named"]
 
 [a]
 name = "agent"

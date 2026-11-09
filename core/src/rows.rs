@@ -289,28 +289,37 @@ pub fn move_row(rows: &mut [Row], i: usize, down: bool) -> usize {
     }
 }
 
+/// The signals `r`, all inside one group, moved out of it to stand right after it, still marked
+/// grouped; a group left empty goes. Returns their new start, or None when none is grouped. A
+/// selection partly in a group is an error naming it.
+fn out_of_group(rows: &mut Vec<Row>, r: std::ops::Range<usize>) -> Result<Option<usize>, String> {
+    let inside = rows[r.clone()].iter().filter(|x| x.grouped()).count();
+    if inside == 0 {
+        return Ok(None);
+    }
+    if inside < r.len() {
+        let h = header_of(rows, r.clone().find(|&i| rows[i].grouped()).unwrap()).unwrap();
+        let Row::Group { name: g, .. } = &rows[h] else { unreachable!() };
+        return Err(format!("the selection is partly in group {g}: select rows all in it or all outside"));
+    }
+    let h = header_of(rows, r.start).expect("a grouped row has a header");
+    let end = group_end(rows, h);
+    rows[r.start..end].rotate_left(r.len());
+    let mut start = end - r.len();
+    if start == h + 1 {
+        rows.remove(h);
+        start = h;
+    }
+    Ok(Some(start))
+}
+
 /// Put the signals in `r` into a new group and return its header's index. Signals all inside one
 /// group leave it for the new group, placed right after it; groups don't nest yet (spec §6).
 pub fn group(rows: &mut Vec<Row>, r: std::ops::Range<usize>, name: &str) -> Result<usize, String> {
     if rows[r.clone()].iter().any(Row::is_group) {
         return Err("groups can't be nested yet: the selection has a group's header".into());
     }
-    let inside = rows[r.clone()].iter().filter(|x| x.grouped()).count();
-    let mut start = r.start;
-    if inside == r.len() {
-        let h = header_of(rows, r.start).expect("a grouped row has a header");
-        let end = group_end(rows, h);
-        rows[r.start..end].rotate_left(r.len());
-        start = end - r.len();
-        if start == h + 1 {
-            rows.remove(h);
-            start = h;
-        }
-    } else if inside > 0 {
-        let h = header_of(rows, r.clone().find(|&i| rows[i].grouped()).unwrap()).unwrap();
-        let Row::Group { name: g, .. } = &rows[h] else { unreachable!() };
-        return Err(format!("the selection is partly in group {g}: select rows all in it or all outside"));
-    }
+    let start = out_of_group(rows, r.clone())?.unwrap_or(r.start);
     rows[start..start + r.len()].iter_mut().for_each(|x| {
         if let Row::Signal(s) = x {
             s.grouped = true;
@@ -318,6 +327,44 @@ pub fn group(rows: &mut Vec<Row>, r: std::ops::Range<usize>, name: &str) -> Resu
     });
     rows.insert(start, Row::Group { name: name.into(), collapsed: false });
     Ok(start)
+}
+
+/// Take the rows `r` out of groups (`<`, spec §6): every group whose header is in it is dissolved,
+/// its signals staying where they are; signals all inside one group leave it, placed right after
+/// it. Returns the rows' new start.
+pub fn ungroup(rows: &mut Vec<Row>, r: std::ops::Range<usize>) -> Result<usize, String> {
+    if rows[r.clone()].iter().any(Row::is_group) {
+        let r = block(rows, r.start, r.end - 1);
+        let headers: Vec<usize> = r.clone().rev().filter(|&i| rows[i].is_group()).collect();
+        for i in headers {
+            let end = group_end(rows, i);
+            rows[i + 1..end].iter_mut().for_each(|x| {
+                if let Row::Signal(s) = x {
+                    s.grouped = false;
+                }
+            });
+            rows.remove(i);
+        }
+        return Ok(r.start);
+    }
+    let start = out_of_group(rows, r.clone())?.ok_or("not in a group")?;
+    rows[start..start + r.len()].iter_mut().for_each(|x| {
+        if let Row::Signal(s) = x {
+            s.grouped = false;
+        }
+    });
+    Ok(start)
+}
+
+/// Put `block` (rows removed earlier, whole groups) above or `below` row `r`, joining a group as
+/// a drop there would (`next_to`). Returns where it went.
+pub fn put(rows: &mut Vec<Row>, block: Vec<Row>, r: usize, below: bool) -> std::ops::Range<usize> {
+    let (len, end) = (block.len(), rows.len());
+    rows.extend(block);
+    match end {
+        0 => 0..len,
+        _ => next_to(rows, end..end + len, r, below).expect("r is before the block"),
+    }
 }
 
 /// Equal apart from which groups are collapsed and which buses are expanded.

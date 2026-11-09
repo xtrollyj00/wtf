@@ -112,3 +112,26 @@ fn names_lost_on_reload() {
     std::fs::remove_dir_all(&dir).unwrap();
     assert_eq!(msg, "reloaded; not in trace: names of top.dma.state (unknown signal: top.dma.state (nearest: top.state, top.cpu.state))");
 }
+
+/// The card lists the values taken, x left out, in value order with how often and their names
+/// (spec §5 "Value-names card"); its line gives the names typed in it.
+#[test]
+fn values_taken() {
+    let mut ws = open();
+    let taken = ws.values_taken("state").unwrap();
+    let got: Vec<(&str, u64, Option<&str>)> = taken.iter().map(|t| (t.bits.as_str(), t.count, t.name.as_deref())).collect();
+    assert_eq!(got, [("0", 2, Some("IDLE")), ("1", 1, Some("READ")), ("10", 1, Some("WRITE")), ("11", 1, Some("DONE")), ("101", 1, None)]);
+    let count: Vec<String> = ws.values_taken("count").unwrap().into_iter().map(|t| t.bits).collect();
+    assert_eq!(count, ["0", "1", "10", "11", "100", "101", "110", "111"]);
+    assert!(ws.values_taken("state[1]").is_err());
+    // a name left empty is none; none at all is `off`
+    let line = wtf_core::workspace::names_line("top.count", &[("1".into(), "ONE".into()), ("10".into(), " ".into()), ("101".into(), "FIVE".into())]);
+    assert_eq!(line, "names top.count 0x1=ONE 0x5=FIVE");
+    run(&mut ws, &line).unwrap();
+    assert_eq!(ws.values_taken("count").unwrap()[5].name.as_deref(), Some("FIVE"));
+    assert_eq!(wtf_core::workspace::names_line("top.count", &[]), "names top.count off");
+    // more values than a card holds: name some with :names
+    let many = (0..300u64).map(|t| (t, wtf_core::trace::Val::Bits(format!("{t:016b}")))).collect();
+    ws.trace.add_computed("top.wide", Some(16), many).unwrap();
+    assert_eq!(ws.values_taken("top.wide").unwrap_err(), "top.wide takes more than 256 values; name some with :names");
+}

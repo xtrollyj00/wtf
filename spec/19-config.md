@@ -13,6 +13,7 @@ glyphs = "box"          # unicode (default), box, ascii, nerd (section 14)
 which_key = 300         # ms keys wait before which-key shows what can follow (section 2); 0 at once
 name_width = 30         # the name column's widest, 4-200 (section 4)
 value_width = 20        # the value column's widest, 5-200 (section 4)
+hints = false           # the status line says what can follow (a clocked search's records); default true
 theme = "light"         # dark, light, or one of the user's (below); default: the one that
                         # suits the terminal's background
 
@@ -63,9 +64,10 @@ start = "<C-g>"
 | `end` | `G` | `undo` | `u` | `command` | `:` |
 | `half_right` | `<C-d>` | `redo` | `<C-r>` | `help` | `?` |
 | `half_left` | `<C-u>` | `copy_value` | `yy` | `quit` | `q` |
-| `screen_left` | `H` | `copy_time` | `yt` | | |
-| `screen_right` | `L` | `center` | `c` | `leader` | `<Space>` |
-| `page_down` | `<C-f>` | | | | |
+| `screen_left` | `H` | `copy_time` | `yt` | `group` | `>` |
+| `screen_right` | `L` | `center` | `c` | `ungroup` | `<` |
+| `page_down` | `<C-f>` | `put` | `p` | `rename` | `R` |
+| `leader` | `<Space>` | `put_above` | `P` | | |
 
 - A key is one key or two. `jump` is followed by the cursor's number, as `'2` is.
 - An action left out keeps its key. A moved action's old key does nothing, unless another action
@@ -118,11 +120,11 @@ m = ["mark at a time…", ":cursor "]
 [d]
 name = "decode"
 d = ["decode an interface", ":pick interfaces", "the ones found in the trace, each with its line"]
-D = ["decode by hand…", ":decode "]
-p = ["protocol…", ":protocol "]
+D = ["decode with a form…", ":decode", "name, protocol, clock and roles as fields, checked as you fill them in; on a V range, its rows play the roles"]
+p = ["protocol with a form…", ":protocol"]
+m = ["records of the matches…", ":protocol search"]
 s = ["computed signal…", ":signal "]
-n = ["name values…", ":names "]
-r = ["records where…", ":records "]
+n = ["name values…", ":names"]
 
 [a]
 name = "agent"

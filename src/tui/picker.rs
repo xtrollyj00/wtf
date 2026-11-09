@@ -317,13 +317,19 @@ impl App {
     /// "Results") below the selected row as a group named after it, the group selected.
     pub(crate) fn decode_and_show(&mut self, line: &str, name: &str) -> Result<(), String> {
         self.run(line)?;
+        self.show_decode(name).map(drop)
+    }
+
+    /// Decode `name`'s results and violations not shown yet, added below the selected row as a
+    /// group of its name; false when all are shown already.
+    pub(crate) fn show_decode(&mut self, name: &str) -> Result<bool, String> {
         let vars: Vec<usize> = self.ws.results(name).into_iter().filter_map(|i| self.ws.trace.by_path.get(&self.ws.streams[i].name).copied()).filter(|&v| !self.ws.shown(v)).collect();
-        let (Some(&first), Some(&last)) = (vars.first(), vars.last()) else { return Ok(()) };
+        let (Some(&first), Some(&last)) = (vars.first(), vars.last()) else { return Ok(false) };
         self.ws.add_rows(&vars);
         let (a, b) = (self.ws.trace.vars[first].path.clone(), self.ws.trace.vars[last].path.clone());
         wtf_core::command::run(&mut self.ws, &format!("select {a} {b}"))?;
         wtf_core::command::run(&mut self.ws, &format!("group {name}"))?;
-        Ok(())
+        Ok(true)
     }
 
     /// The picker's keys (spec §5 "Picker"): `picker_key` and the keys page both read them.

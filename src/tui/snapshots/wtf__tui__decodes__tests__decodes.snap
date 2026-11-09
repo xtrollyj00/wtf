@@ -1,0 +1,16 @@
+---
+source: src/tui/decodes.rs
+expression: "crate::snapshot(&mut a, 100, Some(12))"
+---
+                                              w t ┃ f
+
+                       x
+    ╭─ decodes ──────────────────────────────────────────────────────────────────── 2 decodes ─╮
+    │▌ s    axilite  top.s_axi_  wr 2  rd 8  · errors 2  wr.unmatched 1                        │
+    │  lat  pair     s.aw s.b    lat 2  · unmatched 1                                          │
+    ╰──────────────────────────────── Enter records  a add rows  e edit  dd remove  Esc close ─╯
+                       Decode an interface 1 found                  Space d d
+                       Everything else                                  Space
+                       Keys                                                 ?
+                       Quit                                                 q
+ NORMAL   signals ▸                                                              0  5ns/col  x [+]

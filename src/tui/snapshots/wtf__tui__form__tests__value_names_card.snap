@@ -1,0 +1,20 @@
+---
+source: src/tui/form.rs
+expression: "crate::snapshot(&mut a, 100, Some(16))"
+---
+Name  │ Value │ 0         10ns      20ns      30ns      40ns      50ns      60ns      70ns      80ns
+      │       │ ┃─────────🮦─────────🮦───────────────────🮦───────────────────🮦────────────────────
+stat ╭─ names top.cpu.state ──────────────────────────────────────────────────────────────────╮ ─
+     │ 0x0        IDLE                                                                1 time  │
+     │ 0x1                                                                            1 time  │
+     │▌0x2        BUSY                                                                1 time  │
+     │ 0x4                                                                            1 time  │
+     │ 0x5                                                                            1 time  │
+     │────────────────────────────────────────────────────────────────────────────────────────│
+     │ each value its name, or none: Enter names them                                         │
+     │ :names top.cpu.state 0x0=IDLE 0x2=BUSY                                                 │
+     ╰─────────────────────────────────────────────────────── Tab next  Enter run  Esc close ─╯
+      │       │
+      │       │
+      │       │
+ NORMAL   signals ▸  top.cpu.state                                               0  1ns/col  x [+]

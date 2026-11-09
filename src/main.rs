@@ -86,10 +86,10 @@ fn run(args: Args) -> Result<(), String> {
     let mut warnings = config.warnings;
     warnings.extend(setup);
     let Some(path) = args.trace else {
-        return start(args.snapshot, args.ansi, args.keys.as_deref(), config.palette, (config.keys, config.which_key), &warnings);
+        return start(args.snapshot, args.ansi, args.keys.as_deref(), config.palette, (config.keys, config.which_key, config.hints), &warnings);
     };
     let mut app = open(&path, args.session.clone(), warnings)?;
-    (app.keymap, app.which_delay) = (config.keys, config.which_key);
+    (app.keymap, app.which_delay, app.hints) = (config.keys, config.which_key, config.hints);
     match args.snapshot {
         Some((w, h)) => {
             // plain text keeps the default palette: `text` tells the cursor columns by it
@@ -118,7 +118,7 @@ fn run(args: Args) -> Result<(), String> {
 
 /// Without a trace: the start screen (spec §4), then the trace picked in a window, or its
 /// snapshot.
-fn start(snapshot: Option<(u16, Option<u16>)>, ansi: bool, keys: Option<&str>, palette: draw::Palette, keymap: (tui::keys::Keymap, std::time::Duration), warnings: &[String]) -> Result<(), String> {
+fn start(snapshot: Option<(u16, Option<u16>)>, ansi: bool, keys: Option<&str>, palette: draw::Palette, keymap: (tui::keys::Keymap, std::time::Duration, bool), warnings: &[String]) -> Result<(), String> {
     let mut start = tui::start::Start::load();
     start.msg = (!warnings.is_empty()).then(|| warnings.join("; "));
     if let Some((w, h)) = snapshot {
@@ -155,7 +155,7 @@ fn start(snapshot: Option<(u16, Option<u16>)>, ansi: bool, keys: Option<&str>, p
         {
             app.msg = Some((e, true));
         }
-        (app.keymap, app.which_delay) = keymap;
+        (app.keymap, app.which_delay, app.hints) = keymap;
         history::opened(&path, session.as_deref(), false);
         return tui::run(&mut app);
     }
@@ -368,6 +368,68 @@ mod tests {
 
     fn names(app: &App) -> String {
         wtf_core::rows::display_names(&app.ws.trace, &app.ws.rows).join(",")
+    }
+
+    /// `>` groups and names the group in place, `R` renames, `<` takes rows out, `dd` then `p` /
+    /// `P` move rows anywhere (spec §6).
+    #[test]
+    fn group_keys() {
+        let mut app = open("vcd", None);
+        keys(&mut app, ":add top.**\nkkkVkk>");
+        assert_eq!(names(&app), "▾ group,  clk,  rst,  cpu.state,data,busy,dma.state");
+        assert!(snapshot(&mut app, 80, Some(16)).contains("NAME     Enter keeps the name  Esc as it was"));
+        // typing replaces the name, one undo step on Enter; other keys do nothing
+        keys(&mut app, "bux\x08<Tab>s");
+        assert_eq!(names(&app).split(',').next(), Some("▾ bus"));
+        keys(&mut app, "\n");
+        assert!(app.naming.is_none() && !snapshot(&mut app, 80, Some(16)).contains("NAME"));
+        keys(&mut app, "u");
+        assert_eq!(names(&app).split(',').next(), Some("▾ group"));
+        keys(&mut app, "<C-r>");
+        // R: empty is refused, Esc puts back the name it had
+        keys(&mut app, "R<C-u>\n");
+        assert_eq!((app.naming.is_some(), app.msg.as_ref().map(|m| m.0.as_str())), (true, Some("a group needs a name; Esc keeps the one it had")));
+        keys(&mut app, "x\x1b");
+        assert_eq!(names(&app).split(',').next(), Some("▾ bus"));
+        // <: a member out, after the group; on the header, the group dissolved
+        keys(&mut app, "jj<");
+        assert_eq!(names(&app), "▾ bus,  clk,  cpu.state,rst,data,busy,dma.state");
+        keys(&mut app, "<");
+        assert_eq!(app.msg.as_ref().map(|m| m.0.as_str()), Some("not in a group"));
+        keys(&mut app, "kkk<");
+        assert_eq!(names(&app), "clk,cpu.state,rst,data,busy,dma.state");
+        keys(&mut app, "R");
+        assert_eq!(app.msg.as_ref().map(|m| m.0.as_str()), Some("not in a group: > groups the row"));
+        // nothing removed yet; then dd and p / P
+        keys(&mut app, "p");
+        assert_eq!(app.msg.as_ref().map(|m| m.0.as_str()), Some("nothing to put: dd removes rows, then p puts them below a row"));
+        keys(&mut app, "jjdd");
+        assert_eq!(names(&app), "clk,cpu.state,data,busy,dma.state");
+        keys(&mut app, "jjp");
+        assert_eq!(names(&app), "clk,cpu.state,data,busy,dma.state,rst");
+        // put again: what dd removed stays to put
+        keys(&mut app, "kkkP");
+        assert_eq!(names(&app), "clk,cpu.state,top.rst,data,busy,dma.state,top.rst");
+    }
+
+    /// A new group's name: the start its signals' names share; the menu offers the keys.
+    #[test]
+    fn group_name_and_menu() {
+        let t = trace::Trace::open("tests/data/axilite.vcd".as_ref()).unwrap();
+        let mut app = App::new(workspace::Workspace::new(t, "x".into()));
+        keys(&mut app, ":add top.s_axi_awvalid top.s_axi_awready\nkVj>\n");
+        assert_eq!(names(&app).split(',').next(), Some("▾ s_axi_aw"));
+        // right click on a member: out of the group, rename; after dd, put
+        snapshot(&mut app, 100, Some(16));
+        let y = app.hit.lines.iter().find(|(_, (r, _), _)| *r == 1).map(|&(y, ..)| y as u16 + 1).unwrap();
+        right(&mut app, 2, y);
+        let labels = |app: &App| app.menu.as_ref().map(|m| m.items.iter().map(|i| format!("{} {}", i.label, i.key)).collect::<Vec<_>>()).unwrap_or_default();
+        assert!(labels(&app).contains(&"Out of the group <".into()) && labels(&app).contains(&"Rename the group R".into()), "{:?}", labels(&app));
+        keys(&mut app, "\x1bdd");
+        snapshot(&mut app, 100, Some(16));
+        let y = app.hit.lines.first().map(|&(y, ..)| y as u16 + 1).unwrap();
+        right(&mut app, 2, y);
+        assert_eq!(labels(&app)[2..], ["Rename R", "Ungroup <", "Remove with its rows dd", "Put below p", "Put above P"]);
     }
 
     #[test]
@@ -815,9 +877,9 @@ mod tests {
         keys(&mut app, "n");
         assert_eq!((app.ws.view.cursor, msg(&app)), (25, "not found after 25ns: @clk busy".into()));
         keys(&mut app, "N");
-        assert_eq!((app.ws.view.cursor, msg(&app)), (15, "match 1 of 2".into()));
+        assert_eq!((app.ws.view.cursor, msg(&app)), (15, "match 1 of 2; Space d m: records of them".into()));
         keys(&mut app, "n");
-        assert_eq!(msg(&app), "match 2 of 2");
+        assert_eq!(msg(&app), "match 2 of 2; Space d m: records of them");
         // another search counts its own matches
         keys(&mut app, ":0\n/busy\n");
         assert_eq!(msg(&app), "match 1 of 1"); // where busy becomes true, not each cycle
@@ -1706,17 +1768,17 @@ mod tests {
         right(&mut app, 60, 8);
         pick(&mut app, "Next match");
         assert_eq!(app.ws.view.cursor, found, "back where the search found 0x40");
-        // a `V` range: Group… opens `:group `
+        // a `V` range: Group groups it, its name typed in place, as `>`
         click(&mut app, 3, 6, NONE, t0, 0);
         click(&mut app, 3, 8, KeyModifiers::CONTROL, t0, 1000);
         right(&mut app, 3, 6);
-        pick(&mut app, "Group…");
-        assert_eq!((app.mode, app.line.as_str()), (app::Mode::Command, "group "));
-        keys(&mut app, "<Esc><Esc>");
-        // a header: Rename… opens `:rename cpu`, Fold folds it
+        pick(&mut app, "Group");
+        assert!(app.naming.is_some());
+        keys(&mut app, "<Esc>u");
+        // a header: Rename types its name in place, as `R`; Fold folds it
         right(&mut app, 3, 4);
-        pick(&mut app, "Rename…");
-        assert_eq!(app.line, "rename cpu");
+        pick(&mut app, "Rename");
+        assert_eq!(app.naming.as_ref().map(|n| n.was.as_str()), Some("cpu"));
         keys(&mut app, "<Esc>");
         right(&mut app, 3, 4);
         pick(&mut app, "Fold");
@@ -1807,7 +1869,7 @@ mod tests {
         assert_eq!(app.ws.sel, 3);
         insta::assert_snapshot!("mouse_menu", snapshot(&mut app, 100, Some(22)));
         let labels = |app: &App| app.menu.as_ref().unwrap().items.iter().map(|i| i.label.clone()).collect::<Vec<_>>();
-        assert_eq!(labels(&app), ["Open", "Examine", "Radix", "Colour", "Copy value", "Remove", "Mark here", "Copy time", "Next change", "Previous change", "Search value…"]);
+        assert_eq!(labels(&app), ["Open", "Examine", "Radix", "Colour", "Copy value", "Out of the group", "Rename the group", "Remove", "Mark here", "Copy time", "Next change", "Previous change", "Search value…"]);
         // the pointer highlights; Radix opens its second menu; dec sets it
         let r = app.hit.menus[0];
         app.mouse(at(MouseEventKind::Moved, r.x + 2, r.y + 3, NONE));
@@ -1835,11 +1897,18 @@ mod tests {
         // Mark here puts a mark at the column clicked, the cursor staying
         let (cursor, t) = (app.ws.view.cursor, app.ws.view.col_start(60 - app.wave_x as u64));
         right(&mut app, 60, 8);
-        keys(&mut app, "jjjjjjj<CR>");
+        pick(&mut app, "Mark here");
         assert_eq!((app.ws.marks[1], app.ws.view.cursor), (Some(t), cursor));
+        // after a clocked search: its matches' records
+        keys(&mut app, "/@clk busy<CR>");
+        right(&mut app, 60, 8);
+        pick(&mut app, "Records of the matches");
+        assert!(app.form.as_ref().is_some_and(|f| f.protocol), "{:?}", app.msg);
+        keys(&mut app, "<Esc>");
+        app.ws.view.cursor = cursor;
         // a group header; below the rows: add signals, undo
         right(&mut app, 3, 4);
-        assert_eq!(labels(&app), ["Fold", "Radix", "Colour", "Rename…", "Ungroup", "Remove"]);
+        assert_eq!(labels(&app), ["Fold", "Radix", "Colour", "Rename", "Ungroup", "Remove with its rows"]);
         keys(&mut app, "jjjjjj<CR>");
         assert_eq!(app.ws.rows.len(), 2, "the group and its signals");
         screen(&mut app, 100, Some(22));
@@ -1885,7 +1954,7 @@ mod tests {
         let &(y, ..) = app.hit.lines.iter().find(|l| l.1 == (app.ws.sel, app.ws.bit)).unwrap();
         right(&mut app, 2, y as u16);
         let labels: Vec<String> = app.menu.as_ref().unwrap().items.iter().map(|i| i.label.clone()).collect();
-        assert_eq!(labels, ["Open", "Examine", "Radix", "Colour", "Copy value", "Remove"]);
+        assert_eq!(labels, ["Open", "Examine", "Radix", "Colour", "Copy value", "Group", "Remove"]);
         keys(&mut app, "jjjljjj<CR>");
         let s = app.ws.rows[0].sig().unwrap();
         assert_eq!((radix::RADIXES[app.ws.look(s, hi).radix].name, s.look.radix), ("dec", radix::DEFAULT));

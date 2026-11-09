@@ -203,6 +203,8 @@ Decode first: records are exact and their handshake checks built in.
   fields and `when` can name it (`f3=insn[14:12] ok=f3 == 0`).
 - `pair` matches by order, or by `id=` / `req_id=` and `resp_id=`. `check` gives each record a
   `rule` field.
+- `decode <name> off` removes a decode, its streams and the rows showing them; one another decode
+  reads stays, naming it. `decode` again under a name replaces it.
 - Decoding doesn't touch the rows.
 
 ## records

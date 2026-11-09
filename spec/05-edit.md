@@ -1,7 +1,7 @@
 ## 5. Editing rows
 
 The **rows** (the signals being shown) are changed with Normal mode keys (section 3): `dd`,
-`J` / `K`, `r`, `V`, `u`. Adding happens in the **signal panel** (all signals in the file), which
+`p` / `P`, `J` / `K`, `>` / `<`, `R`, `r`, `V`, `u`. Adding happens in the **signal panel** (all signals in the file), which
 `a` or a click on the status line's `signals ▸` opens on the left, and `a`, the button or `Esc`
 closes. It has the keys while it is open; when it closes, they go back to the rows.
 
@@ -172,6 +172,14 @@ using it.
   `top.s_axi_awvalid`), signals ending in the role first. Nothing is filled in without `→`, and
   nothing is guessed beyond a name's exact ending. `Ctrl-Space` opens the signals picker on the
   role's name, its `Enter` fills the field in; on the protocol, it goes to the next one.
+- **From a selection**: opened on a `V` range (`Space d D`, or the menu's `Decode as` ▸, which
+  names the protocol), the range's signals fill the empty roles they play, and the clock: a
+  signal plays a role its name ends in after `_` or `.` (`s_axi_wvalid` plays `wvalid`,
+  `s_axi_arvalid` never `rvalid`), the clock the one ending in `clk` or `clock`. A role two of
+  them could play is left empty, as are the roles none plays; nothing is guessed beyond that.
+  Changing the protocol fills its roles again; the protocol, left empty, suggests those the
+  signals play roles of, most first. The form opens even when every role is filled: `Enter`
+  decodes.
 - **The prefix** plays each role left empty by `<prefix><role>`, as in `:decode`: the role shows
   that signal dim, the prefix how many roles it plays. Nothing is guessed beyond that.
 - **Checked as filled in**: after each key the form checks the names as `:decode` would before
@@ -186,6 +194,82 @@ using it.
 - **Keys** are fixed (section 5 "Records"): `Tab` / `Down` and `Shift-Tab` / `Up` go between the
   fields, `Backspace` deletes, `Ctrl-u` clears the field, `Esc` closes. A click on a field fills
   that one in.
+
+### Protocol form
+
+`:protocol` without arguments (`Space d p`) opens the **protocol form**: the same card for a
+sampled protocol (section 16), so `:protocol` is learnt by using it.
+
+```
+╭─ protocol ─────────────────────────────────────────────────────────────╮
+│ name       w                                                           │
+│ roles      wvalid, wready, wdata                                       │
+│ wvalid     top.s_axi_wvalid                                            │
+│ …                                                                      │
+│ when       wvalid && wready                                            │
+│ field      lo = wdata[7:0]                                             │
+│▌field                                                                  │
+│────────────────────────────────────────────────────────────────────────│
+│ the names match: Enter defines it, then decodes it                     │
+│ :protocol w roles=wvalid,wready,wdata when=wvalid && wready lo=wdata[7:0] │
+╰─────────────────────────────────────────── Tab next  Enter run  Esc close ─╯
+```
+
+- **Roles** come from the selected rows: a role per signal, named after it without the start the
+  names share (`rx_valid`, `rx_data`: `valid`, `data`), with the signal filled in. `roles` is a
+  comma list to edit; a row follows each role, its signal suggested as in the decode form.
+- **`when` and the fields** are expressions on the roles; a field is `name = expression` and may
+  name the fields before it. The word typed is completed to a role or a field, `→` takes it. An
+  empty field row stays last to add the next.
+- **Checked as filled in**: with a signal for each role, the form reads the expressions against
+  those signals' widths (a slice past a role's width, a name no role nor field before it) and
+  says what is wrong, the field it is in red. It reads no value. Without them, the expressions
+  are not checked and `Enter` defines the protocol as it is.
+- **`Enter`** runs the `:protocol` line under it, then opens the decode form on the new protocol
+  with each role's signal filled in. A name taken by a protocol is refused. Keys are the decode
+  form's.
+- **From a search**: `:protocol search` (`Space d m`, or `Records of the matches` on a waveform)
+  after a clocked search (`/@aclk wvalid && wready`) opens the form filled in as MCP's `find`
+  offers it (section 15): named `ev` (`ev1`, ... when taken), its roles the signals the search
+  names then the signal rows but the clock, `when` the search's on the roles, a field per signal
+  row. `Enter` defines it; the decode form follows with the search's clock and named `s`, and its
+  `Enter` decodes and opens the records (section 5, "Records").
+
+### Value-names card
+
+`:names` without arguments (`Space d n`) opens the **value-names card** on the selected signal, so
+`:names` is learnt by using it: a line per value the signal takes in the trace, x and z left out,
+in value order, as its row shows it (`0x2`), with how many times it is taken; the name typed beside
+it, those it has filled in. More than 256 values is an error: `:names` names some. The `:names`
+line is under them (`:names top.cpu.state 0x0=IDLE 0x2=BUSY`, `off` with none named); `Enter`
+runs it, and an error stays on the card. Keys are the decode form's.
+
+```
+╭─ names top.cpu.state ──────────────────────────────────────────╮
+│ 0x0        IDLE                                       1 time   │
+│ 0x1                                                   1 time   │
+│▌0x2        BUSY                                       1 time   │
+│────────────────────────────────────────────────────────────────│
+│ each value its name, or none: Enter names them                 │
+│ :names top.cpu.state 0x0=IDLE 0x2=BUSY                         │
+╰─────────────────────────────── Tab next  Enter run  Esc close ─╯
+```
+
+### Decodes
+
+`:decodes` (`Space d l`) lists the decodes made, a line each: its name, protocol, where it is (its
+prefix, else its clock, else the signals or streams it takes), and its records, results then
+violations that hold any (`wr 2  rd 8  · errors 2`).
+
+- `Enter` opens its records (section 5 "Records"); `a` adds its results and violations as a group
+  of its name, as the interfaces picker does, or says they are shown already.
+- `e` opens the decode form on it, titled `edit decode <name>`, its name not taken; `Enter` there
+  decodes it again in place (section 16): rows of streams it still makes stay.
+- `dd` removes it, as `:decode <name> off`: after the first `d` the footer says `d again removes
+  it`. One another decode reads stays, the status line naming the readers.
+- `j` / `k` or the arrows move, `Esc` / `q` close; the keys are fixed (section 5 "Records"). The
+  mouse: the wheel moves, a click highlights, a double click opens the records, a click outside
+  closes it. With no decodes, `:decodes` says how to make one.
 
 ### Records
 
@@ -234,9 +318,9 @@ person to look through.
 
 ### Rows
 
-The keys that change the rows are in section 3 with the others: `dd` removes, `J` / `K` move, `r`
-cycles the radix, `V` selects a range of rows for them and for `:group`, `u` / `Ctrl-r` undo and
-redo. In the panel, `/` searches the signals; on the rows it searches values (section 8), so
+The keys that change the rows are in section 3 with the others: `dd` removes and `p` / `P` put
+what it removed elsewhere, `J` / `K` move, `>` / `<` group and ungroup, `R` renames a group, `r`
+cycles the radix, `V` selects a range of rows for them, `u` / `Ctrl-r` undo and redo. In the panel, `/` searches the signals; on the rows it searches values (section 8), so
 adding by name is `a` then `/`.
 
 ### Undo
@@ -283,11 +367,21 @@ A group is a named set of rows with a header row. Groups have one level (no nest
 - A collapsed header shows the number of signals in it: `▸ stream (4)`.
 - With a header selected, the status line shows the group's name and `/` shows an error.
 
-On the rows (section 3): `V` then `j` / `k` select rows and `:group <name>` groups them; `dd` on
-a header removes the group and its signals; `J` / `K` on a header move the whole group, and on a
-signal next to a group's edge move it into or out of the group.
+On the rows (section 3), as in vim's indenting:
 
-- `:group` on a selection that includes a header shows an error, since groups don't nest yet.
+- `>` groups the selected row or `V` range under a name it gives (the start the signals' names
+  share, `s_axi_aw` for `s_axi_awvalid` and `s_axi_awready`; else `group`), and the name is typed
+  in place on the header: the status line shows `NAME` and what the keys do, the first character
+  replaces the name, `Backspace` and `Ctrl-u` edit it, `Enter` keeps it and `Esc` leaves the
+  name it had. `R` types a new name for the group the selected row is in the same way. Grouping
+  and naming are an undo step each. `:group <name>` and `:rename <name>` do it in one line.
+- `<` takes the selected signals out of their group, placed right after it (a group left empty
+  goes); on a header, it dissolves the group, its signals staying where they are, as `:ungroup`.
+- `dd` on a header removes the group and its signals; `p` / `P` put them back elsewhere as a
+  group. `J` / `K` on a header move the whole group, and on a signal next to a group's edge move
+  it into or out of the group.
+
+- `>` or `:group` on a selection that includes a header shows an error, since groups don't nest yet.
 - `:group` on signals all inside one group takes them out of it into the new group, placed right
   after it, so a group is split without rebuilding it; a group left empty goes. A selection
   partly inside a group shows an error naming the group.

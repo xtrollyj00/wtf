@@ -45,7 +45,7 @@ pub struct App {
     searches: Vec<String>,
     hist_pos: Option<usize>,
     /// The search `n` / `N` repeat.
-    last_search: Option<String>,
+    pub last_search: Option<String>,
     /// Its matches counted in the whole trace, for the query it was (as `Debug` shows it).
     matches: Option<(String, u64, bool)>,
     /// Status line message; true for errors.
@@ -85,6 +85,8 @@ pub struct App {
     typed_at: Option<std::time::Instant>,
     pub which_key: bool,
     pub which_delay: std::time::Duration,
+    /// The status line says what can follow (config `hints`, spec §19).
+    pub hints: bool,
     /// The leader menu, open at this group (the keys from the top) (spec §2 "Leader").
     pub leader: Option<Vec<Key>>,
     pub quit: bool,
@@ -120,6 +122,20 @@ pub struct App {
     pub picker: Option<crate::tui::picker::Picker>,
     /// The decode form (`:decode` alone, spec §5 "Decode form").
     pub form: Option<crate::tui::form::Form>,
+    /// The decodes list (`:decodes`, spec §5 "Decodes").
+    pub decodes: Option<crate::tui::decodes::Decodes>,
+    /// The rows `dd` removed last, for `p` / `P` (spec §6).
+    pub removed: Vec<Row>,
+    /// A group's name being typed on its header (`>`, `R`): the header, the name it had, and
+    /// whether the next character replaces it.
+    pub naming: Option<Naming>,
+}
+
+/// A group's name edited in place (spec §6): typed into the header's name.
+pub struct Naming {
+    pub header: usize,
+    pub was: String,
+    pub fresh: bool,
 }
 
 /// The agent a window follows (`:follow`, spec §15 "Following"): each change it makes to its
@@ -226,6 +242,7 @@ impl App {
             hist_pos: None,
             last_search: None,
             matches: None,
+            hints: true,
             msg: None,
             agent_msg: None,
             notes: Vec::new(),
@@ -261,6 +278,9 @@ impl App {
             menu: None,
             picker: None,
             form: None,
+            decodes: None,
+            removed: Vec::new(),
+            naming: None,
         }
     }
 
@@ -361,6 +381,10 @@ impl App {
             "records" => return self.open_browser(arg.trim()),
             "pick" => return self.open_picker(arg.trim()),
             "decode" if arg.trim().is_empty() => return self.open_form(""),
+            "protocol" if arg.trim().is_empty() => return self.open_protocol_form(),
+            "protocol" if arg.trim() == "search" => return self.protocol_of_search(),
+            "names" if arg.trim().is_empty() => return self.open_names(),
+            "decodes" => return self.open_decodes(),
             // the window picks the unit that fits; `unit` is for agents' answers (spec §15)
             "unit" => return Err("unit sets the time unit of an agent's answers; the window picks what fits".into()),
             _ => command::run(&mut self.ws, line)?,
@@ -559,6 +583,9 @@ impl App {
         if self.messages.is_some() {
             return self.messages_key(k);
         }
+        if self.naming.is_some() {
+            return self.naming_key(k);
+        }
         let mark = self.ws.mark();
         if self.leader.is_some() {
             self.leader_key(k);
@@ -566,6 +593,7 @@ impl App {
         }
         match self.mode {
             _ if self.picker.is_some() => self.picker_key(k),
+            _ if self.decodes.is_some() => self.decodes_key(k),
             _ if self.form.is_some() => self.form_key(k),
             Mode::Normal if self.adding => self.panel_key(k),
             Mode::Normal => self.normal_key(k),
@@ -580,6 +608,65 @@ impl App {
         }
     }
 
+
+    /// A new group's name: the longest start its signals' names share (`s_axi_aw` for
+    /// `s_axi_awvalid` and `s_axi_awready`), without a trailing `_` or `.`; else `group`.
+    fn group_name(&self) -> String {
+        let leaves: Vec<String> = self.ws.rows[self.ws.selection()].iter().filter_map(Row::sig).map(|s| rows::child_name(&self.ws.trace.vars[s.var].path)).collect();
+        let first = leaves.first().map_or("", String::as_str);
+        let len = leaves.iter().fold(first.len(), |n, l| first.chars().zip(l.chars()).take(n).take_while(|(a, b)| a == b).count());
+        let name = first.chars().take(len).collect::<String>().trim_end_matches(['_', '.']).to_string();
+        if leaves.len() > 1 && name.chars().count() > 1 { name } else { "group".into() }
+    }
+
+    /// Start typing the selected header's name in place, the first character replacing it.
+    fn start_naming(&mut self) {
+        if let Some(Row::Group { name, .. }) = self.ws.rows.get(self.ws.sel) {
+            self.naming = Some(Naming { header: self.ws.sel, was: name.clone(), fresh: true });
+        }
+    }
+
+    /// Typing a group's name (spec §6): characters, `Backspace`, `Ctrl-u` edit it on the header;
+    /// `Enter` keeps it, one undo step; `Esc` puts back the name it had.
+    fn naming_key(&mut self, k: KeyEvent) {
+        let Some(n) = &mut self.naming else { return };
+        let Some(Row::Group { name, .. }) = self.ws.rows.get_mut(n.header) else { return self.naming = None };
+        let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+        match k.code {
+            KeyCode::Char('u') if ctrl => {
+                name.clear();
+                n.fresh = false;
+            }
+            KeyCode::Char(c) if !ctrl => {
+                if std::mem::take(&mut n.fresh) {
+                    name.clear();
+                }
+                name.push(c);
+            }
+            KeyCode::Backspace => {
+                name.pop();
+                n.fresh = false;
+            }
+            KeyCode::Esc => {
+                *name = n.was.clone();
+                self.naming = None;
+            }
+            KeyCode::Enter if name.trim().is_empty() => self.msg = Some(("a group needs a name; Esc keeps the one it had".into(), true)),
+            KeyCode::Enter => {
+                // one undo step, from the name it had
+                let typed = name.trim().to_string();
+                *name = n.was.clone();
+                let h = n.header;
+                let mark = self.ws.mark();
+                if let Some(Row::Group { name, .. }) = self.ws.rows.get_mut(h) {
+                    *name = typed;
+                }
+                self.ws.record(mark);
+                self.naming = None;
+            }
+            _ => {}
+        }
+    }
 
     /// The `:help <topic>` and `:trail` box has the keys: `j` / `k` and `Ctrl-f` / `Ctrl-b` move,
     /// `Enter` jumps to a line's time, `Esc` / `q` close.
@@ -707,7 +794,12 @@ impl App {
         let at = count(Some(self.ws.view.cursor));
         let (_, total, more) = self.matches.as_ref().unwrap();
         let i = if at.more { format!("{MAX}+") } else { at.total.to_string() };
-        self.msg = Some((format!("match {i} of {total}{}", if *more { "+" } else { "" }), false));
+        let mut msg = format!("match {i} of {total}{}", if *more { "+" } else { "" });
+        // a clocked search's matches can become records (spec §5 "Protocol form")
+        if let Some(k) = (self.hints && q.clock.is_some() && *total > 0).then(|| crate::tui::render::leader_key(self, ":protocol search")).flatten() {
+            msg += &format!("; {k}: records of them");
+        }
+        self.msg = Some((msg, false));
         Ok(())
     }
 
@@ -771,7 +863,7 @@ impl App {
     }
 
 
-    fn report(&mut self, r: Result<(), String>) {
+    pub(crate) fn report(&mut self, r: Result<(), String>) {
         if let Err(e) = r {
             self.msg = Some((e, true));
         }
@@ -999,7 +1091,7 @@ impl App {
                 self.report(r);
             }
             // the keys that change the rows need a row
-            A::MoveDown | A::MoveUp | A::Remove | A::Range | A::Radix if self.ws.rows.is_empty() => {}
+            A::MoveDown | A::MoveUp | A::Remove | A::Range | A::Radix | A::Group | A::Ungroup | A::Rename if self.ws.rows.is_empty() => {}
             // a `V` range moves whole, past the next row on screen (spec §3)
             A::MoveDown | A::MoveUp if self.ws.anchor.is_some() => {
                 let r = self.ws.selection();
@@ -1016,7 +1108,34 @@ impl App {
                 }
             }
             A::Remove => {
+                let kept = self.ws.rows[self.ws.selection()].to_vec();
                 let r = self.ws.delete();
+                if r.is_ok() {
+                    self.removed = kept;
+                }
+                self.report(r);
+            }
+            A::Group => {
+                let name = self.group_name();
+                let r = self.ws.group(&name);
+                if r.is_ok() {
+                    self.start_naming();
+                }
+                self.report(r);
+            }
+            A::Ungroup => {
+                let r = self.ws.ungroup_rows();
+                self.report(r);
+            }
+            A::Rename => match rows::header_of(&self.ws.rows, self.ws.sel) {
+                Some(h) => {
+                    self.ws.sel = h;
+                    self.start_naming();
+                }
+                None => self.msg = Some(("not in a group: > groups the row".into(), true)),
+            },
+            A::Put | A::PutAbove => {
+                let r = self.ws.put(self.removed.clone(), a == A::Put);
                 self.report(r);
             }
             A::Range => self.ws.anchor = if self.ws.anchor.is_some() { None } else { Some(self.ws.sel) },

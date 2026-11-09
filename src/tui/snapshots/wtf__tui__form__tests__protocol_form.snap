@@ -1,0 +1,28 @@
+---
+source: src/tui/form.rs
+expression: "crate::snapshot(&mut a, 100, Some(24))"
+---
+Name         │ Value      │ 0             100ns         200ns         300ns          400ns
+             │            │ ┃━━┐┌─┐ ┌─┐
+s_axi_wvalid │            │ ┃━━┴┘ └─┘ └──────────────────────────────────────────────────────
+             │            │ ┃━━┐┌─┐ ┌─┐
+s_ax ╭─ protocol ─────────────────────────────────────────────────────────────────────────────╮
+     │ name       w                                                                           │
+s_ax │ roles      wvalid, wready, wdata                                                       │
+     │ wvalid     top.s_axi_wvalid                                                            │
+     │ wready     top.s_axi_wready                                                            │
+     │ wdata      top.s_axi_wdata                                                             │
+     │ when       wvalid && wready                                                            │
+     │ field      lo = wdata[7:0]                                                             │
+     │▌field      hi = lo[3:0]                                                                │
+     │ field                                                                                  │
+     │────────────────────────────────────────────────────────────────────────────────────────│
+     │ the names match: Enter defines it, then decodes it                                     │
+     │ :protocol w roles=wvalid,wready,wdata when=wvalid && wready lo=wdata[7:0] hi=lo[3:0]   │
+     ╰─────────────────────────────────────────────────────── Tab next  Enter run  Esc close ─╯
+             │            │
+             │            │
+             │            │
+             │            │
+             │            │
+ NORMAL   signals ▸  top.s_axi_wdata                                             0  7ns/col  x [+]

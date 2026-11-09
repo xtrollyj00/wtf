@@ -60,6 +60,10 @@ fn nvc_names() {
     // a session saved when paths kept nvc's form still finds the element
     let v = ws.var_named("vhdl.arr.[1]").unwrap();
     assert_eq!(ws.trace.vars[v].path, "vhdl.arr[1]");
+    // a one-bit slice of the array is its bit, not the element `arr[1]`
+    wtf_core::command::run(&mut ws, "add arr[1:1]").unwrap();
+    let v = *ws.trace.by_path.get("vhdl.arr[1:1]").unwrap();
+    assert_eq!(ws.trace.vars[v].width, Some(1));
     let q = ws.query("@clk gen(1).x && arr(1) == 0xC && arr(0)(1)").unwrap();
     let s = Search { from: 0, to: None, forward: true, merge: true, runs: usize::MAX, matches: u64::MAX };
     assert_eq!(query::find(&ws.trace, &q, &s).runs.len(), 1);

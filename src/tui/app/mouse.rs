@@ -129,12 +129,13 @@ enum Act {
     Color(Option<usize>),
     MarkAt(Tick),
     CopyTime(Tick),
-    Line(String),
     /// A `:` command, run.
     Run(String),
     Key(KeyEvent),
     Expand(bool),
     Sub(Vec<Item>),
+    /// The decode form for a protocol, on the `V` range's signals.
+    DecodeAs(String),
 }
 
 fn item(label: &str, key: &str, act: Act) -> Item {
@@ -215,6 +216,9 @@ impl App {
             let mark = self.ws.mark();
             self.picker_mouse(m, at, now);
             return self.ws.record(mark);
+        }
+        if self.decodes.is_some() {
+            return self.decodes_mouse(m, at, now);
         }
         // the decode form: a click on a field fills that one in; nothing under it takes the mouse
         if let Some(f) = &mut self.form {
@@ -853,11 +857,11 @@ impl App {
                 self.msg = Some((format!("copied: {text}"), false));
                 self.yank = Some(text);
             }
-            Act::Line(l) => self.prefill(&l),
             Act::Run(c) => return self.run(&c),
             Act::Do(a, given) => self.action(a, 1, given),
             Act::Key(k) => self.panel_key(k),
             Act::Expand(open) => self.panel.open(open),
+            Act::DecodeAs(p) => self.open_form_as(&p),
             Act::Sub(_) => {}
         }
         Ok(())
@@ -889,18 +893,26 @@ impl App {
         let colour = |items: &mut Vec<Item>| items.push(item("Colour", gl().group_closed.to_string().as_str(), Act::Sub(self.color_items())));
         match ws.rows.get(ws.sel) {
             _ if range => {
-                items.push(item("Group…", ":group", Act::Line("group ".into())));
+                items.push(self.does("Group", A::Group));
+                if ws.rows[ws.selection()].iter().any(|r| r.is_group() || r.sig().is_some_and(|s| s.grouped)) {
+                    items.push(self.does("Out of the group", A::Ungroup));
+                }
                 radix(&mut items);
                 colour(&mut items);
+                let playable = ws.playable(&self.range_vars());
+                if !playable.is_empty() {
+                    let sub = playable.into_iter().map(|(p, n)| item(&p, &format!("{n} role{}", if n == 1 { "" } else { "s" }), Act::DecodeAs(p.clone()))).collect();
+                    items.push(item("Decode as", gl().group_closed.to_string().as_str(), Act::Sub(sub)));
+                }
                 items.push(self.does("Remove", A::Remove));
             }
-            Some(Row::Group { collapsed, name, .. }) => {
+            Some(Row::Group { collapsed, .. }) => {
                 items.push(self.does(if *collapsed { "Open" } else { "Fold" }, A::Fold));
                 radix(&mut items);
                 colour(&mut items);
-                items.push(item("Rename…", ":rename", Act::Line(format!("rename {name}"))));
-                items.push(item("Ungroup", ":ungroup", Act::Run("ungroup".into())));
-                items.push(self.does("Remove", A::Remove));
+                items.push(self.does("Rename", A::Rename));
+                items.push(self.does("Ungroup", A::Ungroup));
+                items.push(self.does("Remove with its rows", A::Remove));
             }
             Some(Row::Signal(s)) => {
                 let (var, bit) = ws.probe(s, ws.bit);
@@ -911,9 +923,17 @@ impl App {
                 radix(&mut items);
                 colour(&mut items);
                 items.push(self.does("Copy value", A::CopyValue));
+                match s.grouped {
+                    true => items.extend([self.does("Out of the group", A::Ungroup), self.does("Rename the group", A::Rename)]),
+                    false => items.push(self.does("Group", A::Group)),
+                }
                 items.push(self.does("Remove", A::Remove));
             }
             None => {}
+        }
+        // what dd removed, back next to the row
+        if !self.removed.is_empty() && ws.rows.get(ws.sel).is_some() {
+            items.extend([self.does("Put below", A::Put), self.does("Put above", A::PutAbove)]);
         }
         if let Some(t) = t.filter(|_| !range) {
             items.push(item("Mark here", &self.keymap.show(A::Mark), Act::MarkAt(t)));
@@ -921,6 +941,10 @@ impl App {
             items.extend([self.does("Next change", A::NextChange), self.does("Previous change", A::PrevChange), self.does("Search value…", A::Search)]);
             if self.last_search.is_some() {
                 items.extend([self.does("Next match", A::NextMatch), self.does("Previous match", A::PrevMatch)]);
+                if self.last_search.as_deref().is_some_and(|s| s.trim().starts_with('@')) {
+                    let k = crate::tui::render::leader_key(self, ":protocol search").unwrap_or_default();
+                    items.push(item("Records of the matches", &k, Act::Run("protocol search".into())));
+                }
             }
         }
         items

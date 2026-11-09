@@ -49,7 +49,10 @@ These are wtf's defaults. `?` in the window shows the keys of where you are; `[k
 |---|---|
 | <kbd>a</kbd> | add signals |
 | <kbd>dd</kbd> | remove |
+| <kbd>p</kbd> <kbd>P</kbd> | put below / above |
 | <kbd>J</kbd> <kbd>K</kbd> | move down / up |
+| <kbd>></kbd> <kbd>&lt;</kbd> | group / ungroup |
+| <kbd>R</kbd> | rename the group |
 | <kbd>V</kbd> | select rows; Esc ends |
 | <kbd>r</kbd> | next radix |
 | <kbd>u</kbd> <kbd>Ctrl-r</kbd> | undo / redo |
@@ -200,6 +203,19 @@ New signals go below the selected row, at the accent line.
 | <kbd>Enter</kbd> | run the line; a field it names keeps the form open |
 | <kbd>Esc</kbd> | close |
 
+## In the decodes list
+
+`:decodes`, or `Space d l`, opens it. The keys are fixed.
+
+| Keys | Does |
+|---|---|
+| <kbd>j</kbd> <kbd>k</kbd> <kbd>Down</kbd> <kbd>Up</kbd> | move |
+| <kbd>Enter</kbd> | its records |
+| <kbd>a</kbd> | add its results as a group |
+| <kbd>e</kbd> | edit it in the decode form |
+| <kbd>d</kbd> | dd: remove it, its streams and their rows |
+| <kbd>Esc</kbd> <kbd>q</kbd> | close |
+
 ## The Space menu
 
 `Space` opens a menu of everything that has no key of its own. Groups open with their key; `Backspace` goes back up.
@@ -236,11 +252,12 @@ New signals go below the selected row, at the accent line.
 | Keys | Does | Runs |
 |---|---|---|
 | <kbd>Space</kbd> <kbd>d</kbd> <kbd>d</kbd> | decode an interface: the ones found in the trace, each with its line | `:pick interfaces` |
-| <kbd>Space</kbd> <kbd>d</kbd> <kbd>D</kbd> | decode with a form…: name, protocol, clock and roles as fields, tried as you fill them in | `:decode` |
-| <kbd>Space</kbd> <kbd>d</kbd> <kbd>p</kbd> | protocol… | `:protocol` |
+| <kbd>Space</kbd> <kbd>d</kbd> <kbd>l</kbd> | decodes: the ones made: records, rows, edit, remove | `:decodes` |
+| <kbd>Space</kbd> <kbd>d</kbd> <kbd>D</kbd> | decode with a form…: name, protocol, clock and roles as fields, checked as you fill them in; on a V range, its rows play the roles | `:decode` |
+| <kbd>Space</kbd> <kbd>d</kbd> <kbd>p</kbd> | protocol with a form…: roles from the selected rows, when and the fields checked as you type | `:protocol` |
+| <kbd>Space</kbd> <kbd>d</kbd> <kbd>m</kbd> | records of the matches…: the last clocked search as a protocol: its when, the shown signals as fields | `:protocol search` |
 | <kbd>Space</kbd> <kbd>d</kbd> <kbd>s</kbd> | computed signal… | `:signal` |
-| <kbd>Space</kbd> <kbd>d</kbd> <kbd>n</kbd> | name values… | `:names` |
-| <kbd>Space</kbd> <kbd>d</kbd> <kbd>r</kbd> | records where… | `:records` |
+| <kbd>Space</kbd> <kbd>d</kbd> <kbd>n</kbd> | name values…: the values the selected signal takes, each named | `:names` |
 
 ### <kbd>Space</kbd> <kbd>a</kbd> agent
 
@@ -274,8 +291,9 @@ New signals go below the selected row, at the accent line.
 | `:rm [path\|pattern]...` | Remove matching rows, or the selected row; :rm ** removes all |
 | `:signal <name> = <signal>` | Name a computed signal, e.g. :signal op = cmd[7:0] or :signal hdr = {a, b} |
 | `:decode <name> <protocol> <role>=<signal>...` | Decode a protocol into streams, e.g. :decode rx axis clock=clk tvalid=rx_tvalid tready=rx_tready tdata=rx_tdata tlast=rx_tlast; alone, a form that fills it in |
-| `:protocol <name> roles=<a,b> when=<expr> <field>=<expr>...` | Define a protocol on its roles, a record per cycle where when holds, e.g. :protocol cmd roles=valid,ready,data when=valid && ready op=data[7:0]; :decode puts it on signals |
-| `:names <signal> <value>=<name>...` | Name a signal's values, shown by the enum radix and searched by name, e.g. :names state 0=IDLE 1=BUSY; off removes them |
+| `:decodes` | List the decodes made: Enter opens records, a adds rows, e edits, dd removes |
+| `:protocol <name> roles=<a,b> when=<expr> <field>=<expr>...` | Define a protocol on its roles, a record per cycle where when holds, e.g. :protocol cmd roles=valid,ready,data when=valid && ready op=data[7:0]; :decode puts it on signals; alone, a form with the selected rows as roles; :protocol search, one filled in from the last clocked search |
+| `:names <signal> <value>=<name>...` | Name a signal's values, shown by the enum radix and searched by name, e.g. :names state 0=IDLE 1=BUSY; off removes them; alone, a card of the values the selected signal takes |
 | `:records <streams> [where <expr>]` | Browse records as a table: a stream, a decode's results (:records bus), a glob; / filters, s sorts, = groups |
 | `:scope [path]` | Resolve names under a scope first, e.g. :scope top.cpu makes state top.cpu.state; none without a path |
 | `:radix <name>` | Set the radix: hex bin dec sdec oct ascii float enum, q4.12 / uq4.12 fixed point |
@@ -337,6 +355,11 @@ start = "<C-g>"     # gg
 | `move_up` | `K` | move the row up, *count* |
 | `range` | `V` | select rows |
 | `radix` | `r` | next radix |
+| `group` | `>` | group the rows |
+| `ungroup` | `<` | out of the group |
+| `rename` | `R` | rename the group |
+| `put` | `p` | put removed rows below |
+| `put_above` | `P` | put removed rows above |
 | `undo` | `u` | undo |
 | `redo` | `<C-r>` | redo |
 | `copy_value` | `yy` | copy the value |

@@ -8,7 +8,7 @@
 
 - Command and Search return to Normal mode.
 - There is one mode for keys: time keys, row keys and the keys that change the rows (`dd`,
-  `J` / `K`, `r`, `V`, `u`) all work at once. Their keys don't overlap, and `u` takes back any
+  `p`, `J` / `K`, `>` / `<`, `r`, `V`, `u`) all work at once. Their keys don't overlap, and `u` takes back any
   change to the rows, so a mode to guard them would only cost round trips.
 - Every key that changes the rows is also a `:` command (section 7); the keys are shortcuts.
 - The signal panel (section 5) is no mode: `a` or the status line's `signals ▸` opens and closes
@@ -32,9 +32,13 @@
 | `Ctrl-f` / `Ctrl-b` | select the signal a screen of rows down / up |
 | `z` / `x` | zoom in / out by a factor of 2 around the cursor |
 | `a` | open / close the signal panel, to add signals below the selected row (section 5) |
-| `dd` | remove the selected row; on a group header the group and its signals; with a `V` range, its rows |
+| `dd` | remove the selected row; on a group header the group and its signals; with a `V` range, its rows. What it removed is kept for `p` / `P` |
+| `p` / `P` | put what `dd` removed last below / above the selected row (a `V` range's last / first), joining a group where a drop there would (section 2, "Drags"); selected after. It stays to put again |
 | `J` / `K` | move the selected row (on a header, the whole group) down / up; next to a group's edge, into or out of it. A `V` range moves whole, past the next row on screen, landing as a drag does (section 2, "Drags"), and stays selected |
-| `V` | start / end a range of rows: `j` / `k` extend it, then `dd`, `r`, `:group <name>`, `:radix`, `:color` take it |
+| `>` | group the selected row or `V` range, then type its name in place (section 6) |
+| `<` | take the selected rows out of their group, placed right after it; on a header, dissolve the group, its signals staying where they are (section 6) |
+| `R` | type a new name for the group the selected row is in, in place (section 6) |
+| `V` | start / end a range of rows: `j` / `k` extend it, then `dd`, `>`, `<`, `r`, `:radix`, `:color` take it |
 | `r` | cycle the radix of the selected line (a row, or a field under it), or of all signals in a group or `V` range (section 10) |
 | `u` / `Ctrl-r` | undo / redo a change to the rows (section 5, "Undo") |
 | `Esc` | end a `V` range |
@@ -226,13 +230,18 @@ key or command, so the menu teaches the keys. An item does what its key does.
 - Only items that apply are listed:
   - a row: `Open` / `Fold` (`Enter`, where it opens), `Examine` (`e`), `Radix` ▸ (the radixes the
     signal can take, section 10; `q<m>.<n>` opens the command line with `:radix q`), `Colour` ▸
-    (the eight colours each drawn in it, and `off`), `Copy value` (`yy`), `Remove` (`dd`);
+    (the eight colours each drawn in it, and `off`), `Copy value` (`yy`), `Group` (`>`) or, in a
+    group, `Out of the group` (`<`) and `Rename the group` (`R`), `Remove` (`dd`);
   - on a row's waveform also, for the column clicked, `Mark here` (`m`) and `Copy time` (`yt`);
     and from the cursor, as the keys, `Next change` (`w`), `Previous change` (`b`),
-    `Search value…` (`/`), and after a search `Next match` (`n`) and `Previous match` (`N`);
-  - a group header: `Open` / `Fold`, `Radix` ▸, `Colour` ▸, `Rename…` (opens `:rename <name>`),
-    `Ungroup` (`:ungroup`), `Remove` (`dd`);
-  - a `V` range: `Group…` (opens `:group `), `Radix` ▸, `Colour` ▸, `Remove` (`dd`);
+    `Search value…` (`/`), and after a search `Next match` (`n`) and `Previous match` (`N`),
+    after a clocked one `Records of the matches` (`Space d m`);
+  - a group header: `Open` / `Fold`, `Radix` ▸, `Colour` ▸, `Rename` (`R`), `Ungroup` (`<`),
+    `Remove with its rows` (`dd`);
+  - a `V` range: `Group` (`>`), `Out of the group` (`<`) when a row of it is in one, `Radix` ▸,
+    `Colour` ▸, `Decode as` ▸ (the protocols its signals play roles of, by their names' endings,
+    most roles first: the decode form for one, section 5), `Remove` (`dd`);
+  - on a row, header or range also, after `dd`: `Put below` (`p`), `Put above` (`P`);
   - the time axis: `Zoom to fit` (`:fit`), `Zoom in` (`z`), `Zoom out` (`x`);
   - a mark's number in the ruler: `Jump to` (`'N`), `Remove mark` (`NM`);
   - below the rows: `Add signals…` (`a`), `Undo` (`u`) and `Redo` (`Ctrl-r`) when there is one;

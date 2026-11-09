@@ -56,7 +56,9 @@ clk      ▁▁▁▁▔▔▔▔▁▁▁▁▔▔▔▔
 - A match of an expression is where it **becomes true**. With a clock, `/@aclk wvalid && wready`,
   a match is **every clock cycle** whose ending rising edge of `aclk` samples the expression true
   (just before the edge, as a flip-flop does), so each beat of a burst is one match. The cursor goes
-  to the cycle's start, the edge where the transfer's signals are set.
+  to the cycle's start, the edge where the transfer's signals are set. The match count says what
+  can follow, `match 1 of 12; Space d m: records of them` (`hints = false` in the config file
+  drops it): the matches as records (section 5, "Protocol form").
 - **Over time**: `past(x)` is x's value one sample earlier: with a clock, at the cycle before (just
   before the previous rising edge); without, one tick earlier. It nests (`past(past(x))`) and
   compares like a signal (`past(state) == 2`). `rose(x)` is `x && !past(x)`, `fell(x)` is

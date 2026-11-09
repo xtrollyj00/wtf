@@ -96,7 +96,8 @@ rows = [
   `values`, in the form `:names` takes (`values = "0=IDLE 1=BUSY"`), written before the rows.
 - `[[signal]]` entries name computed signals (`:signal`), made before the rows, which can show
   them. Rows can also show unnamed slices and concatenations by their full form
-  (`signal = "top.cpu.data[7:4]"`, `signal = "{top.a,top.b}"`).
+  (`signal = "top.cpu.data[7:4]"`, `signal = "{top.a,top.b}"`); a one-bit slice is named as the
+  bit (`top.cpu.data[1]`, not `[1:1]`).
 - `[[rows]]` entries are shown in file order. An entry is either a signal (`signal`, optional `radix`,
   `color`, `open` and `fields`, written only where they differ from the defaults)
   or a group (`group`, optional `collapsed`, and its own `rows`). The same shape inside groups

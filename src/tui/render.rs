@@ -41,6 +41,16 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
     }
     right.area.x = area.x + pw as u16;
     buf.merge(&right);
+    // a group's name being typed: a caret after it on its header (spec §6)
+    if let Some(n) = &app.naming
+        && let Some(&(ly, _, _)) = app.hit.lines.iter().find(|(_, (r, b), _)| *r == n.header && b.is_none())
+    {
+        let y = (ly + 1).min(body.saturating_sub(1));
+        let end = (pw..pw + app.hit.name_w).rev().find(|&x| !buf[(x as u16, y as u16)].symbol().trim().is_empty()).map_or(pw, |x| x + 1);
+        if end < w {
+            buf[(end as u16, y as u16)].set_char(' ').set_style(Style::new().add_modifier(Modifier::REVERSED));
+        }
+    }
     // a row being moved, lifted: its name in the accent, its lines tinted (spec §2 "Drags")
     if let Some(Held::Move { row, len, moved: true, .. }) = app.held {
         let name = if pal().mono { Style::new().add_modifier(Modifier::REVERSED) } else { Style::new().bg(pal().cursor).fg(pal().cursor_text).add_modifier(Modifier::BOLD) };
@@ -70,7 +80,7 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
         put(buf, x, y, &text, Style::new().bg(pal().cursor).fg(pal().cursor_text).add_modifier(Modifier::BOLD));
     }
     // under what has the keys, so they don't show around its edges
-    let covered = app.help || app.examine.is_some() || app.records.is_some() || app.browser.is_some() || app.messages.is_some() || app.menu.is_some() || app.leader.is_some() || app.picker.is_some() || app.form.is_some();
+    let covered = app.help || app.examine.is_some() || app.records.is_some() || app.browser.is_some() || app.messages.is_some() || app.menu.is_some() || app.leader.is_some() || app.picker.is_some() || app.form.is_some() || app.decodes.is_some();
     app.hit.notes = if covered { Vec::new() } else { notes(app, buf, w, body) };
     let drawn = app.hit.notes.len();
     app.hit.unshown = drawn == 0 && !app.shown_notes(std::time::Instant::now()).is_empty();
@@ -126,6 +136,7 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
     }
     crate::tui::browser::draw(app, buf, w, body);
     messages(app, buf, w, body);
+    crate::tui::decodes::draw(app, buf, w, body);
     crate::tui::form::draw(app, buf, w, body);
     crate::tui::picker::draw(app, buf, w, body);
     if app.leader.is_some() {
@@ -292,7 +303,10 @@ pub(crate) fn help_text(app: &App) -> (&'static str, Vec<Section>, &'static str,
             vec![
                 k(&[A::Panel], "add signals"),
                 k(&[A::Remove], "remove"),
+                k(&[A::Put, A::PutAbove], "put below / above"),
                 k(&[A::MoveDown, A::MoveUp], "move down / up"),
+                k(&[A::Group, A::Ungroup], "group / ungroup"),
+                k(&[A::Rename], "rename the group"),
                 k(&[A::Range], "select rows; Esc ends"),
                 k(&[A::Radix], "next radix"),
                 k(&[A::Undo, A::Redo], "undo / redo"),
@@ -1000,12 +1014,13 @@ fn status(app: &App, buf: &mut Buffer, w: usize, y: usize) -> Rect {
     let seg = |fg: Color, bg: Color| if mono { Style::new() } else { Style::new().fg(fg).bg(bg) };
     let (panel, sel) = (pal().panel, pal().selected);
     put(buf, 0, y, &" ".repeat(w), Style::new());
-    let mode = if app.picker.is_some() { "PICK" } else if app.panel_shown() { "SIGNALS" } else { "NORMAL" };
+    let mode = if app.naming.is_some() { "NAME" } else if app.picker.is_some() { "PICK" } else if app.panel_shown() { "SIGNALS" } else { "NORMAL" };
     let badge = if mono { Style::new().add_modifier(Modifier::REVERSED | Modifier::BOLD) } else { Style::new().bg(pal().cursor).fg(pal().cursor_text).add_modifier(Modifier::BOLD) };
     let mut x = 0;
     // as wide as the longest, so the button doesn't move when the mode changes
     x += put_seg(buf, x, y, &format!("{mode:<7}"), badge);
-    let pending = app.pending();
+    // typing a group's name: what the keys do, in place of the keys pending
+    let pending = if app.naming.is_some() { "Enter keeps the name  Esc as it was".to_string() } else { app.pending() };
     if !pending.is_empty() {
         x += put_seg(buf, x, y, &pending, seg(pal().cursor, sel).add_modifier(Modifier::BOLD));
     }

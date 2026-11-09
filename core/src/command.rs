@@ -102,7 +102,7 @@ pub fn run(app: &mut Workspace, line: &str) -> Result<Option<Msg>, String> {
 /// runs to the closing quote, so it can hold a `key=` (`bad="x=1"`).
 /// Answers with the streams the instance made and how many records each has, violations apart,
 /// so what there is to look at shows: `bus: records bus.aw 2, ...; violations bus.errors 2, ...`.
-/// A `:decode` line's argument as an instance, not made yet (the TUI's decode form tries it).
+/// A `:decode` line's argument as an instance, not made yet (the TUI's decode form checks it).
 pub fn parse_decode(arg: &str) -> Result<crate::stream::Decode, String> {
     let usage = "usage: :decode <name> <protocol> <role>=<signal>...";
     let (name, rest) = word(arg);
@@ -122,6 +122,11 @@ pub fn parse_decode(arg: &str) -> Result<crate::stream::Decode, String> {
 }
 
 fn decode(app: &mut Workspace, arg: &str) -> Result<String, String> {
+    // `:decode <name> off` removes it, as `:names <signal> off` does
+    if let (name, "off") = (word(arg).0, word(arg).1.trim()) {
+        app.remove_decode(name)?;
+        return Ok(format!("{name}: removed"));
+    }
     let d = parse_decode(arg)?;
     let name = d.name.clone();
     let name = name.as_str();
@@ -158,6 +163,15 @@ fn protocol(app: &mut Workspace, arg: &str) -> Result<(), String> {
     let roles = roles.split(',').map(|r| r.trim().to_string()).filter(|r| !r.is_empty()).collect();
     let p = crate::stream::Sampler { name: name.into(), when, fields, roles };
     app.add_protocol(p).map(drop).map_err(|e| format!("protocol {name} not made: {e}"))
+}
+
+/// A value as a `key=value` line writes it: as it is when it reads back so, else in quotes
+/// (`bad="x=1"`).
+pub fn quote(v: &str) -> String {
+    match key_values(&format!("k={v}")) {
+        Some(p) if p.len() == 1 && p[0].1 == v => v.to_string(),
+        _ => format!("\"{v}\""),
+    }
 }
 
 /// The first word, and the text after it.
@@ -451,8 +465,10 @@ fn add_one(app: &mut Workspace, arg: &str) -> Result<(), String> {
         app.add_rows(&new);
         return Ok(());
     }
-    if crate::computed::form(arg).is_some() {
-        let (v, _) = app.resolve(arg)?;
+    // a bit of a bus (`state[1]`) is a one-bit slice, as in a concatenation
+    let bit = paths(app, &scoped(app, arg)).is_empty() && matches!(app.resolve(arg), Ok((_, Some(_))));
+    if crate::computed::form(arg).is_some() || bit {
+        let v = app.whole(arg)?;
         if app.shown(v) {
             return Err(format!("already shown: {arg}"));
         }
