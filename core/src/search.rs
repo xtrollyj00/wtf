@@ -1157,6 +1157,8 @@ mod tests {
         assert_eq!(err("cpu.busy )"), format!("unexpected: ) (operators: {OPERATORS})"));
         assert_eq!(err("cpu.data < z"), "cpu.data < z: < compares numbers; x, z and text only with == or !=");
         assert_eq!(err("cpu.state == 0x10"), "cpu.state: 0x10 doesn't fit in 3 bits");
+        assert_eq!(err("cpu.data == 40ns"), "cpu.data: file has no timescale; use ticks");
+        assert_eq!(err("cpu.data + 40ns > 0"), "file has no timescale; use ticks");
     }
     /// Signals for arithmetic: a, b 32 bits, m, n 4, s 8 (signed, as `x - y` makes), t text, w
     /// 128 bits, u 8 bits unknown; each with one value.

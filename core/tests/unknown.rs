@@ -37,6 +37,10 @@ fn messages() {
     assert_eq!(msg("cpu.busy.x"), "unknown signal: cpu.busy.x: top.cpu.busy is one 1-bit signal in this trace, without fields or elements");
     assert_eq!(msg("cpu.bsy"), "unknown signal: cpu.bsy (nearest: top.cpu.busy)");
     assert_eq!(msg("nope"), "unknown signal: nope");
+    // a real or text signal has no bits to slice
+    let say = |real| wtf_core::workspace::unknown::Unknown { name: "t.x".into(), why: Why::NoFields { signal: "top.t".into(), width: None, real, start: "t".into() } }.to_string();
+    assert_eq!(say(true), "unknown signal: t.x: top.t is one real signal in this trace, without fields or elements");
+    assert_eq!(say(false), "unknown signal: t.x: top.t is one text signal in this trace, without fields or elements");
     let ws = structs();
     assert_eq!(ws.unknown("pkts[1].bad").to_string(), "unknown signal: pkts[1].bad: types.pkts[1] has no bad; it has valid, state, pair");
     // what resolve answers is that message

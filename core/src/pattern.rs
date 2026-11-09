@@ -87,5 +87,16 @@ mod tests {
         assert_eq!(is(Syntax::Regex, "top.cpu.*"), Err("top.cpu.* is a glob; a pattern is a regex in slashes: /top\\.cpu\\./".into()));
         assert_eq!(is(Syntax::Regex, "**"), Err("** is a glob; a pattern is a regex in slashes: /.*/".into()));
         assert_eq!(is(Syntax::Regex, "/*uart*/"), Err("not a regex: /*uart*/ (repetition operator missing expression); `/uart/` for that glob".into()));
+        // without a `*`, no glob to offer
+        let e = regex("(").unwrap_err();
+        assert!(e.starts_with("not a regex: /(/ (") && !e.contains("glob"), "{e}");
+    }
+
+    #[test]
+    fn globs_as_regexes() {
+        assert_eq!(glob_regex("top.*.state"), "top\\..*\\.state");
+        assert_eq!(glob_regex("**.a**b"), "a.*b");
+        assert_eq!(glob_regex("rx?"), "rx.");
+        assert_eq!(glob_regex("**"), ".*");
     }
 }

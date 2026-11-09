@@ -169,6 +169,8 @@ fn regex_patterns() {
     assert_eq!(run(&mut ws, "add /^top\\.cpu\\./"), Ok(None));
     assert_eq!(names(&ws), ["state", "data", "busy"]);
     assert_eq!(run(&mut ws, "add /nope/"), Err("no match: /nope/".into()));
+    assert_eq!(run(&mut ws, "add /^top\\.cpu\\./"), Err("already shown: /^top\\.cpu\\./".into()));
+    assert_eq!(run(&mut ws, "add"), Err("usage: add <path|/regex/>...".into()));
     assert_eq!(run(&mut ws, "rm /.*/"), Ok(None));
     assert!(ws.rows.is_empty());
 }

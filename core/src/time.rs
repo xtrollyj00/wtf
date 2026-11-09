@@ -197,6 +197,12 @@ mod tests {
     }
 
     #[test]
+    fn no_timescale() {
+        assert_eq!(parse("20ns", None), Err(BadTime::NoTimescale));
+        assert_eq!(BadTime::NoTimescale.to_string(), "file has no timescale; use ticks");
+    }
+
+    #[test]
     fn exact() {
         assert_eq!(format_exact(16_432, NS), "16.432us");
         assert_eq!(format_exact(2_000, NS), "2us");

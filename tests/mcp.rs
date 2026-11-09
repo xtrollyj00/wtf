@@ -510,6 +510,9 @@ fn signals_fold() {
     // what fits isn't folded: a scope per core, a lane's signals
     assert_eq!(s.ok("signals", json!({"pattern": "/lane7$/"})).lines().count(), 4);
     assert_eq!(s.ok("signals", json!({"pattern": "/core2.*lane7\\./"})).lines().count(), 3);
+    // scopes only, folded: a line counts the scopes under it
+    let lanes = s.ok("signals", json!({"pattern": "/lane\\d+$/"}));
+    assert!(lanes.starts_with("top.core0 (scope, 60 matching scopes)\n"), "{lanes}");
 }
 
 #[test]
