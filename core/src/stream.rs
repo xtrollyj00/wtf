@@ -66,6 +66,31 @@ pub struct Decode {
     pub params: Vec<(String, String)>,
 }
 
+impl Sampler {
+    /// The `:protocol` line that defines it, without the `:`.
+    pub fn line(&self) -> String {
+        let mut s = format!("protocol {} roles={} when={}", self.name, self.roles.join(","), crate::command::quote(&self.when));
+        for (f, e) in &self.fields {
+            s += &format!(" {f}={}", crate::command::quote(e));
+        }
+        s
+    }
+}
+
+impl Decode {
+    /// The `:decode` line that makes it, without the `:`: the clock, a prefix, the roles, the
+    /// other params; those empty left out.
+    pub fn line(&self) -> String {
+        let mut s = format!("decode {} {}", self.name, self.protocol);
+        let clock = ("clock".to_string(), self.clock.clone());
+        let (prefix, params): (Vec<_>, Vec<_>) = self.params.iter().partition(|p| p.0 == "prefix");
+        for (k, v) in std::iter::once(&clock).chain(prefix).chain(&self.signals).chain(params).filter(|p| !p.1.is_empty()) {
+            s += &format!(" {k}={}", crate::command::quote(v));
+        }
+        s
+    }
+}
+
 /// Records with the same values of some fields (`Stream::group_by`): the values, how many, and
 /// the first and last start.
 pub struct Group {

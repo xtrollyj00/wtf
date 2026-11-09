@@ -191,20 +191,18 @@ impl Form {
 
     /// The `:decode` line the fields make, without the `:`; the fields left empty aren't in it.
     pub fn line(&self) -> String {
-        let quote = |v: &str| if v.contains(char::is_whitespace) { format!("\"{v}\"") } else { v.to_string() };
         if self.protocol {
-            let p = self.sampler();
-            let mut s = format!("protocol {} roles={} when={}", p.name, p.roles.join(","), quote(&p.when));
-            for (f, e) in &p.fields {
-                s += &format!(" {f}={}", quote(e));
-            }
-            return s;
+            return self.sampler().line();
         }
-        let mut s = format!("decode {} {}", self.value("name"), self.value("protocol"));
-        for f in self.fields[2..].iter().filter(|f| !f.value.trim().is_empty()) {
-            s += &format!(" {}={}", f.key, quote(f.value.trim()));
+        let of = |k: fn(Kind) -> bool| self.fields[2..].iter().filter(move |f| k(f.kind)).map(|f| (f.key.clone(), f.value.trim().to_string())).collect::<Vec<_>>();
+        Decode {
+            name: self.value("name").into(),
+            protocol: self.value("protocol").into(),
+            clock: self.value("clock").into(),
+            signals: of(|k| matches!(k, Kind::Role { .. })),
+            params: of(|k| matches!(k, Kind::Prefix | Kind::Param)),
         }
-        s
+        .line()
     }
 
     /// The protocol the protocol form defines, its fields those with a name and an expression.
@@ -973,7 +971,7 @@ mod tests {
         assert!(matches!(&form(&a).check, Err(e) if e.starts_with("hi: ")), "{:?}", form(&a).check);
         a.keys(":0]").unwrap();
         assert_eq!(form(&a).check, Ok(()));
-        assert_eq!(form(&a).line(), "protocol w roles=wvalid,wready,wdata when=\"wvalid && wready\" lo=wdata[7:0] hi=lo[3:0]");
+        assert_eq!(form(&a).line(), "protocol w roles=wvalid,wready,wdata when=wvalid && wready lo=wdata[7:0] hi=lo[3:0]");
         insta::assert_snapshot!("protocol_form", crate::snapshot(&mut a, 100, Some(24)));
         // defined, then the decode form on it
         a.keys("\n").unwrap();

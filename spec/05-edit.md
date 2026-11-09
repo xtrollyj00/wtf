@@ -211,7 +211,7 @@ sampled protocol (section 16), so `:protocol` is learnt by using it.
 │▌field                                                                  │
 │────────────────────────────────────────────────────────────────────────│
 │ the names match: Enter defines it, then decodes it                     │
-│ :protocol w roles=wvalid,wready,wdata when="wvalid && wready" lo=wdata[7:0] │
+│ :protocol w roles=wvalid,wready,wdata when=wvalid && wready lo=wdata[7:0] │
 ╰─────────────────────────────────────────── Tab next  Enter run  Esc close ─╯
 ```
 

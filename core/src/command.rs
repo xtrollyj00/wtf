@@ -165,6 +165,15 @@ fn protocol(app: &mut Workspace, arg: &str) -> Result<(), String> {
     app.add_protocol(p).map(drop).map_err(|e| format!("protocol {name} not made: {e}"))
 }
 
+/// A value as a `key=value` line writes it: as it is when it reads back so, else in quotes
+/// (`bad="x=1"`).
+pub fn quote(v: &str) -> String {
+    match key_values(&format!("k={v}")) {
+        Some(p) if p.len() == 1 && p[0].1 == v => v.to_string(),
+        _ => format!("\"{v}\""),
+    }
+}
+
 /// The first word, and the text after it.
 fn word(text: &str) -> (&str, &str) {
     let text = text.trim_start();

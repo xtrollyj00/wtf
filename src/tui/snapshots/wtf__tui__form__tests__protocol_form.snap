@@ -18,7 +18,7 @@ s_ax │ roles      wvalid, wready, wdata                                       
      │ field                                                                                  │
      │────────────────────────────────────────────────────────────────────────────────────────│
      │ the names match: Enter defines it, then decodes it                                     │
-     │ :protocol w roles=wvalid,wready,wdata when="wvalid && wready" lo=wdata[7:0] hi=lo[3:0] │
+     │ :protocol w roles=wvalid,wready,wdata when=wvalid && wready lo=wdata[7:0] hi=lo[3:0]   │
      ╰─────────────────────────────────────────────────────── Tab next  Enter run  Esc close ─╯
              │            │
              │            │

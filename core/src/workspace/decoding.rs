@@ -323,6 +323,66 @@ impl Workspace {
         Decode { name: String::new(), protocol: protocol.into(), clock, signals, params: Vec::new() }
     }
 
+    /// A clocked search (`@clk when`) as a protocol named `protocol` and the decode `decode`
+    /// putting it on the signals (spec §15 `find`): its roles are the signals `when` names (not
+    /// functions, numbers or value names) then those `shown`, each named as its signal's leaf
+    /// (two alike: `scope_leaf`, then `_k`); `when` is written on the roles, and each shown signal
+    /// is a field, a slice kept (`lo=data[7:0]`).
+    pub fn protocol_of(&mut self, protocol: &str, decode: &str, search: &str, shown: &[String]) -> Result<(Sampler, Decode), String> {
+        self.query(search)?;
+        let (clock, when) = search.trim().strip_prefix('@').and_then(|e| e.split_once(char::is_whitespace)).ok_or("not a clocked search: write it @<clock> <expr>")?;
+        let ident = |c: char| c.is_alphanumeric() || "_.$".contains(c);
+        let mut words: Vec<(usize, &str)> = Vec::new();
+        let mut at = 0;
+        for piece in when.split(|c: char| !ident(c) && c != '[') {
+            let w = piece.split('[').next().unwrap_or("");
+            let next = when[at + piece.len()..].trim_start();
+            if !w.is_empty() && !w.starts_with(|c: char| c.is_ascii_digit()) && !next.starts_with('(') && !when[..at].ends_with('\'') {
+                words.push((at, w));
+            }
+            at += piece.len() + 1;
+        }
+        let mut sigs: Vec<String> = Vec::new();
+        for (_, w) in &words {
+            if self.resolve(w).is_ok() && !sigs.iter().any(|s| s == w) {
+                sigs.push(w.to_string());
+            }
+        }
+        let base = |n: &str| n.split('[').next().unwrap_or(n).to_string();
+        for n in shown {
+            if !sigs.contains(&base(n)) {
+                sigs.push(base(n));
+            }
+        }
+        // a role is its signal's last name; two alike take their scope's (`cpu_state`), then a number
+        let word = |s: &str| -> String { s.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect() };
+        let mut roles: Vec<String> = sigs.iter().map(|n| word(n.rsplit('.').next().unwrap_or(n))).collect();
+        let alike = |roles: &[String]| -> Vec<usize> { (0..roles.len()).filter(|&k| roles.iter().filter(|f| **f == roles[k]).count() > 1).collect() };
+        for k in alike(&roles) {
+            let mut parts = sigs[k].rsplit('.');
+            let (last, scope) = (parts.next().unwrap_or(""), parts.next().map(word).unwrap_or_default());
+            roles[k] = if scope.is_empty() { word(last) } else { format!("{scope}_{}", word(last)) };
+        }
+        for k in alike(&roles) {
+            roles[k] = format!("{}_{k}", roles[k]);
+        }
+        let role = |sig: &str| sigs.iter().position(|s| s == sig).map(|k| roles[k].clone()).unwrap_or_default();
+        // `when` with each signal's name its role's, from the end so the places stay
+        let mut on_roles = when.to_string();
+        for (at, w) in words.iter().rev().filter(|(_, w)| sigs.iter().any(|s| s == w)) {
+            on_roles.replace_range(*at..at + w.len(), &role(w));
+        }
+        // a field is named as its signal's role; two alike (slices of one) take a number
+        let mut names: Vec<String> = shown.iter().map(|n| role(&base(n))).collect();
+        for k in alike(&names) {
+            names[k] = format!("{}_{k}", names[k]);
+        }
+        let fields = shown.iter().zip(names).map(|(n, f)| (f, n.replacen(&base(n), &role(&base(n)), 1))).collect();
+        let p = Sampler { name: protocol.into(), when: on_roles.trim().into(), fields, roles: roles.clone() };
+        let d = Decode { name: decode.into(), protocol: protocol.into(), clock: clock.into(), signals: roles.into_iter().zip(sigs).collect(), params: Vec::new() };
+        Ok((p, d))
+    }
+
     /// The protocols, built-in then the session's, `signals` play a role of, with how many,
     /// most first.
     pub fn playable(&self, signals: &[usize]) -> Vec<(String, usize)> {

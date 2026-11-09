@@ -644,3 +644,22 @@ fn set_errors_and_briefs() {
     ws.add_protocol(Sampler { name: "cmd".into(), when: "valid && ready".into(), fields: vec![("op".into(), "cmd[3:0]".into())], roles: vec!["valid".into(), "ready".into(), "cmd".into()] }).unwrap();
     assert_eq!(brief("cmd", &ws).unwrap(), "decode <name> cmd clock=<clk> valid=<signal> ready=<signal> cmd=<signal>\n\nA record where valid && ready\nFields: op");
 }
+
+/// simple.vcd: a clocked search as a protocol, as `find` offers it (spec §15 `find`).
+#[test]
+fn protocol_of_a_search() {
+    let mut ws = with(&[]);
+    let shown = |s: &[&str]| s.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+    // `rose` and numbers aren't roles; two `state`s take their scope's name; slices are fields
+    let (p, d) = ws.protocol_of("ev", "s", "@clk rose(busy) && cpu.state == 2", &shown(&["dma.state", "data[7:4]", "data[3:0]"])).unwrap();
+    assert_eq!(p.line(), "protocol ev roles=busy,cpu_state,dma_state,data when=rose(busy) && cpu_state == 2 dma_state=dma_state data_1=data[7:4] data_2=data[3:0]");
+    assert_eq!(d.line(), "decode s ev clock=clk busy=busy cpu_state=cpu.state dma_state=dma.state data=data");
+    // the lines read back as what they say
+    assert_eq!(wtf_core::command::parse_decode(d.line().strip_prefix("decode ").unwrap()).unwrap(), d);
+    wtf_core::command::run(&mut ws, &p.line()).unwrap();
+    assert_eq!(ws.protocols.last(), Some(&p));
+    wtf_core::command::run(&mut ws, &d.line()).unwrap();
+    assert_eq!(wtf_core::command::quote("valid && b=1"), "\"valid && b=1\"");
+    assert!(ws.protocol_of("ev", "s", "@clk nosuch", &[]).is_err());
+    assert!(ws.protocol_of("ev", "s", "busy", &[]).unwrap_err().contains("clocked"));
+}
