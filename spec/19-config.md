@@ -125,7 +125,6 @@ p = ["protocol with a form…", ":protocol"]
 m = ["records of the matches…", ":protocol search"]
 s = ["computed signal…", ":signal "]
 n = ["name values…", ":names"]
-r = ["records where…", ":records "]
 
 [a]
 name = "agent"

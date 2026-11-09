@@ -185,7 +185,6 @@ p = ["protocol with a form…", ":protocol", "roles from the selected rows, when
 m = ["records of the matches…", ":protocol search", "the last clocked search as a protocol: its when, the shown signals as fields"]
 s = ["computed signal…", ":signal "]
 n = ["name values…", ":names", "the values the selected signal takes, each named"]
-r = ["records where…", ":records "]
 
 [a]
 name = "agent"

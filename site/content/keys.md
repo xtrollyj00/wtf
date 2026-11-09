@@ -258,7 +258,6 @@ New signals go below the selected row, at the accent line.
 | <kbd>Space</kbd> <kbd>d</kbd> <kbd>m</kbd> | records of the matches…: the last clocked search as a protocol: its when, the shown signals as fields | `:protocol search` |
 | <kbd>Space</kbd> <kbd>d</kbd> <kbd>s</kbd> | computed signal… | `:signal` |
 | <kbd>Space</kbd> <kbd>d</kbd> <kbd>n</kbd> | name values…: the values the selected signal takes, each named | `:names` |
-| <kbd>Space</kbd> <kbd>d</kbd> <kbd>r</kbd> | records where… | `:records` |
 
 ### <kbd>Space</kbd> <kbd>a</kbd> agent
 
