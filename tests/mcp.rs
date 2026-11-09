@@ -140,6 +140,18 @@ fn tools_list() {
         assert_eq!(t["inputSchema"]["type"], "object", "{t}");
         assert!(!t["description"].as_str().unwrap().is_empty(), "{t}");
     }
+    // the tool definitions ride along on every turn of an agent: they grow only on purpose (spec
+    // §15); raise a bound in the same commit as the text, saying why
+    let size = list.to_string().len();
+    assert!(size <= 13_400, "the tool definitions are {size} bytes, past the 13400 allowed");
+    for t in list["tools"].as_array().unwrap() {
+        let d = t["description"].as_str().unwrap();
+        assert!(d.chars().count() <= 330, "{}: a description of {} characters, past 330: move the rest to its topic", t["name"], d.chars().count());
+        for (arg, p) in t["inputSchema"]["properties"].as_object().into_iter().flatten() {
+            let d = p["description"].as_str().unwrap_or("");
+            assert!(d.chars().count() <= 260, "{}.{arg}: {} characters, past 260", t["name"], d.chars().count());
+        }
+    }
 }
 
 /// `help` is the reference the descriptions point to: the topics, then each one, before a trace
@@ -453,6 +465,12 @@ fn errors() {
     assert_eq!(s.tool("values", json!({"signals": ["data"], "from": "0ns", "to": "9ns", "radix": "hexx"})), Err("unknown radix: hexx".into()));
     assert!(s.tool("find", json!({"expr": "data =="})).is_err());
     assert_eq!(s.tool("render", json!({"signals": ["clk"], "from": "40ns", "to": "10ns"})), Err("`to` must be after `from`".into()));
+    // a range written backwards, likely a unit slip: the trace's range to compare with
+    let back = s.tool("values", json!({"signals": ["data"], "from": "40ns", "to": "10ns"})).unwrap_err();
+    assert!(back.starts_with("`to` 10ns is before `from` 40ns; the trace runs 0"), "{back}");
+    assert!(s.tool("find", json!({"expr": "clk", "from": "40ns", "to": "10ns"})).unwrap_err().starts_with("`to` 10ns is before"));
+    assert!(s.tool("find", json!({"expr": "clk", "from": "40ns", "to": "10ns", "backward": true})).is_ok());
+    assert_eq!(s.tool("find", json!({"expr": "@clk rising"})).unwrap_err(), "rising: `@clk` already samples at the clock's rising edges; an edge of a signal is rose(x), SVA's $rose without the $");
     assert!(s.tool("render", json!({})).unwrap_err().starts_with("the workspace has no signals yet"));
     assert!(s.tool("present", json!({})).unwrap_err().starts_with("the workspace has no signals yet"));
     assert!(s.tool("command", json!({"line": ":w"})).unwrap_err().starts_with(":w belongs to the user's window"));
@@ -1036,7 +1054,10 @@ fn markdown(text: &str) -> String {
     let mut out = Vec::new();
     let (mut prev, mut code) = ("", false);
     for line in text.lines() {
-        if prev.ends_with(':') && line.starts_with("  ") && !line.contains('`') {
+        if ["Form", "Recipes", "Details"].contains(&line) {
+            // a topic's sections
+            out.push(format!("**{line}**\n"));
+        } else if prev.ends_with(':') && line.starts_with("  ") && !line.contains('`') {
             out.push(format!("\n```\n{}\n```\n", line.trim()));
         } else {
             // a code span can run on to the next line
@@ -1082,7 +1103,7 @@ fn site_tools() {
     out.push_str("The `help` topics they point to are the [reference](@/reference.md).\n");
     // the help topics: the same texts the window shows with `:help <topic>`
     let mut reference = String::from(
-        "+++\ntitle = \"Reference\"\ndescription = \"Names, times, radixes, search expressions, decoders, records and commands, as wtf explains them.\"\n+++\n\n\
+        "+++\ntitle = \"Reference\"\ndescription = \"Names, patterns, times, radixes, search expressions, decoders, records and commands, as wtf explains them.\"\n+++\n\n\
          <!-- Written by `UPDATE_SITE=1 cargo test --test mcp site_tools` from wtf's help topics; don't edit. -->\n\n\
          One topic per concept, word for word as wtf explains it: `:help <topic>` shows one in the \
          window, and an agent reads it with the `help` tool. The [tour](@/get-started.md) and the \
@@ -1090,8 +1111,9 @@ fn site_tools() {
     );
     let topics = s.ok("help", json!({}));
     for line in topics.lines().skip(1) {
-        let Some((topic, what)) = line.split_once(": ") else { continue };
-        reference.push_str(&format!("## {topic}\n\n*{}{}.*\n\n{}\n\n", what[..1].to_uppercase(), &what[1..], markdown(&s.ok("help", json!({"topic": topic})))));
+        // a topic's first line says what it covers
+        let Some((topic, _)) = line.split_once(": ") else { continue };
+        reference.push_str(&format!("## {topic}\n\n{}\n\n", markdown(&s.ok("help", json!({"topic": topic})))));
     }
     for (name, page) in [("tools", out), ("reference", reference)] {
         let page = page.trim_end().to_string() + "\n";

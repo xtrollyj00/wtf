@@ -19,14 +19,14 @@ Run one of wtf's `:` commands on the workspace: `decode`, `protocol`, rows, curs
 
 ### `find`
 
-The times a search expression matches, as a table. With `@clk ` first, a match is a clock cycle whose ending edge samples it true, reported at the cycle's starting edge; without, where the expression becomes true, so back-to-back handshakes are one match. `show` adds values (and the `protocol` and `decode` lines making them records), `count_only` counts (`help expressions`). For a bus, decode it instead (`help decode`).
+When a search expression holds, as a table of times; `show` adds values, `count_only` counts. With `@<clock> ` first, a match is a cycle whose ending edge samples it true (`@clk x`: the cycles x is high), reported at the cycle's start; without, where it becomes true (`rose(x)`: x's edges). A bus: decode it (`help decode`).
 
 | Argument | Means |
 |---|---|
 | `backward` | Search toward the start: the latest matches first. |
 | `count` | How many lines to list; default 20. |
 | `count_only` | Only count the matches; no list. |
-| `expr` (required) | A search expression, `@clk valid && ready` (`help expressions`). |
+| `expr` (required) | A search expression as in SystemVerilog: `==` `!=` `<` `&&` `\|\|` `!`; only `rose(x)` `fell(x)` `stable(x)` `past(x)` (SVA's, no `$`); `@<clock> ` first samples each cycle: `@top.clk valid && ready`, `rose(irq) && !past(busy)` (`help expressions`). |
 | `from` | Search after (or with `backward`, before) this time; default the start. |
 | `show` | Signals whose values to list on each match: a table of the transfers. |
 | `to` | Stop at this time (with `backward`, down to it); default the end. |
@@ -34,7 +34,7 @@ The times a search expression matches, as a table. With `@clk ` first, a match i
 
 ### `help`
 
-The reference: a topic per concept (names, times, radix, expressions, decode, records, workspace, commands); none lists them.
+The reference: a topic per concept (names, patterns, times, radix, expressions, decode, records, workspace, commands), each its form, recipes and details; none lists them.
 
 | Argument | Means |
 |---|---|
@@ -141,9 +141,9 @@ Values of signals over a time range: the value at `from`, then each change, as `
 
 | Argument | Means |
 |---|---|
-| `from` (required) | Start time, `120ns` (`help times`). |
+| `from` (required) | Start time with its unit, any unit: `120ns`, `3.4ms` (`help times`). |
 | `radix` | hex, bin, dec, ... (`help radix`); `data:dec` for one signal. |
-| `signals` (required) | Signals by path or path end (`help names`). |
+| `signals` (required) | Signals by path or path end (`help names`); `signals` finds them. |
 | `to` (required) | End time, inclusive. |
 | `unit` | The unit of the answer's times (`help times`). |
 

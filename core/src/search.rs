@@ -336,6 +336,73 @@ pub type Resolve<'a> = dyn FnMut(&str) -> Result<(Probe, Option<u32>, Option<Nam
 /// The operators, for the error on text that isn't one.
 const OPERATORS: &str = "== != < <= > >= && || ! + - * / % & | ^ ~ << >> ?: and parentheses";
 
+/// A word from another tool's language that wtf writes another way, worked out from a name that
+/// is no signal (`prev(x)`, `rising`) or text after an expression (`=1`); its `Display` shows the
+/// form meant (spec §15 "The agent's guide").
+#[derive(Debug, PartialEq)]
+pub enum Borrowed {
+    /// `rising`, `posedge`, `$rose(x)`: an edge, `rose(x)` or `fell(x)`; `arg` the signal if given.
+    Edge { word: String, func: &'static str, arg: Option<String> },
+    /// `prev(x)`, `previous(x)`, `$past(x)`: `past(x)`.
+    Past { word: String, arg: Option<String> },
+    /// `$stable(x)`: `stable(x)`.
+    Stable { word: String, arg: Option<String> },
+    /// `changed(x)`, `$changed(x)`: a change is `x != past(x)`, no function of its own.
+    Changed { word: String, arg: Option<String> },
+    /// `next(x)`: an expression reads no later value.
+    Ahead { word: String },
+    /// `a = 1`: a comparison is `==`.
+    Assign { rest: String },
+}
+
+impl Borrowed {
+    /// What `name`, which resolved to no signal, meant, if it is a word of another language.
+    pub fn of(name: &str) -> Option<Borrowed> {
+        let name = name.trim();
+        let (head, arg) = match name.find(['(', '[']) {
+            Some(i) => (&name[..i], Some(name[i + 1..].trim_end_matches([')', ']']).trim().to_string())),
+            None => (name, None),
+        };
+        let word = name.to_string();
+        Some(match head.trim_start_matches('$').to_ascii_lowercase().as_str() {
+            "rising" | "rise" | "posedge" | "rising_edge" | "rose" => Borrowed::Edge { word, func: "rose", arg },
+            "falling" | "fall" | "negedge" | "falling_edge" | "fell" => Borrowed::Edge { word, func: "fell", arg },
+            "prev" | "previous" | "past" => Borrowed::Past { word, arg },
+            "stable" => Borrowed::Stable { word, arg },
+            "changed" | "change" => Borrowed::Changed { word, arg },
+            "next" | "future" | "nexttime" => Borrowed::Ahead { word },
+            _ => return None,
+        })
+    }
+
+    /// What text left after a whole expression (`=1 && b`, `falling`) meant.
+    fn after(rest: &str) -> Option<Borrowed> {
+        let rest = rest.trim();
+        if rest.starts_with('=') && !rest.starts_with("==") {
+            return Some(Borrowed::Assign { rest: rest.to_string() });
+        }
+        Borrowed::of(rest.split_whitespace().next().unwrap_or(""))
+    }
+}
+
+impl std::fmt::Display for Borrowed {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let x = |arg: &Option<String>| arg.clone().filter(|a| !a.is_empty()).unwrap_or("x".into());
+        match self {
+            Borrowed::Edge { word, func, arg: None } => write!(
+                f,
+                "{word}: `@clk` already samples at the clock's rising edges; an edge of a signal is {func}(x), SVA's ${func} without the $"
+            ),
+            Borrowed::Edge { word, func, arg } => write!(f, "{word}: an edge is {func}({}), SVA's ${func} without the $", x(arg)),
+            Borrowed::Past { word, arg } => write!(f, "{word}: the value a cycle earlier is past({}), SVA's $past without the $", x(arg)),
+            Borrowed::Stable { word, arg } => write!(f, "{word}: stable({}), SVA's $stable without the $", x(arg)),
+            Borrowed::Changed { word, arg } => write!(f, "{word}: a change is {0} != past({0})", x(arg)),
+            Borrowed::Ahead { word } => write!(f, "{word}: an expression reads no later value; search on from a match instead (`find` `from`)"),
+            Borrowed::Assign { rest } => write!(f, "{rest}: compare with ==, not ="),
+        }
+    }
+}
+
 /// Parse `[@clk] expr`. A value with a time unit (`delay == 40ns`) is that many ticks, by the
 /// trace's femtoseconds per tick `fpt`.
 pub fn parse_query(text: &str, fpt: Option<u128>, resolve: &mut Resolve) -> Result<Query, String> {
@@ -355,9 +422,14 @@ pub fn parse_query(text: &str, fpt: Option<u128>, resolve: &mut Resolve) -> Resu
     };
     let expr = p.cond()?;
     if !p.s.trim().is_empty() {
-        return Err(format!("unexpected: {} (operators: {OPERATORS})", p.s.trim()));
+        return Err(unexpected(p.s));
     }
     Ok(Query { clock, expr })
+}
+
+/// The error on text after a whole expression: the form meant, or the operators.
+fn unexpected(rest: &str) -> String {
+    Borrowed::after(rest).map_or_else(|| format!("unexpected: {} (operators: {OPERATORS})", rest.trim()), |b| b.to_string())
 }
 
 /// A computed signal's expression (spec §16): a value at any time, so no `past`, `rose`, `fell`
@@ -367,7 +439,7 @@ pub fn parse_term(text: &str, fpt: Option<u128>, resolve: &mut Resolve) -> Resul
     let mut p = Parser { s: text, len: text.len(), fpt, resolve, names: Vec::new() };
     let e = p.cond()?;
     if !p.s.trim().is_empty() {
-        return Err(format!("unexpected: {} (operators: {OPERATORS})", p.s.trim()));
+        return Err(unexpected(p.s));
     }
     let mut sigs = Vec::new();
     probes(&e, &mut sigs);
@@ -788,7 +860,7 @@ impl Parser<'_> {
         if name.is_empty() {
             return Err(format!("expected a signal at: {}", self.s.trim()));
         }
-        let (sig, width, names, signed) = (self.resolve)(&name)?;
+        let (sig, width, names, signed) = (self.resolve)(&name).map_err(|e| Borrowed::of(&name).map_or(e, |b| b.to_string()))?;
         self.names.push((at..at + name.len(), sig));
         Ok((name, sig, width, names, 0, signed))
     }
@@ -1159,6 +1231,14 @@ mod tests {
         assert_eq!(err("cpu.state == 0x10"), "cpu.state: 0x10 doesn't fit in 3 bits");
         assert_eq!(err("cpu.data == 40ns"), "cpu.data: file has no timescale; use ticks");
         assert_eq!(err("cpu.data + 40ns > 0"), "file has no timescale; use ticks");
+        // words of other languages: the form meant
+        assert_eq!(err("@clk rising"), "rising: `@clk` already samples at the clock's rising edges; an edge of a signal is rose(x), SVA's $rose without the $");
+        assert_eq!(err("prev(cpu.busy) && cpu.busy"), "prev(cpu.busy): the value a cycle earlier is past(cpu.busy), SVA's $past without the $");
+        assert_eq!(err("$rose(cpu.busy)"), "$rose(cpu.busy): an edge is rose(cpu.busy), SVA's $rose without the $");
+        assert_eq!(err("@clk cpu.busy falling"), "falling: `@clk` already samples at the clock's rising edges; an edge of a signal is fell(x), SVA's $fell without the $");
+        assert_eq!(err("cpu.busy=1 && cpu.data == 0"), "=1 && cpu.data == 0: compare with ==, not =");
+        assert_eq!(err("@clk changed(cpu.data)"), "changed(cpu.data): a change is cpu.data != past(cpu.data)");
+        assert_eq!(err("next(cpu.data) == 0"), "next(cpu.data): an expression reads no later value; search on from a match instead (`find` `from`)");
     }
     /// Signals for arithmetic: a, b 32 bits, m, n 4, s 8 (signed, as `x - y` makes), t text, w
     /// 128 bits, u 8 bits unknown; each with one value.

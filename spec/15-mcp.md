@@ -25,20 +25,34 @@ reuse wtf's own pieces:
 | `user_view(adopt)` | what the user's window shows; `adopt` copies it into the workspace |
 | `help(topic)` | the reference, a topic per concept; without a topic, the topics |
 
-- **The docs have one home per concept.** The tool definitions ride along on every turn of an
-  agent (with them, an agent's first turn was 16.2K tokens, without 7.9K), so they are short: a
-  description says what the tool does in a line or two, an argument's in one, and each points to
-  a `help` topic for the rest. Agents rarely call `help` (4 of 20 runs), so a fact that decides
-  an answer stays in the description too: what a `find` match with and without `@clk` is, and
-  what a record's `start` and `end` are; with those only in `help`, fewer runs used `@clk` and
-  some read a record's start as its sampling edge. `help` answers the reference on request, as `protocols <name>`
-  does for a protocol: `names` (paths, bits, slices, VHDL forms, scope, streams as signals),
-  `times`, `radix` (and colours), `expressions` (`find`'s), `decode` (built-ins, `protocol`,
-  `frame`, `pair`, `check`), `records`, `workspace` (declaring, `view`, `render`, `present`) and
-  `commands` (`command`'s). Each concept is explained in one topic, which the others point to.
-  The window shows the same texts: `:help <topic>` opens one in a box (section 7).
-  The server's instructions are the map: the usual path (open, decode, records, present) and the
-  topics. Topics are kept in step with this spec, as descriptions are.
+- **The agent's guide is in five layers, each with one job.** The tool definitions ride along on
+  every turn of an agent (with them, an agent's first turn was 16.2K tokens, without 7.9K), and
+  agents rarely call `help` (4 of 20 runs; on waveform questions, only after an error), so what
+  an agent needs to write a call is where it writes the call, and the rest is one call away:
+  1. The server's instructions are the map: read waveforms with these tools; the usual path
+     (open, signals, decode and records, or values and find, then workspace and present); the
+     topics.
+  2. A tool's description says what it answers, in a line or two, and keeps a fact that decides
+     an answer: what a `find` match with and without `@clk` is, what a record's `start` and
+     `end` are. With those only in `help`, fewer runs used `@clk` and some read a record's start
+     as its sampling edge.
+  3. An argument's doc says how to write the value, with an example. `find`'s `expr` carries the
+     grammar in a line: SystemVerilog's operators, SVA's `rose` / `fell` / `stable` / `past`
+     without the `$`, `@<clock>` first. With it only in `help`, agents wrote `rising`,
+     `prev(x)` and `a=1` from other tools (23 errors in 114 waveform questions).
+  4. A `help` topic is the reference for one concept, as `protocols <name>` is for a protocol:
+     a line on what it covers, then Form (how to write it), Recipes (a task and the call doing
+     it) and Details (edge cases, rounding, errors). The topics: `names`, `patterns`, `times`,
+     `radix`, `expressions`, `decode`, `records`, `workspace`, `commands`. A recipe is a task a
+     real session needed (the recipes page, agents' feedback, the shell commands agents ran on
+     traces), never a benchmark's question, so a benchmark measures the guide and doesn't shape it.
+  5. An error says what to write instead and lists the candidates.
+
+  Each concept is explained in one topic, which the others point to; the window shows the same
+  texts, `:help <topic>` opening one in a box (section 7). Tests hold the shape: every topic has
+  its three sections and fits a page, every `help` pointer names a topic, and the tool
+  definitions stay under a size, each description and argument doc under its own. Topics are
+  kept in step with this spec, as descriptions are.
 - **Agents must know a waveform is wtf's to read.** A VCD is text, and an agent's habit with a
   text file is `cat` and `grep`: in NVIDIA's CVDP debug problems, given the failing run's VCD,
   agents with wtf read it with the shell in 10 of the 16 problems where they read it. Clients
@@ -64,6 +78,16 @@ reuse wtf's own pieces:
   quotes, 20ns), a space before the unit (`20 ns`), an unknown unit (the units listed), no
   number (`None`: a number and a unit, 20ns or 1.5us; a plain number is file ticks). In the
   bench, agents wrote the quoted form and `None`, and took 2 calls to recover each time.
+  A range written backwards (`to` before `from`) is an error giving the trace's range: it is
+  most likely a unit slip, `3386665ps` for a trace that runs to 3.386665ms, and an answer of one
+  line would read as a signal that never changes.
+- A search expression with a word of another language says the form meant, when the word is no
+  signal: an edge is `rose(x)` / `fell(x)` (for `rising`, `posedge`, `$rose(x)`; after `@clk`,
+  that the clock already samples at its rising edges), the value a cycle earlier `past(x)` (for
+  `prev(x)`, `previous(x)`, `$past(x)`), a change `x != past(x)` (for `changed(x)`: one form, no
+  function of its own), a comparison `==` (for `a=1`), and an expression reads no later value
+  (`next(x)`). On waveform questions agents wrote all of these, in 1 run of 5; once the guide
+  named SVA's functions, `changed(x)` too.
 - Agents pay for round trips and for every byte they read, and can't un-read an answer, so
   answers are dense and bounded: at most 1000 lines with a note (`values`: 1000 changes in all),
   and at most 24000 bytes, cut at a line with a note saying how much more there was.

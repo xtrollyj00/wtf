@@ -138,3 +138,52 @@ against a passing run.
   its ending edge 5 ns later; agents with wtf gave the start, as `find @clk` reports it, those
   without the edge, as cocotb prints it, so wtf scored 3/5 against 4/5 for the wording; it now
   asks for the cycle's start, and the grader takes a signal by its last name.
+
+## Questions about a waveform
+
+`bench/wqa` asks WaveformQA's 24 kinds of question (arXiv:2607.20638, written again from its
+Table IV; not its questions) about its RISC-V traces, the answers from a VCD reader of its own.
+Haiku, one run per question, `--jobs 3`.
+
+Dev set, 114 questions on eight traces (13.9 MB - 1.8 GB), wtf 3c99d1f, 2026-11-09:
+
+| arm | right | wtf errors | cost | median / p90 wall |
+|---|---|---|---|---|
+| wtf (its tools only) | 108 | 23 in 22 runs | $0.31 | 12 s / 20 s |
+| shell (Bash, Read) | 110 | - | $0.37 | 25 s / 52 s |
+
+Both arms near the ceiling; no question both got wrong. The shell's misses were reading the VCD
+(an identifier `m` for `m,`, binary to hex, the wrong clock); wtf's were the question (a signal's
+edges counted as clock cycles where it was high, a condition read at an edge instead of just
+before it) and a unit slip (`to` 3386665ps for a 3.386665ms trace) that read as a signal that
+never changes. wtf's errors were syntax from other tools: `rising`, `prev(x)`, `a=1`.
+
+Held-out set, 119 questions on five other traces, frozen before the agent's guide changed and
+not read; wtf arm, 2026-11-09:
+
+| wtf | right | wtf errors | `help` calls | cost | median wall | first-turn tokens |
+|---|---|---|---|---|---|---|
+| 59efa6c (before) | 115 | 26 in 20 runs | 21 | $0.36 | 13 s | 9961 |
+| 5f1c25b (the layered guide) | 116 | 9 in 6 runs | 1 | $0.29 | 11 s | 10130 |
+| 53e8a4e (+ errors naming the form) | 114 | 4 in 4 runs | 0 | $0.28 | 11 s | 10132 |
+
+- The guide prevents the errors: putting the grammar in `find`'s `expr` doc removed every
+  `prev` / `next` (12), edge word (7) and `=` (5); agents stopped opening `help`, which made the
+  runs 20% cheaper, for 1.7% more on the first turn.
+- Calling the functions SVA's made agents write `$changed`'s form, `changed(x)` (7, then 3): the
+  doc now says those four only, and the error names `x != past(x)` (601ca74, not yet measured).
+- The reversed-range error caught one unit slip, and the run recovered.
+- Right answers moved within noise (114 - 116 of 119): the misses are off-by-one counts and
+  misread questions, not the tools.
+
+The trace tasks of `wtf-bench agent` (written before the guide, which wasn't fitted to them),
+Haiku, 3 runs of each of the 5, 2026-11-09:
+
+| wtf | pass | calls | wtf errors | answer bytes | tokens | cost | wall |
+|---|---|---|---|---|---|---|---|
+| 59efa6c (before) | 15/15 | 95 | 1 | 70.8K | 834K | $0.047 | 254 s |
+| 601ca74 (the guide, the errors) | 15/15 | 93 | 0 | 38.0K | 713K | $0.042 | 218 s |
+
+Both at the ceiling. The difference is in axilite-transactions: before, all 3 runs checked the
+decoded records against the raw handshakes (`render`, `values`), 12 - 15 KB of answers; after,
+2 of 3 took the records as they are, 4 KB. Three runs a task: a direction, not a measure.

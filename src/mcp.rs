@@ -77,6 +77,17 @@ fn at(app: &Workspace, s: &str) -> Result<(Tick, Tick), String> {
     Ok((lo.min(app.trace.end()), hi.min(app.trace.end())))
 }
 
+/// `to` not before `from`, as written: reversed, it is likely a unit slip (`3386665ps` for
+/// 3.386665ms), so the error gives the trace's range to compare with (spec §15 "Times").
+fn ordered(app: &Workspace, from: (&str, Tick), to: (&str, Tick)) -> Result<(), String> {
+    if to.1 >= from.1 {
+        return Ok(());
+    }
+    let t = &app.trace;
+    let u = unit(app, &None, [t.start(), t.end()])?;
+    Err(format!("`to` {} is before `from` {}; the trace runs {} - {}", to.0.trim(), from.0.trim(), show(app, t.start(), u), show(app, t.end(), u)))
+}
+
 /// The unit of an answer's times, and their precision.
 #[derive(Clone, Copy)]
 struct Unit {
@@ -455,7 +466,7 @@ impl Wtf {
         }
     }
 
-    #[tool(description = "The reference: a topic per concept (names, times, radix, expressions, decode, records, workspace, commands); none lists them.")]
+    #[tool(description = "The reference: a topic per concept (names, patterns, times, radix, expressions, decode, records, workspace, commands), each its form, recipes and details; none lists them.")]
     fn help(&self, Parameters(a): Parameters<HelpArgs>) -> Result<String, String> {
         help::answer(a.topic.as_deref(), wtf_core::pattern::Syntax::Regex)
     }
@@ -508,6 +519,7 @@ impl Wtf {
         let w = current(self)?;
         let mut app = lock(&w);
         let (from, to) = (at(&app, &a.from)?.0, at(&app, &a.to)?.1);
+        ordered(&app, (&a.from, from), (&a.to, to))?;
         // the cap is for the whole answer: one busy signal mustn't hide behind a quiet one
         let (mut lists, mut budget_left, mut cut) = (Vec::new(), MAX_LINES, false);
         for (name, p, s) in probes(&mut app, &a.signals, &a.radix)? {
@@ -563,6 +575,9 @@ impl Wtf {
         let multi = set.streams.len() > 1;
         let from = a.from.as_deref().map(|f| at(&app, f)).transpose()?.map_or(0, |s| s.0);
         let to = a.to.as_deref().map(|t| at(&app, t)).transpose()?.map_or(app.trace.end(), |s| s.1);
+        if let (Some(f), Some(t)) = (&a.from, &a.to) {
+            ordered(&app, (f, from), (t, to))?;
+        }
         let (picked, of) = set.select(from, to, a.filter.as_deref(), app.trace.fs_per_tick)?;
         let radixes = field_radixes(&set, a.radix.as_deref())?;
         // with `where`: how many match, of how many there are
@@ -664,13 +679,21 @@ impl Wtf {
         Ok(budget(format!("at {}:\n{}", show(&app, t, u), lines.join("\n"))))
     }
 
-    #[tool(description = "The times a search expression matches, as a table. With `@clk ` first, a match is a clock cycle whose ending edge samples it true, reported at the cycle's starting edge; without, where the expression becomes true, so back-to-back handshakes are one match. `show` adds values (and the `protocol` and `decode` lines making them records), `count_only` counts (`help expressions`). For a bus, decode it instead (`help decode`).")]
+    #[tool(description = "When a search expression holds, as a table of times; `show` adds values, `count_only` counts. With `@<clock> ` first, a match is a cycle whose ending edge samples it true (`@clk x`: the cycles x is high), reported at the cycle's start; without, where it becomes true (`rose(x)`: x's edges). A bus: decode it (`help decode`).")]
     fn find(&self, Parameters(a): Parameters<FindArgs>) -> Result<String, String> {
         let w = current(self)?;
         let mut app = lock(&w);
         let q = app.query(&a.expr)?;
         let shown = probes(&mut app, &a.show, &None)?;
         let forward = !a.backward;
+        // backward, the search runs from the later time down to the earlier
+        if let (Some(f), Some(t)) = (&a.from, &a.to) {
+            let (lo, hi) = (at(&app, f)?.0, at(&app, t)?.0);
+            match forward {
+                true => ordered(&app, (f, lo), (t, hi))?,
+                false => ordered(&app, (t, hi), (f, lo))?,
+            }
+        }
         let search = query::Search {
             // after (before) every tick the time stands for, so searching on from a match goes past it
             from: match &a.from {
@@ -1041,17 +1064,7 @@ impl ServerHandler for Wtf {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("wtf", env!("CARGO_PKG_VERSION")))
-            .with_instructions(
-            "wtf reads VCD, FST and GHW waveforms from digital simulations: read them with these tools, not \
-             the shell (`signals` searches the design; a pattern is a regex in slashes, `/uart/`, wherever one goes). The usual path: `open` a trace \
-             (`sessions` lists the user's windows and their traces); it lists the interfaces a built-in \
-             protocol decodes, each with its line. Decode first, with `command` (`decode bus axilite \
-             clock=aclk prefix=s_axi_`): records are exact and the handshake checks built in. Read them \
-             with `records` (`where`, `group_by`, `count_only`); `find` for what no protocol covers, \
-             `values` / `value_at` for values. To show evidence, declare the `workspace`, check it with \
-             `view` / `render`, then `present` it. `help` has the reference: names, times, radix, \
-             expressions, decode, records, workspace, commands.",
-        )
+            .with_instructions(include_str!("mcp/guide/instructions.md").trim_end())
     }
 }
 
