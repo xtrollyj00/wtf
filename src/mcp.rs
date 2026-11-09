@@ -1041,17 +1041,7 @@ impl ServerHandler for Wtf {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("wtf", env!("CARGO_PKG_VERSION")))
-            .with_instructions(
-            "wtf reads VCD, FST and GHW waveforms from digital simulations: read them with these tools, not \
-             the shell (`signals` searches the design; a pattern is a regex in slashes, `/uart/`, wherever one goes). The usual path: `open` a trace \
-             (`sessions` lists the user's windows and their traces); it lists the interfaces a built-in \
-             protocol decodes, each with its line. Decode first, with `command` (`decode bus axilite \
-             clock=aclk prefix=s_axi_`): records are exact and the handshake checks built in. Read them \
-             with `records` (`where`, `group_by`, `count_only`); `find` for what no protocol covers, \
-             `values` / `value_at` for values. To show evidence, declare the `workspace`, check it with \
-             `view` / `render`, then `present` it. `help` has the reference: names, times, radix, \
-             expressions, decode, records, workspace, commands.",
-        )
+            .with_instructions(include_str!("mcp/guide/instructions.md").trim_end())
     }
 }
 

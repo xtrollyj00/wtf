@@ -140,6 +140,10 @@ fn tools_list() {
         assert_eq!(t["inputSchema"]["type"], "object", "{t}");
         assert!(!t["description"].as_str().unwrap().is_empty(), "{t}");
     }
+    // the tool definitions ride along on every turn of an agent: they grow only on purpose (spec
+    // §15); raise the bound in the same commit as the text, saying why
+    let size = list.to_string().len();
+    assert!(size <= 13_900, "the tool definitions are {size} bytes, past the 13900 allowed");
 }
 
 /// `help` is the reference the descriptions point to: the topics, then each one, before a trace
