@@ -394,17 +394,22 @@ fn slices_and_concatenations() {
     // busy (high 20 - 40) above data's bit 0 (1, 0 @20, 1 @30)
     ws.search("{busy, data[0]} == 2", true, 1).unwrap();
     assert_eq!(ws.view.cursor, 20);
-    let cat = var(&ws, "{top.cpu.busy,top.cpu.data[0:0]}");
+    let cat = var(&ws, "{top.cpu.busy,top.cpu.data[0]}");
     assert_eq!(ws.resolve("{cpu.busy,data[0]}"), Ok((cat, None)));
     wtf_core::command::run(&mut ws, "add {busy,data[0]}").unwrap();
-    assert_eq!(names(&ws), ["data[7:4]", "{top.cpu.busy,top.cpu.data[0:0]}"]);
+    // a bit is a row of its own, named as a bit; written as a one-bit slice, the same var
+    wtf_core::command::run(&mut ws, "add cpu.data[1]").unwrap();
+    assert_eq!(wtf_core::command::run(&mut ws, "add top.cpu.data[1:1]"), Err("already shown: top.cpu.data[1:1]".into()));
+    assert_eq!(names(&ws), ["data[7:4]", "{top.cpu.busy,top.cpu.data[0]}", "data[1]"]);
     // sessions and :e make them again
     let toml = wtf_core::session::to_toml(&ws);
     let mut other = open();
+    // a session names signals in full: a path's end alone isn't found
+    assert_eq!(other.var_named("cpu.busy"), None);
     assert_eq!(wtf_core::session::apply(&mut other, &toml), Ok(vec![]));
     assert_eq!(names(&other), names(&ws));
     ws.reload().unwrap();
-    assert_eq!(names(&ws), ["data[7:4]", "{top.cpu.busy,top.cpu.data[0:0]}"]);
+    assert_eq!(names(&ws), ["data[7:4]", "{top.cpu.busy,top.cpu.data[0]}", "data[1]"]);
     let hi = var(&ws, "top.cpu.data[7:4]");
     assert_eq!(ws.trace.value_at(hi, 20), Some(Val::Bits("1001".into())));
 }
@@ -481,7 +486,7 @@ fn named_signals() {
     run(&mut ws, "signal hi = data[7:4]").unwrap();
     run(&mut ws, "signal pair = {busy, data[0]}").unwrap();
     run(&mut ws, "add hi pair {busy, data[1]}").unwrap();
-    assert_eq!(names(&ws), ["hi", "pair", "{top.cpu.busy,top.cpu.data[1:1]}"]);
+    assert_eq!(names(&ws), ["hi", "pair", "{top.cpu.busy,top.cpu.data[1]}"]);
     let hi = var(&ws, "hi");
     assert_eq!((ws.trace.vars[hi].width, ws.trace.value_at(hi, 12)), (Some(4), Some(Val::Bits("0100".into()))));
     ws.search("pair == 2", true, 1).unwrap();

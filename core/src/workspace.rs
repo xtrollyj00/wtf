@@ -474,7 +474,7 @@ impl Workspace {
 
 
     /// A signal named in full: a bit of a bus is a one-bit slice of it.
-    fn whole(&mut self, name: &str) -> Result<usize, String> {
+    pub fn whole(&mut self, name: &str) -> Result<usize, String> {
         match self.resolve(name)? {
             (v, None) => Ok(v),
             (v, Some(b)) => self.compute(Form::Slice(&self.trace.vars[v].path.clone(), b, b)),
@@ -586,7 +586,14 @@ impl Workspace {
         // sessions saved before paths had one form name nvc's `arr.[1]` and `gen(1)`
         match self.trace.by_path.get(path).or_else(|| self.trace.by_path.get(&crate::trace::brackets(path))) {
             Some(&v) => Some(v),
-            None => self.compute(computed::form(path)?).ok(),
+            None => match computed::form(path) {
+                Some(f) => self.compute(f).ok(),
+                // a one-bit slice is named as a bit (`top.x[1]`)
+                None => match self.resolve(path) {
+                    Ok((_, Some(_))) => self.whole(path).ok(),
+                    _ => None,
+                },
+            },
         }
     }
 
@@ -601,7 +608,10 @@ impl Workspace {
             Form::Expr(_) => unreachable!(),
             Form::Slice(base, hi, lo) => {
                 let v = self.whole(base)?;
-                (format!("{}[{hi}:{lo}]", self.trace.vars[v].path), vec![v])
+                // one bit is named as a bit, as searches name it
+                // (not an array's: its `arr[1]` is an element)
+                let range = if hi == lo && self.trace.vars[v].children.is_empty() { hi.to_string() } else { format!("{hi}:{lo}") };
+                (format!("{}[{range}]", self.trace.vars[v].path), vec![v])
             }
             Form::Concat(names) => {
                 let vs = names.iter().map(|n| self.part(n)).collect::<Result<Vec<_>, _>>()?;

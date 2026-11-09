@@ -465,8 +465,10 @@ fn add_one(app: &mut Workspace, arg: &str) -> Result<(), String> {
         app.add_rows(&new);
         return Ok(());
     }
-    if crate::computed::form(arg).is_some() {
-        let (v, _) = app.resolve(arg)?;
+    // a bit of a bus (`state[1]`) is a one-bit slice, as in a concatenation
+    let bit = paths(app, &scoped(app, arg)).is_empty() && matches!(app.resolve(arg), Ok((_, Some(_))));
+    if crate::computed::form(arg).is_some() || bit {
+        let v = app.whole(arg)?;
         if app.shown(v) {
             return Err(format!("already shown: {arg}"));
         }
