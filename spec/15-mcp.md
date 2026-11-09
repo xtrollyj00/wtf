@@ -10,7 +10,7 @@ reuse wtf's own pieces:
 | `open(trace)` | open a trace in a new workspace of the agent's, which becomes the current one |
 | `use(session)` | make another of this server's workspaces the current one |
 | `info` | file, time range, timescale, number of signals, and the interfaces a built-in protocol decodes, each with its `decode` line (`open` answers with it too) |
-| `signals(pattern)` | signals with their widths; `*` / `**` globs, or any path containing the text; array elements and generate instances of one width are one line, the indices as ranges (`mux_in[0..15] (8 bits, 16 signals)`, `gen[0..4].x`); a struct, record or array is one line, `types.grid (array, 24 bits, 6 signals)`, its signals listed when the pattern names inside it (`types.grid.**`) |
+| `signals(pattern)` | search the design, scopes (instances) and signals, by a pattern, a regex in slashes found anywhere in the path, in any case, as grep finds it (`/uart/`, `/_valid$/`, `/^top\.cpu\./`); no pattern matches everything. Paths are matched in one form, either HDL's as section 8 writes it: lowercase, indices in brackets (`/gen\[0\]/` for `gen(0)`). The design (every scope and signal of the file, its path in that form, its parent, how many signals it holds) is worked out once per trace; each search is a pass over it. A signal is listed with its width; a scope whose name the pattern matches (it matches its path, not its parent's; a top scope has none) is listed before its signals, `top.cpu (scope of 3 signals)`; array elements and generate instances of one width are one line, the indices as ranges (`mux_in[0..15] (8 bits, 16 signals)`, `gen[0..4].x`); a struct, record or array is one line, `types.grid (array, 24 bits, 6 signals)`, its signals listed when the pattern names inside it (`types\.grid\.`). An answer over 200 lines is folded: below the deepest level that fits, a scope is one line counting its matches, `top.cpu (scope, 120 matching signals)`, and a last line says how to list one. A pattern that doesn't parse says so, and that it is a regex, not a glob (`.*` for any text) |
 | `values(signals, from, to, radix, unit)` | the value at `from`, then each change up to `to`, as `time value` lines |
 | `value_at(signals, time, radix, unit)` | values at one time; a struct, record or array its whole value, then a line per signal in it (`pkt.valid = 1`, `pkt.pair.hi = 0xA`) |
 | `find(expr, from, to, backward, count, show, count_only, unit)` | match times of a search expression (section 8), `@clk` included, as a table |
@@ -39,10 +39,31 @@ reuse wtf's own pieces:
   The window shows the same texts: `:help <topic>` opens one in a box (section 7).
   The server's instructions are the map: the usual path (open, decode, records, present) and the
   topics. Topics are kept in step with this spec, as descriptions are.
+- **Agents must know a waveform is wtf's to read.** A VCD is text, and an agent's habit with a
+  text file is `cat` and `grep`: in NVIDIA's CVDP debug problems, given the failing run's VCD,
+  agents with wtf read it with the shell in 10 of the 16 problems where they read it. Clients
+  may defer a server's tools, showing the agent only their names until it searches for them
+  (Claude Code's tool search); a name like `open` says nothing of waveforms. So the descriptions
+  of `open`, `info` and `signals` say "waveform" and the formats, which a search for "vcd" or
+  "waveform" finds, and the instructions say to read waveforms with these tools rather than the
+  shell. The README tells users to keep wtf's tools loaded (Claude Code: `ENABLE_TOOL_SEARCH=false`)
+  or to say so in their project's agent instructions.
 
+- **An agent writes every pattern one way: a regex in slashes** (`/^top\.cpu\./`), in
+  `signals`, `command`'s `add` and `rm`, and `records`' stream sets alike; a bare word is always
+  a name. The window keeps globs (section 7), as people write them; the core matches either,
+  the workspace saying which its interface writes (`Syntax`), so `:add` and `command add` run
+  the same code. Agents once met globs in commands and a regex in `signals`, and wrote one for
+  the other; a word in the other syntax is an error giving this one's form (`top.cpu.* is a
+  glob; a pattern is a regex in slashes: /top\.cpu\./`). The `help` topics are written for the
+  interface reading them: the window's `:help` speaks of globs, the agent's `help` of regexes.
 - Signals are named by full path or by the end of a path if only one signal ends that way; `data[3]`
   is one bit. Names may be written as in VHDL or Verilog (section 8): any case, `gen(4)` or
   `gen[4]`, `data(7 downto 4)` or `data[7:4]`. Times take units; radixes are those of section 10.
+  A bad time says what a time is, with the fix where there is one: in quotes (`"20ns"`: without
+  quotes, 20ns), a space before the unit (`20 ns`), an unknown unit (the units listed), no
+  number (`None`: a number and a unit, 20ns or 1.5us; a plain number is file ticks). In the
+  bench, agents wrote the quoted form and `None`, and took 2 calls to recover each time.
 - Agents pay for round trips and for every byte they read, and can't un-read an answer, so
   answers are dense and bounded: at most 1000 lines with a note (`values`: 1000 changes in all),
   and at most 24000 bytes, cut at a line with a note saying how much more there was.
@@ -124,8 +145,22 @@ reuse wtf's own pieces:
   dut`, or `scope` in `workspace`, kept for every later call and in the session), then the
   signal the workspace shows, if it shows just one of them, then the only one under the scope,
   then the shallowest, if just one is (`clk`, passed down to every instance, is the top's);
-  otherwise the error lists the candidates. A pattern that matches nothing hints that it
-  matches the whole path (`**.*fifo*`).
+  otherwise the error lists the candidates. An unknown name says what the trace has instead,
+  worked out apart from how the error says it: a scope, its signals (`cpu is a scope of 3
+  signals`); a start of the name that is one signal without fields or elements (Verilator's VCD
+  dumps a packed struct as one vector), its width and a slice (`top.cpu.data is one 8-bit
+  signal in this trace, without fields or elements; slice it, cpu.data[7:0]`); a struct, array
+  or stream without that part, the parts it has (`types.pkt.pair has no mid; it has hi, lo`);
+  else, as for a pattern that matches nothing (`no match`), the nearest scopes and signals, at
+  most 3: those whose last part
+  holds its last word of two letters or more (`clk_i` for `clk`), else whose last part is that
+  word with letters left out or added, half of it at least (`busy` for `bsy`, `clk` for
+  `clock`), else with few letters changed (one in five, plus one); those holding the most of its
+  other words first.
+  The agent picks from them rather than guess again: in our agent runs a bare `no match` was the
+  commonest error, and in 15 of 36 runs that met it the agent gave up on `signals`. A glob in
+  `command` that matches nothing also says it matches the whole path, with the pattern that would
+  match (`**.*fifo*` for a signal named so, `**.*fifo*.*` for the signals in a scope named so).
 - Every other tool works on the current workspace; until `open`, they say to open a trace first.
 - Session files aren't loaded; the agent starts from an empty workspace (or adopts the user's view).
 - `command` refuses `:w`, `:q`, `:e` and `:help`, which belong to the user's window.

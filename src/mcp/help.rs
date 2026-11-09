@@ -1,6 +1,8 @@
 //! The `help` tool's topics: the reference the tool descriptions point to, each concept explained
 //! once (spec §15). Kept in step with the spec, as the descriptions are.
 
+use wtf_core::pattern::Syntax;
+
 /// (topic, what it covers, the reference).
 pub const TOPICS: &[(&str, &str, &str)] = &[
     (
@@ -21,13 +23,20 @@ signal ends that way (`s_axi_awaddr`); an ambiguous name is an error listing the
 - A struct, record or array, or part of one (`pkt`, `pkts[1]`, `grid[1]`), is a signal of its
   whole value: its fields joined, the first the most significant (`pkt == 0x5A5`, `pkt[10]`);
   with a text field (an nvc enum) text, `'{valid:1, state:busy, pair:'{hi:A, lo:5}}`. `value_at`
-  adds a line per field; `signals` lists it as one line, its fields with `pkt.**`.",
+  adds a line per field; `signals` lists it as one line, its fields with `{fields}`.
+{patterns}
+- `signals` lists what a pattern matches, or with none everything: a scope it names is a line
+  of its own, `top.cpu (scope of 3 signals)`, and an answer too long is folded to a line per
+  scope below the deepest level that fits.
+- An unknown name says what the trace has instead: a scope's signals, a struct's or array's
+  fields, a signal without fields (a packed struct in a VCD: slice it), or the nearest scopes
+  and signals; so does a pattern that matches nothing.",
     ),
     (
         "times",
         "time units, the workspace's unit and rounding",
         "\
-Times take units: `120ns`, `1.5us`, `2595ps`; a plain number is file ticks.
+Times take units: `120ns`, `1.5us`, `2595ps` (no quotes, no space); a plain number is file ticks.
 - Answers use one unit per workspace, so they compare across calls: once a search names a clock
   (`@clk`, also in a protocol or a decode), the unit is the largest that keeps that clock's
   shortest phase at 1 or more (`ns` for a 10 ns or a 200 MHz clock). `command` `unit ns` sets
@@ -120,7 +129,7 @@ Decoding doesn't touch the rows. Read a stream with `records` (`help records`)."
         "\
 `records` lists a stream as a table: n (the record's number), start, end and a field per column,
 headed `20 of 157`. `stream` may name a set: a decode (`bus`: its results and violations, not the
-streams they are made from), a glob (`bus.*`) or several (`bus.wr bus.rd`); their records come
+streams they are made from), a pattern (`{streams}`, `help names`) or several (`bus.wr bus.rd`); their records come
 in order of start with a `stream` column, fields of the same name and kind sharing a column, empty
 where a stream has none. `start` is the rising edge that starts the record's first clock cycle, as
 `find @clk` reports a match; `end` is the edge that samples its last. With more than one record long values are shortened (a frame's data to 8
@@ -142,10 +151,10 @@ bytes and its size); `count: 1` with `from` shows one whole.
         "showing evidence: the `workspace` declaration, `view`, `render`, `present`",
         "\
 To show the user evidence, declare the workspace, check it with `view` / `render`, then `present`
-it into the user's wtf windows on the trace (they can undo with u). With none open, present
-writes a session file that `wtf <trace>` shows when the user opens the trace: tell them so. The user also sees each query and change
-you make as a step (`:trail`), with its time, so ask what you mean to show. `workspace` replaces everything at once, as
-one undo step:
+it into the user's wtf windows on the trace (`:undo` takes it back). With none open, present
+writes a session file that `wtf <trace>` shows when the user opens the trace: tell them so. The
+user also sees each query and change you make as a step (`:trail`), with its time, so each query
+is part of what they see. `workspace` replaces everything at once, as one undo step:
 - `rows`, top to bottom: `\"name\"`, `\"name:radix\"`, `\"name:radix:colour\"` (`help radix`), or a
   group `{\"group\": \"write\", \"rows\": [\"awaddr\", \"awvalid\"], \"collapsed\": false}`. Groups
   hold signals only. A struct or array is one row (`\"pkts\"`); `{\"signal\": \"pkts\", \"open\":
@@ -170,7 +179,7 @@ edits the workspace step by step instead (`help commands`).",
         "\
 `command` runs one of wtf's `:` commands, without the colon, on the workspace.
 - Rows: `add <path|pattern>...` (below the selected row, joining its group; a scope becomes a
-  group of its direct signals, a struct or array one row), `rm <path|pattern>...` (`rm **` clears), `select <row> [<last row>]` (the rows the next
+  group of its direct signals, a struct or array one row), `rm <path|pattern>...` (`rm {all}` clears; patterns: `help names`), `select <row> [<last row>]` (the rows the next
   commands act on), `group <name>`, `rename <name>`, `ungroup`, `radix <radix>`, `color
   <colour|off>` (`help radix`), `names <signal> <value>=<name>...` (names for its values, as an
   FST enum table gives them; `off` removes them), `undo`, `redo`. The answer lists the rows added and removed.
@@ -184,10 +193,57 @@ edits the workspace step by step instead (`help commands`).",
 ];
 
 /// The topics with what each covers, or one topic's reference.
-pub fn answer(topic: Option<&str>) -> Result<String, String> {
+pub fn answer(topic: Option<&str>, syntax: Syntax) -> Result<String, String> {
     let list = || TOPICS.iter().map(|(t, what, _)| format!("{t}: {what}")).collect::<Vec<_>>().join("\n");
     match topic {
         None => Ok(format!("help <topic>:\n{}", list())),
-        Some(t) => TOPICS.iter().find(|(name, ..)| name.eq_ignore_ascii_case(t.trim())).map(|(.., text)| text.to_string()).ok_or_else(|| format!("no help topic {t}; topics:\n{}", list())),
+        Some(t) => TOPICS.iter().find(|(name, ..)| name.eq_ignore_ascii_case(t.trim())).map(|(.., text)| written(text, syntax)).ok_or_else(|| format!("no help topic {t}; topics:\n{}", list())),
+    }
+}
+
+/// A topic as its interface writes patterns: the window globs, an agent regexes in slashes, so
+/// an agent reads of one syntax only (spec §15).
+fn written(text: &str, syntax: Syntax) -> String {
+    let parts: [(&str, &str); 4] = match syntax {
+        Syntax::Regex => [
+            (
+                "{patterns}",
+                "- A pattern is a regex in slashes, found anywhere in the path in any case, the path\n  \
+                 lowercase with indices in brackets whichever HDL wrote it: `/uart/`, `/_valid$/`,\n  \
+                 `/^top\\.cpu\\./` (a scope's signals), `/mem\\[0\\]/`. `signals`, `add`, `rm` and\n  \
+                 `records` take them; a bare word is always a name.",
+            ),
+            ("{fields}", "/pkt\\./"),
+            ("{streams}", "/^bus\\./"),
+            ("{all}", "/.*/"),
+        ],
+        Syntax::Glob => [
+            (
+                "{patterns}",
+                "- A pattern is a glob over the whole path: `*` within a level, `**` across (`top.cpu.*`,\n  \
+                 `**.state`, `**.*valid*`). `add`, `rm` and `:records` take them; a word without `*` is a name.",
+            ),
+            ("{fields}", "pkt.**"),
+            ("{streams}", "bus.*"),
+            ("{all}", "**"),
+        ],
+    };
+    parts.iter().fold(text.to_string(), |t, (k, v)| t.replace(k, v))
+}
+
+#[cfg(test)]
+mod syntax_tests {
+    use super::*;
+
+    /// Each interface reads its own pattern syntax only: the window globs, an agent regexes.
+    #[test]
+    fn topics_speak_the_interfaces_patterns() {
+        let agent = answer(Some("commands"), Syntax::Regex).unwrap() + &answer(Some("names"), Syntax::Regex).unwrap() + &answer(Some("records"), Syntax::Regex).unwrap();
+        let window = answer(Some("commands"), Syntax::Glob).unwrap() + &answer(Some("names"), Syntax::Glob).unwrap();
+        assert!(agent.contains("`rm /.*/` clears") && agent.contains("a regex in slashes") && agent.contains("`/^bus\\./`"), "{agent}");
+        // no glob syntax, and every placeholder filled
+        assert!(!agent.contains("**") && !agent.contains("bus.*"), "{agent}");
+        assert!(["{patterns}", "{fields}", "{streams}", "{all}"].iter().all(|k| !agent.contains(k) && !window.contains(k)));
+        assert!(window.contains("`rm **` clears") && window.contains("A pattern is a glob"), "{window}");
     }
 }

@@ -182,23 +182,42 @@ fn reading_tools() {
     let mut s = Server::start(&dir.0);
     s.ok("open", json!({"trace": simple()}));
     assert_eq!(s.ok("info", json!({})), "simple.vcd\n0ns - 80ns\n1 tick = 1ns\n6 signals");
-    assert_eq!(s.ok("signals", json!({"pattern": "top.cpu.*"})), "top.cpu.state (3 bits)\ntop.cpu.data (8 bits)\ntop.cpu.busy (1 bit)");
-    assert_eq!(s.ok("signals", json!({"pattern": "STATE"})), "top.cpu.state (3 bits)\ntop.dma.state (3 bits)");
-    assert_eq!(s.ok("signals", json!({"pattern": "nope"})), "no match: nope");
+    // a regex found anywhere in the path, in any case; a scope it names is a line before its signals
+    assert_eq!(s.ok("signals", json!({"pattern": "/^top\\.cpu\\./"})), "top.cpu.state (3 bits)\ntop.cpu.data (8 bits)\ntop.cpu.busy (1 bit)");
+    assert_eq!(s.ok("signals", json!({"pattern": "/cpu/"})), "top.cpu (scope of 3 signals)\ntop.cpu.state (3 bits)\ntop.cpu.data (8 bits)\ntop.cpu.busy (1 bit)");
+    assert_eq!(s.ok("signals", json!({"pattern": "/cpu$/"})), "top.cpu (scope of 3 signals)");
+    assert_eq!(s.ok("signals", json!({"pattern": "/STATE/"})), "top.cpu.state (3 bits)\ntop.dma.state (3 bits)");
+    assert_eq!(s.ok("signals", json!({"pattern": "/.*/"})), s.ok("signals", json!({})));
+    assert_eq!(s.ok("signals", json!({"pattern": "/nope/"})), "no match: /nope/");
+    // nothing matches: the nearest scopes and signals
+    assert_eq!(s.ok("signals", json!({"pattern": "/bsy/"})), "no match: /bsy/ (nearest: top.cpu.busy)");
+    assert_eq!(s.ok("signals", json!({"pattern": "/cpux/"})), "no match: /cpux/ (nearest: top.cpu)");
+    // a pattern is a regex in slashes, as everywhere an agent writes one; a glob, or a regex
+    // without them, is an error giving the form meant
+    assert_eq!(s.tool("signals", json!({"pattern": "*sta*"})), Err("*sta* is a glob; a pattern is a regex in slashes: /sta/".into()));
+    assert_eq!(s.tool("signals", json!({"pattern": "**.{busy,data}"})), Err("**.{busy,data} is a glob; a pattern is a regex in slashes: /(busy|data)/".into()));
+    assert_eq!(s.tool("signals", json!({"pattern": "/*sta*/"})), Err("not a regex: /*sta*/ (repetition operator missing expression); `/sta/` for that glob".into()));
+    assert_eq!(s.tool("signals", json!({"pattern": "^top\\.cpu"})), Err("^top\\.cpu is no pattern: a pattern is a regex in slashes, /^top\\.cpu/".into()));
     // a slice a query made isn't listed afterwards (spec §16)
     s.ok("find", json!({"expr": "cpu.data[3:0] == 3", "count_only": true}));
-    assert_eq!(s.ok("signals", json!({"pattern": "data"})), "top.cpu.data (8 bits)");
+    assert_eq!(s.ok("signals", json!({"pattern": "/data/"})), "top.cpu.data (8 bits)");
     // array elements and generate instances of one width are one line, the indices as ranges
     s.ok("open", json!({"trace": std::fs::canonicalize("tests/data/vhdl.fst").unwrap()}));
-    assert_eq!(s.ok("signals", json!({"pattern": "vhdl"})), "vhdl.clk (1 bit)\nvhdl.arr (array, 8 bits, 2 signals)\nvhdl.gen[0..1].x (1 bit, 2 signals)");
-    assert_eq!(s.ok("signals", json!({"pattern": "vhdl.**"})), "vhdl.clk (1 bit)\nvhdl.arr[0..1] (4 bits, 2 signals)\nvhdl.gen[0..1].x (1 bit, 2 signals)");
+    assert_eq!(s.ok("signals", json!({"pattern": "/vhdl/"})), "vhdl (scope of 5 signals)\nvhdl.clk (1 bit)\nvhdl.arr (array, 8 bits, 2 signals)\nvhdl.gen[0..1].x (1 bit, 2 signals)");
+    assert_eq!(s.ok("signals", json!({"pattern": "/arr\\[/"})), "vhdl.arr[0..1] (4 bits, 2 signals)");
+    // a regex is matched against paths in one form, either HDL's written as `canon` writes it:
+    // lowercase, indices in brackets (the file has `gen_stages(0)`, `headers_vld`)
+    s.ok("open", json!({"trace": std::fs::canonicalize("tests/data/hdl.vcd").unwrap()}));
+    assert_eq!(s.ok("signals", json!({"pattern": "/gen_stages\\[0\\]/"})), "dut.gen_stages[0] (scope of 1 signal)\ndut.gen_stages[0].x (1 bit)");
+    assert_eq!(s.ok("signals", json!({"pattern": "/HEADERS_VLD/"})), "dut.headers_vld (1 bit)");
+    assert_eq!(s.ok("signals", json!({"pattern": "/gen_stages\\(0\\)/"})), "no match: /gen_stages\\(0\\)/ (nearest: dut.gen_stages)");
     // without a width: a real, or a string (nvc dumps an enum as one, its type not kept)
     let reals = dir.0.join("real.vcd");
     std::fs::write(&reals, "$timescale 1ns $end\n$scope module top $end\n$var real 64 r level $end\n$upscope $end\n$enddefinitions $end\n#0\nr1.5 r\n").unwrap();
     s.ok("open", json!({"trace": reals}));
-    assert_eq!(s.ok("signals", json!({"pattern": "level"})), "top.level (real)");
+    assert_eq!(s.ok("signals", json!({"pattern": "/level/"})), "top.level (real)");
     s.ok("open", json!({"trace": std::fs::canonicalize("tests/data/types-nvc.fst").unwrap()}));
-    assert_eq!(s.ok("signals", json!({"pattern": "types.pkt.state"})), "types.pkt.state (string)");
+    assert_eq!(s.ok("signals", json!({"pattern": "/types.pkt.state/"})), "types.pkt.state (string)");
     // a file wellen can't read is an error, not a crash or a hang
     let ghw = std::fs::canonicalize("tests/data/types-ghdl.ghw").unwrap();
     assert!(s.tool("open", json!({"trace": ghw})).unwrap_err().ends_with("wellen can't read it: not yet implemented: support multi-dimensional arrays!"));
@@ -206,8 +225,6 @@ fn reading_tools() {
     // 1 fs ticks: the time as asked, not the span's end (20.000499ns)
     assert_eq!(s.ok("value_at", json!({"signals": ["clk"], "time": "20ns"})), "at 20ns:\nclk = 0 (1 earlier in 20ns)");
     s.ok("open", json!({"trace": simple()}));
-    assert_eq!(s.ok("signals", json!({"pattern": "**sta*"})), "no match: **sta* (a pattern matches the whole path: **.*sta* for sta anywhere)");
-    assert_eq!(s.ok("signals", json!({"pattern": "**.*sta*"})), "top.cpu.state (3 bits)\ntop.dma.state (3 bits)");
     assert_eq!(s.ok("values", json!({"signals": ["cpu.data"], "from": "15ns", "to": "40ns", "radix": "dec"})), "cpu.data:\n  15ns 67\n  20ns 150\n  30ns 225\n  40ns 58\n");
     assert_eq!(s.ok("value_at", json!({"signals": ["clk", "data[7]", "busy"], "time": "25ns"})), "at 25ns:\nclk = 1\ndata[7] = 1\nbusy = 1");
     assert_eq!(s.ok("find", json!({"expr": "@clk busy"})), "from\tlast\tcycles\n15ns\t25ns\t2");
@@ -228,9 +245,11 @@ fn struct_fields() {
     let dir = Dir::new("structs");
     let mut s = Server::start(&dir.0);
     s.ok("open", json!({"trace": std::fs::canonicalize("tests/data/types-verilator-structs.fst").unwrap()}));
-    assert_eq!(s.ok("signals", json!({"pattern": "types.pkt.**"})), "types.pkt.valid (1 bit)\ntypes.pkt.state (2 bits)\ntypes.pkt.pair.hi (4 bits)\ntypes.pkt.pair.lo (4 bits)");
-    assert_eq!(s.ok("signals", json!({"pattern": "pkts"})), "types.pkts (array, 22 bits, 8 signals)");
-    assert_eq!(s.ok("signals", json!({"pattern": "types.pkts.**"})), "types.pkts[0..1].valid (1 bit, 2 signals)\ntypes.pkts[0..1].state (2 bits, 2 signals)\ntypes.pkts[0..1].pair.hi (4 bits, 2 signals)\ntypes.pkts[0..1].pair.lo (4 bits, 2 signals)");
+    // a struct or array is one line, what is in it listed a level at a time as the pattern names it
+    assert_eq!(s.ok("signals", json!({"pattern": "/types\\.pkt\\./"})), "types.pkt.valid (1 bit)\ntypes.pkt.state (2 bits)\ntypes.pkt.pair (struct, 8 bits, 2 signals)");
+    assert_eq!(s.ok("signals", json!({"pattern": "/pkts/"})), "types.pkts (array, 22 bits, 8 signals)");
+    assert_eq!(s.ok("signals", json!({"pattern": "/pkts\\[/"})), "types.pkts[0..1] (struct, 11 bits, 4 signals, 2 structs)");
+    assert_eq!(s.ok("signals", json!({"pattern": "/pkts.*pair\\./"})), "types.pkts[0..1].pair.hi (4 bits, 2 signals)\ntypes.pkts[0..1].pair.lo (4 bits, 2 signals)");
     assert_eq!(s.ok("value_at", json!({"signals": ["pkt.state", "pkts(1).pair.lo"], "time": "10ns"})), "at 10ns:\npkt.state = BUSY\npkts(1).pair.lo = 0x7");
     assert_eq!(
         s.ok("value_at", json!({"signals": ["pkt"], "time": "10ns"})),
@@ -292,6 +311,12 @@ fn find_runs_values_and_counts() {
     // a window of the trace, and a unit of the agent's
     assert_eq!(s.ok("find", json!({"expr": "@clk !busy", "from": "30ns", "to": "50ns", "unit": "us"})), "from\tlast\tcycles\n0.035us\t0.045us\t2");
     assert_eq!(s.tool("find", json!({"expr": "busy", "unit": "parsec"})), Err("bad time unit: parsec (s, ms, us, ns, ps, fs)".into()));
+    // a bad time says the form, with the fix where there is one (spec §15 times)
+    let at = |s: &mut Server, t: &str| s.tool("value_at", json!({"signals": ["data"], "time": t})).unwrap_err();
+    assert_eq!(at(&mut s, "\"20ns\""), "bad time: \"20ns\": without quotes, 20ns");
+    assert_eq!(at(&mut s, "None"), "bad time: None (a number and a unit, 20ns or 1.5us; a plain number is file ticks)");
+    assert_eq!(at(&mut s, "20 ns"), "bad time: a space before the unit: 20ns");
+    assert_eq!(at(&mut s, "20nsec"), "bad time unit: nsec (s, ms, us, ns, ps, fs)");
     assert_eq!(s.tool("find", json!({"expr": "busy", "show": ["state"]})), Err("ambiguous: state (2 signals: top.cpu.state, top.dma.state)".into()));
 }
 
@@ -303,7 +328,7 @@ fn agent_commands() {
     let mut cmd = |l: &str| s.tool("command", json!({"line": l}));
     // the answer says which rows changed, so a pattern that caught too much shows
     assert_eq!(cmd("add top.cpu"), Ok("added 4: group cpu, top.cpu.state, top.cpu.data, top.cpu.busy".into()));
-    assert_eq!(cmd("rm top.cpu.*s*"), Ok("removed 2: top.cpu.state, top.cpu.busy".into()));
+    assert_eq!(cmd("rm /^top\\.cpu\\..*s/"), Ok("removed 2: top.cpu.state, top.cpu.busy".into()));
     // several at once; the ones that fail are named
     assert_eq!(cmd("add top.clk top.rst"), Ok("added 2: top.clk, top.rst".into()));
     assert_eq!(cmd("add top.cpu.busy nope"), Ok("added 1: top.cpu.busy\nno match: nope".into()));
@@ -326,7 +351,7 @@ fn agent_commands() {
     assert_eq!(cmd("undo"), Ok("added 1: group cpu".into()));
     assert_eq!(cmd("undo"), Ok("removed 1: top.dma.state".into()));
     assert_eq!(cmd("redo"), Ok("added 1: top.dma.state".into()));
-    assert_eq!(cmd("rm **"), Ok("removed 6: group cpu, top.cpu.data, top.clk, top.rst, top.cpu.busy, top.dma.state".into()));
+    assert_eq!(cmd("rm /.*/"), Ok("removed 6: group cpu, top.cpu.data, top.clk, top.rst, top.cpu.busy, top.dma.state".into()));
     // cursors: 2 - 9 are marks; `cursor n` alone jumps the cursor (1) there, and moving on leaves the mark
     cmd("add top.clk").unwrap();
     cmd("cursor 2 30ns").unwrap();
@@ -356,7 +381,7 @@ fn workspace_in_one_call() {
     assert_eq!(s.tool("command", json!({"line": "undo"})), Ok("removed 5: top.clk, group cpu, top.cpu.data, top.cpu.busy, top.dma.state".into()));
     // every mistake at once, and nothing changes
     let bad = s.tool("workspace", json!({"rows": ["state", "top.clk:float", "nope", "data[3]"], "cursors": {"12": "1ns", "2": "soon"}, "range": ["50ns", "10ns"]}));
-    assert_eq!(bad, Err("ambiguous: state (2 signals: top.cpu.state, top.dma.state)\nfloat doesn't fit top.clk (1 bits)\nunknown signal: nope\ndata[3]: a bit can't be a row; add its bus\ncursors: no cursor 12 (1-9)\nsoon: bad time: soon\nrange: the end must be after the start".into()));
+    assert_eq!(bad, Err("ambiguous: state (2 signals: top.cpu.state, top.dma.state)\nfloat doesn't fit top.clk (1 bits)\nunknown signal: nope\ndata[3]: a bit can't be a row; add its bus\ncursors: no cursor 12 (1-9)\nsoon: bad time: soon (a number and a unit, 20ns or 1.5us; a plain number is file ticks)\nrange: the end must be after the start".into()));
     assert!(s.ok("view", json!({})).starts_with("rows (> selected):\n  (none)\n"));
     // view in a unit of the agent's
     s.ok("workspace", json!({"rows": ["top.clk"], "cursors": {"2": "35ns"}}));
@@ -418,7 +443,7 @@ fn stale_sockets_are_removed() {
 fn errors() {
     let dir = Dir::new("errors");
     let mut s = Server::start(&dir.0);
-    let none = "no trace is open: `open` one (`sessions` lists the user's windows and their traces)";
+    let none = "no trace is open: `open` a VCD, FST or GHW waveform (`sessions` lists the user's windows and their traces)";
     assert_eq!(s.tool("info", json!({})), Err(none.into()));
     assert_eq!(s.tool("command", json!({"line": "add clk"})), Err(none.into()));
     assert!(s.tool("open", json!({"trace": dir.0.join("missing.vcd")})).unwrap_err().contains("missing.vcd"));
@@ -450,6 +475,46 @@ fn big_trace(dir: &Path) -> PathBuf {
     path
 }
 
+/// A long `signals` answer folds to a line per scope below the deepest level that fits, but never
+/// above the scope its matches share, so asking for one scope lists it (spec §15).
+#[test]
+fn signals_fold() {
+    let dir = Dir::new("fold");
+    let mut v = String::from("$timescale 1ns $end\n$scope module top $end\n$var wire 1 ! clk $end\n");
+    for c in 0..4 {
+        v += &format!("$scope module core{c} $end\n$var wire 1 r{c} rst $end\n");
+        for l in 0..60 {
+            v += &format!("$scope module lane{l} $end\n");
+            for (k, name) in ["valid", "ready", "data"].iter().enumerate() {
+                v += &format!("$var wire 8 s{c}_{l}_{k} {name} $end\n");
+            }
+            v += "$upscope $end\n";
+        }
+        v += "$upscope $end\n";
+    }
+    v += "$upscope $end\n$enddefinitions $end\n#0\n0!\n";
+    let path = dir.0.join("deep.vcd");
+    std::fs::write(&path, v).unwrap();
+    let mut s = Server::start(&dir.0);
+    s.ok("open", json!({"trace": path}));
+    let note = "folded to fit: a scope's line counts its matches; ask for one by its path";
+    assert_eq!(
+        s.ok("signals", json!({})),
+        format!("top (scope of 725 signals)\ntop.clk (1 bit)\ntop.core0 (scope, 181 matching signals)\ntop.core1 (scope, 181 matching signals)\ntop.core2 (scope, 181 matching signals)\ntop.core3 (scope, 181 matching signals)\n{note}, `^top\\.core0\\.`")
+    );
+    let core = s.ok("signals", json!({"pattern": "/^top\\.core1\\./"}));
+    assert_eq!(core.lines().count(), 62, "{core}");
+    assert!(core.starts_with("top.core1.rst (1 bit)\ntop.core1.lane0 (scope, 3 matching signals)\n"), "{core}");
+    assert!(core.ends_with(&format!("{note}, `^top\\.core1\\.lane0\\.`")), "{core}");
+    assert_eq!(s.ok("signals", json!({"pattern": "/^top\\.core1\\.lane7\\./"})), "top.core1.lane7.valid (8 bits)\ntop.core1.lane7.ready (8 bits)\ntop.core1.lane7.data (8 bits)");
+    // what fits isn't folded: a scope per core, a lane's signals
+    assert_eq!(s.ok("signals", json!({"pattern": "/lane7$/"})).lines().count(), 4);
+    assert_eq!(s.ok("signals", json!({"pattern": "/core2.*lane7\\./"})).lines().count(), 3);
+    // scopes only, folded: a line counts the scopes under it
+    let lanes = s.ok("signals", json!({"pattern": "/lane\\d+$/"}));
+    assert!(lanes.starts_with("top.core0 (scope, 60 matching scopes)\n"), "{lanes}");
+}
+
 #[test]
 fn answers_are_capped() {
     let dir = Dir::new("caps");
@@ -457,7 +522,8 @@ fn answers_are_capped() {
     s.ok("open", json!({"trace": big_trace(&dir.0)}));
     let all = s.ok("signals", json!({}));
     assert_eq!(all.lines().count(), 1001);
-    assert!(all.ends_with("\n... 101 more; narrow the pattern"), "{}", &all[all.len() - 60..]);
+    assert!(all.starts_with("top (scope of 1101 signals)\n"), "{}", &all[..60]);
+    assert!(all.ends_with("\n... 102 more; narrow the pattern"), "{}", &all[all.len() - 60..]);
     let clk = s.ok("values", json!({"signals": ["clk"], "from": "0ns", "to": "2100ns"}));
     // the name, the value at `from`, 1000 changes, the note
     assert_eq!(clk.lines().count(), 1003);
@@ -736,6 +802,9 @@ fn decode_with_command() {
     );
     assert_eq!(s.ok("records", json!({"stream": "bus", "where": "strb != 0xF", "count_only": true})), "1 matching records, of 13, first 60ns, last 60ns");
     assert_eq!(s.ok("records", json!({"stream": "bus.wr bus.rd", "group_by": ["resp"]})), "2 of 2 distinct, of 10 records\n9 × resp=0x0 (30ns .. 410ns)\n1 × resp=0x2 (170ns .. 170ns)");
+    // a set by pattern, a regex in slashes as everywhere; a glob is an error giving it
+    assert_eq!(s.ok("records", json!({"stream": "/^bus\\.(wr|rd)$/", "group_by": ["resp"]})), "2 of 2 distinct, of 10 records\n9 × resp=0x0 (30ns .. 410ns)\n1 × resp=0x2 (170ns .. 170ns)");
+    assert_eq!(s.tool("records", json!({"stream": "bus.*"})), Err("bus.* is a glob; a pattern is a regex in slashes: /bus\\./".into()));
     assert_eq!(s.ok("records", json!({"stream": "bus.wr"})), "2 of 2\nn\tstart\tend\tdelay\taddr\tdata\tstrb\tresp\n0\t30ns\t50ns\t10ns\t0x10\t0x11111111\t0xF\t0x0\n1\t60ns\t120ns\t20ns\t0x14\t0x22222222\t0x3\t0x0");
     assert_eq!(s.ok("records", json!({"stream": "bus.errors"})), "2 of 2\nn\tstart\tend\trule\n0\t180ns\t190ns\tr_resp\n1\t210ns\t220ns\taw_dropped");
     // a radix for every number field (not the delay, a time), or one field's

@@ -2592,6 +2592,7 @@ dependencies = [
 name = "wtf-core"
 version = "0.3.0"
 dependencies = [
+ "regex",
  "toml",
  "wellen",
 ]
@@ -2606,6 +2607,7 @@ dependencies = [
  "libc",
  "nucleo-matcher",
  "ratatui",
+ "regex",
  "rmcp",
  "serde",
  "serde_json",

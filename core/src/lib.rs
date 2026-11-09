@@ -4,6 +4,8 @@
 pub mod command;
 pub mod computed;
 pub mod decode;
+pub mod design;
+pub mod pattern;
 pub mod protocol;
 pub mod query;
 pub mod radix;

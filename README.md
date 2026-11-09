@@ -101,6 +101,13 @@ Register the MCP server once, for example with Claude Code:
 claude mcp add wtf -- wtf --mcp
 ```
 
+A VCD is text, and an agent left to itself reads it with `cat` and `grep`. Claude Code defers an
+MCP server's tools until the agent searches for them, which makes that likelier: on NVIDIA's CVDP
+debug problems, agents given the failing run's VCD with wtf's tools deferred called wtf in none
+of 10 runs. Keep wtf's tools loaded (`ENABLE_TOOL_SEARCH=false` in the environment), and tell the
+agent in your project's `CLAUDE.md` or `AGENTS.md`: "Read waveforms (VCD, FST, GHW) with the wtf
+MCP server's tools."
+
 Then ask the agent about a trace. It opens it in a workspace of its own and answers
 from the decoded values. Asked for failed reads in `docs/demo.vcd`, an agent calls the `command`
 tool with `decode bus axilite clock=aclk prefix=s_axi_`, then `records` on `bus.rd` with

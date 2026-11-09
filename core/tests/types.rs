@@ -271,6 +271,13 @@ fn add_a_composite() {
         added(structs, "add types.gen"),
         "no signals directly in types.gen: add types.gen.** for all of it, or one of its scopes: types.gen[0], types.gen[1]"
     );
+    // an agent's workspace says it as a regex over the canonical path
+    let mut ws = fixture(structs);
+    ws.patterns = wtf_core::pattern::Syntax::Regex;
+    assert_eq!(
+        wtf_core::command::run(&mut ws, "add types.gen").unwrap_err(),
+        "no signals directly in types.gen: add /^types\\.gen\\./ for all of it, or one of its scopes: types.gen[0], types.gen[1]"
+    );
     // a Verilator VCD writes struct scopes as modules, so :add takes only the fields
     // directly in it (not pkt.pair) and pkts is a plain scope, fixed by a later piece
     let vcd = "types-verilator-structs.vcd";

@@ -23,7 +23,7 @@ pub fn main(args: &[String]) -> Result<(), String> {
     let calls: Vec<(String, &str, Value)> = vec![
         ("open".into(), "open", json!({"trace": trace})),
         ("info".into(), "info", json!({})),
-        ("signals top.u0.*".into(), "signals", json!({"pattern": "top.u0.*"})),
+        ("signals /^top\\.u0\\./".into(), "signals", json!({"pattern": "/^top\\.u0\\./"})),
         ("find @clk awvalid && awready, count_only".into(), "find", json!({"expr": txn, "count_only": true})),
         ("find @clk awvalid && awready, show addr data".into(), "find", json!({"expr": txn, "show": ["top.u0.s_axi_awaddr", "top.u0.s_axi_wdata"]})),
         ("values hot, awaddr over 1 us".into(), "values", json!({"signals": ["top.hot", "top.u0.s_axi_awaddr"], "from": "100us", "to": "101us"})),

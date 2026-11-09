@@ -874,7 +874,7 @@ fn sized(text: &str, bits: String, size: Option<u32>, signed: bool) -> Result<Sv
 /// negative, or a time (ticks).
 fn number_text(text: &str, fpt: Option<u128>) -> Result<i128, String> {
     if crate::time::has_unit(text) {
-        return crate::time::parse(text, fpt).map(|t| t.round() as i128);
+        return crate::time::parse(text, fpt).map(|t| t.round() as i128).map_err(String::from);
     }
     if let Some(sv) = sv_literal(text.trim_start_matches('-')) {
         let n = match sv? {
@@ -1157,6 +1157,8 @@ mod tests {
         assert_eq!(err("cpu.busy )"), format!("unexpected: ) (operators: {OPERATORS})"));
         assert_eq!(err("cpu.data < z"), "cpu.data < z: < compares numbers; x, z and text only with == or !=");
         assert_eq!(err("cpu.state == 0x10"), "cpu.state: 0x10 doesn't fit in 3 bits");
+        assert_eq!(err("cpu.data == 40ns"), "cpu.data: file has no timescale; use ticks");
+        assert_eq!(err("cpu.data + 40ns > 0"), "file has no timescale; use ticks");
     }
     /// Signals for arithmetic: a, b 32 bits, m, n 4, s 8 (signed, as `x - y` makes), t text, w
     /// 128 bits, u 8 bits unknown; each with one value.

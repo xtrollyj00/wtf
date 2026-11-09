@@ -157,8 +157,10 @@ pub struct Trace {
     /// The interfaces built-in protocols decode in the file (`protocol::detect`), found once.
     pub(crate) found: std::cell::OnceCell<Vec<crate::protocol::Found>>,
     /// Each var's path in canonical form (`canon`), for names written in the other HDL's form;
-    /// worked out once per var, as vars are only added.
+    /// worked out once per var; the computed ones' again when they are dropped and move.
     canon: std::cell::RefCell<Vec<String>>,
+    /// The file's design (`design`), worked out once.
+    design: std::cell::OnceCell<crate::design::Design>,
 }
 
 impl Trace {
@@ -196,7 +198,7 @@ impl Trace {
             .collect();
         let mut by_path: HashMap<String, usize> = vars.iter().enumerate().map(|(i, v)| (v.path.clone(), i)).collect();
         composites(&mut vars, &mut by_path);
-        Trace { wave, fs_per_tick, fixed: vars.len(), vars, by_path, version: 0, edges: Default::default(), found: Default::default(), canon: Default::default() }
+        Trace { wave, fs_per_tick, fixed: vars.len(), vars, by_path, version: 0, edges: Default::default(), found: Default::default(), canon: Default::default(), design: Default::default() }
     }
 
     pub fn end(&self) -> Tick {
@@ -310,8 +312,17 @@ impl Trace {
         out
     }
 
-    /// Add a computed signal from its values in time order (`changes`, times may repeat: the last
-    /// value at a time counts), or replace the one with that path. Returns its var.
+    /// The file's design, its scopes and signals, worked out the first time it is asked for: the
+    /// file's hierarchy never changes.
+    pub fn design(&self) -> &crate::design::Design {
+        self.design.get_or_init(|| crate::design::Design::of(&self.vars[..self.fixed]))
+    }
+
+    /// The scopes and signals nearest to a name that matched nothing (`Design::nearest`).
+    pub fn nearest(&self, name: &str, n: usize) -> Vec<String> {
+        self.design().nearest(name, n).into_iter().map(str::to_string).collect()
+    }
+
     /// Every var's path in canonical form, by var (`canon`).
     pub(crate) fn canon_paths(&self) -> std::cell::Ref<'_, Vec<String>> {
         {
@@ -322,6 +333,8 @@ impl Trace {
         self.canon.borrow()
     }
 
+    /// Add a computed signal from its values in time order (`changes`, times may repeat: the last
+    /// value at a time counts), or replace the one with that path. Returns its var.
     pub fn add_computed(&mut self, path: &str, width: Option<u32>, changes: Vec<(Tick, Val)>) -> Result<usize, String> {
         let mut list: Vec<(Tick, Val)> = Vec::with_capacity(changes.len());
         for (t, v) in changes {
@@ -361,6 +374,8 @@ impl Trace {
         if (self.fixed..self.vars.len()).all(|v| keep.contains(&v)) {
             return None;
         }
+        // the computed vars move: their canonical paths are worked out again
+        self.canon.get_mut().truncate(self.fixed);
         let mut to: Vec<Option<usize>> = (0..self.vars.len()).map(|v| (v < self.fixed).then_some(v)).collect();
         for (k, var) in self.vars.split_off(self.fixed).into_iter().enumerate() {
             self.by_path.remove(&var.path);

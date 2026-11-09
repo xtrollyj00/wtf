@@ -53,7 +53,7 @@ fn frame_schema_and_errors() {
     assert_eq!(names(&[("select", "d")]), [("beats".into(), Some(32)), ("d".into(), Some(8)), ("complete".into(), Some(1))]);
     let err = |ps: &[(&str, &str)]| make(ps).err().unwrap();
     assert_eq!(err(&[]), "frame: needs last, gap or select");
-    assert_eq!(err(&[("last", "tlast"), ("gap", "-1"), ("gap", "soon"), ("size", "4")]), "frame: no field tlast (fields: d, rdy); frame: gap: bad time: -1; frame: gap: bad time: soon; frame: no parameter size (last, gap, select, key, bytes, data)");
+    assert_eq!(err(&[("last", "tlast"), ("gap", "-1"), ("gap", "soon"), ("size", "4")]), "frame: no field tlast (fields: d, rdy); frame: gap: bad time: -1 (a number and a unit, 20ns or 1.5us; a plain number is file ticks); frame: gap: bad time: soon (a number and a unit, 20ns or 1.5us; a plain number is file ticks); frame: no parameter size (last, gap, select, key, bytes, data)");
     assert_eq!(decode::make("axi9", &s.schema, &[], None).err().unwrap(), "unknown decoder: axi9 (decoders: frame, spi, uart)");
     // an empty stream makes no frames
     let empty = Stream { name: "e".into(), schema: s.schema.clone(), records: vec![], violations: false, inputs: vec![] };

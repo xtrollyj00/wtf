@@ -319,7 +319,7 @@ impl App {
             // the agents' reference, one source for both (spec §15)
             "help" => {
                 let topics = || crate::mcp::help::TOPICS.iter().map(|t| t.0).collect::<Vec<_>>().join(" ");
-                let text = crate::mcp::help::answer(Some(arg)).map_err(|_| format!("no help topic {}; topics: {}", arg.trim(), topics()))?;
+                let text = crate::mcp::help::answer(Some(arg), wtf_core::pattern::Syntax::Glob).map_err(|_| format!("no help topic {}; topics: {}", arg.trim(), topics()))?;
                 let items = text.lines().map(|l| (None, l.to_string())).collect();
                 let name = format!("help {} {}", gl().dot, arg.trim().to_lowercase());
                 self.records = Some(Records { name, title: String::new(), items, hl: 0, top: 0, page: 1 });

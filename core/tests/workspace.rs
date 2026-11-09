@@ -213,7 +213,7 @@ fn reloads() {
     let short: String = text.lines().filter(|l| !l.contains("dma") && !l.ends_with('&')).take_while(|l| *l != "#60").map(|l| format!("{l}\n")).collect();
     std::fs::write(&trace, short).unwrap();
     let (msg, _) = ws.reload().unwrap();
-    assert_eq!(msg, "reloaded; not in trace: d (d: busy: unknown signal: top.dma.state), dp (dp: state: unknown signal: top.dma.state), top.dma.state");
+    assert_eq!(msg, "reloaded; not in trace: d (d: busy: unknown signal: top.dma.state (nearest: top.state, top.cpu.state)), dp (dp: state: unknown signal: top.dma.state (nearest: top.state, top.cpu.state)), top.dma.state");
     assert_eq!(names(&ws), ["clk", "rst"]);
     assert_eq!((ws.trace.end(), ws.marks[1]), (55, Some(55)));
     // the instance that failed is kept, and made again once it can be
@@ -507,7 +507,7 @@ fn reloads_and_reports_whats_left() {
     }
     std::fs::write(&trace, text.lines().filter(|l| !l.contains("dma") && !l.ends_with('&')).map(|l| format!("{l}\n")).collect::<String>()).unwrap();
     let (msg, _) = ws.reload().unwrap();
-    assert_eq!(msg, "reloaded; not in trace: ds (unknown signal: top.dma.state[0]), dd (unknown signal: ds[0])");
+    assert_eq!(msg, "reloaded; not in trace: ds (unknown signal: top.dma.state[0] (nearest: top.state, top.cpu.state)), dd (unknown signal: ds[0])");
     assert!(ws.trace.by_path.contains_key("lo"), "lo is made in a second pass");
 }
 
@@ -561,4 +561,16 @@ fn computed_signals_load_with_their_parts() {
     let file = ws.trace.vars.iter().position(|v| v.path == "top.cpu.state").unwrap();
     ws.trace.load(&[file]);
     assert!(ws.trace.loaded(file));
+}
+
+/// Dropping a computed var moves the ones after it: a name matched in the other HDL's form (`Y`)
+/// still finds the one that moved.
+#[test]
+fn canonical_names_after_a_drop() {
+    let mut ws = open();
+    ws.resolve("data[7:4]").unwrap();
+    wtf_core::command::run(&mut ws, "signal y = data[3:0]").unwrap();
+    assert!(ws.resolve("Y").is_ok());
+    ws.drop_unused();
+    assert!(ws.resolve("Y").is_ok());
 }

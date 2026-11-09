@@ -131,7 +131,7 @@ pub fn apply(app: &mut Workspace, text: &str) -> Result<Vec<String>, String> {
     let end = app.trace.end();
     let time = |v: &Value, warn: &mut Vec<String>| -> Option<u64> {
         let r = match v {
-            Value::String(s) => crate::time::parse(s, fpt),
+            Value::String(s) => crate::time::parse(s, fpt).map_err(String::from),
             Value::Integer(i) => Ok(*i as f64),
             _ => Err("bad time".into()),
         };

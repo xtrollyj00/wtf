@@ -66,7 +66,7 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 /// The current workspace's app.
 fn current(w: &Wtf) -> Result<Arc<Mutex<Workspace>>, String> {
     let st = lock(&w.state);
-    let ws = st.workspaces.get(st.current).ok_or("no trace is open: `open` one (`sessions` lists the user's windows and their traces)")?;
+    let ws = st.workspaces.get(st.current).ok_or("no trace is open: `open` a VCD, FST or GHW waveform (`sessions` lists the user's windows and their traces)")?;
     Ok(ws.app.clone())
 }
 
@@ -145,6 +145,110 @@ fn field_radixes(s: &wtf_core::stream::Set, asked: Option<&str>) -> Result<Vec<O
     Ok(out)
 }
 
+fn plural(n: usize, noun: &str) -> String {
+    format!("{n} {noun}{}", if n == 1 { "" } else { "s" })
+}
+
+/// Lines a `signals` answer folds to: below the deepest level that fits, a scope is one line.
+const FOLD_LINES: usize = 200;
+
+/// The `signals` answer: the design's nodes a search matched, as the hierarchy sent to the agent
+/// (spec §15). A signal with its width; a struct or array one line, what is in it hidden unless
+/// only that matched; a scope the search names before its signals, when it doesn't name the
+/// scope it is in. Over `FOLD_LINES`, the scopes below the deepest level that fits are a line
+/// each counting their matches, never above the scope all matches share, so asking for one
+/// scope lists it. Empty if nothing matched.
+fn hierarchy(t: &wtf_core::trace::Trace, matched: &[usize]) -> String {
+    let d = t.design();
+    let nodes = &d.nodes;
+    let mut hit = vec![false; nodes.len()];
+    matched.iter().for_each(|&i| hit[i] = true);
+    let up = |mut i: usize| std::iter::from_fn(move || nodes[i].parent.inspect(|&p| i = p));
+    let what = |v: &wtf_core::trace::Var| match v.width {
+        Some(w) => plural(w as usize, "bit"),
+        None if v.real => "real".into(),
+        None => "string".into(),
+    };
+    // a line: (order, node, text); a var's ordered by its first signal, a scope before them
+    let mut items: Vec<((usize, usize, usize), usize, String)> = Vec::new();
+    for &i in matched {
+        let n = &nodes[i];
+        match n.var {
+            // inside a struct or array that matched: that is its line
+            Some(_) if up(i).take_while(|&p| nodes[p].var.is_some()).any(|p| hit[p]) => {}
+            Some(v) => {
+                let var = &t.vars[v];
+                let text = match t.is_composite(v) {
+                    true => format!("{}, {}, {}", if t.is_array(v) { "array" } else { "struct" }, if var.width.is_some() { what(var) } else { "text".into() }, plural(n.signals, "signal")),
+                    false => what(var),
+                };
+                items.push(((n.first, 1, n.depth), i, text));
+            }
+            None if n.parent.is_some_and(|p| hit[p]) => {}
+            None => items.push(((n.first, 0, n.depth), i, format!("scope of {}", plural(n.signals, "signal")))),
+        }
+    }
+    if items.is_empty() {
+        return String::new();
+    }
+    items.sort_by_key(|x| x.0);
+    // the scopes a line is in, from the top; a scope's line is in itself
+    let scopes = |i: usize| {
+        let mut s: Vec<usize> = std::iter::once(i).chain(up(i)).filter(|&p| nodes[p].var.is_none()).collect();
+        s.reverse();
+        s
+    };
+    let chains: Vec<Vec<usize>> = items.iter().map(|x| scopes(x.1)).collect();
+    // the scope every line is in: folding stops there
+    let common = chains.iter().map(|c| c.iter().zip(&chains[0]).take_while(|(a, b)| a == b).count()).min().unwrap_or(0);
+    let deepest = chains.iter().map(Vec::len).max().unwrap_or(0);
+    // at level `k`, what is in `k` scopes or fewer is listed, the rest counted in its scope k + 1 deep
+    let fold = |k: usize| -> (Vec<String>, Option<String>) {
+        let mut lines: Vec<(usize, Option<String>)> = Vec::new();
+        let mut folded: std::collections::HashMap<usize, (usize, usize)> = Default::default();
+        for (x, chain) in items.iter().zip(&chains) {
+            if chain.len() <= k {
+                lines.push((x.1, Some(x.2.clone())));
+                continue;
+            }
+            let s = chain[k];
+            let count = folded.entry(s).or_insert_with(|| {
+                lines.push((s, None));
+                (0, 0)
+            });
+            match nodes[x.1].var {
+                Some(_) => count.0 += nodes[x.1].signals,
+                None => count.1 += 1,
+            }
+        }
+        let first = lines.iter().find(|l| l.1.is_none()).map(|l| format!("^{}\\.", regex::escape(&nodes[l.0].canon)));
+        let lines = lines.into_iter().map(|(i, text)| {
+            let text = text.unwrap_or_else(|| match folded[&i] {
+                (0, s) => format!("scope, {}", plural(s, "matching scope")),
+                (n, _) => format!("scope, {}", plural(n, "matching signal")),
+            });
+            (nodes[i].path.as_str(), text)
+        });
+        (collapse(lines), first)
+    };
+    let (mut lines, mut one) = fold(deepest);
+    for k in (common..deepest).rev() {
+        if lines.len() <= FOLD_LINES {
+            break;
+        }
+        (lines, one) = fold(k);
+    }
+    let more = lines.len().saturating_sub(MAX_LINES);
+    let mut out = lines.into_iter().take(MAX_LINES).collect::<Vec<_>>().join("\n");
+    if more > 0 {
+        out += &format!("\n... {more} more; narrow the pattern");
+    }
+    if let Some(one) = one {
+        out += &format!("\nfolded to fit: a scope's line counts its matches; ask for one by its path, `{one}`");
+    }
+    out
+}
+
 /// Paths with their widths as `signals` lines: those differing only in indices (`[3]`, `(3)`) and
 /// of one width are one line, each index a range: `mux_in[0..15][0..15] (8 bits, 256 signals)`.
 /// A barrel shifter's 256 elements, one line each, were most of an agent's answer.
@@ -177,7 +281,9 @@ fn collapse<'a>(vars: impl Iterator<Item = (&'a str, String)>) -> Vec<String> {
             _ => {
                 let mut ranges = ranges.into_iter().map(|(a, b)| if a == b { a.to_string() } else { format!("{a}..{b}") });
                 let path: String = key.split('\0').enumerate().map(|(i, part)| if i == 0 { part.to_string() } else { format!("{}{part}", ranges.next().unwrap_or_default()) }).collect();
-                format!("{path} ({width}, {n} signals)")
+                // a group of scopes, structs or arrays says so: it counts their signals already
+                let noun = ["scope", "struct", "array"].into_iter().find(|k| width.starts_with(k)).map_or("signals".into(), |k| format!("{k}s"));
+                format!("{path} ({width}, {n} {noun})")
             }
         })
         .collect()
@@ -307,9 +413,12 @@ impl Wtf {
         if lines.is_empty() { "no sessions: the user has no wtf window open; `open` a trace".into() } else { lines.join("\n") }
     }
 
-    #[tool(description = "Open a trace in a new workspace, the current one from then on. Answers with `info`, which lists the interfaces to decode.")]
+    #[tool(description = "Open a waveform (VCD, FST or GHW file) in a new workspace, the current one from then on. Answers with `info`, which lists the interfaces to decode.")]
     fn open(&self, Parameters(a): Parameters<OpenArgs>) -> Result<String, String> {
-        let app = Arc::new(Mutex::new(Workspace::open(std::path::Path::new(&a.trace))?));
+        let mut ws = Workspace::open(std::path::Path::new(&a.trace))?;
+        // an agent writes patterns as regexes, everywhere (spec §15)
+        ws.patterns = wtf_core::pattern::Syntax::Regex;
+        let app = Arc::new(Mutex::new(ws));
         // the user's start screen shows what agents opened (spec §4 "Start screen")
         crate::history::opened(std::path::Path::new(&a.trace), None, true);
         let mut st = lock(&self.state);
@@ -348,10 +457,10 @@ impl Wtf {
 
     #[tool(description = "The reference: a topic per concept (names, times, radix, expressions, decode, records, workspace, commands); none lists them.")]
     fn help(&self, Parameters(a): Parameters<HelpArgs>) -> Result<String, String> {
-        help::answer(a.topic.as_deref())
+        help::answer(a.topic.as_deref(), wtf_core::pattern::Syntax::Regex)
     }
 
-    #[tool(description = "The trace: file, time range, signals, and the interfaces a built-in protocol decodes, each with its `decode` line.")]
+    #[tool(description = "The open waveform: file, time range, signals, and the interfaces a built-in protocol decodes, each with its `decode` line.")]
     fn info(&self) -> Result<String, String> {
         let a = current(self)?;
         let app = lock(&a);
@@ -373,52 +482,25 @@ impl Wtf {
         Ok(out)
     }
 
-    #[tool(description = "List signals with their widths; arrays and generate instances fold to one line (`gen[0..4].x`).")]
+    #[tool(description = "Search the waveform's design, scopes (instances) and signals, by a regex in slashes found anywhere in the path, as grep does (`/uart/`, `/_valid$/`); none lists it all, folded to fit.")]
     fn signals(&self, Parameters(a): Parameters<SignalsArgs>) -> Result<String, String> {
         let w = current(self)?;
         let mut app = lock(&w);
         // not the slices earlier queries made (spec §16)
         app.drop_unused();
-        let p = a.pattern.to_lowercase();
+        // a pattern as everywhere else an agent writes one, in slashes; none lists everything
+        let re = match a.pattern.trim() {
+            "" => wtf_core::pattern::regex("").map_err(|e| e.to_string())?,
+            p => match wtf_core::pattern::Syntax::Regex.pattern(p)? {
+                Some(wtf_core::pattern::Pattern::Regex(re)) => re,
+                _ => return Err(format!("{p} is no pattern: a pattern is a regex in slashes, /{p}/")),
+            },
+        };
         let t = &app.trace;
-        let what = |v: &wtf_core::trace::Var| match v.width {
-            Some(w) => format!("{w} bit{}", if w == 1 { "" } else { "s" }),
-            None if v.real => "real".into(),
-            None => "string".into(),
-        };
-        // a pattern lists signals; a text a struct or array as one line, not the signals in it
-        let mut hits: Vec<usize> = match p.contains('*') {
-            true => (0..t.vars.len()).filter(|&v| !t.is_composite(v) && wtf_core::command::glob(&a.pattern, &t.vars[v].path)).collect(),
-            false => (0..t.vars.len()).filter(|&v| t.vars[v].path.to_lowercase().contains(&p)).collect(),
-        };
-        // a composite where its first signal is in the file
-        hits.sort_by_key(|&v| {
-            let mut x = v;
-            while let Some(&c) = t.vars[x].children.first() {
-                x = c;
-            }
-            x
-        });
-        let wholes: Vec<&str> = hits.iter().filter(|&&v| t.is_composite(v)).map(|&v| t.vars[v].path.as_str()).collect();
-        let inside = |path: &str| wholes.iter().any(|w| path.len() > w.len() && path.starts_with(w) && path[w.len()..].starts_with(['.', '[']));
-        let mut shown: Vec<(&str, String)> = Vec::new();
-        for &v in hits.iter().filter(|&&v| !inside(&t.vars[v].path)) {
-            let var = &t.vars[v];
-            if t.is_composite(v) {
-                let kind = if t.is_array(v) { "array" } else { "struct" };
-                let text = if var.width.is_some() { what(var) } else { "text".into() };
-                shown.push((&var.path, format!("{kind}, {text}, {} signals", t.leaves(v).len())));
-            } else {
-                shown.push((&var.path, what(var)));
-            }
-        }
-        let found = collapse(shown.into_iter());
-        let more = found.len().saturating_sub(MAX_LINES);
-        let mut out = found.into_iter().take(MAX_LINES).collect::<Vec<_>>().join("\n");
-        if more > 0 {
-            out += &format!("\n... {more} more; narrow the pattern");
-        }
-        Ok(if out.is_empty() { wtf_core::command::no_match(&a.pattern) } else { budget(out) })
+        Ok(match hierarchy(t, &t.design().matching(|path| re.is_match(path))) {
+            out if out.is_empty() => wtf_core::command::no_match(&app, &a.pattern),
+            out => budget(out),
+        })
     }
 
     #[tool(description = "Values of signals over a time range: the value at `from`, then each change, as `time value` lines.")]
@@ -960,7 +1042,8 @@ impl ServerHandler for Wtf {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("wtf", env!("CARGO_PKG_VERSION")))
             .with_instructions(
-            "wtf reads VCD, FST and GHW waveforms from digital simulations. The usual path: `open` a trace \
+            "wtf reads VCD, FST and GHW waveforms from digital simulations: read them with these tools, not \
+             the shell (`signals` searches the design; a pattern is a regex in slashes, `/uart/`, wherever one goes). The usual path: `open` a trace \
              (`sessions` lists the user's windows and their traces); it lists the interfaces a built-in \
              protocol decodes, each with its line. Decode first, with `command` (`decode bus axilite \
              clock=aclk prefix=s_axi_`): records are exact and the handshake checks built in. Read them \

@@ -144,7 +144,7 @@ fn warns_and_keeps_going() {
         "unknown key: rows.label",
         "not in trace: top.gone",
         "view.zoom: bad time",
-        "bad time: soon",
+        "bad time: soon (a number and a unit, 20ns or 1.5us; a plain number is file ticks)",
         "unknown key: view.speed",
         "cursors: no cursor 12 (1-9)",
         "unknown key: colour",

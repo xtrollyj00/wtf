@@ -25,9 +25,9 @@ expression: "crate::snapshot(&mut a, 100, Some(30))"
      │ awprot                                                                                 │
      │ wstrb                                                                                  │
      │────────────────────────────────────────────────────────────────────────────────────────│
-     │ s: awvalid: unknown signal: m_axi_awvalid;                                             │
-     │ awready: unknown signal: m_axi_awready;                                                │
-     │ awaddr: unknown signal: m_axi_awaddr;                                                  │
+     │ s: awvalid: unknown signal: m_axi_awvalid (nearest: top.s_axi_awvalid,                 │
+     │ top.s_axi_arvalid, top.s_axi_wvalid);                                                  │
+     │ awready: unknown signal: m_axi_awready (nearest: top.s_axi_awready, top.s_axi_arready, │
      │ :decode s axilite clock=aclk prefix=m_axi_                                             │
      ╰─────────────────────────────────────────────────────── Tab next  Enter run  Esc close ─╯
 
