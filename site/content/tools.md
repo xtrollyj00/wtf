@@ -26,7 +26,7 @@ When a search expression holds, as a table of times; `show` adds values, `count_
 | `backward` | Search toward the start: the latest matches first. |
 | `count` | How many lines to list; default 20. |
 | `count_only` | Only count the matches; no list. |
-| `expr` (required) | A search expression as SystemVerilog writes it: `==` `!=` `<` `&&` `\|\|` `!`; `rose(x)` `fell(x)` `stable(x)` `past(x)` (SVA's, without the `$`); `@<clock> ` first samples each cycle: `@top.clk valid && ready`, `rose(irq) && !past(busy)` (`help expressions`). |
+| `expr` (required) | A search expression as in SystemVerilog: `==` `!=` `<` `&&` `\|\|` `!`; only `rose(x)` `fell(x)` `stable(x)` `past(x)` (SVA's, no `$`); `@<clock> ` first samples each cycle: `@top.clk valid && ready`, `rose(irq) && !past(busy)` (`help expressions`). |
 | `from` | Search after (or with `backward`, before) this time; default the start. |
 | `show` | Signals whose values to list on each match: a table of the transfers. |
 | `to` | Stop at this time (with `backward`, down to it); default the end. |

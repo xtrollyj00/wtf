@@ -347,6 +347,8 @@ pub enum Borrowed {
     Past { word: String, arg: Option<String> },
     /// `$stable(x)`: `stable(x)`.
     Stable { word: String, arg: Option<String> },
+    /// `changed(x)`, `$changed(x)`: a change is `x != past(x)`, no function of its own.
+    Changed { word: String, arg: Option<String> },
     /// `next(x)`: an expression reads no later value.
     Ahead { word: String },
     /// `a = 1`: a comparison is `==`.
@@ -367,6 +369,7 @@ impl Borrowed {
             "falling" | "fall" | "negedge" | "falling_edge" | "fell" => Borrowed::Edge { word, func: "fell", arg },
             "prev" | "previous" | "past" => Borrowed::Past { word, arg },
             "stable" => Borrowed::Stable { word, arg },
+            "changed" | "change" => Borrowed::Changed { word, arg },
             "next" | "future" | "nexttime" => Borrowed::Ahead { word },
             _ => return None,
         })
@@ -393,6 +396,7 @@ impl std::fmt::Display for Borrowed {
             Borrowed::Edge { word, func, arg } => write!(f, "{word}: an edge is {func}({}), SVA's ${func} without the $", x(arg)),
             Borrowed::Past { word, arg } => write!(f, "{word}: the value a cycle earlier is past({}), SVA's $past without the $", x(arg)),
             Borrowed::Stable { word, arg } => write!(f, "{word}: stable({}), SVA's $stable without the $", x(arg)),
+            Borrowed::Changed { word, arg } => write!(f, "{word}: a change is {0} != past({0})", x(arg)),
             Borrowed::Ahead { word } => write!(f, "{word}: an expression reads no later value; search on from a match instead (`find` `from`)"),
             Borrowed::Assign { rest } => write!(f, "{rest}: compare with ==, not ="),
         }
@@ -1233,6 +1237,7 @@ mod tests {
         assert_eq!(err("$rose(cpu.busy)"), "$rose(cpu.busy): an edge is rose(cpu.busy), SVA's $rose without the $");
         assert_eq!(err("@clk cpu.busy falling"), "falling: `@clk` already samples at the clock's rising edges; an edge of a signal is fell(x), SVA's $fell without the $");
         assert_eq!(err("cpu.busy=1 && cpu.data == 0"), "=1 && cpu.data == 0: compare with ==, not =");
+        assert_eq!(err("@clk changed(cpu.data)"), "changed(cpu.data): a change is cpu.data != past(cpu.data)");
         assert_eq!(err("next(cpu.data) == 0"), "next(cpu.data): an expression reads no later value; search on from a match instead (`find` `from`)");
     }
     /// Signals for arithmetic: a, b 32 bits, m, n 4, s 8 (signed, as `x - y` makes), t text, w

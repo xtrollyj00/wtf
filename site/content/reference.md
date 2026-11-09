@@ -125,7 +125,8 @@ Search expressions, for `find` (and `when`, fields and `where` in decoding).
 - Written as in SystemVerilog: `valid && ready && data == 0x40`, `state == 3 || state == 5`,
   `!rst`. Compare with `==`, never `=`.
 - Over time, SVA's functions without the `$`: `rose(x)`, `fell(x)`, `stable(x)`, `past(x)` (x
-  one cycle earlier). No others: an edge is `rose(x)`, not `rising` or `posedge`.
+  one cycle earlier). Those four only: an edge is `rose(x)`, not `rising` or `posedge`; a
+  change is `x != past(x)`.
 - `@<clock> ` first samples each cycle: `@top.clk valid && ready`. Without it, a match is where
   the expression becomes true.
 
