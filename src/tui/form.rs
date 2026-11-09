@@ -78,6 +78,8 @@ pub struct Form {
     pub editing: Option<String>,
     /// The protocol form: `Enter` defines the protocol and goes on to the decode form.
     pub protocol: bool,
+    /// The vars of the `V` range it was opened on: the roles they play fill the empty fields.
+    pub from: Vec<usize>,
 }
 
 /// What a key does in the form (`App::FORM_KEYS`).
@@ -103,13 +105,14 @@ pub fn protocols(ws: &Workspace) -> Vec<String> {
 
 impl Form {
     /// A form with `d`'s values, its fields those of its protocol; a `<placeholder>` (the
-    /// interfaces picker's `clock=<clk>`) is left empty.
-    pub fn new(ws: &mut Workspace, d: &Decode, found: &[Found]) -> Self {
+    /// interfaces picker's `clock=<clk>`) is left empty. The roles signals `from` play fill those
+    /// `d` leaves empty.
+    pub fn new(ws: &mut Workspace, d: &Decode, found: &[Found], from: &[usize]) -> Self {
         let value = |v: &str| if v.starts_with('<') && v.ends_with('>') { String::new() } else { v.to_string() };
-        let mut f = Form { fields: vec![Field::new("name", Kind::Name, &d.name), Field::new("protocol", Kind::Protocol, &d.protocol)], at: 0, hints: Vec::new(), hint: 0, check: Ok(()), error: None, top: 0, editing: None, protocol: false };
+        let mut f = Form { fields: vec![Field::new("name", Kind::Name, &d.name), Field::new("protocol", Kind::Protocol, &d.protocol)], at: 0, hints: Vec::new(), hint: 0, check: Ok(()), error: None, top: 0, editing: None, protocol: false, from: from.to_vec() };
         let given: Vec<(String, String)> = std::iter::once(("clock".to_string(), d.clock.clone())).chain(d.signals.iter().cloned()).chain(d.params.iter().cloned()).collect();
         f.reshape(ws);
-        for (k, v) in given {
+        for (k, v) in given.into_iter().filter(|g| !g.1.is_empty()) {
             if let Some(field) = f.fields.iter_mut().find(|x| x.key == k) {
                 field.value = value(&v);
             }
@@ -124,7 +127,7 @@ impl Form {
     pub fn protocol(ws: &mut Workspace, roles: &[(String, String)]) -> Self {
         let names = roles.iter().map(|r| r.0.as_str()).collect::<Vec<_>>().join(", ");
         let fields = vec![Field::new("name", Kind::Name, ""), Field::new("roles", Kind::Roles, &names)];
-        let mut f = Form { fields, at: 0, hints: Vec::new(), hint: 0, check: Ok(()), error: None, top: 0, editing: None, protocol: true };
+        let mut f = Form { fields, at: 0, hints: Vec::new(), hint: 0, check: Ok(()), error: None, top: 0, editing: None, protocol: true, from: Vec::new() };
         f.reshape(ws);
         for (r, sig) in roles {
             if let Some(field) = f.fields.iter_mut().find(|x| x.key == *r && x.signal()) {
@@ -173,6 +176,12 @@ impl Form {
         } else if let Some(p) = ws.protocols.iter().find(|p| p.name == name) {
             add("clock", Kind::Clock);
             p.roles.iter().for_each(|r| add(r, Kind::Role { required: true }));
+        }
+        if !self.from.is_empty() {
+            let d = ws.plays(&name, &self.from);
+            for f in self.fields.iter_mut().filter(|f| f.signal() && f.value.trim().is_empty()) {
+                f.value = if f.kind == Kind::Clock { d.clock.clone() } else { d.signals.iter().find(|x| x.0 == f.key).map_or(String::new(), |x| x.1.clone()) };
+            }
         }
     }
 
@@ -243,6 +252,7 @@ impl Form {
                 let leaf = prefix.rsplit('.').next().unwrap_or("").trim_matches('_');
                 if typed.is_empty() && !leaf.is_empty() { vec![leaf.to_string()] } else { Vec::new() }
             }
+            Kind::Protocol if typed.is_empty() && !self.from.is_empty() => ws.playable(&self.from).into_iter().map(|p| p.0).collect(),
             Kind::Protocol if typed.is_empty() => found.iter().map(|x| x.protocol.to_string()).collect(),
             Kind::Protocol => fuzzy(&typed, protocols(ws).iter().map(String::as_str)),
             Kind::Prefix => fuzzy(&typed, found.iter().filter(mine).map(|x| x.prefix.as_str())),
@@ -329,14 +339,35 @@ impl App {
     ];
 
     /// `:decode` without arguments, or a line to finish (`line` without the `decode`): the form.
+    /// Alone on a `V` range, the range's signals play the roles (spec §5 "Decode form").
     pub fn open_form(&mut self, line: &str) -> Result<(), String> {
-        let d = match line.trim() {
-            "" => Decode { name: String::new(), protocol: String::new(), clock: String::new(), signals: Vec::new(), params: Vec::new() },
-            l => wtf_core::command::parse_decode(l)?,
+        let (d, from) = match line.trim() {
+            "" => (Decode { name: String::new(), protocol: String::new(), clock: String::new(), signals: Vec::new(), params: Vec::new() }, self.range_vars()),
+            l => (wtf_core::command::parse_decode(l)?, Vec::new()),
         };
-        self.form = Some(Form::new(&mut self.ws, &d, &self.found));
+        self.form = Some(Form::new(&mut self.ws, &d, &self.found, &from));
         self.form_check();
         Ok(())
+    }
+
+    /// The form for `protocol` on the `V` range's signals (the menu's `Decode as`).
+    pub fn open_form_as(&mut self, protocol: &str) {
+        let d = Decode { name: String::new(), protocol: protocol.into(), clock: String::new(), signals: Vec::new(), params: Vec::new() };
+        let from = self.range_vars();
+        self.form = Some(Form::new(&mut self.ws, &d, &self.found, &from));
+        self.form_check();
+    }
+
+    /// The vars of the signals in the `V` range, none without one.
+    pub fn range_vars(&self) -> Vec<usize> {
+        if self.ws.anchor.is_none() || self.ws.rows.is_empty() {
+            return Vec::new();
+        }
+        let sel = self.ws.selection();
+        if sel.len() < 2 {
+            return Vec::new();
+        }
+        self.ws.rows[sel].iter().filter_map(wtf_core::rows::Row::sig).map(|s| s.var).collect()
     }
 
     /// `:protocol` without arguments: the protocol form, a role for each selected signal, named
@@ -356,7 +387,7 @@ impl App {
     /// The form on decode `name`, to edit it (the decodes list's `e`).
     pub fn edit_decode(&mut self, name: &str) -> Result<(), String> {
         let d = self.ws.decodes.iter().find(|d| d.name == name).cloned().ok_or_else(|| format!("no decode {name}"))?;
-        let mut f = Form::new(&mut self.ws, &d, &self.found);
+        let mut f = Form::new(&mut self.ws, &d, &self.found, &[]);
         (f.editing, f.at) = (Some(name.to_string()), 1);
         self.form = Some(f);
         self.form_check();
@@ -523,7 +554,7 @@ impl App {
             Ok(()) => {
                 let d = Decode { name: String::new(), protocol: name.clone(), clock: String::new(), signals: f.role_signals(), params: Vec::new() };
                 self.msg = Some((format!("protocol {name} defined: put it on signals"), false));
-                self.form = Some(Form::new(&mut self.ws, &d, &self.found));
+                self.form = Some(Form::new(&mut self.ws, &d, &self.found, &[]));
                 self.form_check();
             }
             Err(e) => {
@@ -988,5 +1019,38 @@ mod tests {
         assert_eq!(form(&a).fields_of("p: the name is taken; give another"), [0]);
         assert_eq!(super::role_names(&["rx_valid".into(), "rx_data[3]".into()]), ["valid", "data_3"]);
         assert_eq!(super::role_names(&["s_axi_awvalid".into()]), ["awvalid"]);
+    }
+
+    /// A `V` range decoded (spec §5 "Decode form"): the menu's `Decode as` lists the protocols
+    /// its signals play, `axilite` first; the form has the roles they play filled, the clock too,
+    /// the rest empty; another protocol fills its own; `Space d D` does the same.
+    #[test]
+    fn decode_from_selection() {
+        let mut a = app();
+        a.run("add top.aclk top.s_axi_awvalid top.s_axi_awready top.s_axi_awaddr top.s_axi_wvalid top.s_axi_wready top.s_axi_wdata top.s_axi_wstrb top.s_axi_bvalid top.s_axi_bready top.s_axi_bresp").unwrap();
+        a.keys("V10k").unwrap();
+        crate::snapshot(&mut a, 100, Some(24));
+        let (x, y) = ((a.hit.x0 + 2) as u16, (a.hit.head + 1) as u16);
+        a.mouse(crossterm::event::MouseEvent { kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Right), column: x, row: y, modifiers: crossterm::event::KeyModifiers::NONE });
+        let menu = a.menu.as_ref().expect("the menu");
+        let k = menu.items.iter().position(|i| i.label == "Decode as").expect("Decode as");
+        a.keys(&format!("{}<CR>", "j".repeat(k + 1))).unwrap();
+        let sub: Vec<String> = a.menu.as_ref().unwrap().sub.as_ref().unwrap().1.items.iter().map(|i| format!("{} {}", i.label, i.key)).collect();
+        assert_eq!(sub, ["axilite 10 roles", "axi4 10 roles"]);
+        a.keys("j<CR>").unwrap();
+        let f = form(&a);
+        let value = |f: &Form, k: &str| f.fields.iter().find(|x| x.key == k).map(|x| x.value.clone()).unwrap();
+        assert_eq!((value(f, "protocol").as_str(), value(f, "clock").as_str(), value(f, "wdata").as_str()), ("axilite", "top.aclk", "top.s_axi_wdata"));
+        assert_eq!((value(f, "arvalid").as_str(), value(f, "prefix").as_str()), ("", ""));
+        assert_eq!(f.at, 0, "the name is the first left empty");
+        assert!(f.line().starts_with("decode  axilite clock=top.aclk awvalid=top.s_axi_awvalid "), "{}", f.line());
+        // another protocol fills its roles: axi4's are the same names
+        a.keys("\t<C-u>axi4").unwrap();
+        assert_eq!(value(form(&a), "bresp"), "top.s_axi_bresp");
+        // Space d D on the range, the protocol suggests those played
+        a.keys("<Esc><Esc>V10j<Space>dD\t").unwrap();
+        assert_eq!(form(&a).hints, ["axilite", "axi4"]);
+        a.keys("<Right>").unwrap();
+        assert_eq!(value(form(&a), "awaddr"), "top.s_axi_awaddr");
     }
 }

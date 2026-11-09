@@ -268,6 +268,34 @@ fn check_protocol_names_only() {
     assert!(!ws.trace.vars.iter().any(|v| ws.trace.loaded(ws.trace.by_path[&v.path])), "no value read");
 }
 
+/// The instance and the protocols signals play, from their names' endings alone (spec §5
+/// "Decode form"): `s_axi_arvalid` never plays `rvalid`, a role two signals end in stays empty.
+#[test]
+fn plays_by_endings() {
+    let ws = open("axilite.vcd");
+    let vars = |names: &[&str]| -> Vec<usize> { names.iter().map(|n| ws.trace.vars.iter().position(|v| v.path == format!("top.{n}")).unwrap()).collect() };
+    let write = vars(&["aclk", "s_axi_awvalid", "s_axi_awready", "s_axi_awaddr", "s_axi_wvalid", "s_axi_wready", "s_axi_wdata", "s_axi_arvalid"]);
+    let d = ws.plays("axilite", &write);
+    assert_eq!(d.clock, "top.aclk");
+    let roles: Vec<&str> = d.signals.iter().map(|(r, _)| r.as_str()).collect();
+    assert_eq!(roles, ["awvalid", "awready", "awaddr", "wvalid", "wready", "wdata", "arvalid"]);
+    assert_eq!(d.signals[3], ("wvalid".into(), "top.s_axi_wvalid".into()));
+    // axis plays nothing here: tvalid isn't an ending of any of them
+    assert_eq!(ws.playable(&write), [("axilite".to_string(), 7), ("axi4".to_string(), 7)]);
+    // the ending is after `_` or `.`: s_axi_bready doesn't play ready
+    assert!(ws.plays("axis", &vars(&["s_axi_bready"])).signals.is_empty());
+    assert!(!ws.trace.vars.iter().any(|v| ws.trace.loaded(ws.trace.by_path[&v.path])), "no value read");
+    // two signals ending in state (simple.vcd: top.cpu.state, top.dma.state): state stays empty
+    let mut ws = Workspace::open(&fixture("vcd")).unwrap();
+    let sigs: Vec<usize> = ["top.clk", "top.cpu.state", "top.dma.state", "top.cpu.busy"].iter().map(|p| ws.trace.vars.iter().position(|v| v.path == *p).unwrap()).collect();
+    ws.add_protocol(Sampler { name: "hs".into(), when: "busy".into(), fields: vec![], roles: vec!["state".into(), "busy".into()] }).unwrap();
+    let d = ws.plays("hs", &sigs);
+    assert_eq!((d.clock.as_str(), d.signals), ("top.clk", pairs(&[("busy", "top.cpu.busy")])));
+    assert_eq!(ws.playable(&sigs), [("hs".to_string(), 1)]);
+    assert!(ws.plays("nope", &sigs).signals.is_empty());
+    assert!(!ws.trace.vars.iter().any(|v| ws.trace.loaded(ws.trace.by_path[&v.path])), "no value read");
+}
+
 /// `:decode <name> off` (spec §16): the instance, its streams and their rows go, the vars after;
 /// a decode another reads stays, naming it. Made again under its name, rows of streams it still
 /// makes stay, those of streams it no longer makes go.

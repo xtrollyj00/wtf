@@ -238,7 +238,8 @@ key or command, so the menu teaches the keys. An item does what its key does.
   - a group header: `Open` / `Fold`, `Radix` ▸, `Colour` ▸, `Rename` (`R`), `Ungroup` (`<`),
     `Remove with its rows` (`dd`);
   - a `V` range: `Group` (`>`), `Out of the group` (`<`) when a row of it is in one, `Radix` ▸,
-    `Colour` ▸, `Remove` (`dd`);
+    `Colour` ▸, `Decode as` ▸ (the protocols its signals play roles of, by their names' endings,
+    most roles first: the decode form for one, section 5), `Remove` (`dd`);
   - on a row, header or range also, after `dd`: `Put below` (`p`), `Put above` (`P`);
   - the time axis: `Zoom to fit` (`:fit`), `Zoom in` (`z`), `Zoom out` (`x`);
   - a mark's number in the ruler: `Jump to` (`'N`), `Remove mark` (`NM`);

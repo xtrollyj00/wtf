@@ -119,7 +119,7 @@ m = ["mark at a time…", ":cursor "]
 [d]
 name = "decode"
 d = ["decode an interface", ":pick interfaces", "the ones found in the trace, each with its line"]
-D = ["decode by hand…", ":decode "]
+D = ["decode with a form…", ":decode", "name, protocol, clock and roles as fields, checked as you fill them in; on a V range, its rows play the roles"]
 p = ["protocol with a form…", ":protocol"]
 s = ["computed signal…", ":signal "]
 n = ["name values…", ":names "]

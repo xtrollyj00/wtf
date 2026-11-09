@@ -134,6 +134,8 @@ enum Act {
     Key(KeyEvent),
     Expand(bool),
     Sub(Vec<Item>),
+    /// The decode form for a protocol, on the `V` range's signals.
+    DecodeAs(String),
 }
 
 fn item(label: &str, key: &str, act: Act) -> Item {
@@ -859,6 +861,7 @@ impl App {
             Act::Do(a, given) => self.action(a, 1, given),
             Act::Key(k) => self.panel_key(k),
             Act::Expand(open) => self.panel.open(open),
+            Act::DecodeAs(p) => self.open_form_as(&p),
             Act::Sub(_) => {}
         }
         Ok(())
@@ -896,6 +899,11 @@ impl App {
                 }
                 radix(&mut items);
                 colour(&mut items);
+                let playable = ws.playable(&self.range_vars());
+                if !playable.is_empty() {
+                    let sub = playable.into_iter().map(|(p, n)| item(&p, &format!("{n} role{}", if n == 1 { "" } else { "s" }), Act::DecodeAs(p.clone()))).collect();
+                    items.push(item("Decode as", gl().group_closed.to_string().as_str(), Act::Sub(sub)));
+                }
                 items.push(self.does("Remove", A::Remove));
             }
             Some(Row::Group { collapsed, .. }) => {

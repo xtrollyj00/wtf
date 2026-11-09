@@ -172,6 +172,14 @@ using it.
   `top.s_axi_awvalid`), signals ending in the role first. Nothing is filled in without `→`, and
   nothing is guessed beyond a name's exact ending. `Ctrl-Space` opens the signals picker on the
   role's name, its `Enter` fills the field in; on the protocol, it goes to the next one.
+- **From a selection**: opened on a `V` range (`Space d D`, or the menu's `Decode as` ▸, which
+  names the protocol), the range's signals fill the empty roles they play, and the clock: a
+  signal plays a role its name ends in after `_` or `.` (`s_axi_wvalid` plays `wvalid`,
+  `s_axi_arvalid` never `rvalid`), the clock the one ending in `clk` or `clock`. A role two of
+  them could play is left empty, as are the roles none plays; nothing is guessed beyond that.
+  Changing the protocol fills its roles again; the protocol, left empty, suggests those the
+  signals play roles of, most first. The form opens even when every role is filled: `Enter`
+  decodes.
 - **The prefix** plays each role left empty by `<prefix><role>`, as in `:decode`: the role shows
   that signal dim, the prefix how many roles it plays. Nothing is guessed beyond that.
 - **Checked as filled in**: after each key the form checks the names as `:decode` would before

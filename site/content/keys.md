@@ -253,7 +253,7 @@ New signals go below the selected row, at the accent line.
 |---|---|---|
 | <kbd>Space</kbd> <kbd>d</kbd> <kbd>d</kbd> | decode an interface: the ones found in the trace, each with its line | `:pick interfaces` |
 | <kbd>Space</kbd> <kbd>d</kbd> <kbd>l</kbd> | decodes: the ones made: records, rows, edit, remove | `:decodes` |
-| <kbd>Space</kbd> <kbd>d</kbd> <kbd>D</kbd> | decode with a form…: name, protocol, clock and roles as fields, checked as you fill them in | `:decode` |
+| <kbd>Space</kbd> <kbd>d</kbd> <kbd>D</kbd> | decode with a form…: name, protocol, clock and roles as fields, checked as you fill them in; on a V range, its rows play the roles | `:decode` |
 | <kbd>Space</kbd> <kbd>d</kbd> <kbd>p</kbd> | protocol with a form…: roles from the selected rows, when and the fields checked as you type | `:protocol` |
 | <kbd>Space</kbd> <kbd>d</kbd> <kbd>s</kbd> | computed signal… | `:signal` |
 | <kbd>Space</kbd> <kbd>d</kbd> <kbd>n</kbd> | name values… | `:names` |

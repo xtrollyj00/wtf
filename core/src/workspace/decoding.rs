@@ -300,6 +300,49 @@ impl Workspace {
         out
     }
 
+    /// The instance `signals` (vars) make for `protocol`, read from their names alone (spec §5
+    /// "Decode form"): a signal plays a role its leaf ends in after `_` or `.` (`s_axi_wvalid`
+    /// plays `wvalid`, `s_axi_arvalid` never `rvalid`), the clock one ending in `clk` / `clock`.
+    /// A role or clock two signals could play is left empty, and so is the rest.
+    pub fn plays(&self, protocol: &str, signals: &[usize]) -> Decode {
+        let leaves: Vec<(String, &str)> = signals.iter().map(|&v| (rows::child_name(&self.trace.vars[v].path).to_lowercase(), self.trace.vars[v].path.as_str())).collect();
+        let only = |hit: &dyn Fn(&str) -> bool| match leaves.iter().filter(|(l, _)| hit(l)).collect::<Vec<_>>()[..] {
+            [(_, p)] => p.to_string(),
+            _ => String::new(),
+        };
+        let (roles, clocked) = self.roles_of(protocol);
+        let signals = roles
+            .iter()
+            .map(|r| {
+                let low = r.to_lowercase();
+                (r.clone(), only(&|l: &str| l == low || l.strip_suffix(low.as_str()).is_some_and(|s| s.ends_with(['_', '.']))))
+            })
+            .filter(|(_, s)| !s.is_empty())
+            .collect();
+        let clock = if clocked { only(&|l: &str| l.ends_with("clk") || l.ends_with("clock")) } else { String::new() };
+        Decode { name: String::new(), protocol: protocol.into(), clock, signals, params: Vec::new() }
+    }
+
+    /// The protocols, built-in then the session's, `signals` play a role of, with how many,
+    /// most first.
+    pub fn playable(&self, signals: &[usize]) -> Vec<(String, usize)> {
+        let names = protocol::BUILTINS.iter().map(|s| s.to_string()).chain(self.protocols.iter().map(|p| p.name.clone()));
+        let mut found: Vec<(String, usize)> = names.map(|n| { let k = self.plays(&n, signals).signals.len(); (n, k) }).filter(|p| p.1 > 0).collect();
+        found.sort_by_key(|p| std::cmp::Reverse(p.1));
+        found
+    }
+
+    /// A protocol's roles, required then optional, and whether it samples at a clock.
+    fn roles_of(&self, protocol: &str) -> (Vec<String>, bool) {
+        if let Some(b) = protocol::builtin(protocol) {
+            (b.required.iter().chain(b.optional).map(|s| s.to_string()).collect(), b.clocked)
+        } else if let Some(p) = self.protocols.iter().find(|p| p.name == protocol) {
+            (p.roles.clone(), true)
+        } else {
+            (Vec::new(), false)
+        }
+    }
+
     /// The decodes a var is in, each with the role it plays there (spec §5 "Picker"): their
     /// clock, a role given it, or one their prefix gives it, or the stream a decoder takes.
     pub fn decodes_of(&self, var: usize) -> Vec<(&str, String)> {
