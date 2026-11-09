@@ -182,6 +182,7 @@ d = ["decode an interface", ":pick interfaces", "the ones found in the trace, ea
 l = ["decodes", ":decodes", "the ones made: records, rows, edit, remove"]
 D = ["decode with a form…", ":decode", "name, protocol, clock and roles as fields, checked as you fill them in; on a V range, its rows play the roles"]
 p = ["protocol with a form…", ":protocol", "roles from the selected rows, when and the fields checked as you type"]
+m = ["records of the matches…", ":protocol search", "the last clocked search as a protocol: its when, the shown signals as fields"]
 s = ["computed signal…", ":signal "]
 n = ["name values…", ":names "]
 r = ["records where…", ":records "]

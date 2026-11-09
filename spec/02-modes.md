@@ -234,7 +234,8 @@ key or command, so the menu teaches the keys. An item does what its key does.
     group, `Out of the group` (`<`) and `Rename the group` (`R`), `Remove` (`dd`);
   - on a row's waveform also, for the column clicked, `Mark here` (`m`) and `Copy time` (`yt`);
     and from the cursor, as the keys, `Next change` (`w`), `Previous change` (`b`),
-    `Search value…` (`/`), and after a search `Next match` (`n`) and `Previous match` (`N`);
+    `Search value…` (`/`), and after a search `Next match` (`n`) and `Previous match` (`N`),
+    after a clocked one `Records of the matches` (`Space d m`);
   - a group header: `Open` / `Fold`, `Radix` ▸, `Colour` ▸, `Rename` (`R`), `Ungroup` (`<`),
     `Remove with its rows` (`dd`);
   - a `V` range: `Group` (`>`), `Out of the group` (`<`) when a row of it is in one, `Radix` ▸,

@@ -80,6 +80,9 @@ pub struct Form {
     pub protocol: bool,
     /// The vars of the `V` range it was opened on: the roles they play fill the empty fields.
     pub from: Vec<usize>,
+    /// Opened on a clocked search's matches: the search's clock, which the decode form after the
+    /// protocol form takes; that form's `Enter` opens the records (spec §5 "Protocol form").
+    pub then: Option<String>,
 }
 
 /// What a key does in the form (`App::FORM_KEYS`).
@@ -109,7 +112,7 @@ impl Form {
     /// `d` leaves empty.
     pub fn new(ws: &mut Workspace, d: &Decode, found: &[Found], from: &[usize]) -> Self {
         let value = |v: &str| if v.starts_with('<') && v.ends_with('>') { String::new() } else { v.to_string() };
-        let mut f = Form { fields: vec![Field::new("name", Kind::Name, &d.name), Field::new("protocol", Kind::Protocol, &d.protocol)], at: 0, hints: Vec::new(), hint: 0, check: Ok(()), error: None, top: 0, editing: None, protocol: false, from: from.to_vec() };
+        let mut f = Form { fields: vec![Field::new("name", Kind::Name, &d.name), Field::new("protocol", Kind::Protocol, &d.protocol)], at: 0, hints: Vec::new(), hint: 0, check: Ok(()), error: None, top: 0, editing: None, protocol: false, from: from.to_vec(), then: None };
         let given: Vec<(String, String)> = std::iter::once(("clock".to_string(), d.clock.clone())).chain(d.signals.iter().cloned()).chain(d.params.iter().cloned()).collect();
         f.reshape(ws);
         for (k, v) in given.into_iter().filter(|g| !g.1.is_empty()) {
@@ -123,11 +126,13 @@ impl Form {
         f
     }
 
-    /// The protocol form, with roles (role, signal), as the selected rows give them.
-    pub fn protocol(ws: &mut Workspace, roles: &[(String, String)]) -> Self {
+    /// The protocol form with `p`'s name, `when` and fields, and roles (role, signal): the
+    /// selected rows', or a search's.
+    pub fn protocol(ws: &mut Workspace, p: &wtf_core::stream::Sampler, roles: &[(String, String)]) -> Self {
         let names = roles.iter().map(|r| r.0.as_str()).collect::<Vec<_>>().join(", ");
-        let fields = vec![Field::new("name", Kind::Name, ""), Field::new("roles", Kind::Roles, &names)];
-        let mut f = Form { fields, at: 0, hints: Vec::new(), hint: 0, check: Ok(()), error: None, top: 0, editing: None, protocol: true, from: Vec::new() };
+        let mut fields = vec![Field::new("name", Kind::Name, &p.name), Field::new("roles", Kind::Roles, &names), Field::new("when", Kind::When, &p.when)];
+        fields.extend(p.fields.iter().map(|(n, e)| Field::new("field", Kind::Expr, &format!("{n} = {e}"))));
+        let mut f = Form { fields, at: 0, hints: Vec::new(), hint: 0, check: Ok(()), error: None, top: 0, editing: None, protocol: true, from: Vec::new(), then: None };
         f.reshape(ws);
         for (r, sig) in roles {
             if let Some(field) = f.fields.iter_mut().find(|x| x.key == *r && x.signal()) {
@@ -375,7 +380,22 @@ impl App {
         let paths: Vec<String> = self.ws.rows[sel].iter().filter_map(wtf_core::rows::Row::sig).map(|s| self.ws.trace.vars[s.var].path.clone()).collect();
         let leaves: Vec<String> = paths.iter().map(|p| wtf_core::rows::child_name(p)).collect();
         let roles: Vec<(String, String)> = role_names(&leaves).into_iter().zip(paths).filter(|r| !r.0.is_empty()).collect();
-        let mut f = Form::protocol(&mut self.ws, &roles);
+        let mut f = Form::protocol(&mut self.ws, &wtf_core::stream::Sampler::default(), &roles);
+        f.suggest(&mut self.ws, &self.found);
+        self.form = Some(f);
+        self.form_check();
+        Ok(())
+    }
+
+    /// `:protocol search`: the protocol form filled in from the last clocked search (spec §5
+    /// "Protocol form"): its `when` on roles, the signal rows as fields.
+    pub fn protocol_of_search(&mut self) -> Result<(), String> {
+        let search = self.last_search.clone().filter(|s| s.trim().starts_with('@')).ok_or("no clocked search: search with /@clk <expr> first")?;
+        let clock = self.ws.resolve(search.trim()[1..].split_whitespace().next().unwrap_or("")).map(|p| p.0).ok();
+        let shown: Vec<String> = self.ws.rows.iter().filter_map(wtf_core::rows::Row::sig).filter(|s| Some(s.var) != clock).map(|s| self.ws.trace.vars[s.var].path.clone()).collect();
+        let (p, d) = self.ws.protocol_of(&self.ws.free_name("ev"), "", &search, &shown)?;
+        let mut f = Form::protocol(&mut self.ws, &p, &d.signals);
+        f.then = Some(d.clock);
         f.suggest(&mut self.ws, &self.found);
         self.form = Some(f);
         self.form_check();
@@ -504,7 +524,7 @@ impl App {
             return self.protocol_run();
         }
         let (line, name) = (f.line(), f.value("name").to_string());
-        let editing = f.editing.as_deref() == Some(name.as_str());
+        let (editing, then) = (f.editing.as_deref() == Some(name.as_str()), f.then.is_some());
         if self.ws.decodes.iter().any(|d| d.name == name) && !editing {
             let f = self.form.as_mut().expect("checked above");
             return (f.at, f.error) = (0, Some((Some(0), format!("{name}: the name is taken; give another"))));
@@ -517,6 +537,8 @@ impl App {
                     false => (format!("{name}: decoded again, but its readers failed: {failed}"), true),
                 });
             }),
+            // from a search's matches: on to their records
+            false if then => self.decode_and_show(&line, &name).and_then(|()| self.open_browser(&name)),
             false => self.decode_and_show(&line, &name),
         };
         match r {
@@ -550,9 +572,13 @@ impl App {
         let f = self.form.as_mut().expect("checked above");
         match r {
             Ok(()) => {
-                let d = Decode { name: String::new(), protocol: name.clone(), clock: String::new(), signals: f.role_signals(), params: Vec::new() };
+                let then = f.then.clone();
+                let decode = then.as_ref().map_or(String::new(), |_| self.ws.free_name("s"));
+                let d = Decode { name: decode, protocol: name.clone(), clock: then.clone().unwrap_or_default(), signals: f.role_signals(), params: Vec::new() };
                 self.msg = Some((format!("protocol {name} defined: put it on signals"), false));
-                self.form = Some(Form::new(&mut self.ws, &d, &self.found, &[]));
+                let mut f = Form::new(&mut self.ws, &d, &self.found, &[]);
+                f.then = then;
+                self.form = Some(f);
                 self.form_check();
             }
             Err(e) => {
@@ -982,6 +1008,29 @@ mod tests {
         a.keys("x\t\taclk\n").unwrap();
         assert!(a.form.is_none(), "{:?}", a.msg);
         assert_eq!(a.ws.streams.iter().map(|s| (s.name.as_str(), s.records.len())).collect::<Vec<_>>(), [("x", 2)]);
+    }
+
+    /// A clocked search's matches as records (spec §5 "Protocol form"): the status line says the
+    /// key, which opens the protocol form filled in from the search; `Enter` defines it, the
+    /// decode form follows with the clock, and its `Enter` opens the records.
+    #[test]
+    fn protocol_of_a_search() {
+        let mut a = app();
+        assert!(a.run("protocol search").unwrap_err().starts_with("no clocked search"));
+        a.run("add top.aclk top.s_axi_wdata").unwrap();
+        a.keys("/@aclk s_axi_wvalid && s_axi_wready\n").unwrap();
+        assert_eq!(a.msg.as_ref().map(|m| m.0.as_str()), Some("match 1 of 2; Space d m: records of them"));
+        a.keys(" dm").unwrap();
+        let f = form(&a);
+        assert_eq!(f.line(), "protocol ev roles=s_axi_wvalid,s_axi_wready,s_axi_wdata when=s_axi_wvalid && s_axi_wready s_axi_wdata=s_axi_wdata", "the clock row is no field");
+        a.keys("\n").unwrap();
+        assert_eq!(form(&a).line(), "decode s ev clock=aclk s_axi_wvalid=s_axi_wvalid s_axi_wready=s_axi_wready s_axi_wdata=top.s_axi_wdata");
+        a.keys("\n").unwrap();
+        assert!(a.form.is_none() && a.browser.is_some(), "{:?}", a.msg);
+        // hints off: the count alone
+        a.hints = false;
+        a.keys("<Esc>/@aclk s_axi_wvalid\n").unwrap();
+        assert!(a.msg.as_ref().is_some_and(|m| m.0.ends_with(" of 2")), "{:?}", a.msg);
     }
 
     /// What is wrong stays on the field it names: a name no role, a field written without `=`,

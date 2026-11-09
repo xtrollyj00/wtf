@@ -14,6 +14,8 @@ pub struct Config {
     pub which_key: std::time::Duration,
     /// The name and value columns' widest (spec §19 `name_width`, `value_width`).
     pub columns: (usize, usize),
+    /// The status line says what can follow (a clocked search's `Space d m`); spec §19 `hints`.
+    pub hints: bool,
     pub warnings: Vec<String>,
 }
 
@@ -93,12 +95,13 @@ pub fn parse(text: &str, rgb: bool, themes: &Path, bg: Option<theme::Rgb>) -> Co
         Ok(t) => t,
         Err(e) => {
             warnings.push(format!("config: {}", theme::toml_error(&e, text)));
-            return Config { glyphs: &draw::UNICODE, palette: dark(), keys: Keymap::default(), which_key: WHICH_KEY, columns: draw::COLUMNS, warnings };
+            return Config { glyphs: &draw::UNICODE, palette: dark(), keys: Keymap::default(), which_key: WHICH_KEY, columns: draw::COLUMNS, hints: true, warnings };
         }
     };
     let mut glyphs = &draw::UNICODE;
     let mut which_key = WHICH_KEY;
     let mut columns = draw::COLUMNS;
+    let mut hints = true;
     for (key, value) in &table {
         match key.as_str() {
             "glyphs" => match value.as_str().and_then(|s| draw::SETS.iter().find(|(n, _)| *n == s)) {
@@ -117,8 +120,12 @@ pub fn parse(text: &str, rgb: bool, themes: &Path, bg: Option<theme::Rgb>) -> Co
                     None => warnings.push(format!("config: {key} = {}? (columns, {min}-200)", theme::show(value))),
                 }
             }
+            "hints" => match value.as_bool() {
+                Some(b) => hints = b,
+                None => warnings.push(format!("config: hints = {}? (true or false)", theme::show(value))),
+            },
             "theme" | "colors" | "keys" | "leader" => {}
-            _ => warnings.push(format!("config: unknown key {key} (keys: glyphs, theme, which_key, name_width, value_width, colors, keys, leader)")),
+            _ => warnings.push(format!("config: unknown key {key} (keys: glyphs, theme, which_key, name_width, value_width, hints, colors, keys, leader)")),
         }
     }
     // the theme first, so the single colours override it whatever the order in the file
@@ -153,7 +160,7 @@ pub fn parse(text: &str, rgb: bool, themes: &Path, bg: Option<theme::Rgb>) -> Co
         Some(toml::Value::Table(t)) => keys.set_leader(t, &mut warnings),
         Some(v) => warnings.push(format!("config: leader = {}? (a table of key = [\"what it does\", \":command\"])", theme::show(v))),
     }
-    Config { glyphs, palette, keys, which_key, columns, warnings }
+    Config { glyphs, palette, keys, which_key, columns, hints, warnings }
 }
 
 #[cfg(test)]
@@ -211,7 +218,7 @@ mod tests {
         assert_eq!(
             c.warnings,
             [
-                "config: unknown key foo (keys: glyphs, theme, which_key, name_width, value_width, colors, keys, leader)",
+                "config: unknown key foo (keys: glyphs, theme, which_key, name_width, value_width, hints, colors, keys, leader)",
                 "config: glyphs = \"utf8\"? (unicode, box, ascii, nerd)",
                 "config: theme = 3? (dark, light)",
                 "config: unknown key colors.curser (keys: line, bus, fill, unknown, highz, cursor, cursor_text, column, cursor_dim, mark, selected, panel, hatch, dim, background, text, red, orange, yellow, green, cyan, blue, magenta, gray)",
@@ -226,17 +233,18 @@ mod tests {
 
     #[test]
     fn right_kinds_apply() {
-        let c = parse("which_key = 250\n[keys]\n[leader]\n", true, Path::new(""), None);
-        assert_eq!((c.warnings, c.which_key), (vec![], std::time::Duration::from_millis(250)));
+        let c = parse("which_key = 250\nhints = false\n[keys]\n[leader]\n", true, Path::new(""), None);
+        assert_eq!((c.warnings, c.which_key, c.hints), (vec![], std::time::Duration::from_millis(250), false));
     }
 
     #[test]
     fn wrong_kinds_warn() {
-        let c = parse("which_key = 99999\ncolors = 1\nkeys = 2\nleader = 3\n", true, Path::new(""), None);
+        let c = parse("which_key = 99999\nhints = 1\ncolors = 1\nkeys = 2\nleader = 3\n", true, Path::new(""), None);
         assert_eq!(
             c.warnings,
             [
                 "config: which_key = 99999? (milliseconds, 0-10000)",
+                "config: hints = 1? (true or false)",
                 "config: colors = 1? (a table of colours)",
                 "config: keys = 2? (a table of action = key)",
                 "config: leader = 3? (a table of key = [\"what it does\", \":command\"])",

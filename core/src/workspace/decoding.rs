@@ -323,6 +323,12 @@ impl Workspace {
         Decode { name: String::new(), protocol: protocol.into(), clock, signals, params: Vec::new() }
     }
 
+    /// `base`, else `base1`, `base2`...: the first no protocol or decode is named.
+    pub fn free_name(&self, base: &str) -> String {
+        let taken = |n: &str| self.protocols.iter().any(|p| p.name == n) || self.decodes.iter().any(|d| d.name == n);
+        std::iter::once(base.to_string()).chain((1..).map(|k| format!("{base}{k}"))).find(|n| !taken(n)).expect("names run out never")
+    }
+
     /// A clocked search (`@clk when`) as a protocol named `protocol` and the decode `decode`
     /// putting it on the signals (spec §15 `find`): its roles are the signals `when` names (not
     /// functions, numbers or value names) then those `shown`, each named as its signal's leaf

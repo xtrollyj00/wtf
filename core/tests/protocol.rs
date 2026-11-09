@@ -663,3 +663,11 @@ fn protocol_of_a_search() {
     assert!(ws.protocol_of("ev", "s", "@clk nosuch", &[]).is_err());
     assert!(ws.protocol_of("ev", "s", "busy", &[]).unwrap_err().contains("clocked"));
 }
+
+#[test]
+fn free_names() {
+    let mut ws = with(&[]);
+    assert_eq!(ws.free_name("ev"), "ev");
+    wtf_core::command::run(&mut ws, "protocol ev roles=a when=a").unwrap();
+    assert_eq!(ws.free_name("ev"), "ev1");
+}

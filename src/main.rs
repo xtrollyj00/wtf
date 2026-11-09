@@ -86,10 +86,10 @@ fn run(args: Args) -> Result<(), String> {
     let mut warnings = config.warnings;
     warnings.extend(setup);
     let Some(path) = args.trace else {
-        return start(args.snapshot, args.ansi, args.keys.as_deref(), config.palette, (config.keys, config.which_key), &warnings);
+        return start(args.snapshot, args.ansi, args.keys.as_deref(), config.palette, (config.keys, config.which_key, config.hints), &warnings);
     };
     let mut app = open(&path, args.session.clone(), warnings)?;
-    (app.keymap, app.which_delay) = (config.keys, config.which_key);
+    (app.keymap, app.which_delay, app.hints) = (config.keys, config.which_key, config.hints);
     match args.snapshot {
         Some((w, h)) => {
             // plain text keeps the default palette: `text` tells the cursor columns by it
@@ -118,7 +118,7 @@ fn run(args: Args) -> Result<(), String> {
 
 /// Without a trace: the start screen (spec §4), then the trace picked in a window, or its
 /// snapshot.
-fn start(snapshot: Option<(u16, Option<u16>)>, ansi: bool, keys: Option<&str>, palette: draw::Palette, keymap: (tui::keys::Keymap, std::time::Duration), warnings: &[String]) -> Result<(), String> {
+fn start(snapshot: Option<(u16, Option<u16>)>, ansi: bool, keys: Option<&str>, palette: draw::Palette, keymap: (tui::keys::Keymap, std::time::Duration, bool), warnings: &[String]) -> Result<(), String> {
     let mut start = tui::start::Start::load();
     start.msg = (!warnings.is_empty()).then(|| warnings.join("; "));
     if let Some((w, h)) = snapshot {
@@ -155,7 +155,7 @@ fn start(snapshot: Option<(u16, Option<u16>)>, ansi: bool, keys: Option<&str>, p
         {
             app.msg = Some((e, true));
         }
-        (app.keymap, app.which_delay) = keymap;
+        (app.keymap, app.which_delay, app.hints) = keymap;
         history::opened(&path, session.as_deref(), false);
         return tui::run(&mut app);
     }
@@ -877,9 +877,9 @@ mod tests {
         keys(&mut app, "n");
         assert_eq!((app.ws.view.cursor, msg(&app)), (25, "not found after 25ns: @clk busy".into()));
         keys(&mut app, "N");
-        assert_eq!((app.ws.view.cursor, msg(&app)), (15, "match 1 of 2".into()));
+        assert_eq!((app.ws.view.cursor, msg(&app)), (15, "match 1 of 2; Space d m: records of them".into()));
         keys(&mut app, "n");
-        assert_eq!(msg(&app), "match 2 of 2");
+        assert_eq!(msg(&app), "match 2 of 2; Space d m: records of them");
         // another search counts its own matches
         keys(&mut app, ":0\n/busy\n");
         assert_eq!(msg(&app), "match 1 of 1"); // where busy becomes true, not each cycle

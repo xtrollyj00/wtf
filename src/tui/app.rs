@@ -45,7 +45,7 @@ pub struct App {
     searches: Vec<String>,
     hist_pos: Option<usize>,
     /// The search `n` / `N` repeat.
-    last_search: Option<String>,
+    pub last_search: Option<String>,
     /// Its matches counted in the whole trace, for the query it was (as `Debug` shows it).
     matches: Option<(String, u64, bool)>,
     /// Status line message; true for errors.
@@ -85,6 +85,8 @@ pub struct App {
     typed_at: Option<std::time::Instant>,
     pub which_key: bool,
     pub which_delay: std::time::Duration,
+    /// The status line says what can follow (config `hints`, spec §19).
+    pub hints: bool,
     /// The leader menu, open at this group (the keys from the top) (spec §2 "Leader").
     pub leader: Option<Vec<Key>>,
     pub quit: bool,
@@ -240,6 +242,7 @@ impl App {
             hist_pos: None,
             last_search: None,
             matches: None,
+            hints: true,
             msg: None,
             agent_msg: None,
             notes: Vec::new(),
@@ -379,6 +382,7 @@ impl App {
             "pick" => return self.open_picker(arg.trim()),
             "decode" if arg.trim().is_empty() => return self.open_form(""),
             "protocol" if arg.trim().is_empty() => return self.open_protocol_form(),
+            "protocol" if arg.trim() == "search" => return self.protocol_of_search(),
             "decodes" => return self.open_decodes(),
             // the window picks the unit that fits; `unit` is for agents' answers (spec §15)
             "unit" => return Err("unit sets the time unit of an agent's answers; the window picks what fits".into()),
@@ -789,7 +793,12 @@ impl App {
         let at = count(Some(self.ws.view.cursor));
         let (_, total, more) = self.matches.as_ref().unwrap();
         let i = if at.more { format!("{MAX}+") } else { at.total.to_string() };
-        self.msg = Some((format!("match {i} of {total}{}", if *more { "+" } else { "" }), false));
+        let mut msg = format!("match {i} of {total}{}", if *more { "+" } else { "" });
+        // a clocked search's matches can become records (spec §5 "Protocol form")
+        if let Some(k) = (self.hints && q.clock.is_some() && *total > 0).then(|| crate::tui::render::leader_key(self, ":protocol search")).flatten() {
+            msg += &format!("; {k}: records of them");
+        }
+        self.msg = Some((msg, false));
         Ok(())
     }
 

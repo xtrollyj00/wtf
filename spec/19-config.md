@@ -13,6 +13,7 @@ glyphs = "box"          # unicode (default), box, ascii, nerd (section 14)
 which_key = 300         # ms keys wait before which-key shows what can follow (section 2); 0 at once
 name_width = 30         # the name column's widest, 4-200 (section 4)
 value_width = 20        # the value column's widest, 5-200 (section 4)
+hints = false           # the status line says what can follow (a clocked search's records); default true
 theme = "light"         # dark, light, or one of the user's (below); default: the one that
                         # suits the terminal's background
 
@@ -121,6 +122,7 @@ name = "decode"
 d = ["decode an interface", ":pick interfaces", "the ones found in the trace, each with its line"]
 D = ["decode with a form…", ":decode", "name, protocol, clock and roles as fields, checked as you fill them in; on a V range, its rows play the roles"]
 p = ["protocol with a form…", ":protocol"]
+m = ["records of the matches…", ":protocol search"]
 s = ["computed signal…", ":signal "]
 n = ["name values…", ":names "]
 r = ["records where…", ":records "]

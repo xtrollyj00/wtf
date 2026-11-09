@@ -45,7 +45,7 @@ pub type Signal = (String, Option<u32>, Vec<(Tick, Val)>);
 /// A stateless protocol (`[[protocol]]`), defined on its roles alone: a record per cycle of the
 /// instance's clock where `when` holds, with `fields` (field, expression) sampled with it. Its
 /// expressions name only roles; a `Decode` puts it on signals. Kept to sample again on `:e`.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct Sampler {
     pub name: String,
     pub when: String,

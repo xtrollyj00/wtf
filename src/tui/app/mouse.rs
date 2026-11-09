@@ -941,6 +941,10 @@ impl App {
             items.extend([self.does("Next change", A::NextChange), self.does("Previous change", A::PrevChange), self.does("Search value…", A::Search)]);
             if self.last_search.is_some() {
                 items.extend([self.does("Next match", A::NextMatch), self.does("Previous match", A::PrevMatch)]);
+                if self.last_search.as_deref().is_some_and(|s| s.trim().starts_with('@')) {
+                    let k = crate::tui::render::leader_key(self, ":protocol search").unwrap_or_default();
+                    items.push(item("Records of the matches", &k, Act::Run("protocol search".into())));
+                }
             }
         }
         items

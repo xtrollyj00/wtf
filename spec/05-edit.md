@@ -228,6 +228,12 @@ sampled protocol (section 16), so `:protocol` is learnt by using it.
 - **`Enter`** runs the `:protocol` line under it, then opens the decode form on the new protocol
   with each role's signal filled in. A name taken by a protocol is refused. Keys are the decode
   form's.
+- **From a search**: `:protocol search` (`Space d m`, or `Records of the matches` on a waveform)
+  after a clocked search (`/@aclk wvalid && wready`) opens the form filled in as MCP's `find`
+  offers it (section 15): named `ev` (`ev1`, ... when taken), its roles the signals the search
+  names then the signal rows but the clock, `when` the search's on the roles, a field per signal
+  row. `Enter` defines it; the decode form follows with the search's clock and named `s`, and its
+  `Enter` decodes and opens the records (section 5, "Records").
 
 ### Decodes
 
