@@ -32,15 +32,9 @@ impl IntoCallToolResult for Answer {
     }
 }
 
-/// The time an answer carried, taken out so the client never sees it.
+/// The time an answer carried, taken out so the client never sees it: `_meta` holds only it.
 pub fn take_time(res: &mut CallToolResult) -> Option<Tick> {
-    let mut meta = res.meta.take()?.0;
-    let time = meta.remove(TIME)?.as_u64();
-    // no empty `_meta` on the wire
-    if !meta.is_empty() {
-        res.meta = Some(MetaObject(meta));
-    }
-    time
+    res.meta.take()?.0.get(TIME)?.as_u64()
 }
 
 /// The step a call of `tool` with `args` that answered `answer` makes, if it makes one.

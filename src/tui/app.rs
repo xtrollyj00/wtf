@@ -748,14 +748,14 @@ impl App {
         let mut lines: Vec<(String, String)> = value.into_iter().map(|v| (String::new(), v)).collect();
         if bit.is_none() && self.ws.trace.is_composite(var) {
             lines.push(Default::default());
-            lines.extend(self.fields(var));
+            lines.extend(self.fields(s, var));
         }
         self.examine = Some(Examine { title: name, at: time::format(self.ws.view.cursor, fpt), lines, of: (var, bit) });
     }
 
     /// A struct's or array's fields at the cursor, a line each, nested ones indented under their
     /// struct, an array's elements by index (spec §2 `e`).
-    fn fields(&self, var: usize) -> Vec<(String, String)> {
+    fn fields(&self, s: &rows::Sig, var: usize) -> Vec<(String, String)> {
         let t = &self.ws.trace;
         t.fields(var)
             .into_iter()
@@ -764,13 +764,9 @@ impl App {
                 if t.is_composite(f.var) {
                     return (name, String::new());
                 }
-                // in the look its line has under the selected row
+                // in the look its line has under the row
                 let v = &t.vars[f.var];
-                let look = match self.ws.rows.get(self.ws.sel) {
-                    Some(Row::Signal(s)) => self.ws.look(s, f.var),
-                    _ => rows::Look::of(v),
-                };
-                let value = t.value_at(f.var, self.ws.view.cursor).map_or("-".into(), |x| rows::label(v, &look, &x));
+                let value = t.value_at(f.var, self.ws.view.cursor).map_or("-".into(), |x| rows::label(v, &self.ws.look(s, f.var), &x));
                 (name, value)
             })
             .collect()

@@ -674,6 +674,11 @@ fn undecoded_interface_names() {
     assert_eq!(part(&ws, "s_axi.wr"), "wr");
     assert_eq!(part(&ws, "s_axi"), "");
     assert_eq!(part(&ws, "top.s_axi"), "");
+    // as core says it: the line, and the stream it makes or its streams
+    let said = |name: &str| ws.stream_set(name).unwrap_err().to_string();
+    assert_eq!(said("s_axi.wr"), format!("unknown stream: s_axi.wr: its interface isn't decoded yet; `{line}` makes s_axi.wr"));
+    assert_eq!(said("s_axi"), format!("unknown stream: s_axi: its interface isn't decoded yet; `{line}` makes its streams"));
+    assert_eq!(said("nope"), "unknown stream: nope (none yet; make one with decode or protocol)");
     // decoded, its streams are what it makes; a part it has not is a name unknown
     ws.add_decode(decode("s_axi", "axilite", "top.aclk", &[], &[("prefix", "top.s_axi_")])).unwrap();
     assert!(matches!(ws.stream_set("s_axi.zz").unwrap_err(), wtf_core::workspace::unknown::NoStream::Unknown { name, .. } if name == "s_axi.zz"));

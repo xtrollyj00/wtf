@@ -252,6 +252,21 @@ mod tests {
         assert_eq!(a.edit_decode("nope"), Err("no decode nope".into()));
     }
 
+    /// Edited into a protocol without the field a frame reads: decoded again, the frame failing
+    /// says so (spec §5 "Decodes").
+    #[test]
+    fn edit_fails_readers() {
+        let mut a = app();
+        a.keys(":protocol pa roles=valid,ready when=valid && ready a=valid\n:protocol pb roles=valid,ready when=valid && ready b=valid\n").unwrap();
+        a.keys(":decode x pa clock=aclk valid=s_axi_wvalid ready=s_axi_wready\n:decode f frame input=x last=a\n").unwrap();
+        a.edit_decode("x").unwrap();
+        let f = a.form.as_mut().expect("the form");
+        f.fields[1].value = "pb".into();
+        a.keys("\n").unwrap();
+        let (text, error) = a.msg.clone().expect("a message");
+        assert!(error && text.starts_with("x: decoded again, but its readers failed: "), "{text}");
+    }
+
     /// The mouse: the wheel moves, a click highlights, a double click opens the records, a click
     /// outside closes the list.
     #[test]

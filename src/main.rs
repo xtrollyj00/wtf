@@ -2192,6 +2192,20 @@ mod tests {
         keys(&mut app, "a<Space>");
         let text = snapshot(&mut app, 120, Some(20));
         assert!(text.contains('\u{eb31}') && text.contains('\u{eb7c}') && icons(&text) > 10, "{text}");
+        // every kind of var has an icon of its own (spec §14)
+        let mut kinds = std::collections::BTreeSet::new();
+        for (file, lines) in [("simple.vcd", ":decode c check clock=clk busy=cpu.busy\n:add cpu.data[7:4]\n"), ("axis.vcd", ""), ("types-verilator-structs.fst", ""), ("enum.fst", ""), ("types-nvc.vcd", "")] {
+            let t = trace::Trace::open(format!("tests/data/{file}").as_ref()).unwrap();
+            let mut a = App::new(workspace::Workspace::new(t, file.into()));
+            keys(&mut a, lines);
+            kinds.extend((0..a.ws.trace.vars.len()).filter_map(|v| draw::kind(&a.ws, v, None).map(|k| k.0)));
+        }
+        // no fixture has a real: say one is
+        let mut t = trace::Trace::open("tests/data/simple.vcd".as_ref()).unwrap();
+        t.vars[0].real = true;
+        kinds.extend(draw::kind(&workspace::Workspace::new(t, "real".into()), 0, None).map(|k| k.0));
+        kinds.extend((0..axis.ws.trace.vars.len()).filter_map(|v| draw::kind(&axis.ws, v, None).map(|k| k.0)));
+        assert_eq!(kinds.len(), 12, "{kinds:?}");
         draw::set_glyphs(&draw::UNICODE);
         assert_eq!(icons(&snapshot(&mut app, 120, Some(20))), 0);
         keys(&mut app, "<Esc>");

@@ -584,11 +584,8 @@ impl App {
             };
         }
         let (line, name) = (f.line(), f.value("name").to_string());
+        // a taken name failed the check above
         let (editing, then) = (f.editing.as_deref() == Some(name.as_str()), f.then.is_some());
-        if self.ws.decodes.iter().any(|d| d.name == name) && !editing {
-            let f = self.form.as_mut().expect("checked above");
-            return (f.at, f.error) = (0, Some(Wrong { text: format!("{name}: the name is taken; give another"), fields: vec![0] }));
-        }
         // edited: made again in place, its rows kept where it still makes their streams
         let r = match editing {
             true => wtf_core::command::parse_decode(&line["decode ".len()..]).and_then(|d| self.ws.redecode(d)).map(|failed| {
@@ -913,6 +910,9 @@ mod tests {
         // the check says so too, on the name, as it is typed
         a.keys("<BS>s").unwrap();
         assert_eq!((form(&a).error.as_ref(), form(&a).shown().map(|w| w.fields.clone())), (None, Some(vec![0])));
+        // a line that doesn't parse, a name with a space: its error, on no field
+        a.keys("<Esc>:decode\nt u\taxilite\taclk\ts_axi_").unwrap();
+        assert_eq!(form(&a).check, Err(Wrong { text: "usage: :decode <name> <protocol> <role>=<signal>...".into(), fields: Vec::new() }));
     }
 
     /// A decode form missing two of a protocol's roles marks both, named by one reason.
