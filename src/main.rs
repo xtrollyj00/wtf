@@ -1899,6 +1899,13 @@ mod tests {
         right(&mut app, 60, 8);
         pick(&mut app, "Mark here");
         assert_eq!((app.ws.marks[1], app.ws.view.cursor), (Some(t), cursor));
+        // after a clocked search: its matches' records
+        keys(&mut app, "/@clk busy<CR>");
+        right(&mut app, 60, 8);
+        pick(&mut app, "Records of the matches");
+        assert!(app.form.as_ref().is_some_and(|f| f.protocol), "{:?}", app.msg);
+        keys(&mut app, "<Esc>");
+        app.ws.view.cursor = cursor;
         // a group header; below the rows: add signals, undo
         right(&mut app, 3, 4);
         assert_eq!(labels(&app), ["Fold", "Radix", "Colour", "Rename", "Ungroup", "Remove with its rows"]);

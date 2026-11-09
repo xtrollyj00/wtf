@@ -1115,6 +1115,14 @@ mod tests {
         // opened again, the names are in it; all cleared, they are gone
         a.keys(" dn<C-u>\t\t<C-u>\n").unwrap();
         assert!(a.ws.value_names.is_empty(), "{:?}", a.msg);
+        // a name of two words: :names fails, the card stays with the error
+        a.keys(" dnA B\n").unwrap();
+        assert!(form(&a).error.as_ref().is_some_and(|e| e.1.starts_with("usage")), "{:?}", form(&a).error);
+        a.keys("<Esc>").unwrap();
+        // a signal that is only ever x has no value to name
+        a.ws.trace.add_computed("top.ux", Some(2), vec![(0, wtf_core::trace::Val::Bits("xx".into()))]).unwrap();
+        a.run("add top.ux").unwrap();
+        assert_eq!(a.run("names").unwrap_err(), "top.ux takes no value without x or z bits");
     }
 
     /// What is wrong stays on the field it names: a name no role, a field written without `=`,
@@ -1148,6 +1156,9 @@ mod tests {
         a.keys("<Esc>:protocol\np\tvalid\t\tvalid").unwrap();
         assert_eq!(form(&a).check, Err("p: the name is taken; give another".into()));
         assert_eq!(form(&a).fields_of("p: the name is taken; give another"), [0]);
+        // Enter keeps the form and the protocol already there
+        a.keys("\n").unwrap();
+        assert_eq!((a.ws.protocols.len(), form(&a).protocol), (1, true));
         assert_eq!(super::role_names(&["rx_valid".into(), "rx_data[3]".into()]), ["valid", "data_3"]);
         assert_eq!(super::role_names(&["s_axi_awvalid".into()]), ["awvalid"]);
     }

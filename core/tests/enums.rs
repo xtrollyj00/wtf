@@ -130,4 +130,8 @@ fn values_taken() {
     run(&mut ws, &line).unwrap();
     assert_eq!(ws.values_taken("count").unwrap()[5].name.as_deref(), Some("FIVE"));
     assert_eq!(wtf_core::workspace::names_line("top.count", &[]), "names top.count off");
+    // more values than a card holds: name some with :names
+    let many = (0..300u64).map(|t| (t, wtf_core::trace::Val::Bits(format!("{t:016b}")))).collect();
+    ws.trace.add_computed("top.wide", Some(16), many).unwrap();
+    assert_eq!(ws.values_taken("top.wide").unwrap_err(), "top.wide takes more than 256 values; name some with :names");
 }

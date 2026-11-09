@@ -202,6 +202,10 @@ mod tests {
         let mut a = app();
         a.keys(":decodes\n").unwrap();
         insta::assert_snapshot!("decodes", crate::snapshot(&mut a, 100, Some(12)));
+        // a key the list has none for does nothing; a screen too small for it leaves it out
+        a.keys("z").unwrap();
+        assert!(a.decodes.is_some());
+        assert!(!crate::snapshot(&mut a, 40, Some(10)).contains("lat"));
         a.keys("jjk").unwrap();
         assert_eq!(hl(&a), 0);
         // dd on s: lat reads it; d then another key does nothing
@@ -235,6 +239,7 @@ mod tests {
         a.keys(":decodes\nae").unwrap();
         let f = a.form.as_ref().expect("the form");
         assert_eq!((f.editing.as_deref(), f.at, f.check.clone()), (Some("s"), 1, Ok(())));
+        assert!(crate::snapshot(&mut a, 100, Some(16)).contains("edit decode s"));
         let rows = a.ws.rows.len();
         a.keys("\n").unwrap();
         assert!(a.form.is_none());
