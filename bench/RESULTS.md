@@ -175,3 +175,15 @@ not read; wtf arm, 2026-11-09:
 - The reversed-range error caught one unit slip, and the run recovered.
 - Right answers moved within noise (114 - 116 of 119): the misses are off-by-one counts and
   misread questions, not the tools.
+
+The trace tasks of `wtf-bench agent` (written before the guide, which wasn't fitted to them),
+Haiku, 3 runs of each of the 5, 2026-11-09:
+
+| wtf | pass | calls | wtf errors | answer bytes | tokens | cost | wall |
+|---|---|---|---|---|---|---|---|
+| 59efa6c (before) | 15/15 | 95 | 1 | 70.8K | 834K | $0.047 | 254 s |
+| 601ca74 (the guide, the errors) | 15/15 | 93 | 0 | 38.0K | 713K | $0.042 | 218 s |
+
+Both at the ceiling. The difference is in axilite-transactions: before, all 3 runs checked the
+decoded records against the raw handshakes (`render`, `values`), 12 - 15 KB of answers; after,
+2 of 3 took the records as they are, 4 KB. Three runs a task: a direction, not a measure.
