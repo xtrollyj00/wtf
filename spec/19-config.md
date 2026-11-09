@@ -124,7 +124,7 @@ D = ["decode with a form…", ":decode", "name, protocol, clock and roles as fie
 p = ["protocol with a form…", ":protocol"]
 m = ["records of the matches…", ":protocol search"]
 s = ["computed signal…", ":signal "]
-n = ["name values…", ":names "]
+n = ["name values…", ":names"]
 r = ["records where…", ":records "]
 
 [a]

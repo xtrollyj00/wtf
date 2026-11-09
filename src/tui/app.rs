@@ -383,6 +383,7 @@ impl App {
             "decode" if arg.trim().is_empty() => return self.open_form(""),
             "protocol" if arg.trim().is_empty() => return self.open_protocol_form(),
             "protocol" if arg.trim() == "search" => return self.protocol_of_search(),
+            "names" if arg.trim().is_empty() => return self.open_names(),
             "decodes" => return self.open_decodes(),
             // the window picks the unit that fits; `unit` is for agents' answers (spec §15)
             "unit" => return Err("unit sets the time unit of an agent's answers; the window picks what fits".into()),

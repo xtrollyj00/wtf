@@ -121,6 +121,25 @@ pub struct Step {
 /// The most steps a trail keeps; older ones go.
 pub const TRAIL: usize = 200;
 
+/// The most values the value-names card lists (`Workspace::values_taken`).
+pub const MAX_NAMES: usize = 256;
+
+/// A value a signal takes (`Workspace::values_taken`): its bits as names keep them
+/// (`trace::names_key`), how many times, and its name if it has one.
+#[derive(Debug, PartialEq)]
+pub struct Taken {
+    pub bits: String,
+    pub count: u64,
+    pub name: Option<String>,
+}
+
+/// The `:names` line that gives signal `path` these names (bits, name), without the `:`; those
+/// without a name left out, `off` when none has one.
+pub fn names_line(path: &str, names: &[(String, String)]) -> String {
+    let named: Vec<String> = names.iter().filter(|(_, n)| !n.trim().is_empty()).map(|(b, n)| format!("{}={}", (radix::RADIXES[radix::DEFAULT].format)(b, 0), n.trim())).collect();
+    format!("names {path} {}", if named.is_empty() { "off".to_string() } else { named.join(" ") })
+}
+
 /// What `Workspace::record` compares against.
 pub struct Mark {
     before: Layout,
@@ -535,6 +554,31 @@ impl Workspace {
             }
         }
         Ok(())
+    }
+
+    /// The values signal `sig` takes over the trace (spec §5 "Value-names card"): each without
+    /// x or z bits once, in value order, with how many times it is taken and its name now.
+    pub fn values_taken(&mut self, sig: &str) -> Result<Vec<Taken>, String> {
+        let (var, bit) = self.resolve(sig)?;
+        if bit.is_some() || self.trace.vars[var].width.is_none() {
+            return Err(format!("{sig}: names are for a whole bus or bit signal, not a bit or a string"));
+        }
+        self.trace.load(&[var]);
+        let t = &self.trace;
+        let first = t.value_at(var, t.start()).map(|v| (t.start(), v));
+        let mut counts: std::collections::BTreeMap<(usize, String), u64> = Default::default();
+        for (_, v) in first.into_iter().chain(t.walk(var, None, t.start(), true).filter_map(|(x, v)| Some((x, v?)))) {
+            let Val::Bits(b) = v else { continue };
+            if !b.bytes().all(|c| c == b'0' || c == b'1') {
+                continue;
+            }
+            let key = crate::trace::names_key(&b).to_string();
+            *counts.entry((key.len(), key)).or_default() += 1;
+            if counts.len() > MAX_NAMES {
+                return Err(format!("{sig} takes more than {MAX_NAMES} values; name some with :names"));
+            }
+        }
+        Ok(counts.into_iter().map(|((_, bits), count)| Taken { name: t.vars[var].name_of(&bits).map(String::from), bits, count }).collect())
     }
 
     /// A var by full path, made again if it is a computed one (sessions, `:e`).

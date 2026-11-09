@@ -257,7 +257,7 @@ New signals go below the selected row, at the accent line.
 | <kbd>Space</kbd> <kbd>d</kbd> <kbd>p</kbd> | protocol with a form…: roles from the selected rows, when and the fields checked as you type | `:protocol` |
 | <kbd>Space</kbd> <kbd>d</kbd> <kbd>m</kbd> | records of the matches…: the last clocked search as a protocol: its when, the shown signals as fields | `:protocol search` |
 | <kbd>Space</kbd> <kbd>d</kbd> <kbd>s</kbd> | computed signal… | `:signal` |
-| <kbd>Space</kbd> <kbd>d</kbd> <kbd>n</kbd> | name values… | `:names` |
+| <kbd>Space</kbd> <kbd>d</kbd> <kbd>n</kbd> | name values…: the values the selected signal takes, each named | `:names` |
 | <kbd>Space</kbd> <kbd>d</kbd> <kbd>r</kbd> | records where… | `:records` |
 
 ### <kbd>Space</kbd> <kbd>a</kbd> agent
@@ -294,7 +294,7 @@ New signals go below the selected row, at the accent line.
 | `:decode <name> <protocol> <role>=<signal>...` | Decode a protocol into streams, e.g. :decode rx axis clock=clk tvalid=rx_tvalid tready=rx_tready tdata=rx_tdata tlast=rx_tlast; alone, a form that fills it in |
 | `:decodes` | List the decodes made: Enter opens records, a adds rows, e edits, dd removes |
 | `:protocol <name> roles=<a,b> when=<expr> <field>=<expr>...` | Define a protocol on its roles, a record per cycle where when holds, e.g. :protocol cmd roles=valid,ready,data when=valid && ready op=data[7:0]; :decode puts it on signals; alone, a form with the selected rows as roles; :protocol search, one filled in from the last clocked search |
-| `:names <signal> <value>=<name>...` | Name a signal's values, shown by the enum radix and searched by name, e.g. :names state 0=IDLE 1=BUSY; off removes them |
+| `:names <signal> <value>=<name>...` | Name a signal's values, shown by the enum radix and searched by name, e.g. :names state 0=IDLE 1=BUSY; off removes them; alone, a card of the values the selected signal takes |
 | `:records <streams> [where <expr>]` | Browse records as a table: a stream, a decode's results (:records bus), a glob; / filters, s sorts, = groups |
 | `:scope [path]` | Resolve names under a scope first, e.g. :scope top.cpu makes state top.cpu.state; none without a path |
 | `:radix <name>` | Set the radix: hex bin dec sdec oct ascii float enum, q4.12 / uq4.12 fixed point |

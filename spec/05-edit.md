@@ -235,6 +235,26 @@ sampled protocol (section 16), so `:protocol` is learnt by using it.
   row. `Enter` defines it; the decode form follows with the search's clock and named `s`, and its
   `Enter` decodes and opens the records (section 5, "Records").
 
+### Value-names card
+
+`:names` without arguments (`Space d n`) opens the **value-names card** on the selected signal, so
+`:names` is learnt by using it: a line per value the signal takes in the trace, x and z left out,
+in value order, as its row shows it (`0x2`), with how many times it is taken; the name typed beside
+it, those it has filled in. More than 256 values is an error: `:names` names some. The `:names`
+line is under them (`:names top.cpu.state 0x0=IDLE 0x2=BUSY`, `off` with none named); `Enter`
+runs it, and an error stays on the card. Keys are the decode form's.
+
+```
+╭─ names top.cpu.state ──────────────────────────────────────────╮
+│ 0x0        IDLE                                       1 time   │
+│ 0x1                                                   1 time   │
+│▌0x2        BUSY                                       1 time   │
+│────────────────────────────────────────────────────────────────│
+│ each value its name, or none: Enter names them                 │
+│ :names top.cpu.state 0x0=IDLE 0x2=BUSY                         │
+╰─────────────────────────────── Tab next  Enter run  Esc close ─╯
+```
+
 ### Decodes
 
 `:decodes` (`Space d l`) lists the decodes made, a line each: its name, protocol, where it is (its
