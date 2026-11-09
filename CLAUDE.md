@@ -41,6 +41,8 @@ cargo build --release && cargo run -p wtf-bench --release -- agent run [--runs 3
                                      # agent benchmark: claude -p solves bench/agent/tasks (costs money)
                                      # fix tasks need nvc, cocotb and more: bench/agent/SETUP.md
 cargo run -p wtf-bench --release -- agent report           # results.jsonl per task, commit, model
+python3 bench/wqa/gen.py target/wqa/vcds target/wqa/heldout.jsonl 5 1109 <traces>   # WaveformQA-style questions (bench/wqa/README.md)
+python3 bench/wqa/run.py wtf target/wqa/heldout.jsonl target/wqa/vcds out.jsonl        # ask them of an agent with wtf, or `shell` (costs money)
 python3 site/tools/screens.py && (cd site && zola serve)    # the site, its screens from target/release/wtf
 ```
 
