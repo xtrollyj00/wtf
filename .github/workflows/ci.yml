@@ -44,3 +44,29 @@ jobs:
           files: lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: true
+
+  # Tool Definition Quality Score of the MCP tools (spec §15): the lint is free and runs
+  # everywhere; the score spends one of the account's 30 hosted calls a day, so only on push
+  tdqs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --locked
+      - run: npx -y mcp-tdqs@0.2.0 lint --command "target/debug/wtf --mcp" --server-name wtf --fail-on error
+      - if: github.event_name == 'push'
+        run: |
+          npx -y mcp-tdqs@0.2.0 score --command "target/debug/wtf --mcp" --server-name wtf \
+            --hosted https://tdqs.dev --fail-under B --format markdown --output tdqs.md 2> >(tee tdqs.err >&2)
+        env:
+          TDQS_API_KEY: ${{ secrets.TDQS_API_KEY }}
+      # the report, also when the score fails the bar, with its link and the README's badge line
+      - if: always() && hashFiles('tdqs.md') != ''
+        run: |
+          url=$(sed -n 's/^report: //p' tdqs.err)
+          echo "Report: $url, badge: \`[![TDQS]($url/badge.svg)]($url)\`" >> "$GITHUB_STEP_SUMMARY"
+          cat tdqs.md >> "$GITHUB_STEP_SUMMARY"
