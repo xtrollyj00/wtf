@@ -228,20 +228,13 @@ impl Term {
             Term::Inv(a, w) => !a.value(value)? & mask(*w),
             Term::Signed(a, w) => to_signed(a.value(value)? & mask(*w), *w),
             Term::Slice(a, hi, lo) => (a.value(value)? >> lo) & mask(hi - lo + 1),
-            Term::Bool(e) => i128::from(holds(e, value)),
-            Term::Cond(c, a, b) => {
-                let mut read = Vec::new();
-                probes(c, &mut read);
-                // shortcut (#12): an unknown bit anywhere in c makes it unknown, even where SV's || or && would know; upgrade if that bites
-                let known = |v: Option<&Val>| match v {
-                    Some(Val::Bits(b)) => unsigned(b).is_some(),
-                    v => v.is_some(),
-                };
-                if !read.iter().all(|&(p, n)| known(value(p, n).flatten().as_ref().map(|v| v.borrow()))) {
-                    return None;
-                }
-                if holds(c, value) { a.value(value)? } else { b.value(value)? }
-            }
+            Term::Bool(e) => i128::from(holds3(e, value)?),
+            // shortcut (#12): whole values: an unknown condition gives a where a == b, else all x, not SV's per-bit merge; upgrade if a partly known mux result matters
+            Term::Cond(c, a, b) => match holds3(c, value) {
+                Some(true) => a.value(value)?,
+                Some(false) => b.value(value)?,
+                None => a.value(value).filter(|&x| b.value(value) == Some(x))?,
+            },
         })
     }
 
@@ -985,16 +978,42 @@ fn eval(trace: &Trace, e: &Expr, t: Tick, prev: Prev) -> bool {
 
 /// Whether `e` holds, given `value(sig, n)`: sig's value `n` samples back, None where there is no
 /// such sample (and Some(None) where the signal has no value there). Searches sample a trace;
-/// `records` `where` samples a stream's records, a field per probe.
+/// `records` `where` samples a stream's records, a field per probe. Unknown is not a match.
 pub fn holds<V: std::borrow::Borrow<Val>>(e: &Expr, value: &dyn Fn(Probe, u32) -> Option<Option<V>>) -> bool {
+    holds3(e, value) == Some(true)
+}
+
+/// `holds`, three-valued as SV's conditions are (spec §8): None where an unknown decides it.
+/// `&&` and `||` know their answer when one known side decides it (`0 && x` is 0); a comparison
+/// with an unknown operand is unknown, except with `x` or `z`, which ask about unknown bits.
+fn holds3<V: std::borrow::Borrow<Val>>(e: &Expr, value: &dyn Fn(Probe, u32) -> Option<Option<V>>) -> Option<bool> {
+    use std::cmp::Ordering::{self, *};
+    let compare = |op: Op, order: Option<Ordering>| {
+        order.map(|o| match op {
+            Op::Eq => o == Equal,
+            Op::Ne => o != Equal,
+            Op::Lt => o == Less,
+            Op::Le => o != Greater,
+            Op::Gt => o == Greater,
+            Op::Ge => o != Less,
+        })
+    };
     match e {
-        Expr::Or(a, b) => holds(a, value) || holds(b, value),
-        Expr::And(a, b) => holds(a, value) && holds(b, value),
-        Expr::Not(a) => !holds(a, value),
-        Expr::Stable { sig, past } => match (value(*sig, *past), value(*sig, past + 1)) {
+        Expr::Or(a, b) => match (holds3(a, value), holds3(b, value)) {
+            (Some(true), _) | (_, Some(true)) => Some(true),
+            (Some(false), Some(false)) => Some(false),
+            _ => None,
+        },
+        Expr::And(a, b) => match (holds3(a, value), holds3(b, value)) {
+            (Some(false), _) | (_, Some(false)) => Some(false),
+            (Some(true), Some(true)) => Some(true),
+            _ => None,
+        },
+        Expr::Not(a) => holds3(a, value).map(|h| !h),
+        Expr::Stable { sig, past } => Some(match (value(*sig, *past), value(*sig, past + 1)) {
             (Some(a), Some(b)) => a.as_ref().map(|v| v.borrow()) == b.as_ref().map(|v| v.borrow()),
             _ => false,
-        },
+        }),
         Expr::Signals { a, a_past, op, b, b_past } => {
             let (x, y) = (value(*a, *a_past).flatten(), value(*b, *b_past).flatten());
             let order = match (x.as_ref().map(|v| v.borrow()), y.as_ref().map(|v| v.borrow())) {
@@ -1002,51 +1021,35 @@ pub fn holds<V: std::borrow::Borrow<Val>>(e: &Expr, value: &dyn Fn(Probe, u32) -
                 (Some(Val::Text(x)), Some(Val::Text(y))) => Some(x.cmp(y)),
                 _ => None,
             };
-            use std::cmp::Ordering::*;
-            match op {
-                Op::Eq => order == Some(Equal),
-                Op::Ne => order != Some(Equal),
-                Op::Lt => order == Some(Less),
-                Op::Le => matches!(order, Some(Less | Equal)),
-                Op::Gt => order == Some(Greater),
-                Op::Ge => matches!(order, Some(Greater | Equal)),
-            }
+            compare(*op, order)
         }
-        Expr::Truth(t) => t.value(value).is_some_and(|v| v != 0),
+        Expr::Truth(t) => t.value(value).map(|v| v != 0),
         Expr::Arith { a, op, b } => {
             let x = a.value(value);
-            let Some(b) = b else { return (x.is_none()) == (*op == Op::Eq) };
-            use std::cmp::Ordering::*;
-            let order = x.zip(b.value(value)).map(|(x, y)| x.cmp(&y));
-            match op {
-                Op::Eq => order == Some(Equal),
-                Op::Ne => order != Some(Equal),
-                Op::Lt => order == Some(Less),
-                Op::Le => matches!(order, Some(Less | Equal)),
-                Op::Gt => order == Some(Greater),
-                Op::Ge => matches!(order, Some(Greater | Equal)),
-            }
+            // `== x`: whether the result is unknown, always known
+            let Some(b) = b else { return Some(x.is_none() == (*op == Op::Eq)) };
+            compare(*op, x.zip(b.value(value)).map(|(x, y)| x.cmp(&y)))
         }
         Expr::Cmp { sig, past, op, target } => {
             let v = value(*sig, *past).flatten();
             let v = v.as_ref().map(|v| v.borrow());
-            let hit = || match target {
-                Some(target) => matches(target, v),
-                // as in an `if`: some bit is 1 and none is unknown
-                None => matches!(&v, Some(Val::Bits(b)) if b.contains(['1', 'h']) && !b.contains(['x', 'u', 'w', '-', 'z'])),
-            };
-            let order = || match (target, v) {
-                (Some(Target::Bits(p)), Some(Val::Bits(b))) => unsigned(b).map(|b| b.cmp(&unsigned(p).unwrap_or_default())),
+            let unknown = |b: &str| b.contains(['x', 'u', 'w', '-', 'z']);
+            match (target, v) {
+                // `== x`, `== z`: whether it has such a bit, always known
+                (Some(t @ (Target::Unknown | Target::HighZ)), _) => Some(matches(t, v) == (*op == Op::Eq)),
+                (Some(t @ Target::Bits(p)), Some(Val::Bits(b))) => match (unsigned(b), unsigned(p)) {
+                    (Some(b), Some(p)) => compare(*op, Some(b.cmp(&p))),
+                    // a value with x or z bits (`4'b1x01`) matches them exactly
+                    (_, None) if matches!(op, Op::Eq | Op::Ne) => Some(matches(t, v) == (*op == Op::Eq)),
+                    _ => None,
+                },
+                (Some(Target::Text(p)), Some(Val::Text(t))) => compare(*op, Some(t.as_str().cmp(p.as_str()))),
+                // as in an `if`: some bit is 1; unknown with an unknown bit
+                (None, Some(Val::Bits(b))) if unknown(b) => None,
+                (None, Some(Val::Bits(b))) => Some(b.contains(['1', 'h'])),
+                (None, Some(_)) => Some(false),
+                // no value there
                 _ => None,
-            };
-            use std::cmp::Ordering::*;
-            match op {
-                Op::Eq => hit(),
-                Op::Ne => !hit(),
-                Op::Lt => order() == Some(Less),
-                Op::Le => matches!(order(), Some(Less | Equal)),
-                Op::Gt => order() == Some(Greater),
-                Op::Ge => matches!(order(), Some(Greater | Equal)),
             }
         }
     }
@@ -1216,6 +1219,8 @@ mod tests {
         assert_eq!(find("cpu.data>=0x96&&cpu.data<=0x96", 0, true), Some(20));
         assert_eq!(find("cpu.data < 0x40", 0, true), Some(40));
         assert_eq!(find("cpu.data < 0x40", 41, true), None);
+        // !(data < 0x30) is 1, then x where data is z, then 1 again: a second match at 60
+        assert_eq!(find("!(cpu.data < 0x30)", 10, true), Some(60));
         // with a clock: the cycles whose ending edge samples busy (edges 25 and 35), by their start
         assert_eq!(find("@clk cpu.busy", 0, true), Some(15));
         assert_eq!(find("@clk cpu.busy", 15, true), Some(25));
@@ -1309,13 +1314,28 @@ mod tests {
 
     #[test]
     fn arithmetic_unknowns() {
-        // u is unknown: its result too, which equals x and no number
+        // u is unknown: its result too, which equals x; a comparison with a number is unknown,
+        // so neither it nor its negation matches
         assert_eq!(arith("u + 1 == x"), Ok(true));
         assert_eq!(arith("u + 1 != x"), Ok(false));
-        assert_eq!(arith("u + 1 != 5"), Ok(true));
+        assert_eq!(arith("u + 1 != 5"), Ok(false));
+        assert_eq!(arith("!(u + 1 == 5)"), Ok(false));
         assert_eq!(arith("u + 1 == 5"), Ok(false));
         assert_eq!(arith("u + 1 < 5"), Ok(false));
+        assert_eq!(arith("!(u + 1 < 5)"), Ok(false));
         assert_eq!(arith("u & 1"), Ok(false));
+        assert_eq!(arith("!(u & 1)"), Ok(false));
+        assert_eq!(arith("u != 1"), Ok(false));
+        assert_eq!(arith("u != m"), Ok(false));
+        assert_eq!(arith("!u"), Ok(false));
+        assert_eq!(arith("u == x && !(u != x)"), Ok(true));
+        // && and || know what one known side decides, as SV
+        assert_eq!(arith("!(m == 5 && u == 1)"), Ok(true));
+        assert_eq!(arith("!(m == 4 && u == 1)"), Ok(false));
+        assert_eq!(arith("m == 4 || u == 1"), Ok(true));
+        assert_eq!(arith("!(m == 5 || u == 1)"), Ok(false));
+        // as a value: unknown
+        assert_eq!(arith("(u == 1) + 1 == x"), Ok(true));
     }
 
     #[test]
@@ -1361,11 +1381,16 @@ mod tests {
         yes("m % 3 == 1");
         yes("m / 0 == x");
         yes("m % (b - 1) == x");
-        // `c ? a : b`, below `||`; an unknown condition gives x
+        // `c ? a : b`, below `||`; an unknown condition gives a if a == b, else x, and && and ||
+        // know a condition one known side decides
         yes("(m == 4 ? 1 : 0) == 1");
         yes("(m == 5 || b ? a : 0) == a");
         yes("(m[2] ? -4096 : 0) + 1 == -4095");
         yes("(u ? 1 : 0) == x");
+        yes("(u ? 3 : 3) == 3");
+        yes("(m == 5 && u ? 1 : 2) == 2");
+        yes("(m == 4 || u ? 1 : 2) == 1");
+        yes("(m == 4 && u ? 1 : 2) == x");
         yes("m == 4 ? 1 : 0");
         no("m == 5 ? 1 : 0");
         // a bit of a parenthesised value, a slice of signed(x)

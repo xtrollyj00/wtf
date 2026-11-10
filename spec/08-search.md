@@ -33,10 +33,14 @@ clk      ▁▁▁▁▔▔▔▔▁▁▁▁▔▔▔▔
 - **Expressions** search several signals at once, written as in SystemVerilog:
   `/s_axi_wvalid && s_axi_wready && s_axi_wdata == 0x40`, `/state == 3 || state == 5`, `/valid && !last`.
   Operators are `==`, `!=`, `<`, `<=`, `>`, `>=`, `&&`, `||`, `!` and parentheses; values are
-  written as above. `<` and the like compare unsigned numbers (`count >= 6`, `delay > 40ns`), and
-  a value with an unknown or high-impedance bit is neither less nor more; `x`, `z` and text compare
-  only with `==` and `!=`. A bare
-  signal is true when it is 1 (on a bus: nonzero, with no unknown bits). Signals are named as in the
+  written as above. `<` and the like compare unsigned numbers (`count >= 6`, `delay > 40ns`).
+  A value with an unknown or high-impedance bit is neither less nor more, nor equal or unequal to
+  a number: the comparison is unknown, as in SV, so neither `data != 5` nor `!(data == 5)` matches
+  where data is x. `x`, `z` and text compare only with `==` and `!=`, and `data == x` is always
+  known. A bare signal is true when it is 1 (on a bus: nonzero), unknown with an unknown bit.
+  Conditions are three-valued as SV's: `&&` and `||` know their answer when one known side
+  decides it (`0 && x` is 0, `1 || x` is 1), `!x` is unknown, and a search matches only where its
+  condition is known true, so a result going 1, x, 1 matches twice. Signals are named as in the
   name column, by full path, or by the end of a path if only one signal ends that way
   (`s_axi_wvalid`); of several, the one shown, the one in the workspace's scope, or the
   shallowest if only one is (a port passed down the hierarchy, `clk` in every instance, is the top
@@ -88,7 +92,8 @@ clk      ▁▁▁▁▔▔▔▔▁▁▁▁▔▔▔▔
   - `/` and `%` bind like `*`. A quotient truncates toward zero (`-7 / 2` is -3), and a remainder
     takes the dividend's sign (`-7 % 2` is -1). Dividing by zero is x, as in SV.
   - `c ? a : b` is a value, with the lowest precedence (below `||`), as in SV: `rd != (a < b ? 1 : 0)`.
-    `c` is a condition: when it reads an unknown bit, the result is x. A nested `?` needs
+    `c` is a condition, unknown where an unknown decides it (as above); with an unknown
+    condition the result is a if a and b are equal, else x. A nested `?` needs
     parentheses: `c ? a : (d ? e : f)`.
   - `*`, `/` and `%` bind tighter than `+` and `-`, arithmetic (shifts too) tighter than
     comparisons, comparisons tighter than `&&`, `&&` tighter than `||`, and `?:` is lowest.
@@ -100,7 +105,8 @@ clk      ▁▁▁▁▔▔▔▔▁▁▁▁▔▔▔▔
   - `~x` inverts x's bits at x's width, so x is a signal or a slice: `~(a + b)` is an error
     naming `~(a + b)[31:0]`.
   - An unknown or high-impedance bit in an operand makes the result unknown, which compares as
-    `x` does: equal to `x`, unequal to every number.
+    `x` does: equal to `x`, and neither equal nor unequal to a number (`u + 1 != 5` doesn't
+    match where u is x).
   - Sizes are checked before searching: an operand up to 64 bits, a result up to 127 (a shift by
     a 32-bit amount could be 2^32 bits wide). Beyond that, an error names the part and the fix;
     with 32-bit a and b: `a << b: b is 32 bits, so the result could be 2^32 bits; shift by a
