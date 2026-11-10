@@ -73,6 +73,8 @@ pub enum Expr {
     Arith { a: Term, op: Op, b: Option<Term> },
     /// A bare `a & b`: true when it is known and nonzero.
     Truth(Term),
+    /// `contains(sig, "text")`: sig's text holds `text`, case and spaces as written.
+    Contains { sig: Probe, past: u32, text: String },
 }
 
 /// How `Expr::Cmp` compares: `<` and the like as unsigned numbers, an unknown bit never.
@@ -510,7 +512,7 @@ impl Parser<'_> {
                 ')' if parens > 0 => parens -= 1,
                 '[' => brackets += 1,
                 ']' => brackets -= 1,
-                c if braces == 0 && parens == 0 && (c.is_whitespace() || "()&|!=<>+-*/%^~?".contains(c) || (c == ':' && brackets == 0)) => {
+                c if braces == 0 && parens == 0 && (c.is_whitespace() || "()&|!=<>+-*/%^~?".contains(c) || (matches!(c, ':' | ',') && brackets == 0)) => {
                     end = i;
                     break;
                 }
@@ -584,6 +586,37 @@ impl Parser<'_> {
         }
         if self.eat("!") {
             return Ok(Expr::Not(Box::new(self.unary()?)));
+        }
+        // `contains(x, "text")`: a quote before the `)` closing `contains(`; else a VHDL name
+        // (`contains(3)`), read below
+        let quoted = |r: &str| {
+            let mut depth = 0;
+            for c in r.chars() {
+                match c {
+                    '"' => return true,
+                    '(' => depth += 1,
+                    ')' if depth == 0 => return false,
+                    ')' => depth -= 1,
+                    _ => {}
+                }
+            }
+            false
+        };
+        if self.s.trim_start().strip_prefix("contains(").is_some_and(quoted) {
+            self.eat("contains(");
+            let (name, sig, width, _, past, _) = self.operand()?;
+            if width.is_some() {
+                return Err(format!("contains({name}, ...): {name} is a bit signal; contains reads a string signal's text"));
+            }
+            if !self.eat(",") || !self.eat("\"") {
+                return Err(format!("contains({name}, ...): write the text in quotes, contains({name}, \"text\")"));
+            }
+            let Some((text, rest)) = self.s.split_once('"') else { return Err(format!("contains({name}, ...): missing closing \"")) };
+            self.s = rest;
+            if !self.eat(")") {
+                return Err("missing )".into());
+            }
+            return Ok(Expr::Contains { sig, past, text: text.into() });
         }
         // `rose(`, `fell(`, `stable(`; otherwise the word is read again as an operand
         let start = self.s;
@@ -1024,6 +1057,9 @@ fn holds3<V: std::borrow::Borrow<Val>>(e: &Expr, value: &dyn Fn(Probe, u32) -> O
             compare(*op, order)
         }
         Expr::Truth(t) => t.value(value).map(|v| v != 0),
+        Expr::Contains { sig, past, text } => {
+            value(*sig, *past).flatten().map(|v| matches!(v.borrow(), Val::Text(t) if t.contains(text.as_str())))
+        }
         Expr::Arith { a, op, b } => {
             let x = a.value(value);
             // `== x`: whether the result is unknown, always known
@@ -1066,6 +1102,7 @@ pub fn probes(e: &Expr, out: &mut Vec<(Probe, u32)>) {
         Expr::Cmp { sig, past, .. } => out.push((*sig, *past)),
         Expr::Stable { sig, past } => out.extend([(*sig, *past), (*sig, past + 1)]),
         Expr::Signals { a, a_past, b, b_past, .. } => out.extend([(*a, *a_past), (*b, *b_past)]),
+        Expr::Contains { sig, past, .. } => out.push((*sig, *past)),
         Expr::Truth(t) => t.probes(out),
         Expr::Arith { a, b, .. } => {
             a.probes(out);
@@ -1336,6 +1373,27 @@ mod tests {
         assert_eq!(arith("!(m == 5 || u == 1)"), Ok(false));
         // as a value: unknown
         assert_eq!(arith("(u == 1) + 1 == x"), Ok(true));
+    }
+
+    #[test]
+    fn contains_text() {
+        let yes = |s: &str| assert_eq!(arith(s), Ok(true), "{s}");
+        let no = |s: &str| assert_eq!(arith(s), Ok(false), "{s}");
+        yes(r#"contains(t, "dl")"#);
+        yes(r#"contains(t, "idle")"#);
+        no(r#"contains(t, "DL")"#);
+        no(r#"contains(t, "id le")"#);
+        no(r#"contains(t, "e)")"#);
+        yes(r#"!contains(t, "x") && m == 4"#);
+        yes(r#"(contains( t , "id") ? 1 : 0) == 1"#);
+        yes(r#"contains(past(t), "dl") || m == 4"#);
+        assert_eq!(arith(r#"contains(m, "a")"#), Err(r#"contains(m, ...): m is a bit signal; contains reads a string signal's text"#.into()));
+        assert_eq!(arith(r#"contains(t, dl")"#), Err(r#"contains(t, ...): write the text in quotes, contains(t, "text")"#.into()));
+        assert_eq!(arith(r#"contains(t, "dl)"#), Err(r#"contains(t, ...): missing closing ""#.into()));
+        assert_eq!(arith(r#"contains(t, "dl""#), Err("missing )".into()));
+        // without a quote, a VHDL name as before
+        assert_eq!(arith("contains(3) == 1"), Err("unknown signal: contains(3)".into()));
+        assert_eq!(arith(r#"contains(3) == 1 && t == "idle""#), Err("unknown signal: contains(3)".into()));
     }
 
     #[test]

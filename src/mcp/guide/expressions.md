@@ -17,6 +17,8 @@ Recipes
 - A state machine's moves: `@clk state != past(state)`, `show` `["state"]`.
 - Is it idle: `x != past(x)`, `count_only`, over the window; 0 means it never changed.
 - A protocol check, as a search for its violations: `@clk fell(valid) && !past(ready)`.
+- Where a log or state string says something: `contains(msg, "error")`; a frame's bytes in
+  `records` `where`: `contains(data, "de ad")`.
 - Two events at different times (a request and its response): decode each as a stream and
   match them with `pair` (`help decode`).
 
@@ -43,3 +45,5 @@ Details
 - Values: 0x40, 64, 0b1000000, -12, SV numbers (8'h40, 'd64, 4'b10x0, '1), x, z, a name the
   file gives a value, a time (`40ns`), or another signal (`mi_addr != reg_waddr`); a field's
   bits are `b[4:0]`, as a signal's.
+- `contains(x, "text")`: x's text holds text, case and spaces as written; x is a string signal
+  or a text field, not bits. `x == idle` compares the whole text.

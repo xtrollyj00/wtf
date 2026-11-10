@@ -116,4 +116,7 @@ clk      ▁▁▁▁▔▔▔▔▁▁▁▁▔▔▔▔
     `records` `where`, a field's slice or bit is written as a signal's: `b[4:0]`, `b[3]`, on
     either side of a comparison: `rd == insn[11:7]`.
 - On a bit line of an expanded bus, the search looks at that bit. String and real signals are
-  searched by their text.
+  searched by their text, the whole of it; `contains(x, "text")` is true where x's text holds
+  `text`, case and spaces as written: `/contains(msg, "error")`, and in a `records` `where`, a
+  frame whose bytes hold de ad, `contains(data, "de ad")`. x is a string signal or a text field;
+  on a bit signal it is an error.
