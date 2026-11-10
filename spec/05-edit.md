@@ -332,8 +332,9 @@ adding by name is `a` then `/`.
 ### Undo
 
 `u` / `:undo` undo and `Ctrl-r` / `:redo` redo changes to the rows (adding, removing, moving,
-grouping, radix and colour) and to the marks (placing, moving, naming and removing them, section 9;
-a drag is one step), and an agent's `present` as a whole. The keys work on the rows and in the
+grouping, radix and colour), to the marks (placing, moving, naming and removing them, section 9;
+a drag is one step) and to the named signals (`:signal`, defining and removing one), and an
+agent's `present` as a whole. The keys work on the rows and in the
 panel (not while typing a search), the commands from the command line. The history covers the
 whole session. Moving the cursor, zooming and other time keys are looking around, not changes,
 and not part of the undo history. Undo and redo return the selection to the row the change was

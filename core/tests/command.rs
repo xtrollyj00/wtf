@@ -129,6 +129,39 @@ fn color_and_undo() {
     assert_eq!(ws.rows[1].sig().unwrap().look.color, None);
 }
 
+/// `:signal <name> off` (spec §7): refused while read, then its rows go; both it and `:signal`
+/// are undo steps.
+#[test]
+fn signal_off_and_undo() {
+    let mut ws = with(&["top.cpu.data"]);
+    ws.undoable(|ws| run(ws, "signal lo = top.cpu.data[3:0]")).unwrap();
+    ws.undoable(|ws| run(ws, "signal hi = lo[3:2]")).unwrap();
+    ws.undoable(|ws| run(ws, "add lo")).unwrap();
+    ws.undoable(|ws| run(ws, "decode c check clock=top.clk big=lo == 15")).unwrap();
+    assert_eq!(run(&mut ws, "signal lo off"), Err("lo is read by hi, c: remove them first".into()));
+    run(&mut ws, "decode c off").unwrap();
+    assert_eq!(run(&mut ws, "signal lo off"), Err("lo is read by hi: remove it first".into()));
+    assert_eq!(run(&mut ws, "signal nope off"), Err("no signal nope (signals: lo, hi)".into()));
+    assert_eq!(ws.undoable(|ws| run(ws, "signal hi off")), Ok(Some(("hi: removed".into(), false))));
+    run(&mut ws, "names lo 0=zero").unwrap();
+    let rows = names(&ws).len();
+    assert_eq!(ws.undoable(|ws| run(ws, "signal lo off")), Ok(Some(("lo: removed".into(), false))));
+    assert!(ws.signals.is_empty() && ws.value_names.is_empty());
+    assert_eq!(names(&ws).len(), rows - 1);
+    assert_eq!(run(&mut ws, "signal lo off"), Err("no signal lo: there are none yet".into()));
+    // undo gives back lo with its row and names, then hi
+    run(&mut ws, "undo").unwrap();
+    assert_eq!(ws.signals.iter().map(|s| s.0.as_str()).collect::<Vec<_>>(), ["lo"]);
+    assert_eq!(ws.value_names, [("lo".to_string(), "0=zero".to_string())]);
+    assert_eq!(names(&ws).len(), rows);
+    run(&mut ws, "undo").unwrap();
+    assert_eq!(ws.signals.len(), 2);
+    // a definition replaced is undone too
+    ws.undoable(|ws| run(ws, "signal lo = top.cpu.data[7:4]")).unwrap();
+    run(&mut ws, "undo").unwrap();
+    assert_eq!(ws.signals[0], ("lo".to_string(), "top.cpu.data[3:0]".to_string()));
+}
+
 #[test]
 fn reload_answers() {
     let mut ws = with(&["top.clk"]);

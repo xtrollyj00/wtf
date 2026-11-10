@@ -18,7 +18,7 @@ pub const COMMANDS: &[Command] = &[
     Command { name: "zoom", usage: ":zoom <time>", desc: "Set the time per column, e.g. :zoom 1ns", args: true },
     Command { name: "add", usage: ":add <path|pattern>...", desc: "Add signals below the selected row (after a selected group); a scope becomes a group, e.g. :add top.cpu.*", args: true },
     Command { name: "rm", usage: ":rm [path|pattern]...", desc: "Remove matching rows, or the selected row; :rm ** removes all", args: true },
-    Command { name: "signal", usage: ":signal <name> = <signal>", desc: "Name a computed signal, e.g. :signal op = cmd[7:0] or :signal hdr = {a, b}", args: true },
+    Command { name: "signal", usage: ":signal <name> = <signal> | off", desc: "Name a computed signal, e.g. :signal op = cmd[7:0] or :signal hdr = {a, b}; :signal op off removes it", args: true },
     Command { name: "decode", usage: ":decode <name> <protocol> <role>=<signal>...", desc: "Decode a protocol into streams, e.g. :decode rx axis clock=clk tvalid=rx_tvalid tready=rx_tready tdata=rx_tdata tlast=rx_tlast; alone, a form that fills it in", args: true },
     Command { name: "decodes", usage: ":decodes", desc: "List the decodes made: Enter opens records, a adds rows, e edits, dd removes", args: false },
     Command { name: "protocol", usage: ":protocol <name> roles=<a,b> when=<expr> <field>=<expr>...", desc: "Define a protocol on its roles, a record per cycle where when holds, e.g. :protocol cmd roles=valid,ready,data when=valid && ready op=data[7:0]; :decode puts it on signals; alone, a form with the selected rows as roles; :protocol search, one filled in from the last clocked search", args: true },
@@ -164,6 +164,7 @@ fn arguments(c: &Command, line: &str, app: &crate::tui::app::App) -> Completion 
             ("topic", fuzzy(word, topics.iter().map(|t| t.0)).into_iter().filter_map(|t| topics.iter().find(|x| x.0 == t)).map(|t| item(t.0, t.1)).collect())
         }
         ("decode", 2) => ("protocol", protocols(word, ws)),
+        ("signal", 2) => ("", fuzzy(word, ["=", "off"]).into_iter().map(|w| item(format!("{w} "), if w == "off" { "remove it" } else { "define it" })).collect()),
         ("names", 1) | ("signal", 3..) => ("signal", signals(word)),
         ("records", 2) => ("", fuzzy(word, ["where"]).into_iter().map(|w| item(format!("{w} "), "only the records it holds for")).collect()),
         ("records", 3..) => {
@@ -373,6 +374,8 @@ mod tests {
         let c = complete("zo", &app);
         assert_eq!(c.ghost("zo", 0), "om <time>");
         assert_eq!(names("radix he"), ["hex"]);
+        assert_eq!(names("signal op "), ["= ", "off "]);
+        assert_eq!(names("signal op of"), ["off "]);
         // the interface found in the trace, with its whole line, before the protocol alone
         let c = complete("decode bus axil", &app);
         assert_eq!(c.what, "protocol");
