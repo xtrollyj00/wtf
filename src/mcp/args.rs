@@ -51,13 +51,13 @@ pub struct ValuesArgs {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 pub struct ValueAtArgs {
-    /// Signals, named as for `values`.
+    /// Signals by path or path end (`help names`); `signals` finds them.
     pub signals: Vec<String>,
     /// The time, `120ns` (`help times`).
     pub time: String,
-    /// As for `values`.
+    /// hex, bin, dec, ... (`help radix`); `data:dec` for one signal.
     pub radix: Option<String>,
-    /// As for `values`.
+    /// The unit of the answer's times, `ns`, `us` (`help times`).
     pub unit: Option<String>,
 }
 
@@ -82,7 +82,7 @@ pub struct FindArgs {
     /// Only count the matches; no list.
     #[serde(default)]
     pub count_only: bool,
-    /// As for `values`.
+    /// The unit of the answer's times, `ns`, `us` (`help times`).
     pub unit: Option<String>,
 }
 
@@ -97,13 +97,13 @@ pub struct RenderArgs {
     pub to: Option<String>,
     /// Width in characters; default 120.
     pub width: Option<u16>,
-    /// The unit of the range in the heading; as for `values`.
+    /// The unit of the range in the heading, `ns`, `us` (`help times`).
     pub unit: Option<String>,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
 pub struct ViewArgs {
-    /// As for `values`.
+    /// The unit of the answer's times, `ns`, `us` (`help times`).
     pub unit: Option<String>,
 }
 
@@ -183,7 +183,7 @@ pub struct RecordsArgs {
     pub count_only: bool,
     /// hex, dec, ... for every field (`help radix`); `len:dec` for one, several with commas.
     pub radix: Option<String>,
-    /// As for `values`.
+    /// The unit of the answer's times, `ns`, `us` (`help times`).
     pub unit: Option<String>,
 }
 

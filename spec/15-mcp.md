@@ -21,7 +21,7 @@ reuse wtf's own pieces:
 | `reload` | reopen the trace after the simulation was rerun, like `:e` |
 | `command(line)` | run a `:` command on the agent's workspace (milestone 7) |
 | `view(unit)` | describe the workspace: rows, cursors with Δt, visible range |
-| `present` | show the workspace in the user's window, or write `<trace>.agent.session.toml` |
+| `present` | show the workspace in every user's window on the trace, or write `<trace>.agent.session.toml` |
 | `user_view(adopt)` | what the user's window shows; `adopt` copies it into the workspace |
 | `help(topic)` | the reference, a topic per concept; without a topic, the topics |
 
@@ -35,7 +35,11 @@ reuse wtf's own pieces:
   2. A tool's description says what it answers, in a line or two, and keeps a fact that decides
      an answer: what a `find` match with and without `@clk` is, what a record's `start` and
      `end` are. With those only in `help`, fewer runs used `@clk` and some read a record's start
-     as its sampling edge.
+     as its sampling edge. Where tools overlap, it names the sibling for the other case
+     (`value_at` and `values`, `view` and `render`). Its MCP annotations say what it changes: the
+     reading tools are read-only; `command`, `workspace` and `user_view` with `adopt` replace the
+     rows (destructive); none reaches past the machine (`openWorldHint` false). Tool Definition
+     Quality Score (tdqs.dev) grades the descriptions on their own, without the instructions.
   3. An argument's doc says how to write the value, with an example. `find`'s `expr` carries the
      grammar in a line: SystemVerilog's operators, SVA's `rose` / `fell` / `stable` / `past`
      without the `$`, `@<clock>` first. With it only in `help`, agents wrote `rising`,

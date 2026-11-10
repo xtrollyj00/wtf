@@ -142,8 +142,9 @@ fn tools_list() {
     }
     // the tool definitions ride along on every turn of an agent: they grow only on purpose (spec
     // §15); raise a bound in the same commit as the text, saying why
+    // 15100: annotations, when to use which, and argument docs that stand alone, for TDQS
     let size = list.to_string().len();
-    assert!(size <= 13_400, "the tool definitions are {size} bytes, past the 13400 allowed");
+    assert!(size <= 15_100, "the tool definitions are {size} bytes, past the 15100 allowed");
     for t in list["tools"].as_array().unwrap() {
         let d = t["description"].as_str().unwrap();
         assert!(d.chars().count() <= 330, "{}: a description of {} characters, past 330: move the rest to its topic", t["name"], d.chars().count());
