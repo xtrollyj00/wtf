@@ -24,6 +24,8 @@ Recipes
 Details
 - The answer lists the streams made (`bus.wr`, `bus.rd`, ...) with their counts, and the
   violations (`bus.errors`, `bus.wr.unmatched`).
+- A lost response shifts every later AXI pairing by one (delays grow, `no request` at the end):
+  `timeout=1us` on `axilite` / `axi4` makes a request unanswered that long `no response`.
 - A value runs to the next `key=`, so it can have spaces; in quotes it runs to the closing one
   (`when="x=1"`).
 - A `protocol` makes a record per clock cycle where `when` holds (`help expressions`), its

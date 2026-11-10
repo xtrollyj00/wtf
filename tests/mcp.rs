@@ -485,6 +485,8 @@ fn big_trace(dir: &Path) -> PathBuf {
         v += &format!("$var wire 1 w{i} w{i} $end\n");
     }
     v += "$upscope $end\n$enddefinitions $end\n";
+    // w5 low all along: a level, while clk toggles
+    v += "#0\n0w5\n";
     for t in 0..=2100 {
         v += &format!("#{t}\n{}!\n", t % 2);
     }
@@ -928,7 +930,7 @@ fn protocols_describe_themselves() {
         "        aw_dropped: fell(awvalid) && !past(awready)\n",
         "        r_resp: rvalid && rready && rresp != 0\n",
         "      writes: AW and W in either order, then B; delay from the later of AW and W to B\n",
-        "      a B without a write (no request), a write never answered (no response)",
+        "      a B without a write (no request), a write never answered, or not within `timeout` (no response)",
         "example: decode bus axilite clock=aclk prefix=s_axi_",
     ] {
         assert!(axil.contains(line), "{line}\n{axil}");

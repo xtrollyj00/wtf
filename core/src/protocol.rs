@@ -51,17 +51,17 @@ const AXIS: &[(&str, &str)] = &[
 ];
 const AXILITE: &[(&str, &str)] = &[
     ("wr", "writes: AW and W in either order, then B; delay from the later of AW and W to B"),
-    ("wr.unmatched", "a B without a write (no request), a write never answered (no response), a W without an AW (no aw) or the reverse (no w)"),
+    ("wr.unmatched", "a B without a write (no request), a write never answered, or not within `timeout` (no response), a W without an AW (no aw) or the reverse (no w)"),
     ("rd", "reads: AR, then R; delay from AR to R"),
-    ("rd.unmatched", "an R without an AR (no request), an AR never answered (no response)"),
+    ("rd.unmatched", "an R without an AR (no request), an AR never answered, or not within `timeout` (no response)"),
 ];
 const AXI4: &[(&str, &str)] = &[
     ("wburst", "the W beats of a burst up to wlast; data the bytes wstrb marks"),
     ("rburst", "the R beats of a burst up to rlast, each ID's apart (bursts of different IDs interleave)"),
     ("wr", "writes: AW and its W burst in order, then the B with its ID; delay from the later of AW and the burst's first beat to B"),
-    ("wr.unmatched", "a B without a write (no request), a write never answered (no response), a W burst without an AW (no aw) or the reverse (no wburst)"),
+    ("wr.unmatched", "a B without a write (no request), a write never answered, or not within `timeout` (no response), a W burst without an AW (no aw) or the reverse (no wburst)"),
     ("rd", "reads: AR, then the R burst with its ID; delay (latency) from AR to the first R beat"),
-    ("rd.unmatched", "an R burst without an AR (no request), an AR never answered (no response)"),
+    ("rd.unmatched", "an R burst without an AR (no request), an AR never answered, or not within `timeout` (no response)"),
 ];
 const SPI: &[(&str, &str)] = &[
     ("bit", "a bit of mosi (and miso) at each sampling edge of sclk while cs is low (mode 0 and 3: rising, 1 and 2: falling)"),
@@ -88,7 +88,7 @@ pub fn builtin(name: &str) -> Option<Builtin> {
             ],
             optional: &["awprot", "wstrb", "bresp", "arprot", "rresp"],
             sides: &[&["awvalid", "awready", "awaddr", "wvalid", "wready", "wdata", "bvalid", "bready"], &["arvalid", "arready", "araddr", "rvalid", "rready", "rdata"]],
-            params: &[],
+            params: &["timeout"],
             clocked: true,
             steps: axilite,
             notes: AXILITE,
@@ -101,7 +101,7 @@ pub fn builtin(name: &str) -> Option<Builtin> {
             ],
             optional: &["awid", "awlen", "awsize", "awburst", "awprot", "wstrb", "bid", "bresp", "arid", "arlen", "arsize", "arburst", "arprot", "rid", "rresp"],
             sides: &[&["awvalid", "awready", "awaddr", "wvalid", "wready", "wdata", "wlast", "bvalid", "bready"], &["arvalid", "arready", "araddr", "rvalid", "rready", "rdata", "rlast"]],
-            params: &[],
+            params: &["timeout"],
             clocked: true,
             steps: axi4,
             notes: AXI4,

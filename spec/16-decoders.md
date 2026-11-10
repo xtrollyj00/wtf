@@ -121,7 +121,10 @@ checks that return only violations.
 - **Decoders** implement one trait, `Decoder { schema, feed(record) -> records }`, made by name
   (`frame`, `spi`, `uart`). `pair`, `join` (several request streams answered by one, in order, as
   AXI-Lite's AW and W by B, or by an ID, as AXI4's B by BID) and `check` work on whole streams
-  instead, as functions; built-in protocols use them as steps too.
+  instead, as functions; built-in protocols use them as steps too. `axilite` and `axi4` take a
+  `timeout` param (`timeout=1us`): a request still unanswered more than that after it completed is
+  `no response` when the next response comes, so a lost B or R doesn't pair every later
+  response with the request before its own.
 - **Instances** are kept in the session, so they persist, and agents declare them like the rest
   of the workspace:
   ```toml
