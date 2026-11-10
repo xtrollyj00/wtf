@@ -153,7 +153,8 @@ impl Shape {
     }
 }
 
-/// The widest operand and result arithmetic takes (#11).
+// shortcut (#11): values are i128, so operands up to 64 bits and results up to 127; a big integer type would lift it.
+/// The widest operand and result arithmetic takes.
 const MAX_OPERAND: u32 = 64;
 const MAX_RESULT: u32 = 127;
 

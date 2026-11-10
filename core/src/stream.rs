@@ -141,6 +141,7 @@ impl Stream {
     /// Record `i`'s short label, as a stream row shows it: `#3`, with a `len` field `#3 64B`, and
     /// the text and time fields' values but a frame's `data` (`#3 40ns`, `#0 dropped`).
     pub fn label(&self, i: usize, fpt: Option<u128>) -> String {
+        // shortcut (#25): one label form for every stream; let a protocol give its own if its rows need it.
         let mut out = format!("#{i}");
         for (f, v) in self.schema.iter().zip(&self.records[i].fields) {
             match v {

@@ -774,7 +774,6 @@ impl App {
 
     /// A value search (spec §8) that says where the match is: `match 3 of 157`.
     fn search(&mut self, text: &str, forward: bool, n: u64) -> Result<(), String> {
-        // shortcut (#13): counting stops at MAX matches, so `n` stays quick on huge traces
         const MAX: u64 = 100_000;
         let q = self.ws.search(text, forward, n)?;
         let count = |to| query::find(&self.ws.trace, &q, &query::Search { from: 0, to, forward: true, merge: false, runs: usize::MAX, matches: MAX });

@@ -32,6 +32,7 @@ pub fn make(name: &str, input: &[Field], params: &[(String, String)], fs_per_tic
 
 /// Feed a whole stream through a decoder: the stream `name` it makes.
 pub fn run(name: &str, input: &Stream, mut d: Box<dyn Decoder>) -> Stream {
+    // shortcut (#23): the whole stream at once; decode by time window if huge traces make it slow.
     let mut records: Vec<Record> = input.records.iter().flat_map(|r| d.feed(r)).collect();
     records.extend(d.finish());
     records.sort_by_key(|r| r.start);

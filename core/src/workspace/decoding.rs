@@ -677,6 +677,7 @@ impl Workspace {
     /// Violations: a record per cycle of `clock` where a rule (name, expression) holds, its name
     /// the field `rule`; in time order, rules in their order at one time.
     pub fn check(&mut self, name: &str, clock: &str, rules: &[(String, String)]) -> Result<Stream, String> {
+        // shortcut (#24): rules are expressions of signals at the clock, not of a stream's records; take a stream's fields as `where` does if checks over transactions are wanted.
         let mut records = Vec::new();
         for (rule, when) in rules {
             let s = self.sample(name, clock, when, &[]).map_err(|e| format!("{rule}: {e}"))?;
