@@ -11,7 +11,7 @@ What `wtf --mcp` tells an agent, word for word: each tool's description and argu
 
 ### `command`
 
-Run one of wtf's `:` commands on the workspace: `decode`, `protocol`, rows, cursors (`help commands`).
+Run one of wtf's `:` commands on the workspace: `decode`, `protocol`, rows, cursors (`help commands`). Answers with the rows it added or removed; `undo` takes a step back.
 
 | Argument | Means |
 |---|---|
@@ -30,11 +30,11 @@ When a search expression holds, as a table of times; `show` adds values, `count_
 | `from` | Search after (or with `backward`, before) this time; default the start. |
 | `show` | Signals whose values to list on each match: a table of the transfers. |
 | `to` | Stop at this time (with `backward`, down to it); default the end. |
-| `unit` | As for `values`. |
+| `unit` | The unit of the answer's times, `ns`, `us` (`help times`). |
 
 ### `help`
 
-The reference: a topic per concept (names, patterns, times, radix, expressions, decode, records, workspace, commands), each its form, recipes and details; none lists them.
+The reference for one concept: its form, recipes and details. Topics: names, patterns, times, radix, expressions, decode, records, workspace, commands; without a topic, lists them. Call it when an argument's doc or an error isn't enough.
 
 | Argument | Means |
 |---|---|
@@ -54,7 +54,7 @@ Open a waveform (VCD, FST or GHW file) in a new workspace, the current one from 
 
 ### `present`
 
-Show the workspace to the user, in every wtf window on this trace or as a session file.
+Show your workspace to the user as evidence: it replaces the view of every wtf window on this trace (theirs is one `u` away), or with none open writes `<trace>.agent.session.toml` for them to open.
 
 ### `protocols`
 
@@ -77,7 +77,7 @@ Records of a decoded stream, or of several in start order (a decode's name: its 
 | `radix` | hex, dec, ... for every field (`help radix`); `len:dec` for one, several with commas. |
 | `stream` (required) | A stream, e.g. `bus.wr`; a decode's name for its results, `bus`; a pattern, `/^bus\./`; or several, space-separated (`help records`). |
 | `to` | Records starting at or before this time; default the end. |
-| `unit` | As for `values`. |
+| `unit` | The unit of the answer's times, `ns`, `us` (`help times`). |
 | `where` | Only the records this holds for: `resp != 0`, `n == 138`, `req_addr != resp_addr` (`help records`). |
 
 ### `reload`
@@ -93,12 +93,12 @@ Draw signals over a time range as text, as wtf's screen does; without signals, t
 | `from` | Start of the range; default the start, or the workspace's range. |
 | `signals` | Signals drawn top to bottom; none: the workspace. |
 | `to` | End of the range; default the end, or the workspace's range. |
-| `unit` | The unit of the range in the heading; as for `values`. |
+| `unit` | The unit of the range in the heading, `ns`, `us` (`help times`). |
 | `width` | Width in characters; default 120. |
 
 ### `sessions`
 
-The open sessions: the user's wtf windows and agents' workspaces, with ids and traces.
+The open sessions: the user's wtf windows and agents' workspaces, with ids and traces, yours marked. `use` switches between yours; `open` starts one.
 
 ### `signals`
 
@@ -110,7 +110,7 @@ Search the waveform's design, scopes (instances) and signals, by a regex in slas
 
 ### `use`
 
-Make another of this server's workspaces the current one.
+Make another of this server's workspaces (ids from `sessions`) the current one, which the other tools then work on; nothing is closed. Answers with `info`.
 
 | Argument | Means |
 |---|---|
@@ -118,7 +118,7 @@ Make another of this server's workspaces the current one.
 
 ### `user_view`
 
-What the user is looking at in their wtf window on this trace; `adopt` copies it into the workspace.
+What the user is looking at in their wtf window on this trace, to start from what they see; `adopt` replaces the workspace's rows, cursors and range with it.
 
 | Argument | Means |
 |---|---|
@@ -126,14 +126,14 @@ What the user is looking at in their wtf window on this trace; `adopt` copies it
 
 ### `value_at`
 
-Values of signals at one time.
+Values of signals at one time; a struct or array whole, then each signal in it. For the changes over a range use `values`; for when something happens, `find`.
 
 | Argument | Means |
 |---|---|
-| `radix` | As for `values`. |
-| `signals` (required) | Signals, named as for `values`. |
+| `radix` | hex, bin, dec, ... (`help radix`); `data:dec` for one signal. |
+| `signals` (required) | Signals by path or path end (`help names`); `signals` finds them. |
 | `time` (required) | The time, `120ns` (`help times`). |
-| `unit` | As for `values`. |
+| `unit` | The unit of the answer's times, `ns`, `us` (`help times`). |
 
 ### `values`
 
@@ -149,11 +149,11 @@ Values of signals over a time range: the value at `from`, then each change, as `
 
 ### `view`
 
-Describe the workspace: rows, cursors with the time between them, visible range.
+Describe the workspace in words: rows, cursors with the time between them, visible range. Drawn: `render`; the user's window: `user_view`.
 
 | Argument | Means |
 |---|---|
-| `unit` | As for `values`. |
+| `unit` | The unit of the answer's times, `ns`, `us` (`help times`). |
 
 ### `workspace`
 

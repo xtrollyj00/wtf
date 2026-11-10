@@ -403,7 +403,7 @@ fn value(app: &Workspace, p: search::Probe, s: &Sig, t: Tick) -> String {
 
 #[tool_router]
 impl Wtf {
-    #[tool(description = "The open sessions: the user's wtf windows and agents' workspaces, with ids and traces.")]
+    #[tool(description = "The open sessions: the user's wtf windows and agents' workspaces, with ids and traces, yours marked. `use` switches between yours; `open` starts one.", annotations(read_only_hint = true, open_world_hint = false))]
     fn sessions(&self) -> String {
         let (ours, cur) = {
             let st = lock(&self.state);
@@ -427,7 +427,7 @@ impl Wtf {
         if lines.is_empty() { "no sessions: the user has no wtf window open; `open` a trace".into() } else { lines.join("\n") }
     }
 
-    #[tool(description = "Open a waveform (VCD, FST or GHW file) in a new workspace, the current one from then on. Answers with `info`, which lists the interfaces to decode.")]
+    #[tool(description = "Open a waveform (VCD, FST or GHW file) in a new workspace, the current one from then on. Answers with `info`, which lists the interfaces to decode.", annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = false))]
     fn open(&self, Parameters(a): Parameters<OpenArgs>) -> Result<String, String> {
         let mut ws = Workspace::open(std::path::Path::new(&a.trace))?;
         // an agent writes patterns as regexes, everywhere (spec §15)
@@ -450,7 +450,7 @@ impl Wtf {
         Ok(format!("workspace {id} (the user's wtf windows on this trace see your steps; :follow there shows the workspace)\n{}", self.info()?))
     }
 
-    #[tool(name = "use", description = "Make another of this server's workspaces the current one.")]
+    #[tool(name = "use", description = "Make another of this server's workspaces (ids from `sessions`) the current one, which the other tools then work on; nothing is closed. Answers with `info`.", annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = true, open_world_hint = false))]
     fn use_session(&self, Parameters(a): Parameters<UseArgs>) -> Result<String, String> {
         let mut st = lock(&self.state);
         let i = st.workspaces.iter().position(|w| w.id == a.session).ok_or(format!("{} is not one of your workspaces; see `sessions`", a.session))?;
@@ -459,7 +459,7 @@ impl Wtf {
         self.info()
     }
 
-    #[tool(description = "What can be decoded; with a name, its roles, params, streams and fields (`help decode`).")]
+    #[tool(description = "What can be decoded; with a name, its roles, params, streams and fields (`help decode`).", annotations(read_only_hint = true, open_world_hint = false))]
     fn protocols(&self, Parameters(a): Parameters<ProtocolsArgs>) -> Result<String, String> {
         // works before a trace is open, without the session's own protocols
         let own = current(self).ok().map(|w| lock(&w).protocols.clone()).unwrap_or_default();
@@ -469,12 +469,12 @@ impl Wtf {
         }
     }
 
-    #[tool(description = "The reference: a topic per concept (names, patterns, times, radix, expressions, decode, records, workspace, commands), each its form, recipes and details; none lists them.")]
+    #[tool(description = "The reference for one concept: its form, recipes and details. Topics: names, patterns, times, radix, expressions, decode, records, workspace, commands; without a topic, lists them. Call it when an argument's doc or an error isn't enough.", annotations(read_only_hint = true, open_world_hint = false))]
     fn help(&self, Parameters(a): Parameters<HelpArgs>) -> Result<String, String> {
         help::answer(a.topic.as_deref(), wtf_core::pattern::Syntax::Regex)
     }
 
-    #[tool(description = "The open waveform: file, time range, signals, and the interfaces a built-in protocol decodes, each with its `decode` line.")]
+    #[tool(description = "The open waveform: file, time range, signals, and the interfaces a built-in protocol decodes, each with its `decode` line.", annotations(read_only_hint = true, open_world_hint = false))]
     fn info(&self) -> Result<String, String> {
         let a = current(self)?;
         let app = lock(&a);
@@ -496,7 +496,7 @@ impl Wtf {
         Ok(out)
     }
 
-    #[tool(description = "Search the waveform's design, scopes (instances) and signals, by a regex in slashes found anywhere in the path, as grep does (`/uart/`, `/_valid$/`); none lists it all, folded to fit.")]
+    #[tool(description = "Search the waveform's design, scopes (instances) and signals, by a regex in slashes found anywhere in the path, as grep does (`/uart/`, `/_valid$/`); none lists it all, folded to fit.", annotations(read_only_hint = true, open_world_hint = false))]
     fn signals(&self, Parameters(a): Parameters<SignalsArgs>) -> Result<String, String> {
         let w = current(self)?;
         let mut app = lock(&w);
@@ -520,7 +520,7 @@ impl Wtf {
         })
     }
 
-    #[tool(description = "Values of signals over a time range: the value at `from`, then each change, as `time value` lines.")]
+    #[tool(description = "Values of signals over a time range: the value at `from`, then each change, as `time value` lines.", annotations(read_only_hint = true, open_world_hint = false))]
     fn values(&self, Parameters(a): Parameters<ValuesArgs>) -> Result<Answer, String> {
         let w = current(self)?;
         let mut app = lock(&w);
@@ -551,7 +551,7 @@ impl Wtf {
         Ok(Answer { text: budget(out), time: Some(from) })
     }
 
-    #[tool(description = "Records of a decoded stream, or of several in start order (a decode's name: its results), as a table: n, start (the rising edge that starts the record's first clock cycle), end (the edge that samples its last) and the fields; `where`, `group_by`, `count_only` (`help records`).")]
+    #[tool(description = "Records of a decoded stream, or of several in start order (a decode's name: its results), as a table: n, start (the rising edge that starts the record's first clock cycle), end (the edge that samples its last) and the fields; `where`, `group_by`, `count_only` (`help records`).", annotations(read_only_hint = true, open_world_hint = false))]
     fn records(&self, Parameters(a): Parameters<RecordsArgs>) -> Result<Answer, String> {
         let w = current(self)?;
         let app = lock(&w);
@@ -648,7 +648,7 @@ impl Wtf {
         Ok(Answer { text: budget(lines.join("\n")), time: Some(set.record(page[0]).start) })
     }
 
-    #[tool(description = "Values of signals at one time.")]
+    #[tool(description = "Values of signals at one time; a struct or array whole, then each signal in it. For the changes over a range use `values`; for when something happens, `find`.", annotations(read_only_hint = true, open_world_hint = false))]
     fn value_at(&self, Parameters(a): Parameters<ValueAtArgs>) -> Result<Answer, String> {
         let w = current(self)?;
         let mut app = lock(&w);
@@ -686,7 +686,7 @@ impl Wtf {
         Ok(Answer { text: budget(format!("at {}:\n{}", show(&app, t, u), lines.join("\n"))), time: Some(t) })
     }
 
-    #[tool(description = "When a search expression holds, as a table of times; `show` adds values, `count_only` counts. With `@<clock> ` first, a match is a cycle whose ending edge samples it true (`@clk x`: the cycles x is high), reported at the cycle's start; without, where it becomes true (`rose(x)`: x's edges). A bus: decode it (`help decode`).")]
+    #[tool(description = "When a search expression holds, as a table of times; `show` adds values, `count_only` counts. With `@<clock> ` first, a match is a cycle whose ending edge samples it true (`@clk x`: the cycles x is high), reported at the cycle's start; without, where it becomes true (`rose(x)`: x's edges). A bus: decode it (`help decode`).", annotations(read_only_hint = true, open_world_hint = false))]
     fn find(&self, Parameters(a): Parameters<FindArgs>) -> Result<Answer, String> {
         let w = current(self)?;
         let mut app = lock(&w);
@@ -760,7 +760,7 @@ impl Wtf {
         Ok(Answer { text: budget(lines.join("\n")), time: Some(runs[0].span().0) })
     }
 
-    #[tool(description = "Draw signals over a time range as text, as wtf's screen does; without signals, the workspace.")]
+    #[tool(description = "Draw signals over a time range as text, as wtf's screen does; without signals, the workspace.", annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = true, open_world_hint = false))]
     fn render(&self, Parameters(a): Parameters<RenderArgs>) -> Result<Answer, String> {
         let w = current(self)?;
         let mut app = lock(&w);
@@ -805,7 +805,7 @@ impl Wtf {
         Ok(Answer { text: budget(text?), time: a.from.as_ref().map(|_| from) })
     }
 
-    #[tool(description = "Run one of wtf's `:` commands on the workspace: `decode`, `protocol`, rows, cursors (`help commands`).")]
+    #[tool(description = "Run one of wtf's `:` commands on the workspace: `decode`, `protocol`, rows, cursors (`help commands`). Answers with the rows it added or removed; `undo` takes a step back.", annotations(read_only_hint = false, destructive_hint = true, idempotent_hint = false, open_world_hint = false))]
     fn command(&self, Parameters(a): Parameters<CommandArgs>) -> Result<String, String> {
         let w = current(self)?;
         let mut app = lock(&w);
@@ -842,7 +842,7 @@ impl Wtf {
         Ok(if out.is_empty() { "done".into() } else { out.join("\n") })
     }
 
-    #[tool(description = "Describe the workspace: rows, cursors with the time between them, visible range.")]
+    #[tool(description = "Describe the workspace in words: rows, cursors with the time between them, visible range. Drawn: `render`; the user's window: `user_view`.", annotations(read_only_hint = true, open_world_hint = false))]
     fn view(&self, Parameters(a): Parameters<ViewArgs>) -> Result<String, String> {
         let w = current(self)?;
         let app = lock(&w);
@@ -850,7 +850,7 @@ impl Wtf {
         Ok(budget(describe(&app, u)))
     }
 
-    #[tool(description = "Set up the whole workspace in one call: rows, cursors, range, decodes (`help workspace`). Answers as `view` does.")]
+    #[tool(description = "Set up the whole workspace in one call: rows, cursors, range, decodes (`help workspace`). Answers as `view` does.", annotations(read_only_hint = false, destructive_hint = true, idempotent_hint = true, open_world_hint = false))]
     fn workspace(&self, Parameters(a): Parameters<WorkspaceArgs>) -> Result<String, String> {
         let w = current(self)?;
         let mut app = lock(&w);
@@ -861,7 +861,7 @@ impl Wtf {
         Ok(budget(format!("{}{warn}", describe(&app, None))))
     }
 
-    #[tool(description = "Show the workspace to the user, in every wtf window on this trace or as a session file.")]
+    #[tool(description = "Show your workspace to the user as evidence: it replaces the view of every wtf window on this trace (theirs is one `u` away), or with none open writes `<trace>.agent.session.toml` for them to open.", annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = true, open_world_hint = false))]
     fn present(&self) -> Result<String, String> {
         let w = current(self)?;
         let app = lock(&w);
@@ -890,7 +890,7 @@ impl Wtf {
         }
     }
 
-    #[tool(description = "What the user is looking at in their wtf window on this trace; `adopt` copies it into the workspace.")]
+    #[tool(description = "What the user is looking at in their wtf window on this trace, to start from what they see; `adopt` replaces the workspace's rows, cursors and range with it.", annotations(read_only_hint = false, destructive_hint = true, idempotent_hint = true, open_world_hint = false))]
     fn user_view(&self, Parameters(a): Parameters<UserViewArgs>) -> Result<String, String> {
         let w = current(self)?;
         let mut app = lock(&w);
@@ -908,7 +908,7 @@ impl Wtf {
         Ok(budget(described))
     }
 
-    #[tool(description = "Reopen the trace file, after the simulation was run again.")]
+    #[tool(description = "Reopen the trace file, after the simulation was run again.", annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = true, open_world_hint = false))]
     fn reload(&self) -> Result<String, String> {
         let w = current(self)?;
         let mut app = lock(&w);
