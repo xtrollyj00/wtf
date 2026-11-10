@@ -5,6 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}{{ config.title }}{% endblock %}</title>
 <meta name="description" content="{% block description %}{{ config.description }}{% endblock %}">
+<meta property="og:title" content="{{ config.title }}">
+<meta property="og:description" content="{{ config.description }}">
+<meta property="og:image" content="{{ get_url(path="og-card.png") }}">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="{{ get_url(path="favicon.svg") }}" type="image/svg+xml">
 <link rel="stylesheet" href="{{ get_url(path="site.css") }}">
 </head>
