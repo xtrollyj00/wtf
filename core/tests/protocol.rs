@@ -226,6 +226,30 @@ fn axilite_transactions_and_errors() {
     assert!(err.starts_with("t: awvalid: unknown signal: m_axi_awvalid"), "{err}");
 }
 
+/// `timeout=`: the write answered after 20ns is no response under 15ns, and its B no request.
+#[test]
+fn axilite_timeout() {
+    let mut ws = open("axilite.vcd");
+    ws.add_decode(decode("s", "axilite", "aclk", &[], &[("prefix", "s_axi_"), ("timeout", "15ns")])).unwrap();
+    assert_eq!(table(stream(&ws, "s.wr")), [row(30, 50, &["10", "16", "286331153", "15", "0"])]);
+    let kinds: Vec<(u64, String)> = table(stream(&ws, "s.wr.unmatched")).into_iter().map(|r| (r.0, r.2[0].clone())).collect();
+    assert_eq!(kinds.iter().map(|k| k.1.as_str()).collect::<Vec<_>>(), ["no response", "no request", "no request"]);
+    assert_eq!(kinds[0].0, 60);
+    // long enough: as without
+    let mut long = open("axilite.vcd");
+    long.add_decode(decode("s", "axilite", "aclk", &[], &[("prefix", "s_axi_"), ("timeout", "1us")])).unwrap();
+    assert_eq!(table(stream(&long, "s.wr")).len(), 2);
+    // the session keeps it
+    let mut back = open("axilite.vcd");
+    assert_eq!(wtf_core::session::apply(&mut back, &wtf_core::session::to_toml(&ws)).unwrap(), Vec::<String>::new());
+    assert_eq!(table(stream(&back, "s.wr")).len(), 1);
+    // a time it can't read, and a protocol without the param
+    let err = ws.add_decode(decode("t", "axilite", "aclk", &[], &[("prefix", "s_axi_"), ("timeout", "soon")])).unwrap_err();
+    assert!(err.contains("join: timeout: "), "{err}");
+    let err = ws.add_decode(decode("x", "axis", "aclk", &[], &[("prefix", "s_axi_"), ("timeout", "1us")])).unwrap_err();
+    assert!(err.contains("has no param timeout"), "{err}");
+}
+
 /// The names of an instance checked without decoding (the decode form, spec §5): the same
 /// mistakes `add_decode` reports, nothing made, no value read.
 #[test]

@@ -570,9 +570,14 @@ impl Workspace {
                 protocol::Step::Check { name, rules } => self.check(&format!("{}.{name}", d.name), &d.clock, &rules).and_then(|s| self.add_signals(s)),
                 protocol::Step::Join { name, requests, response, id } => {
                     let find = |x: &str| self.streams.iter().position(|s| s.name == format!("{}.{x}", d.name)).ok_or(format!("no stream {}.{x}", d.name));
-                    let made = requests.iter().map(|&r| find(r).map(|i| (r, i))).collect::<Result<Vec<_>, _>>().and_then(|reqs| {
+                    let timeout = match params.iter().find(|p| p.0 == "timeout") {
+                        Some((_, v)) => crate::time::parse(v, self.trace.fs_per_tick).map(|t| Some(t.round() as Tick)).map_err(|e| format!("join: timeout: {e}")),
+                        None => Ok(None),
+                    };
+                    let made = timeout.and_then(|timeout| {
+                        let reqs = requests.iter().map(|&r| find(r).map(|i| (r, i))).collect::<Result<Vec<_>, _>>()?;
                         let reqs: Vec<(&str, &Stream)> = reqs.into_iter().map(|(r, i)| (r, &self.streams[i])).collect();
-                        decode::join(&format!("{}.{name}", d.name), &reqs, &self.streams[find(response)?], id)
+                        decode::join(&format!("{}.{name}", d.name), &reqs, &self.streams[find(response)?], id, timeout)
                     });
                     made.and_then(|(done, unmatched)| {
                         let v = self.add_signals(done)?;
@@ -672,6 +677,7 @@ impl Workspace {
     /// Violations: a record per cycle of `clock` where a rule (name, expression) holds, its name
     /// the field `rule`; in time order, rules in their order at one time.
     pub fn check(&mut self, name: &str, clock: &str, rules: &[(String, String)]) -> Result<Stream, String> {
+        // shortcut (#24): rules are expressions of signals at the clock, not of a stream's records; take a stream's fields as `where` does if checks over transactions are wanted.
         let mut records = Vec::new();
         for (rule, when) in rules {
             let s = self.sample(name, clock, when, &[]).map_err(|e| format!("{rule}: {e}"))?;

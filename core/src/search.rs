@@ -73,6 +73,8 @@ pub enum Expr {
     Arith { a: Term, op: Op, b: Option<Term> },
     /// A bare `a & b`: true when it is known and nonzero.
     Truth(Term),
+    /// `contains(sig, "text")`: sig's text holds `text`, case and spaces as written.
+    Contains { sig: Probe, past: u32, text: String },
 }
 
 /// How `Expr::Cmp` compares: `<` and the like as unsigned numbers, an unknown bit never.
@@ -151,7 +153,8 @@ impl Shape {
     }
 }
 
-/// The widest operand and result arithmetic takes (#11).
+// shortcut (#11): values are i128, so operands up to 64 bits and results up to 127; a big integer type would lift it.
+/// The widest operand and result arithmetic takes.
 const MAX_OPERAND: u32 = 64;
 const MAX_RESULT: u32 = 127;
 
@@ -228,20 +231,13 @@ impl Term {
             Term::Inv(a, w) => !a.value(value)? & mask(*w),
             Term::Signed(a, w) => to_signed(a.value(value)? & mask(*w), *w),
             Term::Slice(a, hi, lo) => (a.value(value)? >> lo) & mask(hi - lo + 1),
-            Term::Bool(e) => i128::from(holds(e, value)),
-            Term::Cond(c, a, b) => {
-                let mut read = Vec::new();
-                probes(c, &mut read);
-                // shortcut (#12): an unknown bit anywhere in c makes it unknown, even where SV's || or && would know; upgrade if that bites
-                let known = |v: Option<&Val>| match v {
-                    Some(Val::Bits(b)) => unsigned(b).is_some(),
-                    v => v.is_some(),
-                };
-                if !read.iter().all(|&(p, n)| known(value(p, n).flatten().as_ref().map(|v| v.borrow()))) {
-                    return None;
-                }
-                if holds(c, value) { a.value(value)? } else { b.value(value)? }
-            }
+            Term::Bool(e) => i128::from(holds3(e, value)?),
+            // shortcut (#12): whole values: an unknown condition gives a where a == b, else all x, not SV's per-bit merge; upgrade if a partly known mux result matters
+            Term::Cond(c, a, b) => match holds3(c, value) {
+                Some(true) => a.value(value)?,
+                Some(false) => b.value(value)?,
+                None => a.value(value).filter(|&x| b.value(value) == Some(x))?,
+            },
         })
     }
 
@@ -517,7 +513,7 @@ impl Parser<'_> {
                 ')' if parens > 0 => parens -= 1,
                 '[' => brackets += 1,
                 ']' => brackets -= 1,
-                c if braces == 0 && parens == 0 && (c.is_whitespace() || "()&|!=<>+-*/%^~?".contains(c) || (c == ':' && brackets == 0)) => {
+                c if braces == 0 && parens == 0 && (c.is_whitespace() || "()&|!=<>+-*/%^~?".contains(c) || (matches!(c, ':' | ',') && brackets == 0)) => {
                     end = i;
                     break;
                 }
@@ -591,6 +587,37 @@ impl Parser<'_> {
         }
         if self.eat("!") {
             return Ok(Expr::Not(Box::new(self.unary()?)));
+        }
+        // `contains(x, "text")`: a quote before the `)` closing `contains(`; else a VHDL name
+        // (`contains(3)`), read below
+        let quoted = |r: &str| {
+            let mut depth = 0;
+            for c in r.chars() {
+                match c {
+                    '"' => return true,
+                    '(' => depth += 1,
+                    ')' if depth == 0 => return false,
+                    ')' => depth -= 1,
+                    _ => {}
+                }
+            }
+            false
+        };
+        if self.s.trim_start().strip_prefix("contains(").is_some_and(quoted) {
+            self.eat("contains(");
+            let (name, sig, width, _, past, _) = self.operand()?;
+            if width.is_some() {
+                return Err(format!("contains({name}, ...): {name} is a bit signal; contains reads a string signal's text"));
+            }
+            if !self.eat(",") || !self.eat("\"") {
+                return Err(format!("contains({name}, ...): write the text in quotes, contains({name}, \"text\")"));
+            }
+            let Some((text, rest)) = self.s.split_once('"') else { return Err(format!("contains({name}, ...): missing closing \"")) };
+            self.s = rest;
+            if !self.eat(")") {
+                return Err("missing )".into());
+            }
+            return Ok(Expr::Contains { sig, past, text: text.into() });
         }
         // `rose(`, `fell(`, `stable(`; otherwise the word is read again as an operand
         let start = self.s;
@@ -985,16 +1012,42 @@ fn eval(trace: &Trace, e: &Expr, t: Tick, prev: Prev) -> bool {
 
 /// Whether `e` holds, given `value(sig, n)`: sig's value `n` samples back, None where there is no
 /// such sample (and Some(None) where the signal has no value there). Searches sample a trace;
-/// `records` `where` samples a stream's records, a field per probe.
+/// `records` `where` samples a stream's records, a field per probe. Unknown is not a match.
 pub fn holds<V: std::borrow::Borrow<Val>>(e: &Expr, value: &dyn Fn(Probe, u32) -> Option<Option<V>>) -> bool {
+    holds3(e, value) == Some(true)
+}
+
+/// `holds`, three-valued as SV's conditions are (spec §8): None where an unknown decides it.
+/// `&&` and `||` know their answer when one known side decides it (`0 && x` is 0); a comparison
+/// with an unknown operand is unknown, except with `x` or `z`, which ask about unknown bits.
+fn holds3<V: std::borrow::Borrow<Val>>(e: &Expr, value: &dyn Fn(Probe, u32) -> Option<Option<V>>) -> Option<bool> {
+    use std::cmp::Ordering::{self, *};
+    let compare = |op: Op, order: Option<Ordering>| {
+        order.map(|o| match op {
+            Op::Eq => o == Equal,
+            Op::Ne => o != Equal,
+            Op::Lt => o == Less,
+            Op::Le => o != Greater,
+            Op::Gt => o == Greater,
+            Op::Ge => o != Less,
+        })
+    };
     match e {
-        Expr::Or(a, b) => holds(a, value) || holds(b, value),
-        Expr::And(a, b) => holds(a, value) && holds(b, value),
-        Expr::Not(a) => !holds(a, value),
-        Expr::Stable { sig, past } => match (value(*sig, *past), value(*sig, past + 1)) {
+        Expr::Or(a, b) => match (holds3(a, value), holds3(b, value)) {
+            (Some(true), _) | (_, Some(true)) => Some(true),
+            (Some(false), Some(false)) => Some(false),
+            _ => None,
+        },
+        Expr::And(a, b) => match (holds3(a, value), holds3(b, value)) {
+            (Some(false), _) | (_, Some(false)) => Some(false),
+            (Some(true), Some(true)) => Some(true),
+            _ => None,
+        },
+        Expr::Not(a) => holds3(a, value).map(|h| !h),
+        Expr::Stable { sig, past } => Some(match (value(*sig, *past), value(*sig, past + 1)) {
             (Some(a), Some(b)) => a.as_ref().map(|v| v.borrow()) == b.as_ref().map(|v| v.borrow()),
             _ => false,
-        },
+        }),
         Expr::Signals { a, a_past, op, b, b_past } => {
             let (x, y) = (value(*a, *a_past).flatten(), value(*b, *b_past).flatten());
             let order = match (x.as_ref().map(|v| v.borrow()), y.as_ref().map(|v| v.borrow())) {
@@ -1002,51 +1055,38 @@ pub fn holds<V: std::borrow::Borrow<Val>>(e: &Expr, value: &dyn Fn(Probe, u32) -
                 (Some(Val::Text(x)), Some(Val::Text(y))) => Some(x.cmp(y)),
                 _ => None,
             };
-            use std::cmp::Ordering::*;
-            match op {
-                Op::Eq => order == Some(Equal),
-                Op::Ne => order != Some(Equal),
-                Op::Lt => order == Some(Less),
-                Op::Le => matches!(order, Some(Less | Equal)),
-                Op::Gt => order == Some(Greater),
-                Op::Ge => matches!(order, Some(Greater | Equal)),
-            }
+            compare(*op, order)
         }
-        Expr::Truth(t) => t.value(value).is_some_and(|v| v != 0),
+        Expr::Truth(t) => t.value(value).map(|v| v != 0),
+        Expr::Contains { sig, past, text } => {
+            value(*sig, *past).flatten().map(|v| matches!(v.borrow(), Val::Text(t) if t.contains(text.as_str())))
+        }
         Expr::Arith { a, op, b } => {
             let x = a.value(value);
-            let Some(b) = b else { return (x.is_none()) == (*op == Op::Eq) };
-            use std::cmp::Ordering::*;
-            let order = x.zip(b.value(value)).map(|(x, y)| x.cmp(&y));
-            match op {
-                Op::Eq => order == Some(Equal),
-                Op::Ne => order != Some(Equal),
-                Op::Lt => order == Some(Less),
-                Op::Le => matches!(order, Some(Less | Equal)),
-                Op::Gt => order == Some(Greater),
-                Op::Ge => matches!(order, Some(Greater | Equal)),
-            }
+            // `== x`: whether the result is unknown, always known
+            let Some(b) = b else { return Some(x.is_none() == (*op == Op::Eq)) };
+            compare(*op, x.zip(b.value(value)).map(|(x, y)| x.cmp(&y)))
         }
         Expr::Cmp { sig, past, op, target } => {
             let v = value(*sig, *past).flatten();
             let v = v.as_ref().map(|v| v.borrow());
-            let hit = || match target {
-                Some(target) => matches(target, v),
-                // as in an `if`: some bit is 1 and none is unknown
-                None => matches!(&v, Some(Val::Bits(b)) if b.contains(['1', 'h']) && !b.contains(['x', 'u', 'w', '-', 'z'])),
-            };
-            let order = || match (target, v) {
-                (Some(Target::Bits(p)), Some(Val::Bits(b))) => unsigned(b).map(|b| b.cmp(&unsigned(p).unwrap_or_default())),
+            let unknown = |b: &str| b.contains(['x', 'u', 'w', '-', 'z']);
+            match (target, v) {
+                // `== x`, `== z`: whether it has such a bit, always known
+                (Some(t @ (Target::Unknown | Target::HighZ)), _) => Some(matches(t, v) == (*op == Op::Eq)),
+                (Some(t @ Target::Bits(p)), Some(Val::Bits(b))) => match (unsigned(b), unsigned(p)) {
+                    (Some(b), Some(p)) => compare(*op, Some(b.cmp(&p))),
+                    // a value with x or z bits (`4'b1x01`) matches them exactly
+                    (_, None) if matches!(op, Op::Eq | Op::Ne) => Some(matches(t, v) == (*op == Op::Eq)),
+                    _ => None,
+                },
+                (Some(Target::Text(p)), Some(Val::Text(t))) => compare(*op, Some(t.as_str().cmp(p.as_str()))),
+                // as in an `if`: some bit is 1; unknown with an unknown bit
+                (None, Some(Val::Bits(b))) if unknown(b) => None,
+                (None, Some(Val::Bits(b))) => Some(b.contains(['1', 'h'])),
+                (None, Some(_)) => Some(false),
+                // no value there
                 _ => None,
-            };
-            use std::cmp::Ordering::*;
-            match op {
-                Op::Eq => hit(),
-                Op::Ne => !hit(),
-                Op::Lt => order() == Some(Less),
-                Op::Le => matches!(order(), Some(Less | Equal)),
-                Op::Gt => order() == Some(Greater),
-                Op::Ge => matches!(order(), Some(Greater | Equal)),
             }
         }
     }
@@ -1063,6 +1103,7 @@ pub fn probes(e: &Expr, out: &mut Vec<(Probe, u32)>) {
         Expr::Cmp { sig, past, .. } => out.push((*sig, *past)),
         Expr::Stable { sig, past } => out.extend([(*sig, *past), (*sig, past + 1)]),
         Expr::Signals { a, a_past, b, b_past, .. } => out.extend([(*a, *a_past), (*b, *b_past)]),
+        Expr::Contains { sig, past, .. } => out.push((*sig, *past)),
         Expr::Truth(t) => t.probes(out),
         Expr::Arith { a, b, .. } => {
             a.probes(out);
@@ -1216,6 +1257,8 @@ mod tests {
         assert_eq!(find("cpu.data>=0x96&&cpu.data<=0x96", 0, true), Some(20));
         assert_eq!(find("cpu.data < 0x40", 0, true), Some(40));
         assert_eq!(find("cpu.data < 0x40", 41, true), None);
+        // !(data < 0x30) is 1, then x where data is z, then 1 again: a second match at 60
+        assert_eq!(find("!(cpu.data < 0x30)", 10, true), Some(60));
         // with a clock: the cycles whose ending edge samples busy (edges 25 and 35), by their start
         assert_eq!(find("@clk cpu.busy", 0, true), Some(15));
         assert_eq!(find("@clk cpu.busy", 15, true), Some(25));
@@ -1309,13 +1352,49 @@ mod tests {
 
     #[test]
     fn arithmetic_unknowns() {
-        // u is unknown: its result too, which equals x and no number
+        // u is unknown: its result too, which equals x; a comparison with a number is unknown,
+        // so neither it nor its negation matches
         assert_eq!(arith("u + 1 == x"), Ok(true));
         assert_eq!(arith("u + 1 != x"), Ok(false));
-        assert_eq!(arith("u + 1 != 5"), Ok(true));
+        assert_eq!(arith("u + 1 != 5"), Ok(false));
+        assert_eq!(arith("!(u + 1 == 5)"), Ok(false));
         assert_eq!(arith("u + 1 == 5"), Ok(false));
         assert_eq!(arith("u + 1 < 5"), Ok(false));
+        assert_eq!(arith("!(u + 1 < 5)"), Ok(false));
         assert_eq!(arith("u & 1"), Ok(false));
+        assert_eq!(arith("!(u & 1)"), Ok(false));
+        assert_eq!(arith("u != 1"), Ok(false));
+        assert_eq!(arith("u != m"), Ok(false));
+        assert_eq!(arith("!u"), Ok(false));
+        assert_eq!(arith("u == x && !(u != x)"), Ok(true));
+        // && and || know what one known side decides, as SV
+        assert_eq!(arith("!(m == 5 && u == 1)"), Ok(true));
+        assert_eq!(arith("!(m == 4 && u == 1)"), Ok(false));
+        assert_eq!(arith("m == 4 || u == 1"), Ok(true));
+        assert_eq!(arith("!(m == 5 || u == 1)"), Ok(false));
+        // as a value: unknown
+        assert_eq!(arith("(u == 1) + 1 == x"), Ok(true));
+    }
+
+    #[test]
+    fn contains_text() {
+        let yes = |s: &str| assert_eq!(arith(s), Ok(true), "{s}");
+        let no = |s: &str| assert_eq!(arith(s), Ok(false), "{s}");
+        yes(r#"contains(t, "dl")"#);
+        yes(r#"contains(t, "idle")"#);
+        no(r#"contains(t, "DL")"#);
+        no(r#"contains(t, "id le")"#);
+        no(r#"contains(t, "e)")"#);
+        yes(r#"!contains(t, "x") && m == 4"#);
+        yes(r#"(contains( t , "id") ? 1 : 0) == 1"#);
+        yes(r#"contains(past(t), "dl") || m == 4"#);
+        assert_eq!(arith(r#"contains(m, "a")"#), Err(r#"contains(m, ...): m is a bit signal; contains reads a string signal's text"#.into()));
+        assert_eq!(arith(r#"contains(t, dl")"#), Err(r#"contains(t, ...): write the text in quotes, contains(t, "text")"#.into()));
+        assert_eq!(arith(r#"contains(t, "dl)"#), Err(r#"contains(t, ...): missing closing ""#.into()));
+        assert_eq!(arith(r#"contains(t, "dl""#), Err("missing )".into()));
+        // without a quote, a VHDL name as before
+        assert_eq!(arith("contains(3) == 1"), Err("unknown signal: contains(3)".into()));
+        assert_eq!(arith(r#"contains(3) == 1 && t == "idle""#), Err("unknown signal: contains(3)".into()));
     }
 
     #[test]
@@ -1361,11 +1440,16 @@ mod tests {
         yes("m % 3 == 1");
         yes("m / 0 == x");
         yes("m % (b - 1) == x");
-        // `c ? a : b`, below `||`; an unknown condition gives x
+        // `c ? a : b`, below `||`; an unknown condition gives a if a == b, else x, and && and ||
+        // know a condition one known side decides
         yes("(m == 4 ? 1 : 0) == 1");
         yes("(m == 5 || b ? a : 0) == a");
         yes("(m[2] ? -4096 : 0) + 1 == -4095");
         yes("(u ? 1 : 0) == x");
+        yes("(u ? 3 : 3) == 3");
+        yes("(m == 5 && u ? 1 : 2) == 2");
+        yes("(m == 4 || u ? 1 : 2) == 1");
+        yes("(m == 4 && u ? 1 : 2) == x");
         yes("m == 4 ? 1 : 0");
         no("m == 5 ? 1 : 0");
         // a bit of a parenthesised value, a slice of signed(x)

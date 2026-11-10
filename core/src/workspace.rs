@@ -165,20 +165,24 @@ pub struct Mark {
 }
 
 /// What an undo step restores (spec §5 "Undo"): the rows, the marks with their names and notes,
-/// and the selection the change was made on. Cursor 1, zoom and the visible time are no part of
-/// it: looking around isn't a change.
+/// the named signals, and the selection the change was made on. Cursor 1, zoom and the visible time
+/// are no part of it: looking around isn't a change.
 #[derive(Clone)]
 struct Layout {
     rows: Vec<Row>,
     marks: [Option<Tick>; 9],
     labels: [Label; 9],
     sel: usize,
+    /// The named signals (`:signal`), so defining and removing one are undo steps.
+    signals: Vec<(String, String)>,
+    /// The `:names` then, to give a signal made again by undo its names back.
+    value_names: Vec<(String, String)>,
 }
 
 impl Layout {
-    /// The same rows (`rows::same_layout`) and the same marks.
+    /// The same rows (`rows::same_layout`), marks and named signals.
     fn same(&self, other: &Layout) -> bool {
-        rows::same_layout(&self.rows, &other.rows) && self.marks == other.marks && self.labels == other.labels
+        rows::same_layout(&self.rows, &other.rows) && self.marks == other.marks && self.labels == other.labels && self.signals == other.signals
     }
 }
 
@@ -231,13 +235,25 @@ impl Workspace {
     }
 
     fn layout(&self) -> Layout {
-        Layout { rows: self.rows.clone(), marks: self.marks, labels: self.labels.clone(), sel: self.sel }
+        Layout { rows: self.rows.clone(), marks: self.marks, labels: self.labels.clone(), sel: self.sel, signals: self.signals.clone(), value_names: self.value_names.clone() }
     }
 
-    /// Put back a layout, giving the one there was.
+    /// Put back a layout, giving the one there was. A named signal defined otherwise since is made
+    /// again from its expression; a removed one's var, dropped by `drop_unused` unless a row holds it, is made again too.
     fn restore(&mut self, l: Layout) -> Layout {
         let now = self.layout();
-        (self.rows, self.marks, self.labels, self.sel) = (l.rows, l.marks, l.labels, l.sel);
+        for (n, e) in &l.signals {
+            if !self.signals.contains(&(n.clone(), e.clone())) {
+                // one that no longer resolves (its signal gone on `:e`) stays out, as `:e` leaves it
+                if self.define(n, e).is_ok() {
+                    // `:names` are no undo step: only a signal made again gets its own back
+                    for (_, spec) in l.value_names.iter().filter(|(p, _)| p == n) {
+                        let _ = self.name_values(n, spec);
+                    }
+                }
+            }
+        }
+        (self.rows, self.marks, self.labels, self.sel, self.signals) = (l.rows, l.marks, l.labels, l.sel, l.signals);
         now
     }
 
@@ -530,6 +546,35 @@ impl Workspace {
             None => self.signals.push((name.to_string(), expr.to_string())),
         }
         Ok(var)
+    }
+
+    /// Remove named signal `name` (`:signal <name> off`, spec §16): its definition, the rows
+    /// showing it or a part of it, and its value names. One another named signal or a decode
+    /// reads stays, naming the readers to remove first.
+    pub fn remove_signal(&mut self, name: &str) -> Result<(), String> {
+        if !self.signals.iter().any(|s| s.0 == name) {
+            let all: Vec<&str> = self.signals.iter().map(|s| s.0.as_str()).collect();
+            return Err(match all.is_empty() {
+                true => format!("no signal {name}: there are none yet"),
+                false => format!("no signal {name} (signals: {})", all.join(", ")),
+            });
+        }
+        // a name, a slice `name[3:0]` or a part of `{name, b}`: the words of a text
+        let reads = |text: &str| text.split(|c: char| !(c.is_alphanumeric() || "_.$".contains(c))).any(|w| w == name);
+        let mut readers: Vec<&str> = self.signals.iter().filter(|s| s.0 != name && reads(&s.1)).map(|s| s.0.as_str()).collect();
+        readers.extend(self.decodes.iter().filter(|d| reads(&d.clock) || d.signals.iter().chain(&d.params).any(|p| reads(&p.1))).map(|d| d.name.as_str()));
+        if !readers.is_empty() {
+            return Err(format!("{name} is read by {}: remove {} first", readers.join(", "), if readers.len() > 1 { "them" } else { "it" }));
+        }
+        self.signals.retain(|s| s.0 != name);
+        self.value_names.retain(|(p, _)| p != name);
+        let keep: Vec<bool> = self.rows.iter().map(|r| r.sig().is_none_or(|s| !reads(&self.trace.vars[s.var].path))).collect();
+        let mut k = keep.into_iter();
+        self.rows.retain(|_| k.next().expect("one per row"));
+        rows::tidy(&mut self.rows);
+        self.anchor = None;
+        self.fix_sel();
+        Ok(())
     }
 
     /// `:names <signal> <value>=<name>...`: names for a signal's values, shown by the `enum` radix

@@ -185,6 +185,7 @@ pub struct Trace {
 impl Trace {
     /// wellen detects VCD / FST / GHW from the content, not the extension (spec §13).
     pub fn open(path: &std::path::Path) -> Result<Self, String> {
+        // shortcut (#29): simple::read reads a VCD whole before the window opens; index in the background to open huge VCDs at once.
         // wellen panics on a missing file, so check first
         std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
         let wave = unpanic(|| simple::read(path)).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -231,6 +232,7 @@ impl Trace {
     /// Read the values of these variables from the file (lazy loading, spec §18). Computed ones
     /// have theirs already; a composite's are its signals'.
     pub fn load(&mut self, vars: &[usize]) {
+        // shortcut (#30): each signal is loaded whole before it is drawn; read the visible time window first to draw huge FSTs sooner.
         let mut all = vars.to_vec();
         let mut i = 0;
         while i < all.len() {
@@ -460,6 +462,7 @@ impl Trace {
     }
 
     pub fn value_at(&self, var: usize, t: Tick) -> Option<Val> {
+        // shortcut (#7): a composite's value is joined from its signals' at each lookup; keep its change list if wide structs draw slowly.
         if self.is_composite(var) {
             let vals: Vec<Option<Val>> = self.vars[var].children.iter().map(|&c| self.value_at(c, t)).collect();
             return vals.iter().any(Option::is_some).then(|| self.join_values(var, &vals));

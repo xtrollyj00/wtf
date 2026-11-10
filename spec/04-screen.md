@@ -244,6 +244,7 @@ plug, a check for an interface found in the trace.
   | Command | Completes |
   |---|---|
   | `:add`, `:rm` | signal paths |
+  | `:signal <name>` | `=` or `off` |
   | `:signal <name> =`, `:names` | signal paths |
   | `:protocol <name>` | `clock=`, `when=`, `roles=`; after `clock=` or a field's `=` a signal path, and in `when=`'s expression the signal at the end, after any `!` or `(` |
   | `:radix`, `:color`, `:help` | radix names, colours, topics |

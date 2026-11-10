@@ -114,6 +114,7 @@ impl Design {
     /// The nodes with children whose canonical parts end with `name`'s, in node order: what a
     /// `:add` name or an error's name can stand for.
     pub fn ending(&self, name: &str) -> Vec<usize> {
+        // shortcut (#10): scans every node; index the nodes by their last part if `:add` of a name gets slow on huge designs.
         let name = canon(name);
         let key = parts(&name);
         (0..self.nodes.len()).filter(|&i| !self.nodes[i].children.is_empty() && parts(&self.nodes[i].canon).ends_with(&key)).collect()

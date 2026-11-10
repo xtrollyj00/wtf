@@ -18,6 +18,12 @@ pub fn run(app: &mut Workspace, line: &str) -> Result<Option<Msg>, String> {
         "add" => return add(app, arg),
         "e" => return app.reload().map(Some),
         "decode" => return decode(app, arg).map(|m| Some((m, false))),
+        // `:signal <name> off` removes it, as `:decode <name> off` does
+        "signal" if word(arg).1.trim() == "off" => {
+            let name = word(arg).0;
+            app.remove_signal(name)?;
+            return Ok(Some((format!("{name}: removed"), false)));
+        }
         _ => {}
     }
     match cmd {
@@ -57,7 +63,7 @@ pub fn run(app: &mut Workspace, line: &str) -> Result<Option<Msg>, String> {
         "group" if arg.is_empty() => Err("usage: :group <name>".into()),
         "group" => app.group(arg),
         "signal" => {
-            let (name, expr) = arg.split_once('=').ok_or("usage: :signal <name> = <signal>")?;
+            let (name, expr) = arg.split_once('=').ok_or("usage: :signal <name> = <signal>, or :signal <name> off")?;
             app.define(name, expr).map(drop)
         }
         "protocol" => protocol(app, arg),

@@ -75,7 +75,7 @@ fn join_in_order() {
     };
     // a at 10, 50, 70; b at 20, 60: requests complete at 20 and 60, a's third has no b
     let (a, b, resp) = (stream("a", &[10, 50, 70]), stream("b", &[20, 60]), stream("r", &[5, 30]));
-    let (done, unmatched) = decode::join("t", &[("a", &a), ("b", &b)], &resp, None).unwrap();
+    let (done, unmatched) = decode::join("t", &[("a", &a), ("b", &b)], &resp, None, None).unwrap();
     assert_eq!(done.schema.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["delay", "a", "b", "r"]);
     let starts: Vec<(u64, u64)> = done.records.iter().map(|r| (r.start, r.end)).collect();
     assert_eq!((starts, &done.records[0].fields[0]), (vec![(10, 35)], &Some(Val::Bits(format!("{:064b}", 10)))));
@@ -83,4 +83,14 @@ fn join_in_order() {
     let text = |k: &str| format!("{:?}", Some(Val::Text(k.into())));
     assert_eq!(kinds, [(5, text("no request")), (50, text("no response")), (70, text("no b"))]);
     assert!(unmatched.violations && unmatched.name == "t.unmatched");
+    // with a timeout of 50, the request complete at 20 is no response by 100; 60's pairs (delay 40)
+    let (a, b, resp) = (stream("a", &[10, 50]), stream("b", &[20, 60]), stream("r", &[100]));
+    let (done, unmatched) = decode::join("t", &[("a", &a), ("b", &b)], &resp, None, Some(50)).unwrap();
+    assert_eq!(done.records.iter().map(|r| (r.start, r.end)).collect::<Vec<_>>(), [(50, 105)]);
+    assert_eq!(done.records[0].fields[0], Some(Val::Bits(format!("{:064b}", 40))));
+    let kinds: Vec<(u64, String)> = unmatched.records.iter().map(|r| (r.start, format!("{:?}", r.fields[0]))).collect();
+    assert_eq!(kinds, [(10, text("no response"))]);
+    // a response just at the timeout still pairs
+    let (done, _) = decode::join("t", &[("a", &a), ("b", &b)], &stream("r", &[70]), None, Some(50)).unwrap();
+    assert_eq!(done.records.iter().map(|r| r.start).collect::<Vec<_>>(), [10]);
 }

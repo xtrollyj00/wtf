@@ -32,6 +32,7 @@ pub fn make(name: &str, input: &[Field], params: &[(String, String)], fs_per_tic
 
 /// Feed a whole stream through a decoder: the stream `name` it makes.
 pub fn run(name: &str, input: &Stream, mut d: Box<dyn Decoder>) -> Stream {
+    // shortcut (#23): the whole stream at once; decode by time window if huge traces make it slow.
     let mut records: Vec<Record> = input.records.iter().flat_map(|r| d.feed(r)).collect();
     records.extend(d.finish());
     records.sort_by_key(|r| r.start);
@@ -227,8 +228,9 @@ fn data_bytes(v: &Option<Val>, keep: Option<&Val>) -> Vec<String> {
 /// request record's start to the response's) and the fields of all, in order (a name in more than
 /// one stream gets the stream's label: `aw_addr`). The unmatched ones are violations,
 /// `<name>.unmatched` with `kind`: `no request`, `no response`, or `no w` for a request missing a
-/// part.
-pub fn join(name: &str, requests: &[(&str, &Stream)], response: &Stream, id: Option<(&str, &str, &str)>) -> Result<(Stream, Stream), String> {
+/// part. With a `timeout`, a request still waiting when a response starts more than `timeout` after it
+/// completed is `no response`, so a lost response doesn't shift every later pairing.
+pub fn join(name: &str, requests: &[(&str, &Stream)], response: &Stream, id: Option<(&str, &str, &str)>, timeout: Option<Tick>) -> Result<(Stream, Stream), String> {
     let field = |s: &Stream, f: &str| s.schema.iter().position(|x| x.name == f).ok_or(format!("join: {} has no field {f}", s.name));
     let ids = match id {
         Some((label, q, r)) => {
@@ -244,10 +246,18 @@ pub fn join(name: &str, requests: &[(&str, &Stream)], response: &Stream, id: Opt
     let kind = |start, end, k: String| Record { start, end, fields: vec![Some(Val::Text(k))] };
     let mut waiting: std::collections::HashMap<Option<Val>, std::collections::VecDeque<usize>> = Default::default();
     let (mut done, mut unmatched, mut next) = (Vec::new(), Vec::new(), 0);
+    let mut expired = Vec::new();
     for r in &response.records {
         while next < n && complete(next) < r.start {
             waiting.entry(req_key(next)).or_default().push_back(next);
             next += 1;
+        }
+        if let Some(t) = timeout {
+            for w in waiting.values_mut() {
+                while w.front().is_some_and(|&k| r.start.saturating_sub(complete(k)) > t) {
+                    expired.extend(w.pop_front());
+                }
+            }
         }
         let key = ids.and_then(|(_, _, f)| r.fields[f].clone());
         match waiting.get_mut(&key).and_then(|w| w.pop_front()) {
@@ -260,7 +270,7 @@ pub fn join(name: &str, requests: &[(&str, &Stream)], response: &Stream, id: Opt
             None => unmatched.push(kind(r.start, r.end, "no request".into())),
         }
     }
-    for k in waiting.into_values().flatten().chain(next..n) {
+    for k in expired.into_iter().chain(waiting.into_values().flatten()).chain(next..n) {
         let (start, end) = (parts(k).map(|q| q.start).min().unwrap_or(0), parts(k).map(|q| q.end).max().unwrap_or(0));
         unmatched.push(kind(start, end, "no response".into()));
     }

@@ -52,6 +52,7 @@ pub fn run(app: &mut App) -> Result<(), String> {
     let mut term = ratatui::init();
     let _ = crossterm::execute!(std::io::stdout(), crossterm::event::EnableMouseCapture);
     let res = (|| -> std::io::Result<()> {
+        // shortcut (#31): drawing and keys share this thread, so a long operation blocks the window and Esc; run work on a thread to cancel it.
         while !app.quit {
             term.draw(|f| {
                 if crate::draw::too_small(f.area(), f.buffer_mut()) {
