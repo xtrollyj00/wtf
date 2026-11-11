@@ -39,7 +39,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       # the workspace, so wtf-core is measured too; the bench has no tests worth it
       - run: cargo llvm-cov --locked --workspace --exclude wtf-bench --lcov --output-path lcov.info
-      - uses: codecov/codecov-action@v5
+      - uses: codecov/codecov-action@v7
         with:
           files: lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -51,7 +51,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - uses: dtolnay/rust-toolchain@stable
