@@ -9,7 +9,7 @@
 
 [![ci](https://github.com/xtrollyj00/wtf/actions/workflows/ci.yml/badge.svg)](https://github.com/xtrollyj00/wtf/actions/workflows/ci.yml)
 [![coverage](https://codecov.io/gh/xtrollyj00/wtf/graph/badge.svg)](https://codecov.io/gh/xtrollyj00/wtf)
-[![TDQS](https://tdqs.dev/reports/shs1u2w5ee/badge.svg)](https://tdqs.dev/reports/shs1u2w5ee)
+[![TDQS](https://tdqs.dev/reports/tt1wg8d953/badge.svg)](https://tdqs.dev/reports/tt1wg8d953)
 [![release](https://img.shields.io/github/v/release/xtrollyj00/wtf)](https://github.com/xtrollyj00/wtf/releases/latest)
 [![license](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
 ![platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS-lightgrey)
@@ -63,10 +63,10 @@ curl -fsSL https://raw.githubusercontent.com/xtrollyj00/wtf/main/install.sh | sh
 
 This puts the `wtf` command in `~/.local/bin`, checked against the release's checksum. The
 archives are on the [releases page](https://github.com/xtrollyj00/wtf/releases) too. Or build it
-from source:
+from [crates.io](https://crates.io/crates/wtf-wave):
 
 ```sh
-cargo install --locked --git https://github.com/xtrollyj00/wtf wtf-wave
+cargo install --locked wtf-wave
 ```
 
 Windows is not supported.

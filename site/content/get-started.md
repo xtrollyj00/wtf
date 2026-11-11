@@ -25,10 +25,10 @@ export PATH="$HOME/.local/bin:$PATH"
 
 Check the install with `wtf --version`.
 
-To build from source instead:
+To build from source instead, from [crates.io](https://crates.io/crates/wtf-wave):
 
 ```sh
-cargo install --locked --git https://github.com/xtrollyj00/wtf wtf-wave
+cargo install --locked wtf-wave
 ```
 
 The package is `wtf-wave`, and the command it installs is `wtf`, in `~/.cargo/bin`.
