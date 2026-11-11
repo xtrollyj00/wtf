@@ -358,6 +358,6 @@ impl Sink for Fst {
     }
 
     fn finish(self: Box<Self>) -> std::io::Result<()> {
-        self.out.finish().map_err(fst_err)
+        self.out.finish().map(drop).map_err(fst_err)
     }
 }
