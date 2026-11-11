@@ -879,7 +879,7 @@ impl Wtf {
         }
     }
 
-    #[tool(description = "What the user is looking at in their wtf window on this trace, to start from what they see; `adopt` replaces the workspace's rows, cursors and range with it.", annotations(read_only_hint = false, destructive_hint = true, idempotent_hint = true, open_world_hint = false))]
+    #[tool(description = "What the user is looking at in their wtf window on this trace, worded as `view` words the workspace, to start from what they see. Changes nothing unless `adopt`: that replaces the workspace's rows, cursors and range with the user's, dropping yours; `command` `undo` brings them back.", annotations(read_only_hint = false, destructive_hint = true, idempotent_hint = true, open_world_hint = false))]
     fn user_view(&self, Parameters(a): Parameters<UserViewArgs>) -> Result<String, String> {
         let w = current(self)?;
         let mut app = lock(&w);
@@ -1073,8 +1073,13 @@ mod tests {
         assert!(attached.starts_with(&view) && attached.contains("\nto = \"79ns\"\n"), "{attached}");
         assert!(agent.render(Parameters(RenderArgs { signals: vec![], from: None, to: None, width: Some(80), unit: None })).unwrap().text.contains("▾ evidence"));
         assert_eq!(agent.present().unwrap(), "shown in the user's window: agent: presented 2 signals, 2 cursors");
+        // adopting drops a row added since, and `undo` brings it back
+        cmd("add top.dma.state").unwrap();
         let seen = agent.user_view(Parameters(UserViewArgs { adopt: true })).unwrap();
         assert!(seen.contains("▾ evidence") && seen.contains("2: 20ns") && seen.contains("adopted"), "{seen}");
+        assert!(!agent.view(Parameters(ViewArgs { unit: None })).unwrap().contains("top.dma.state"));
+        cmd("undo").unwrap();
+        assert!(agent.view(Parameters(ViewArgs { unit: None })).unwrap().contains("top.dma.state"));
         // the user's own view comes back with u; the session file wasn't touched
         let mut window = window.join().unwrap();
         assert!(window.ws.modified());

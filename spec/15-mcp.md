@@ -19,7 +19,7 @@ reuse wtf's own pieces:
 | `command(line)` | run a `:` command on the agent's workspace (milestone 7) |
 | `view(unit)` | describe the workspace: rows, cursors with Δt, visible range |
 | `present` | show the workspace in every user's window on the trace, or write `<trace>.agent.session.toml` |
-| `user_view(adopt)` | what the user's window shows; `adopt` copies it into the workspace |
+| `user_view(adopt)` | what the user's window shows; `adopt` copies it into the workspace, replacing its rows, cursors and range as one undo step |
 | `help(topic)` | the reference, a topic per concept; without a topic, the topics |
 
 - **The agent's guide is in five layers, each with one job.** The tool definitions ride along on

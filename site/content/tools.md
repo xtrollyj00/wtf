@@ -107,11 +107,11 @@ Search the waveform's design, scopes (instances) and signals, by a regex in slas
 
 ### `user_view`
 
-What the user is looking at in their wtf window on this trace, to start from what they see; `adopt` replaces the workspace's rows, cursors and range with it.
+What the user is looking at in their wtf window on this trace, worded as `view` words the workspace, to start from what they see. Changes nothing unless `adopt`: that replaces the workspace's rows, cursors and range with the user's, dropping yours; `command` `undo` brings them back.
 
 | Argument | Means |
 |---|---|
-| `adopt` | Also copy the user's rows, cursors and visible range into the workspace, to build on them. |
+| `adopt` | Also copy the user's rows, cursors and visible range into the workspace, to build on them; they replace the workspace's (one `undo` step). |
 
 ### `values`
 

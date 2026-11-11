@@ -195,7 +195,8 @@ pub enum RowSpec {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 pub struct UserViewArgs {
-    /// Also copy the user's rows, cursors and visible range into the workspace, to build on them.
+    /// Also copy the user's rows, cursors and visible range into the workspace, to build on them;
+    /// they replace the workspace's (one `undo` step).
     #[serde(default)]
     pub adopt: bool,
 }
