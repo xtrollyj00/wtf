@@ -3,6 +3,66 @@
 What changed in each release. Commits follow [Conventional Commits](https://www.conventionalcommits.org/),
 so `git log v0.1.0..` has the details.
 
+## 0.4.0 (2026-11-11)
+
+Decoding works from forms: fill in a bus's signals in a card and wtf checks and decodes them,
+select a `V` range to decode the interface its signals play, or turn a clocked search into a table
+of its matches. Conditions read X and Z as SystemVerilog does, a name the trace doesn't have
+answers with the names it does, and the agent has fewer tools to choose from. wtf is on crates.io:
+`cargo install --locked wtf-wave`.
+
+Breaking:
+
+- A condition is three-valued, as in SystemVerilog: `data != 5` no longer matches where `data` is
+  unknown, `0 && x` is 0, `1 || x` is 1 and `!x` is unknown. Search `data == x` for the unknown
+  stretches.
+- The `value_at` tool is gone: `values` without `to` answers one time.
+- The `use` and `reload` tools are gone: `open` with `session` goes back to one of the server's
+  workspaces, and `open` with neither re-reads the current file as `:e` does, saying which signals
+  the file dropped.
+- The agent writes every pattern as a regex in slashes (`/^top\.cpu\./`), in `signals`, in
+  `command`'s `add` and `rm` and in `records`; a bare word is a name, and a glob is an error that
+  gives the regex form.
+- `Space d r` is gone: `Space d l` lists the decodes, and `Enter` there opens one's records.
+- A session writes a bit added from a bus as `top.x[1]`, not `top.x[1:1]`.
+
+New:
+
+- `:decode` alone, or `Space d D`, opens a form: name, protocol, clock and roles as fields, each
+  suggesting what fits and checked as you fill it in, with the `:decode` line shown underneath.
+  It reads no values, so it opens fast on a 1 GB trace.
+- `Space d D` on a `V` range decodes the range's signals: each plays the role its name ends in,
+  and the clock is found. The right-click menu's `Decode as ▸` does the same.
+- `:protocol` alone, or `Space d p`, opens a form for a protocol; `:protocol search`, or `Space d m`
+  after a clocked search, fills it from the search, decodes it and opens the matches as records.
+- `:decodes`, or `Space d l`, lists the decodes with their record counts: `Enter` opens the
+  records, `e` edits one and `dd` removes it. `:decode <name> off` removes one from the command
+  line.
+- `:names` alone, or `Space d n`, lists the values a signal takes and how often, and takes a name
+  beside each.
+- A name the trace doesn't have lists the nearest names, a scope says what it holds, and a word
+  from another tool names the form meant: `rose(x)`, `past(x)`, `==` for `=`.
+- `contains(x, "text")` is true where a string signal's or a text field's text holds `text`.
+- `axilite` and `axi4` take `timeout=`: a request left unanswered longer becomes `no response`
+  instead of pairing every later response with the wrong request.
+- `>` groups the selected rows or `V` range and names the group in place, `<` takes rows out or
+  dissolves a group, `R` renames a group, and `dd` keeps what it removed for `p` / `P`.
+- `:add` takes a slice or a bit of a bus as a row of its own: `:add data[7:4] state[1]`.
+- `:signal <name> off` removes a computed signal, or says which signal or decode still reads it.
+- A terminal too small for wtf says so with both sizes and draws what fits; a card bigger than the
+  screen shows what fits too.
+- The agent's `help` has a topic per concept, and each tool's description and annotations stand
+  alone: what an argument is, what a call changes and what to try next.
+- `cargo install --locked wtf-wave` installs wtf from crates.io.
+
+Fixed:
+
+- A bad time says what a time is and how to fix it: quotes, a space before the unit, an unknown
+  unit or no number.
+- A bit slice of an array element adds, names and saves as `grid[1][3]`, and a session row that
+  isn't in the trace by its full path is reported missing instead of loading a look-alike.
+- Names resolve again after unused computed signals are dropped, where a lookup could panic.
+
 ## 0.3.0 (2026-11-04)
 
 wtf opens to a start screen and works from a menu on Space. A picker finds signals and decodes
