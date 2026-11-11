@@ -32,8 +32,8 @@ How every tool names a signal.
 
 - A struct, record or array, or part of one (`pkt`, `pkts[1]`, `grid[1]`), is a signal of its
   whole value: its fields joined, the first the most significant (`pkt == 0x5A5`, `pkt[10]`);
-  with a text field (an nvc enum) text, `'{valid:1, state:busy, pair:'{hi:A, lo:5}}`. `value_at`
-  adds a line per field.
+  with a text field (an nvc enum) text, `'{valid:1, state:busy, pair:'{hi:A, lo:5}}`. `values`
+  adds each field.
 - A decoded stream is a signal (`bus.wr`, its value the record's number `#n`), and so is each
   of its fields (`bus.wr.addr`, `z` between records), for `find`, `values` and rows alike.
 - An unknown name says what the trace has instead: a scope's signals, a struct's or array's
@@ -89,9 +89,8 @@ Times you give and times you get back.
   shortest phase at 1 or more (`ns` for a 10 ns or a 200 MHz clock). A call's `unit` argument
   overrides it for that call.
 - Times are rounded to a thousandth of the unit (`2595ns` for 2595.000001ns). A time given back
-  stands for every tick that rounds to it: `value_at` reads after them all (as `find` `show` and
-  `records` sample), and says a change among them (`data = 0x5 (0x4 earlier in 2595ns)`);
-  `from` / `to` take them all, and `find` `from` a match starts after it.
+  stands for every tick that rounds to it: `values` with `from` alone lists a change among them
+  as a line of its own; `from` / `to` take them all, and `find` `from` a match starts after it.
 - Durations a decoder works out (a pair's `delay`) are times: shown in the unit, and compared
   with a time in `where` (`delay > 40ns`).
 

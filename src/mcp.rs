@@ -403,7 +403,7 @@ fn value(app: &Workspace, p: search::Probe, s: &Sig, t: Tick) -> String {
 
 #[tool_router]
 impl Wtf {
-    #[tool(description = "The open sessions: the user's wtf windows and agents' workspaces, with ids and traces, yours marked. `use` switches between yours; `open` starts one.", annotations(read_only_hint = true, open_world_hint = false))]
+    #[tool(description = "The open sessions: the user's wtf windows and agents' workspaces, with ids and traces, yours marked. `open` starts one or switches between yours.", annotations(read_only_hint = true, open_world_hint = false))]
     fn sessions(&self) -> String {
         let (ours, cur) = {
             let st = lock(&self.state);
@@ -427,19 +427,39 @@ impl Wtf {
         if lines.is_empty() { "no sessions: the user has no wtf window open; `open` a trace".into() } else { lines.join("\n") }
     }
 
-    #[tool(description = "Open a waveform (VCD, FST or GHW file) in a new workspace, the current one from then on. Answers with `info`, which lists the interfaces to decode.", annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = false))]
+    #[tool(description = "Choose the trace the other tools work on: `trace` opens a waveform (VCD, FST or GHW file) in a new workspace; `session` goes back to one of your workspaces (`sessions`); neither re-reads the current one's file, after the simulation ran again, keeping its rows. Answers with `info`, which lists the interfaces to decode.", annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = false))]
     fn open(&self, Parameters(a): Parameters<OpenArgs>) -> Result<String, String> {
-        let mut ws = Workspace::open(std::path::Path::new(&a.trace))?;
+        let trace = match (a.trace, a.session) {
+            (Some(_), Some(_)) => return Err("give `trace` (a new workspace) or `session` (one of yours), not both".into()),
+            (Some(t), None) => t,
+            (None, Some(id)) => {
+                let mut st = lock(&self.state);
+                st.current = st.workspaces.iter().position(|w| w.id == id).ok_or(format!("{id} is not one of your workspaces; see `sessions`"))?;
+                drop(st);
+                return self.info();
+            }
+            (None, None) => {
+                let w = current(self)?;
+                let msg = {
+                    let mut app = lock(&w);
+                    let name = app.file_name.clone();
+                    // its message lists the signals no longer in the file
+                    app.reload()?.0.replacen("reloaded", &format!("reloaded {name}"), 1)
+                };
+                return Ok(format!("{msg}\n{}", self.info()?));
+            }
+        };
+        let mut ws = Workspace::open(std::path::Path::new(&trace))?;
         // an agent writes patterns as regexes, everywhere (spec §15)
         ws.patterns = wtf_core::pattern::Syntax::Regex;
         let app = Arc::new(Mutex::new(ws));
         // the user's start screen shows what agents opened (spec §4 "Start screen")
-        crate::history::opened(std::path::Path::new(&a.trace), None, true);
+        crate::history::opened(std::path::Path::new(&trace), None, true);
         let mut st = lock(&self.state);
         st.opened += 1;
         let id = format!("{}-{}", std::process::id(), st.opened);
         let shared_app = app.clone();
-        let link = live::listen(&id, "agent", std::path::Path::new(&a.trace), move |req| match req {
+        let link = live::listen(&id, "agent", std::path::Path::new(&trace), move |req| match req {
             live::Request::Get => Ok(link_answer(&lock(&shared_app))),
             live::Request::Put(_) => Err("an agent's workspace takes no sessions".into()),
         })
@@ -448,15 +468,6 @@ impl Wtf {
         st.current = st.workspaces.len() - 1;
         drop(st);
         Ok(format!("workspace {id} (the user's wtf windows on this trace see your steps; :follow there shows the workspace)\n{}", self.info()?))
-    }
-
-    #[tool(name = "use", description = "Make another of this server's workspaces (ids from `sessions`) the current one, which the other tools then work on; nothing is closed. Answers with `info`.", annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = true, open_world_hint = false))]
-    fn use_session(&self, Parameters(a): Parameters<UseArgs>) -> Result<String, String> {
-        let mut st = lock(&self.state);
-        let i = st.workspaces.iter().position(|w| w.id == a.session).ok_or(format!("{} is not one of your workspaces; see `sessions`", a.session))?;
-        st.current = i;
-        drop(st);
-        self.info()
     }
 
     #[tool(description = "What can be decoded; with a name, its roles, params, streams and fields (`help decode`).", annotations(read_only_hint = true, open_world_hint = false))]
@@ -520,15 +531,31 @@ impl Wtf {
         })
     }
 
-    #[tool(description = "Values of signals over a time range: the value at `from`, then each change, as `time value` lines.", annotations(read_only_hint = true, open_world_hint = false))]
+    #[tool(description = "Values of signals from `from` to `to`: the value at `from`, then each change, as `time value` lines; omit `to` for one time. A struct or array also lists its fields. For when something happens, `find`.", annotations(read_only_hint = true, open_world_hint = false))]
     fn values(&self, Parameters(a): Parameters<ValuesArgs>) -> Result<Answer, String> {
         let w = current(self)?;
         let mut app = lock(&w);
-        let (from, to) = (at(&app, &a.from)?.0, at(&app, &a.to)?.1);
-        ordered(&app, (&a.from, from), (&a.to, to))?;
+        // one time is a span too: `20ns` covers what prints as 20ns, its changes listed
+        let to_text = a.to.as_ref().unwrap_or(&a.from);
+        let (from, to) = (at(&app, &a.from)?.0, at(&app, to_text)?.1);
+        ordered(&app, (&a.from, from), (to_text, to))?;
+        let asked = probes(&mut app, &a.signals, &a.radix)?;
+        // a struct or array: its whole value, then each signal in it (spec §15)
+        let asked: Vec<_> = asked
+            .into_iter()
+            .flat_map(|(n, p, s)| {
+                let mut out = vec![(n.clone(), p, s)];
+                if p.1.is_none() && app.trace.is_composite(p.0) {
+                    for f in app.trace.fields(p.0).into_iter().filter(|f| !app.trace.is_composite(f.var)) {
+                        out.push((f.under(&n), (f.var, None), Sig::of(f.var, &app.trace.vars[f.var])));
+                    }
+                }
+                out
+            })
+            .collect();
         // the cap is for the whole answer: one busy signal mustn't hide behind a quiet one
         let (mut lists, mut budget_left, mut cut) = (Vec::new(), MAX_LINES, false);
-        for (name, p, s) in probes(&mut app, &a.signals, &a.radix)? {
+        for (name, p, s) in asked {
             if cut {
                 break;
             }
@@ -646,44 +673,6 @@ impl Wtf {
         }
         // the record that starts the first row
         Ok(Answer { text: budget(lines.join("\n")), time: Some(set.record(page[0]).start) })
-    }
-
-    #[tool(description = "Values of signals at one time; a struct or array whole, then each signal in it. For the changes over a range use `values`; for when something happens, `find`.", annotations(read_only_hint = true, open_world_hint = false))]
-    fn value_at(&self, Parameters(a): Parameters<ValueAtArgs>) -> Result<Answer, String> {
-        let w = current(self)?;
-        let mut app = lock(&w);
-        // after everything that prints as the time, and a change among it said
-        let (lo, t) = at(&app, &a.time)?;
-        let mut asked = probes(&mut app, &a.signals, &a.radix)?;
-        // a struct or array: its whole value, then each signal in it (spec §15)
-        asked = asked
-            .into_iter()
-            .flat_map(|(n, p, s)| {
-                let mut out = vec![(n.clone(), p, s)];
-                if p.1.is_none() && app.trace.is_composite(p.0) {
-                    for f in app.trace.fields(p.0).into_iter().filter(|f| !app.trace.is_composite(f.var)) {
-                        out.push((f.under(&n), (f.var, None), Sig::of(f.var, &app.trace.vars[f.var])));
-                    }
-                }
-                out
-            })
-            .collect();
-        let lines: Vec<String> = asked
-            .iter()
-            .map(|(n, p, s)| match (value(&app, *p, s, lo), value(&app, *p, s, t)) {
-                (early, v) if early != v => format!("{n} = {v} ({early} earlier in {})", a.time.trim()),
-                (_, v) => format!("{n} = {v}"),
-            })
-            .collect();
-        // before there is a unit, in the asked time's own: `20ns` is the span's end, 20.000499ns
-        let own = (a.unit.is_none() && app.time_unit().is_none() && time::has_unit(&a.time))
-            .then(|| time::unit_named(a.time.trim().trim_start_matches(|c: char| c.is_ascii_digit() || c == '.')))
-            .transpose()?;
-        let u = match own {
-            Some(index) => Unit { index, decimals: Some(3) },
-            None => unit(&app, &a.unit, [t])?,
-        };
-        Ok(Answer { text: budget(format!("at {}:\n{}", show(&app, t, u), lines.join("\n"))), time: Some(t) })
     }
 
     #[tool(description = "When a search expression holds, as a table of times; `show` adds values, `count_only` counts. With `@<clock> ` first, a match is a cycle whose ending edge samples it true (`@clk x`: the cycles x is high), reported at the cycle's start; without, where it becomes true (`rose(x)`: x's edges). A bus: decode it (`help decode`).", annotations(read_only_hint = true, open_world_hint = false))]
@@ -812,7 +801,7 @@ impl Wtf {
         let line = a.line.trim().trim_start_matches(':');
         let cmd = line.split_whitespace().next().unwrap_or("");
         if matches!(cmd, "w" | "wq" | "q" | "q!" | "e" | "help") {
-            return Err(format!(":{cmd} belongs to the user's window; use `present` to show the workspace, `reload` to reopen the trace"));
+            return Err(format!(":{cmd} belongs to the user's window; use `present` to show the workspace, `open` with no arguments to reopen the trace"));
         }
         let rows = |app: &Workspace| -> Vec<String> {
             let row = |r: &Row| match r {
@@ -890,7 +879,7 @@ impl Wtf {
         }
     }
 
-    #[tool(description = "What the user is looking at in their wtf window on this trace, to start from what they see; `adopt` replaces the workspace's rows, cursors and range with it.", annotations(read_only_hint = false, destructive_hint = true, idempotent_hint = true, open_world_hint = false))]
+    #[tool(description = "What the user is looking at in their wtf window on this trace, worded as `view` words the workspace, to start from what they see. Changes nothing unless `adopt`: that replaces the workspace's rows, cursors and range with the user's, dropping yours; `command` `undo` brings them back.", annotations(read_only_hint = false, destructive_hint = true, idempotent_hint = true, open_world_hint = false))]
     fn user_view(&self, Parameters(a): Parameters<UserViewArgs>) -> Result<String, String> {
         let w = current(self)?;
         let mut app = lock(&w);
@@ -906,15 +895,6 @@ impl Wtf {
             return Ok(format!("{described}\n(adopted into the workspace{warn})"));
         }
         Ok(budget(described))
-    }
-
-    #[tool(description = "Reopen the trace file, after the simulation was run again.", annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = true, open_world_hint = false))]
-    fn reload(&self) -> Result<String, String> {
-        let w = current(self)?;
-        let mut app = lock(&w);
-        app.reload()?;
-        let end = time::format_exact(app.trace.end(), app.trace.fs_per_tick);
-        Ok(format!("reloaded {}: now 0 - {end}", app.file_name))
     }
 }
 
@@ -1052,15 +1032,15 @@ mod tests {
         let agent = Wtf::new();
         let cmd = |l: &str| agent.command(Parameters(CommandArgs { line: l.into() }));
         assert!(agent.info().unwrap_err().starts_with("no trace is open"));
-        let opened = agent.open(Parameters(OpenArgs { trace: trace.display().to_string() })).unwrap();
+        let opened = agent.open(Parameters(OpenArgs { trace: Some(trace.display().to_string()), session: None })).unwrap();
         let id = format!("{}-1", std::process::id());
         assert!(opened.starts_with(&format!("workspace {id} (the user's wtf windows on this trace see your steps; :follow there shows the workspace)\nsimple.vcd\n")), "{opened}");
         assert!(agent.sessions().contains(&format!("{id}  agent  {}  (yours, current)", trace.display())), "{}", agent.sessions());
-        assert!(agent.use_session(Parameters(UseArgs { session: "nope".into() })).is_err());
+        assert!(agent.open(Parameters(OpenArgs { trace: None, session: Some("nope".into()) })).is_err());
 
         // headless: no window, so present writes a session file
         cmd("add top.cpu.data").unwrap();
-        assert_eq!(cmd("q").unwrap_err(), ":q belongs to the user's window; use `present` to show the workspace, `reload` to reopen the trace");
+        assert_eq!(cmd("q").unwrap_err(), ":q belongs to the user's window; use `present` to show the workspace, `open` with no arguments to reopen the trace");
         assert_eq!(cmd("add nope").unwrap_err(), "no match: nope");
         let r = agent.present().unwrap();
         assert!(r.starts_with("no wtf window is open") && dir.join("simple.vcd.agent.session.toml").exists(), "{r}");
@@ -1093,8 +1073,13 @@ mod tests {
         assert!(attached.starts_with(&view) && attached.contains("\nto = \"79ns\"\n"), "{attached}");
         assert!(agent.render(Parameters(RenderArgs { signals: vec![], from: None, to: None, width: Some(80), unit: None })).unwrap().text.contains("▾ evidence"));
         assert_eq!(agent.present().unwrap(), "shown in the user's window: agent: presented 2 signals, 2 cursors");
+        // adopting drops a row added since, and `undo` brings it back
+        cmd("add top.dma.state").unwrap();
         let seen = agent.user_view(Parameters(UserViewArgs { adopt: true })).unwrap();
         assert!(seen.contains("▾ evidence") && seen.contains("2: 20ns") && seen.contains("adopted"), "{seen}");
+        assert!(!agent.view(Parameters(ViewArgs { unit: None })).unwrap().contains("top.dma.state"));
+        cmd("undo").unwrap();
+        assert!(agent.view(Parameters(ViewArgs { unit: None })).unwrap().contains("top.dma.state"));
         // the user's own view comes back with u; the session file wasn't touched
         let mut window = window.join().unwrap();
         assert!(window.ws.modified());

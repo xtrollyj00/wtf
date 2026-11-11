@@ -7,22 +7,19 @@ reuse wtf's own pieces:
 | Tool | Does |
 |---|---|
 | `sessions` | the open sessions: the user's windows and agents' workspaces, each with its id and trace |
-| `open(trace)` | open a trace in a new workspace of the agent's, which becomes the current one |
-| `use(session)` | make another of this server's workspaces the current one |
+| `open(trace, session)` | choose the current workspace: `trace` opens a trace in a new workspace of the agent's; `session` makes another of this server's workspaces current; neither reopens the current one's trace after the simulation was rerun, like `:e`, answering which signals it dropped. Both is an error |
 | `info` | file, time range, timescale, number of signals, and the interfaces a built-in protocol decodes, each with its `decode` line (`open` answers with it too) |
 | `signals(pattern)` | search the design, scopes (instances) and signals, by a pattern, a regex in slashes found anywhere in the path, in any case, as grep finds it (`/uart/`, `/_valid$/`, `/^top\.cpu\./`); no pattern matches everything. Paths are matched in one form, either HDL's as section 8 writes it: lowercase, indices in brackets (`/gen\[0\]/` for `gen(0)`). The design (every scope and signal of the file, its path in that form, its parent, how many signals it holds) is worked out again when computed signals come or go; a search is a pass over it. A signal is listed with its width; a scope whose name the pattern matches (it matches its path, not its parent's; a top scope has none) is listed before its signals, `top.cpu (scope of 3 signals)`; array elements and generate instances of one width are one line, the indices as ranges (`mux_in[0..15] (8 bits, 16 signals)`, `gen[0..4].x`); a struct, record or array is one line, `types.grid (array, 24 bits, 6 signals)`, its signals listed when the pattern names inside it (`types\.grid\.`). An answer over 200 lines is folded: below the deepest level that fits, a scope is one line counting its matches, `top.cpu (scope, 120 matching signals)`, and a last line says how to list one. A pattern that doesn't parse says so, and that it is a regex, not a glob (`.*` for any text) |
-| `values(signals, from, to, radix, unit)` | the value at `from`, then each change up to `to`, as `time value` lines |
-| `value_at(signals, time, radix, unit)` | values at one time; a struct, record or array its whole value, then a line per signal in it (`pkt.valid = 1`, `pkt.pair.hi = 0xA`) |
+| `values(signals, from, to, radix, unit)` | the value at `from`, then each change up to `to` (without `to`, inside the span `from` stands for), as `time value` lines; a struct, record or array its whole value, then each signal in it (`pkt.valid:`, `pkt.pair.hi:`) |
 | `find(expr, from, to, backward, count, show, count_only, unit)` | match times of a search expression (section 8), `@clk` included, as a table |
 | `render(signals, from, to, width, unit)` | the signals drawn as text, as on the screen (`--snapshot`); without signals, the workspace. The name and value columns keep their default widest (30, 20): the server reads no config file, so an answer doesn't depend on the user's |
 | `workspace(scope, signals, protocols, decode, rows, cursors, range)` | set up the whole workspace in one call |
 | `protocols(name)` | what can be decoded and how; for one protocol its roles, params and streams |
 | `records(stream, from, to, where, group_by, count, count_only, unit)` | the records of a stream, or of a set of streams (a decode's name: its results), as a table |
-| `reload` | reopen the trace after the simulation was rerun, like `:e` |
 | `command(line)` | run a `:` command on the agent's workspace (milestone 7) |
 | `view(unit)` | describe the workspace: rows, cursors with Δt, visible range |
 | `present` | show the workspace in every user's window on the trace, or write `<trace>.agent.session.toml` |
-| `user_view(adopt)` | what the user's window shows; `adopt` copies it into the workspace |
+| `user_view(adopt)` | what the user's window shows; `adopt` copies it into the workspace, replacing its rows, cursors and range as one undo step |
 | `help(topic)` | the reference, a topic per concept; without a topic, the topics |
 
 - **The agent's guide is in five layers, each with one job.** The tool definitions ride along on
@@ -36,7 +33,7 @@ reuse wtf's own pieces:
      an answer: what a `find` match with and without `@clk` is, what a record's `start` and
      `end` are. With those only in `help`, fewer runs used `@clk` and some read a record's start
      as its sampling edge. Where tools overlap, it names the sibling for the other case
-     (`value_at` and `values`, `view` and `render`). Its MCP annotations say what it changes: the
+     (`values` and `find`, `view` and `render`). Its MCP annotations say what it changes: the
      reading tools are read-only; `command`, `workspace` and `user_view` with `adopt` replace the
      rows (destructive); none reaches past the machine (`openWorldHint` false). Tool Definition
      Quality Score (tdqs.dev) grades the descriptions on their own, without the instructions.
@@ -107,9 +104,9 @@ reuse wtf's own pieces:
   keeps the smallest nonzero one at 1 or more, exactly (`80ns`, `2595.000001ns`).
   A time given as text in an MCP call stands for a span: every tick that prints as it (`2595ns`
   is 2594.9995ns to 2595.0005ns; a finer time, `2595.0004ns`, is narrower; `fs` or a plain tick
-  count is one tick). `value_at` reads the span's end, after everything that printed as the
-  time, answers `at` the time as asked (before there is a unit, in the asked time's), and says when a signal changes inside the span (`0x5 (0x4 earlier in 2595ns)`). `from`
-  in `records`, `values` and `render` takes the span's start, `to` its end; `find` searches after
+  count is one tick). `from`
+  in `records`, `values` and `render` takes the span's start, `to` its end (`values` without `to`:
+  the span's, so a change inside it is a line of its own); `find` searches after
   the span's end (before its start, backward), and `find` `to` takes the whole span. `workspace`
   `range` takes spans, its cursors keep the time written. The TUI's times are points.
 - The core keeps times as ticks and never picks a unit: the interfaces pass the unit and the
@@ -249,7 +246,7 @@ reuse wtf's own pieces:
 - The agent's changes never save the user's session file by themselves; the user `:w`s if they
   want to keep them.
 - `wtf --mcp` takes no trace. The agent lists what is open with `sessions`, opens traces with
-  `open` (several at once, switching with `use`), and works on the current workspace.
+  `open` (several at once, switching with `open` `session`), and works on the current workspace.
 - **Registry**: every session listens on a socket `wtf-<id>.sock` in `$XDG_RUNTIME_DIR`, or
   without it in `wtf-<uid>` in the temp directory, made so only the user can enter it and refused
   (with an error saying so) if someone else owns it or can enter it: a window's id is its process id, a workspace's is the server's process id and
@@ -277,12 +274,12 @@ reuse wtf's own pieces:
 ### Trail
 
 The user sees what the agent did, not only where it ended up. Each call of a tool that queries
-the trace or changes the workspace (`find`, `records`, `values`, `value_at`, `render`, `command`,
+the trace or changes the workspace (`find`, `records`, `values`, `render`, `command`,
 `workspace`) is a **step** on the current workspace's trail: the tool, what it asked (`find`'s
 expression, `records`' stream and `where`, a command's line, ...), the first line of the answer
-(`error: ...` for an error; `declared` for `workspace`, whose answer is a `view`), and the time it is about: the `time` or `from` asked, or the first
+(`values`: its first value too, `data: 40ns 0x2A`; `error: ...` for an error; `declared` for `workspace`, whose answer is a `view`), and the time it is about: the `time` or `from` asked, or the first
 time a `find` or `records` answer lists. Lookups (`help`, `info`, `signals`, `view`, `sessions`,
-`protocols`, `user_view`) and `open`, `use`, `reload` and `present` are no steps. A trail keeps
+`protocols`, `user_view`) and `open` and `present` are no steps. A trail keeps
 the last 200 steps.
 
 - The session a window reads from an agent's workspace carries the trail as `[[trail]]` tables

@@ -16,8 +16,7 @@ Details
   shortest phase at 1 or more (`ns` for a 10 ns or a 200 MHz clock). A call's `unit` argument
   overrides it for that call.
 - Times are rounded to a thousandth of the unit (`2595ns` for 2595.000001ns). A time given back
-  stands for every tick that rounds to it: `value_at` reads after them all (as `find` `show` and
-  `records` sample), and says a change among them (`data = 0x5 (0x4 earlier in 2595ns)`);
-  `from` / `to` take them all, and `find` `from` a match starts after it.
+  stands for every tick that rounds to it: `values` with `from` alone lists a change among them
+  as a line of its own; `from` / `to` take them all, and `find` `from` a match starts after it.
 - Durations a decoder works out (a pair's `delay`) are times: shown in the unit, and compared
   with a time in `where` (`delay > 40ns`).

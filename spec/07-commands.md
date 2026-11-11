@@ -58,4 +58,4 @@ Times accept `fs`, `ps`, `ns`, `us`, `ms`, `s`. A number without a unit means fi
   changes and then stays the same for a second, so a simulator still writing it isn't read half
   way, the window reloads it as `:e` does and the status line says `reloaded`; a file that can't be
   read keeps the old trace and shows the error. A file that disappears is not a change. Agents'
-  workspaces don't auto-reload: `reload` (section 15) is their `:e`.
+  workspaces don't auto-reload: `open` with no arguments (section 15) is their `:e`.
