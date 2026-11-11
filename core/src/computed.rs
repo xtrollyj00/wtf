@@ -3,6 +3,8 @@
 //! once, from the changes of the signals they are made of, into a computed var (`Trace`). Also
 //! expressions (`pc + 4`, `signed(insn[31:20])`, spec §16), evaluated at each change.
 
+use dashu_int::IBig;
+
 use crate::time::Tick;
 use crate::search::Term;
 use crate::trace::{Trace, Val};
@@ -138,7 +140,8 @@ pub fn term(trace: &mut Trace, t: &Term) -> Vec<(Tick, Val)> {
     all.dedup();
     let w = t.shape().bits as usize;
     let bits = |at| match t.value(&|p, _| Some(trace.value_of(p.0, p.1, at))) {
-        Some(n) => format!("{:0w$b}", (n as u128) & ((1u128 << w) - 1)),
+        // two's complement at the width: masked, so not negative
+        Some(n) => format!("{:0w$b}", n & ((IBig::ONE << w) - IBig::ONE)),
         None => "x".repeat(w),
     };
     all.into_iter().map(|at| (at, Val::Bits(bits(at)))).collect()

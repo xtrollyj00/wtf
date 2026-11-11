@@ -4,6 +4,8 @@
 //! earlier (a clock cycle with `@clk`, else one tick), `rose(x)`, `fell(x)` and `stable(x)` compare
 //! x with it; `rose` and `fell` only from a known value (not U -> 0).
 
+use dashu_int::{IBig, UBig, ops::BitTest};
+
 use crate::radix::RADIXES;
 use crate::time::Tick;
 use crate::trace::{Names, Trace, Val};
@@ -125,7 +127,7 @@ impl Bin {
 pub enum Term {
     /// A signal, `past` samples back; `signed` reads its bits as two's complement.
     Sig { sig: Probe, past: u32, width: u32, signed: bool },
-    Num(i128),
+    Num(IBig),
     Bin(Bin, Box<Term>, Box<Term>),
     /// `~x`: x's bits inverted at its width.
     Inv(Box<Term>, u32),
@@ -153,18 +155,17 @@ impl Shape {
     }
 }
 
-// shortcut (#11): values are i128, so operands up to 64 bits and results up to 127; a big integer type would lift it.
-/// The widest operand and result arithmetic takes.
-const MAX_OPERAND: u32 = 64;
-const MAX_RESULT: u32 = 127;
+/// The widest result arithmetic takes (spec §8): it bounds a shift by a signal, which could
+/// otherwise be 2^32 bits wide.
+const MAX_RESULT: u32 = 1 << 16;
 
 impl Term {
     /// The values it can have, worked out before searching.
     pub fn shape(&self) -> Shape {
         match self {
             Term::Sig { width, signed, .. } => Shape { bits: *width, signed: *signed },
-            Term::Num(n) if *n < 0 => Shape { bits: 129 - (!n).leading_zeros(), signed: true },
-            Term::Num(n) => Shape { bits: (128 - n.leading_zeros()).max(1), signed: false },
+            Term::Num(n) if *n < IBig::ZERO => Shape { bits: (!n.clone()).bit_len() as u32 + 1, signed: true },
+            Term::Num(n) => Shape { bits: (n.bit_len() as u32).max(1), signed: false },
             Term::Bin(op, l, r) => {
                 let (a, b) = (l.shape(), r.shape());
                 let signed = a.signed || b.signed;
@@ -203,7 +204,7 @@ impl Term {
     }
 
     /// Its value, reading signals with `value` as `holds` does; None where unknown.
-    pub fn value<V: std::borrow::Borrow<Val>>(&self, value: &dyn Fn(Probe, u32) -> Option<Option<V>>) -> Option<i128> {
+    pub fn value<V: std::borrow::Borrow<Val>>(&self, value: &dyn Fn(Probe, u32) -> Option<Option<V>>) -> Option<IBig> {
         Some(match self {
             Term::Sig { sig, past, width, signed } => {
                 let v = value(*sig, *past)??;
@@ -211,32 +212,38 @@ impl Term {
                 let n = number(b)?;
                 if *signed { to_signed(n, *width) } else { n }
             }
-            Term::Num(n) => *n,
+            Term::Num(n) => n.clone(),
             Term::Bin(op, a, b) => {
                 let (x, y) = (a.value(value)?, b.value(value)?);
                 match op {
-                    Bin::Add => x.checked_add(y)?,
-                    Bin::Sub => x.checked_sub(y)?,
-                    Bin::Mul => x.checked_mul(y)?,
+                    Bin::Add => x + y,
+                    Bin::Sub => x - y,
+                    Bin::Mul => x * y,
                     // by zero: x, as in SV; both truncate toward zero
-                    Bin::Div => x.checked_div(y)?,
-                    Bin::Rem => x.checked_rem(y)?,
+                    Bin::Div | Bin::Rem if y == IBig::ZERO => return None,
+                    Bin::Div => x / y,
+                    Bin::Rem => x % y,
                     Bin::And => x & y,
                     Bin::Or => x | y,
                     Bin::Xor => x ^ y,
-                    Bin::Shl => x.checked_shl(u32::try_from(y).ok()?)?,
-                    Bin::Shr => x >> y.clamp(0, 127),
+                    // the amount fits: `bin` bounds the result to MAX_RESULT bits
+                    Bin::Shl => x << usize::try_from(&y).ok()?,
+                    // past x's bits only its sign is left
+                    Bin::Shr => {
+                        let s = usize::try_from(&y).unwrap_or(usize::MAX).min(x.bit_len());
+                        x >> s
+                    }
                 }
             }
             Term::Inv(a, w) => !a.value(value)? & mask(*w),
             Term::Signed(a, w) => to_signed(a.value(value)? & mask(*w), *w),
-            Term::Slice(a, hi, lo) => (a.value(value)? >> lo) & mask(hi - lo + 1),
-            Term::Bool(e) => i128::from(holds3(e, value)?),
+            Term::Slice(a, hi, lo) => (a.value(value)? >> *lo as usize) & mask(hi - lo + 1),
+            Term::Bool(e) => IBig::from(u8::from(holds3(e, value)?)),
             // shortcut (#12): whole values: an unknown condition gives a where a == b, else all x, not SV's per-bit merge; upgrade if a partly known mux result matters
             Term::Cond(c, a, b) => match holds3(c, value) {
                 Some(true) => a.value(value)?,
                 Some(false) => b.value(value)?,
-                None => a.value(value).filter(|&x| b.value(value) == Some(x))?,
+                None => a.value(value).filter(|x| b.value(value).as_ref() == Some(x))?,
             },
         })
     }
@@ -283,29 +290,28 @@ impl Term {
 /// How far a shift by `b` can move bits.
 fn shift_max(b: &Term) -> u32 {
     match b {
-        Term::Num(n) => u32::try_from(*n).unwrap_or(u32::MAX),
+        Term::Num(n) => u32::try_from(n).unwrap_or(u32::MAX),
         b => 1u32.checked_shl(b.shape().bits).map_or(u32::MAX, |m| m - 1),
     }
 }
 
-/// The low `w` bits set (w up to 127).
-fn mask(w: u32) -> i128 {
-    1i128.wrapping_shl(w).wrapping_sub(1)
+/// The low `w` bits set.
+fn mask(w: u32) -> IBig {
+    (IBig::ONE << w as usize) - IBig::ONE
 }
 
 /// `n`, `w` bits wide, as two's complement.
-fn to_signed(n: i128, w: u32) -> i128 {
-    if w > 0 && (n >> (w - 1)) & 1 == 1 { n.wrapping_sub(1i128.wrapping_shl(w)) } else { n }
+fn to_signed(n: IBig, w: u32) -> IBig {
+    if w > 0 && n.bit(w as usize - 1) { n - (IBig::ONE << w as usize) } else { n }
 }
 
-/// Bits as an unsigned number; None with an unknown bit or more than 127 bits.
-fn number(bits: &str) -> Option<i128> {
-    let (b, _) = unsigned(bits)?;
-    if b > MAX_RESULT as usize {
-        return None;
+/// Bits as an unsigned number; None with an unknown bit.
+fn number(bits: &str) -> Option<IBig> {
+    let (_, b) = unsigned(bits)?;
+    if b.is_empty() {
+        return Some(IBig::ZERO);
     }
-    let b: String = bits.chars().map(|c| if c == 'h' { '1' } else if c == 'l' { '0' } else { c }).collect();
-    i128::from_str_radix(&b, 2).ok()
+    UBig::from_str_radix(&b, 2).ok().map(IBig::from)
 }
 
 #[derive(Debug)]
@@ -753,7 +759,7 @@ impl Parser<'_> {
         if bits > MAX_RESULT {
             let Term::Bin(_, a, b) = &t else { unreachable!() };
             if op == Bin::Shl && !matches!(**b, Term::Num(_)) && a.shape().bits < MAX_RESULT {
-                // the widest amount that fits: a.bits + 2^k - 1 <= 127
+                // the widest amount that fits: a.bits + 2^k - 1 <= MAX_RESULT
                 let k = (MAX_RESULT - a.shape().bits + 1).ilog2();
                 let w = b.shape().bits;
                 return Err(format!("{src}: {bt} is {w} bits, so the result could be 2^{w} bits; shift by a slice, {at} << {bt}[{}:0]", k - 1));
@@ -763,13 +769,12 @@ impl Parser<'_> {
         Ok((t, src))
     }
 
-    /// An operand as a number: a signal of up to 64 bits.
-    fn term(&mut self, atom: Atom, src: &str) -> Result<Term, String> {
+    /// An operand as a number: a signal of any width.
+    fn term(&mut self, atom: Atom, _src: &str) -> Result<Term, String> {
         match atom {
             Atom::Term(t) => Ok(t),
             Atom::Signal((name, sig, width, _, past, signed)) => match width {
                 None => Err(format!("{name} is a real or string signal; arithmetic takes numbers")),
-                Some(w) if w > MAX_OPERAND => Err(format!("{src}: {name} is {w} bits; arithmetic takes up to {MAX_OPERAND}: slice it, as {name}[63:0]")),
                 Some(width) => Ok(Term::Sig { sig, past, width, signed }),
             },
         }
@@ -937,7 +942,7 @@ pub fn sv_literal(text: &str) -> Option<Result<Sv, String>> {
         'o' => 3,
         'h' => 4,
         'd' if matches!(digits.as_str(), "x" | "z") => 0,
-        'd' => match digits.parse::<u128>() {
+        'd' => match digits.parse::<UBig>() {
             Ok(n) => return Some(sized(text, format!("{n:b}"), size, signed)),
             Err(_) => return Some(Err(form())),
         },
@@ -971,16 +976,16 @@ fn sized(text: &str, bits: String, size: Option<u32>, signed: bool) -> Result<Sv
 
 /// A number in an expression: decimal, `0x`, `0b` or `0o`, an SV number (`8'hFF`), maybe
 /// negative, or a time (ticks).
-fn number_text(text: &str, fpt: Option<u128>) -> Result<i128, String> {
+fn number_text(text: &str, fpt: Option<u128>) -> Result<IBig, String> {
     if crate::time::has_unit(text) {
-        return crate::time::parse(text, fpt).map(|t| t.round() as i128).map_err(String::from);
+        return crate::time::parse(text, fpt).map(|t| IBig::from(t.round() as i128)).map_err(String::from);
     }
     if let Some(sv) = sv_literal(text.trim_start_matches('-')) {
         let n = match sv? {
             Sv::Fill(c) => return Err(format!("{text}: '{c} has no width in arithmetic; write one, as 32'h{}", if c == '1' { "FFFFFFFF" } else { "0" })),
             Sv::Bits { bits, .. } if bits.contains(['x', 'z']) => return Err(format!("{text}: arithmetic takes known numbers; compare with x instead (== x)")),
             Sv::Bits { bits, signed, sized } => {
-                let n = number(&bits).ok_or(format!("{text}: more than {MAX_RESULT} bits"))?;
+                let n = number(&bits).ok_or(format!("not a number: {text}"))?;
                 if signed && sized { to_signed(n, bits.len() as u32) } else { n }
             }
         };
@@ -989,9 +994,9 @@ fn number_text(text: &str, fpt: Option<u128>) -> Result<i128, String> {
     let (neg, t) = text.strip_prefix('-').map_or((false, text), |t| (true, t));
     let t = t.replace('_', "").to_lowercase();
     let n = match t.get(..2) {
-        Some("0x") => i128::from_str_radix(&t[2..], 16),
-        Some("0b") => i128::from_str_radix(&t[2..], 2),
-        Some("0o") => i128::from_str_radix(&t[2..], 8),
+        Some("0x") => IBig::from_str_radix(&t[2..], 16),
+        Some("0b") => IBig::from_str_radix(&t[2..], 2),
+        Some("0o") => IBig::from_str_radix(&t[2..], 8),
         _ => t.parse(),
     }
     .map_err(|_| format!("not a number: {text}"))?;
@@ -1057,7 +1062,7 @@ fn holds3<V: std::borrow::Borrow<Val>>(e: &Expr, value: &dyn Fn(Probe, u32) -> O
             };
             compare(*op, order)
         }
-        Expr::Truth(t) => t.value(value).map(|v| v != 0),
+        Expr::Truth(t) => t.value(value).map(|v| v != IBig::ZERO),
         Expr::Contains { sig, past, text } => {
             value(*sig, *past).flatten().map(|v| matches!(v.borrow(), Val::Text(t) if t.contains(text.as_str())))
         }
@@ -1284,15 +1289,16 @@ mod tests {
         assert_eq!(err("next(cpu.data) == 0"), "next(cpu.data): an expression reads no later value; search on from a match instead (`find` `from`)");
     }
     /// Signals for arithmetic: a, b 32 bits, m, n 4, s 8 (signed, as `x - y` makes), t text, w
-    /// 128 bits, u 8 bits unknown; each with one value.
+    /// 128 bits all ones, u 8 bits unknown; each with one value.
     fn arith(text: &str) -> Result<bool, String> {
+        let ones = "1".repeat(128);
         let sigs: [(&str, Option<u32>, bool, &str); 8] = [
             ("a", Some(32), false, "11111111111111111111111111111111"),
             ("b", Some(32), false, "00000000000000000000000000000001"),
             ("m", Some(4), false, "0100"),
             ("s", Some(8), true, "11111100"),
             ("t", None, false, "idle"),
-            ("w", Some(128), false, ""),
+            ("w", Some(128), false, &ones),
             ("n", Some(4), false, "1111"),
             ("u", Some(8), false, "x"),
         ];
@@ -1348,6 +1354,13 @@ mod tests {
         yes("(m == 4) != !b");
         yes("!(m == 3) == 1");
         yes("m[2] == 1 && m[3:2] == 1 && m[1:0] == 0");
+        // any width: wide operands, results past 128 bits, exact
+        yes("w + 1 == 0x100000000000000000000000000000000");
+        yes("(w + 1)[128:128] == 1");
+        yes("signed(w) == -1");
+        yes("a * a * a * a == 0xFFFFFFFC00000005FFFFFFFC00000001");
+        yes("(w << 100) >> 100 == w");
+        yes("w[127:64] == 0xFFFFFFFFFFFFFFFF");
     }
 
     #[test]
@@ -1469,17 +1482,16 @@ mod tests {
         assert_eq!(err("m & 3 == 0"), "m & 3 == 0: & and == need parentheses: (m & 3) == 0 or m & (3 == 0)");
         assert_eq!(err("0 == m & 3"), "0 == m & 3: == and & need parentheses: 0 == (m & 3) or (0 == m) & 3");
         assert_eq!(err("a + m & 3 == 0"), "a + m & 3: + and & need parentheses: (a + m) & 3 or a + (m & 3)");
-        assert_eq!(err("a << b == 0"), "a << b: b is 32 bits, so the result could be 2^32 bits; shift by a slice, a << b[5:0]");
+        assert_eq!(err("a << b == 0"), "a << b: b is 32 bits, so the result could be 2^32 bits; shift by a slice, a << b[14:0]");
+        assert_eq!(err("a << 70000 == 0"), "a << 70000: the result could be 70032 bits, more than 65536; slice an operand to fewer bits");
         assert_eq!(err("a << s == 0"), "a << s: s can be negative; shift by an unsigned amount");
         assert_eq!(err("~(a + b) == 0"), "~(a + b): ~ inverts bits at a width, so give one with a slice: ~(a + b)[31:0]");
         assert_eq!(err("signed(a + b) == 0"), "signed(a + b): signed reads bits at a width, so give one with a slice: signed((a + b)[31:0])");
-        assert_eq!(err("w + 1 == 0"), "w: w is 128 bits; arithmetic takes up to 64: slice it, as w[63:0]");
         assert_eq!(err("t + 1 == 0"), "t is a real or string signal; arithmetic takes numbers");
-        assert_eq!(err("a * a * a * a == 0"), "a * a * a * a: the result could be 128 bits, more than 127; slice an operand to fewer bits");
         assert_eq!(err("a + 1 < x"), "a + 1 < x: < compares numbers; x only with == or !=");
         assert_eq!(err("a + 1 == z"), "a + 1 == z: an arithmetic result is a number or x");
         assert_eq!(err("m[4:0] == 0"), "m[4:0]: m has no bits 4:0 (4 bits)");
         assert_eq!(err("q[1:0] == 0"), "unknown signal: q[1:0]");
-        assert_eq!(err("(a + b)[200:0] == 0"), "(a + b)[200:0]: a slice is [hi:lo], hi from lo to 126");
+        assert_eq!(err("(a + b)[70000:0] == 0"), "(a + b)[70000:0]: a slice is [hi:lo], hi from lo to 65535");
     }
 }
