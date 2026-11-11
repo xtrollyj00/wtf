@@ -18,8 +18,8 @@ Recipes
 Details
 - A struct, record or array, or part of one (`pkt`, `pkts[1]`, `grid[1]`), is a signal of its
   whole value: its fields joined, the first the most significant (`pkt == 0x5A5`, `pkt[10]`);
-  with a text field (an nvc enum) text, `'{valid:1, state:busy, pair:'{hi:A, lo:5}}`. `value_at`
-  adds a line per field.
+  with a text field (an nvc enum) text, `'{valid:1, state:busy, pair:'{hi:A, lo:5}}`. `values`
+  adds each field.
 - A decoded stream is a signal (`bus.wr`, its value the record's number `#n`), and so is each
   of its fields (`bus.wr.addr`, `z` between records), for `find`, `values` and rows alike.
 - An unknown name says what the trace has instead: a scope's signals, a struct's or array's

@@ -28,6 +28,6 @@ for line in open(qs):
         err, out = tool("open", {"trace": f"{vcds}/{q['trace']}"})
         print("open", q["trace"], "ERR " + out if err else "ok"); opened = q["trace"]
     names = sorted(set(re.findall(r"\b(?:testbench|TOP|tb_top)\.[\w.\[\]]+\w\]?", q["question"])))
-    err, out = tool("value_at", {"signals": names, "time": re.search(r"t=(\d+\w+)", q["question"]).group(1)})
+    err, out = tool("values", {"signals": names, "from": re.search(r"t=(\d+\w+)", q["question"]).group(1)})
     print(f"  {q['id']:24} {'ERR' if err else 'ok '} {out[:300] if err else ''}")
 p.terminate()

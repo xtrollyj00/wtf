@@ -705,7 +705,7 @@ mod tests {
         app.follow = Some(tui::app::Follow { id: id.clone(), shown: text, own, presented: false });
         assert_eq!((app.ws.rows.len(), app.ws.view.cursor), (4, 30));
         keys(&mut app, "5l");
-        agent.ws.add_step(step("value_at", "top.cpu.data at 40ns", "at 40ns:", Some(40)));
+        agent.ws.add_step(step("values", "top.cpu.data at 40ns", "top.cpu.data: 40ns 0x2A", Some(40)));
         assert!(app.agents_now(vec![(id.clone(), session::to_link_toml(&agent.ws))]));
         assert_eq!(app.ws.view.cursor, 35);
         // the agent steers the view: its cursor and a range it renders show too
@@ -2441,7 +2441,7 @@ mod tests {
         app.ws.trail = vec![
             step("command", "decode bus axilite clock=clk", "decoded 2 streams", None),
             step("find", "@clk top.cpu.busy", "1 matches, first 20ns, last 20ns", Some(20)),
-            step("value_at", "top.cpu.data 40ns", "at 40ns: 0x2A", Some(40)),
+            step("values", "top.cpu.data at 40ns", "top.cpu.data: 40ns 0x2A", Some(40)),
         ];
         // the trail opens on the newest step; Enter jumps to its time
         keys(&mut app, ":pick trail\n");

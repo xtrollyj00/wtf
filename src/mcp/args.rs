@@ -5,14 +5,10 @@ use serde::Deserialize;
 
 #[derive(Deserialize, schemars::JsonSchema)]
 pub struct OpenArgs {
-    /// Path of a VCD, FST or GHW file, best absolute.
-    pub trace: String,
-}
-
-#[derive(Deserialize, schemars::JsonSchema)]
-pub struct UseArgs {
-    /// The id of one of this server's workspaces, from `sessions`.
-    pub session: String,
+    /// Path of a VCD, FST or GHW file, best absolute: a new workspace on it.
+    pub trace: Option<String>,
+    /// The id of one of this server's workspaces, from `sessions`: make it current again.
+    pub session: Option<String>,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -41,23 +37,11 @@ pub struct ValuesArgs {
     pub signals: Vec<String>,
     /// Start time with its unit, any unit: `120ns`, `3.4ms` (`help times`).
     pub from: String,
-    /// End time, inclusive.
-    pub to: String,
+    /// End time, inclusive; omit for the value at `from` alone.
+    pub to: Option<String>,
     /// hex, bin, dec, ... (`help radix`); `data:dec` for one signal.
     pub radix: Option<String>,
     /// The unit of the answer's times (`help times`).
-    pub unit: Option<String>,
-}
-
-#[derive(Deserialize, schemars::JsonSchema)]
-pub struct ValueAtArgs {
-    /// Signals by path or path end (`help names`); `signals` finds them.
-    pub signals: Vec<String>,
-    /// The time, `120ns` (`help times`).
-    pub time: String,
-    /// hex, bin, dec, ... (`help radix`); `data:dec` for one signal.
-    pub radix: Option<String>,
-    /// The unit of the answer's times, `ns`, `us` (`help times`).
     pub unit: Option<String>,
 }
 

@@ -134,7 +134,7 @@ fn tools_list() {
     let list = s.call("tools/list", json!({}));
     let mut names: Vec<&str> = list["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
     names.sort();
-    assert_eq!(names, ["command", "find", "help", "info", "open", "present", "protocols", "records", "reload", "render", "sessions", "signals", "use", "user_view", "value_at", "values", "view", "workspace"]);
+    assert_eq!(names, ["command", "find", "help", "info", "open", "present", "protocols", "records", "render", "sessions", "signals", "user_view", "values", "view", "workspace"]);
     // clients reject tools whose input schema isn't an object
     for t in list["tools"].as_array().unwrap() {
         assert_eq!(t["inputSchema"]["type"], "object", "{t}");
@@ -142,9 +142,9 @@ fn tools_list() {
     }
     // the tool definitions ride along on every turn of an agent: they grow only on purpose (spec
     // §15); raise a bound in the same commit as the text, saying why
-    // 15100: annotations, when to use which, and argument docs that stand alone, for TDQS
+    // 14000: 15 tools (values took value_at, open took use and reload), descriptions that stand alone
     let size = list.to_string().len();
-    assert!(size <= 15_100, "the tool definitions are {size} bytes, past the 15100 allowed");
+    assert!(size <= 14_000, "the tool definitions are {size} bytes, past the 14000 allowed");
     for t in list["tools"].as_array().unwrap() {
         let d = t["description"].as_str().unwrap();
         assert!(d.chars().count() <= 330, "{}: a description of {} characters, past 330: move the rest to its topic", t["name"], d.chars().count());
@@ -235,11 +235,11 @@ fn reading_tools() {
     let ghw = std::fs::canonicalize("tests/data/types-ghdl.ghw").unwrap();
     assert!(s.tool("open", json!({"trace": ghw})).unwrap_err().ends_with("wellen can't read it: not yet implemented: support multi-dimensional arrays!"));
     s.ok("open", json!({"trace": std::fs::canonicalize("tests/data/vhdl.fst").unwrap()}));
-    // 1 fs ticks: the time as asked, not the span's end (20.000499ns)
-    assert_eq!(s.ok("value_at", json!({"signals": ["clk"], "time": "20ns"})), "at 20ns:\nclk = 0 (1 earlier in 20ns)");
+    // 1 fs ticks: `20ns` is every tick that prints as it, so the change inside it shows
+    assert_eq!(s.ok("values", json!({"signals": ["clk"], "from": "20ns"})), "clk:\n  19.9995ns 1\n  20ns 0\n");
     s.ok("open", json!({"trace": simple()}));
     assert_eq!(s.ok("values", json!({"signals": ["cpu.data"], "from": "15ns", "to": "40ns", "radix": "dec"})), "cpu.data:\n  15ns 67\n  20ns 150\n  30ns 225\n  40ns 58\n");
-    assert_eq!(s.ok("value_at", json!({"signals": ["clk", "data[7]", "busy"], "time": "25ns"})), "at 25ns:\nclk = 1\ndata[7] = 1\nbusy = 1");
+    assert_eq!(s.ok("values", json!({"signals": ["clk", "data[7]", "busy"], "from": "25ns"})), "clk:\n  25ns 1\ndata[7]:\n  25ns 1\nbusy:\n  25ns 1\n");
     assert_eq!(s.ok("find", json!({"expr": "@clk busy"})), "from\tlast\tcycles\n15ns\t25ns\t2");
     assert_eq!(s.ok("find", json!({"expr": "data == 0x40", "backward": true})), "time\n60ns");
     assert_eq!(s.ok("find", json!({"expr": "data == 0x99"})), "no match");
@@ -247,7 +247,7 @@ fn reading_tools() {
     assert_eq!(s.ok("values", json!({"signals": ["cpu.data[7:4]"], "from": "15ns", "to": "30ns", "radix": "dec"})), "cpu.data[7:4]:\n  15ns 4\n  20ns 9\n  30ns 14\n");
     assert_eq!(s.ok("find", json!({"expr": "{busy, data[0]} == 2"})), "time\n20ns");
     insta::assert_snapshot!("render_signals", s.ok("render", json!({"signals": ["clk", "data", "busy"], "from": "0ns", "to": "40ns", "width": 60})));
-    assert_eq!(s.ok("reload", json!({})), "reloaded simple.vcd: now 0 - 80ns");
+    assert!(s.ok("open", json!({})).starts_with("reloaded simple.vcd\nsimple.vcd\n0ns - 80ns\n"));
 }
 
 /// Composite types (tests/data/types-verilator-structs.fst, as in core/tests/types.rs): a struct's
@@ -263,10 +263,10 @@ fn struct_fields() {
     assert_eq!(s.ok("signals", json!({"pattern": "/pkts/"})), "types.pkts (array, 22 bits, 8 signals)");
     assert_eq!(s.ok("signals", json!({"pattern": "/pkts\\[/"})), "types.pkts[0..1] (struct, 11 bits, 4 signals, 2 structs)");
     assert_eq!(s.ok("signals", json!({"pattern": "/pkts.*pair\\./"})), "types.pkts[0..1].pair.hi (4 bits, 2 signals)\ntypes.pkts[0..1].pair.lo (4 bits, 2 signals)");
-    assert_eq!(s.ok("value_at", json!({"signals": ["pkt.state", "pkts(1).pair.lo"], "time": "10ns"})), "at 10ns:\npkt.state = BUSY\npkts(1).pair.lo = 0x7");
+    assert_eq!(s.ok("values", json!({"signals": ["pkt.state", "pkts(1).pair.lo"], "from": "10ns"})), "pkt.state:\n  10ns BUSY\npkts(1).pair.lo:\n  10ns 0x7\n");
     assert_eq!(
-        s.ok("value_at", json!({"signals": ["pkt"], "time": "10ns"})),
-        "at 10ns:\npkt = 0x5A5\npkt.valid = 1\npkt.state = BUSY\npkt.pair.hi = 0xA\npkt.pair.lo = 0x5"
+        s.ok("values", json!({"signals": ["pkt"], "from": "10ns"})),
+        "pkt:\n  10ns 0x5A5\npkt.valid:\n  10ns 1\npkt.state:\n  10ns BUSY\npkt.pair.hi:\n  10ns 0xA\npkt.pair.lo:\n  10ns 0x5\n"
     );
     assert_eq!(s.ok("find", json!({"expr": "pkt == 0x5A5"})), "time\n10ns");
     // one row each, folded or with levels open, drawn as the window draws them
@@ -325,7 +325,7 @@ fn find_runs_values_and_counts() {
     assert_eq!(s.ok("find", json!({"expr": "@clk !busy", "from": "30ns", "to": "50ns", "unit": "us"})), "from\tlast\tcycles\n0.035us\t0.045us\t2");
     assert_eq!(s.tool("find", json!({"expr": "busy", "unit": "parsec"})), Err("bad time unit: parsec (s, ms, us, ns, ps, fs)".into()));
     // a bad time says the form, with the fix where there is one (spec §15 times)
-    let at = |s: &mut Server, t: &str| s.tool("value_at", json!({"signals": ["data"], "time": t})).unwrap_err();
+    let at = |s: &mut Server, t: &str| s.tool("values", json!({"signals": ["data"], "from": t})).unwrap_err();
     assert_eq!(at(&mut s, "\"20ns\""), "bad time: \"20ns\": without quotes, 20ns");
     assert_eq!(at(&mut s, "None"), "bad time: None (a number and a unit, 20ns or 1.5us; a plain number is file ticks)");
     assert_eq!(at(&mut s, "20 ns"), "bad time: a space before the unit: 20ns");
@@ -358,7 +358,7 @@ fn agent_commands() {
     assert_eq!(cmd("ungroup"), Err("not in a group".into()));
     assert_eq!(rows(&mut s), "rows (> selected):\n> data  top.cpu.data  hex\n  clk  top.clk\n  rst  top.rst\n  busy  top.cpu.busy\n  state  top.dma.state  hex\n");
     // a name ambiguous in the trace, but only one of them shown
-    assert_eq!(s.ok("value_at", json!({"signals": ["state"], "time": "70ns"})), "at 70ns:\nstate = 0x1");
+    assert_eq!(s.ok("values", json!({"signals": ["state"], "from": "70ns"})), "state:\n  70ns 0x1\n");
     // undo steps, one per command
     let mut cmd = |l: &str| s.tool("command", json!({"line": l}));
     assert_eq!(cmd("undo"), Ok("added 1: group cpu".into()));
@@ -461,7 +461,7 @@ fn errors() {
     assert_eq!(s.tool("command", json!({"line": "add clk"})), Err(none.into()));
     assert!(s.tool("open", json!({"trace": dir.0.join("missing.vcd")})).unwrap_err().contains("missing.vcd"));
     s.ok("open", json!({"trace": simple()}));
-    assert_eq!(s.tool("value_at", json!({"signals": ["nope"], "time": "1ns"})), Err("unknown signal: nope".into()));
+    assert_eq!(s.tool("values", json!({"signals": ["nope"], "from": "1ns"})), Err("unknown signal: nope".into()));
     assert_eq!(s.tool("values", json!({"signals": ["data"], "from": "0ns", "to": "9ns", "radix": "float"})), Err("float doesn't fit data (8 bits)".into()));
     assert_eq!(s.tool("values", json!({"signals": ["data"], "from": "0ns", "to": "9ns", "radix": "hexx"})), Err("unknown radix: hexx".into()));
     assert!(s.tool("find", json!({"expr": "data =="})).is_err());
@@ -590,8 +590,9 @@ fn workspaces_and_joining() {
     assert_eq!(listed, expected);
     // each workspace keeps its own rows
     s.ok("command", json!({"line": "add top.cpu.busy"}));
-    assert!(s.ok("use", json!({"session": format!("{pid}-1")})).starts_with("simple.vcd\n"));
-    assert_eq!(s.tool("use", json!({"session": "77"})), Err("77 is not one of your workspaces; see `sessions`".into()));
+    assert!(s.ok("open", json!({"session": format!("{pid}-1")})).starts_with("simple.vcd\n"));
+    assert_eq!(s.tool("open", json!({"session": "77"})), Err("77 is not one of your workspaces; see `sessions`".into()));
+    assert_eq!(s.tool("open", json!({"session": "77", "trace": "x.vcd"})), Err("give `trace` (a new workspace) or `session` (one of yours), not both".into()));
     s.ok("command", json!({"line": "add top.cpu.data"}));
     s.ok("command", json!({"line": "cursor 2 30ns"}));
     insta::assert_snapshot!("render_workspace", s.ok("render", json!({"width": 60})));
@@ -628,7 +629,7 @@ fn trail_reaches_the_window() {
     s.ok("command", json!({"line": "add top.cpu.data"}));
     s.ok("find", json!({"expr": "top.cpu.busy", "count_only": true}));
     s.ok("help", json!({"topic": "times"}));
-    let _ = s.tool("value_at", json!({"signals": ["nope"], "time": "10ns"}));
+    let _ = s.tool("values", json!({"signals": ["nope"], "from": "10ns"}));
     // the agent's own declaration keeps the steps before it
     s.ok("workspace", json!({"rows": ["top.cpu.data"]}));
     // a window reads the whole trail over the link (spec §15 "Joining"); present carries none
@@ -644,7 +645,7 @@ fn trail_reaches_the_window() {
     assert_eq!(steps.len(), 4, "{toml}");
     assert_eq!(steps[0], "tool = \"command\"\nask = \"add top.cpu.data\"\nanswer = \"added 1: top.cpu.data\"\n");
     assert!(steps[1].starts_with("tool = \"find\"\nask = \"top.cpu.busy\"\nanswer = \"1 matches, first 20ns") && steps[1].ends_with("time = \"20ns\"\n"), "{}", steps[1]);
-    assert!(steps[2].starts_with("tool = \"value_at\"\nask = \"nope at 10ns\"\nanswer = \"error: "), "{}", steps[2]);
+    assert!(steps[2].starts_with("tool = \"values\"\nask = \"nope at 10ns\"\nanswer = \"error: "), "{}", steps[2]);
     // the agent's own declaration keeps the steps before it
     assert!(steps[3].starts_with("tool = \"workspace\"\nask = \"1 rows, 0 cursors\"\nanswer = \"declared\"\n"), "{}", steps[3]);
     // a real window following the agent lists them
@@ -887,7 +888,7 @@ fn decode_with_command() {
     assert_eq!(s.ok("records", json!({"stream": "bus.errors", "where": "rule == aw_dropped && past(rule) == r_resp"})), "1 of 1 matching, of 2\nn\tstart\tend\trule\n1\t210ns\t220ns\taw_dropped");
     assert_eq!(s.tool("records", rd("adr == 1", false)), Err("bus.rd: no field adr (fields: delay, addr, data, resp, and n, the record's number)".into()));
     // a delay is a time: in the unit asked for, and compared with one
-    assert_eq!(s.ok("value_at", json!({"signals": ["bus.wr.delay", "bus.wr.addr"], "time": "70ns"})), "at 70ns:\nbus.wr.delay = 20ns\nbus.wr.addr = 0x14");
+    assert_eq!(s.ok("values", json!({"signals": ["bus.wr.delay", "bus.wr.addr"], "from": "70ns"})), "bus.wr.delay:\n  70ns 20ns\nbus.wr.addr:\n  70ns 0x14\n");
     assert_eq!(s.ok("values", json!({"signals": ["bus.wr.delay"], "from": "30ns", "to": "70ns"})), "bus.wr.delay:\n  30ns 10ns\n  50ns 0xZZZZZZZZZZZZZZZZ\n  60ns 20ns\n");
     let wr = json!({"stream": "bus.wr", "where": "delay == 20ns", "unit": "ps"});
     assert_eq!(s.ok("records", wr), "1 of 1 matching, of 2\nn\tstart\tend\tdelay\taddr\tdata\tstrb\tresp\n1\t60000ps\t120000ps\t20000ps\t0x14\t0x22222222\t0x3\t0x0");
@@ -1024,8 +1025,8 @@ fn times_in_the_clocks_unit() {
     s.ok("command", json!({"line": "protocol beat roles=valid,ready,data when=valid && ready d=data"}));
     s.ok("command", json!({"line": "decode rx beat clock=clk valid=valid ready=ready data=data"}));
     assert_eq!(s.ok("records", json!({"stream": "rx"})), "2 of 2\nn\tstart\tend\td\n0\t20ns\t30ns\t0x5\n1\t30ns\t40ns\t0x6");
-    // a rounded time stands for every tick that prints as it: read after them, a change among them said
-    assert_eq!(s.ok("value_at", json!({"signals": ["data", "ready"], "time": "20ns"})), "at 20ns:\ndata = 0x5 (0x0 earlier in 20ns)\nready = 1");
+    // a rounded time stands for every tick that prints as it: a change among them is a line
+    assert_eq!(s.ok("values", json!({"signals": ["data", "ready"], "from": "20ns"})), "data:\n  20ns 0x0\n  20ns 0x5\nready:\n  20ns 1\n");
     assert_eq!(s.ok("find", json!({"expr": "@clk valid && ready", "from": "20ns"})), "from\tlast\tcycles\n30ns\t30ns\t1");
     // backward: before every tick the time stands for
     let back = |from: &str| json!({"expr": "@clk valid && ready", "from": from, "backward": true});
@@ -1035,7 +1036,7 @@ fn times_in_the_clocks_unit() {
     // exact in a finer unit, or with the unit set
     assert_eq!(s.ok("find", json!({"expr": "@clk valid", "unit": "fs"})), "from\tlast\tcycles\n20000001fs\t30000001fs\t2");
     s.ok("command", json!({"line": "unit ps"}));
-    assert_eq!(s.ok("value_at", json!({"signals": ["data"], "time": "20.000002ns"})), "at 20000.002ps:\ndata = 0x5");
+    assert_eq!(s.ok("values", json!({"signals": ["data"], "from": "20.000002ns"})), "data:\n  20000.002ps 0x5\n");
     assert_eq!(s.tool("command", json!({"line": "unit min"})), Err("usage: :unit <s|ms|us|ns|ps|fs|auto>".into()));
     s.ok("command", json!({"line": "unit auto"}));
     assert_eq!(s.ok("values", data), "data:\n  0ns 0x0\n  20ns 0x5\n  30ns 0x6\n");
@@ -1050,11 +1051,11 @@ fn names_under_the_scope() {
     let trace = dir.0.join("simple.vcd");
     std::fs::copy("tests/data/simple.vcd", &trace).unwrap();
     s.ok("open", json!({"trace": trace}));
-    let at = json!({"signals": ["state"], "time": "0ns"});
-    assert!(s.tool("value_at", at.clone()).unwrap_err().starts_with("ambiguous: state (2 signals"));
+    let at = json!({"signals": ["state"], "from": "0ns"});
+    assert!(s.tool("values", at.clone()).unwrap_err().starts_with("ambiguous: state (2 signals"));
     assert_eq!(s.tool("command", json!({"line": "scope top.cpux"})), Err("no scope top.cpux".into()));
     s.ok("command", json!({"line": "scope top.dma"}));
-    assert!(s.ok("value_at", at.clone()).ends_with("\nstate = 0x0"));
+    assert!(s.ok("values", at.clone()).ends_with("\n  0ns 0x0\n"));
     assert_eq!(s.ok("find", json!({"expr": "state != 0", "count_only": true})), s.ok("find", json!({"expr": "top.dma.state != 0", "count_only": true})));
     assert_eq!(s.ok("command", json!({"line": "add state"})), "added 1: top.dma.state");
     // the scope's signals resolve in full too, and other scopes by their path
@@ -1066,13 +1067,13 @@ fn names_under_the_scope() {
     assert!(s.tool("workspace", json!({"scope": "top.cpu", "rows": ["nope"]})).is_err());
     assert!(s.ok("command", json!({"line": "rm state"})).contains("removed 1: top.dma.state"));
     s.ok("workspace", json!({"scope": "top.cpu", "rows": ["state", "data"]}));
-    assert!(s.ok("value_at", json!({"signals": ["state"], "time": "0ns"})).contains("state = "));
+    assert!(s.ok("values", json!({"signals": ["state"], "from": "0ns"})).contains("state:\n  0ns "));
     assert!(s.ok("view", json!({})).contains("top.cpu.state"));
     // cleared, the session has none; `state` is then the one the workspace shows
     s.ok("command", json!({"line": "scope"}));
     s.ok("present", json!({}));
     assert!(!std::fs::read_to_string(dir.0.join("simple.vcd.agent.session.toml")).unwrap().contains("\nscope = "));
-    assert!(s.ok("value_at", at).contains("state = "));
+    assert!(s.ok("values", at).contains("state:\n  0ns "));
 }
 
 /// SPI and UART, decoded by an agent with `command`: they sample by time, so they need no clock.

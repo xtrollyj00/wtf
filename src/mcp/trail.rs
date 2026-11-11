@@ -9,7 +9,7 @@ use wtf_core::workspace::Step;
 
 /// The tools whose calls are steps: queries of the trace and changes to the workspace. Lookups
 /// (`help`, `info`, `signals`, `view`, ...) show nothing about the trace.
-const STEPS: [&str; 7] = ["find", "records", "values", "value_at", "render", "command", "workspace"];
+const STEPS: [&str; 6] = ["find", "records", "values", "render", "command", "workspace"];
 
 /// The `_meta` key a tool's time rides under from the tool to `call_tool`, which takes it out.
 const TIME: &str = "wtf/time";
@@ -50,19 +50,23 @@ pub fn step(tool: &str, args: Option<&JsonObject>, answer: &str, error: bool, ti
         "find" => arg("expr").to_string(),
         "records" if arg("where").is_empty() => arg("stream").to_string(),
         "records" => format!("{} where {}", arg("stream"), arg("where")),
+        "values" if arg("to").is_empty() => format!("{} at {}", list("signals"), arg("from")),
         "values" => format!("{} from {} to {}", list("signals"), arg("from"), arg("to")),
-        "value_at" => format!("{} at {}", list("signals"), arg("time")),
         "render" if count("signals") == 0 => "the workspace".into(),
         "render" => list("signals"),
         _ => format!("{} rows, {} cursors", count("rows"), args.and_then(|a| a.get("cursors")).and_then(Value::as_object).map_or(0, |c| c.len())),
     };
     let time = if error { None } else { time };
-    let first = answer.lines().next().unwrap_or_default();
+    let first = match tool {
+        // `name:` alone says nothing: with its first value, `data: 40ns 0x2A`
+        "values" => answer.lines().take(2).map(str::trim).collect::<Vec<_>>().join(" "),
+        _ => answer.lines().next().unwrap_or_default().to_string(),
+    };
     let answer = match (error, tool) {
         (true, _) => format!("error: {first}"),
         // its answer is the `view` that follows; the step says what was asked
         (false, "workspace") => "declared".into(),
-        _ => first.to_string(),
+        _ => first,
     };
     Some(Step { tool: tool.into(), ask, answer, time })
 }

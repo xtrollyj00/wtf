@@ -46,11 +46,12 @@ The open waveform: file, time range, signals, and the interfaces a built-in prot
 
 ### `open`
 
-Open a waveform (VCD, FST or GHW file) in a new workspace, the current one from then on. Answers with `info`, which lists the interfaces to decode.
+Choose the trace the other tools work on: `trace` opens a waveform (VCD, FST or GHW file) in a new workspace; `session` goes back to one of your workspaces (`sessions`); neither re-reads the current one's file, after the simulation ran again, keeping its rows. Answers with `info`, which lists the interfaces to decode.
 
 | Argument | Means |
 |---|---|
-| `trace` (required) | Path of a VCD, FST or GHW file, best absolute. |
+| `session` | The id of one of this server's workspaces, from `sessions`: make it current again. |
+| `trace` | Path of a VCD, FST or GHW file, best absolute: a new workspace on it. |
 
 ### `present`
 
@@ -80,10 +81,6 @@ Records of a decoded stream, or of several in start order (a decode's name: its 
 | `unit` | The unit of the answer's times, `ns`, `us` (`help times`). |
 | `where` | Only the records this holds for: `resp != 0`, `n == 138`, `req_addr != resp_addr` (`help records`). |
 
-### `reload`
-
-Reopen the trace file, after the simulation was run again.
-
 ### `render`
 
 Draw signals over a time range as text, as wtf's screen does; without signals, the workspace.
@@ -98,7 +95,7 @@ Draw signals over a time range as text, as wtf's screen does; without signals, t
 
 ### `sessions`
 
-The open sessions: the user's wtf windows and agents' workspaces, with ids and traces, yours marked. `use` switches between yours; `open` starts one.
+The open sessions: the user's wtf windows and agents' workspaces, with ids and traces, yours marked. `open` starts one or switches between yours.
 
 ### `signals`
 
@@ -108,14 +105,6 @@ Search the waveform's design, scopes (instances) and signals, by a regex in slas
 |---|---|
 | `pattern` | A regex in slashes, found anywhere in the path in any case, indices in brackets (`/s_axi_.*valid/`, `/^top\.cpu\./`, `/gen\[0\]/`); none lists all. |
 
-### `use`
-
-Make another of this server's workspaces (ids from `sessions`) the current one, which the other tools then work on; nothing is closed. Answers with `info`.
-
-| Argument | Means |
-|---|---|
-| `session` (required) | The id of one of this server's workspaces, from `sessions`. |
-
 ### `user_view`
 
 What the user is looking at in their wtf window on this trace, to start from what they see; `adopt` replaces the workspace's rows, cursors and range with it.
@@ -124,27 +113,16 @@ What the user is looking at in their wtf window on this trace, to start from wha
 |---|---|
 | `adopt` | Also copy the user's rows, cursors and visible range into the workspace, to build on them. |
 
-### `value_at`
-
-Values of signals at one time; a struct or array whole, then each signal in it. For the changes over a range use `values`; for when something happens, `find`.
-
-| Argument | Means |
-|---|---|
-| `radix` | hex, bin, dec, ... (`help radix`); `data:dec` for one signal. |
-| `signals` (required) | Signals by path or path end (`help names`); `signals` finds them. |
-| `time` (required) | The time, `120ns` (`help times`). |
-| `unit` | The unit of the answer's times, `ns`, `us` (`help times`). |
-
 ### `values`
 
-Values of signals over a time range: the value at `from`, then each change, as `time value` lines.
+Values of signals from `from` to `to`: the value at `from`, then each change, as `time value` lines; omit `to` for one time. A struct or array also lists its fields. For when something happens, `find`.
 
 | Argument | Means |
 |---|---|
 | `from` (required) | Start time with its unit, any unit: `120ns`, `3.4ms` (`help times`). |
 | `radix` | hex, bin, dec, ... (`help radix`); `data:dec` for one signal. |
 | `signals` (required) | Signals by path or path end (`help names`); `signals` finds them. |
-| `to` (required) | End time, inclusive. |
+| `to` | End time, inclusive; omit for the value at `from` alone. |
 | `unit` | The unit of the answer's times (`help times`). |
 
 ### `view`
