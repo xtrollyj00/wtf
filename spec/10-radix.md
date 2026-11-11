@@ -12,7 +12,7 @@ its values.
 | `oct` | `0o17` | leading zero digits dropped |
 | `ascii` | `Hi` | one character per byte; `.` for bytes that aren't printable, `?` for unknown ones; leading zero bytes dropped |
 | `float` | `0.1`, `1e300` | IEEE 754 half, single or double, for 16-, 32- and 64-bit signals |
-| `q<m>.<n>` | `-1.25` | signed fixed point: `m` integer bits including the sign, `n` fraction bits (up to 38), `m + n` = the signal's width; exact |
+| `q<m>.<n>` | `-1.25` | signed fixed point: `m` integer bits including the sign, `n` fraction bits, `m + n` = the signal's width; exact |
 | `uq<m>.<n>` | `1.25` | unsigned fixed point |
 | `enum` | `READ` | the name the file gives the value (an FST enum table, as Verilator writes SystemVerilog enums; enums written as strings, as nvc writes VHDL ones, are text already), or one given with `:names` (section 7); a value without a name in hex; only for signals with names |
 
