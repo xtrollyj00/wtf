@@ -487,7 +487,7 @@ fn computed_expressions() {
     assert_eq!(ws.trace.value_at(next, 0), Some(Val::Bits("xxxxxxxxx".into())));
     assert_eq!(ws.trace.value_at(next, 22), Some(Val::Bits("010010111".into())));
     // wider than 128 bits: exact, no wrap (data is 0x96 @20)
-    run(&mut ws, "signal big = data << 130").unwrap();
+    run(&mut ws, "signal big = data << 0o202").unwrap(); // 130
     let big = var(&ws, "big");
     assert_eq!(ws.trace.vars[big].width, Some(138));
     assert_eq!(ws.trace.value_at(big, 22), Some(Val::Bits(format!("10010110{}", "0".repeat(130)))));
