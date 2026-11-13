@@ -1,0 +1,6 @@
+# wait for both coverage uploads (ubuntu, windows) before reporting (.github/workflows/ci.yml)
+codecov:
+  notify:
+    after_n_builds: 2
+comment:
+  after_n_builds: 2
