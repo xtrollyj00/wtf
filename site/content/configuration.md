@@ -10,7 +10,8 @@ wtf reads one file, `config.toml`, for how it looks and which keys it takes. Ses
 | Where | Notes |
 |---|---|
 | `$XDG_CONFIG_HOME/wtf/config.toml` | used when `XDG_CONFIG_HOME` is set |
-| `~/.config/wtf/config.toml` | otherwise |
+| `~/.config/wtf/config.toml` | otherwise, on Linux and macOS |
+| `%APPDATA%\wtf\config.toml` | otherwise, on Windows |
 | `<config dir>/themes/<name>.toml` | your themes, next to `config.toml` |
 
 The file is optional. wtf reads it once, at start, so a change shows the next time you start wtf.

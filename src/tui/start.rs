@@ -10,6 +10,12 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use std::path::{Path, PathBuf};
 
+/// The user's home directory, for `~`: `$HOME`, or `%USERPROFILE%` on Windows.
+pub fn home() -> Option<PathBuf> {
+    let var = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+    std::env::var_os(var).filter(|h| !h.is_empty()).map(PathBuf::from)
+}
+
 /// The logo's letters, `w t f` in a pixel font: one pixel a column and half a line, `#` ink.
 /// Two pixel lines make a cell (▀ ▄); the shadow is the ink moved 2 right and 2 down.
 const INK: [&str; 20] = [
@@ -140,8 +146,8 @@ impl Start {
                 KeyCode::Esc => self.typing = None,
                 KeyCode::Enter => {
                     let t = self.typing.take().unwrap_or_default();
-                    let trace = match t.strip_prefix("~/") {
-                        Some(rest) => std::env::var_os("HOME").map_or(PathBuf::from(&t), |h| Path::new(&h).join(rest)),
+                    let trace = match t.strip_prefix("~/").or_else(|| t.strip_prefix("~\\")) {
+                        Some(rest) => home().map_or(PathBuf::from(&t), |h| h.join(rest)),
                         None => PathBuf::from(t.trim()),
                     };
                     return (!t.trim().is_empty()).then_some(Choice::Open { trace, session: None });
@@ -604,7 +610,7 @@ mod tests {
         assert_eq!(press(&mut s, "<Esc>z"), None);
         assert!(s.list == List::Recent);
         // `~/` is the home directory
-        let home = std::env::var_os("HOME").map_or(PathBuf::from("~"), PathBuf::from);
+        let home = home().unwrap_or_else(|| PathBuf::from("~"));
         assert_eq!(press(&mut s, "o~/a.vcd<CR>"), Some(Choice::Open { trace: home.join("a.vcd"), session: None }));
         // agents, with icons; a screen too small for a big logo takes the small one in a corner
         s.agents.push(live::Session { id: "5000-2".into(), kind: "agent".into(), trace: "/w/b.fst".into() });

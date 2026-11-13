@@ -1537,13 +1537,9 @@ fn wrap(v: &str) -> Vec<String> {
 
 /// `secs` since the epoch as the local clock shows it, `14:03:05`.
 fn clock(secs: u64) -> String {
-    let t = secs as libc::time_t;
-    // SAFETY: localtime_r reads `t` and writes only `tm`, which it is given
-    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    if unsafe { libc::localtime_r(&t, &mut tm) }.is_null() {
-        return "--:--:--".into();
-    }
-    format!("{:02}:{:02}:{:02}", tm.tm_hour, tm.tm_min, tm.tm_sec)
+    use chrono::Timelike;
+    let local = i64::try_from(secs).ok().and_then(|s| chrono::DateTime::from_timestamp(s, 0)).map(|t| t.with_timezone(&chrono::Local));
+    local.map_or_else(|| "--:--:--".into(), |t| format!("{:02}:{:02}:{:02}", t.hour(), t.minute(), t.second()))
 }
 
 /// Keys as `App::keys` takes them, each a key event.
@@ -1598,7 +1594,7 @@ mod tests {
 
     #[test]
     fn clock_out_of_range() {
-        // a time past the years localtime_r can hold fails it: no made-up 00:00:00
+        // a time past the years a calendar can hold: no made-up 00:00:00
         assert_eq!(clock(i64::MAX as u64), "--:--:--");
     }
 

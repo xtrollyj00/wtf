@@ -7,7 +7,8 @@ Install wtf, then take a five-minute tour of it on a demo trace.
 
 ## Install
 
-wtf runs on Linux and macOS, on x86_64 and arm64. Windows is not supported.
+wtf runs on Linux and macOS, on x86_64 and arm64, and experimentally on Windows 10 1803 or later
+(x86_64).
 
 Install the latest release with the script:
 
@@ -32,6 +33,10 @@ cargo install --locked wtf-wave
 ```
 
 The package is `wtf-wave`, and the command it installs is `wtf`, in `~/.cargo/bin`.
+
+On Windows, unzip `wtf.exe` from the release's `wtf-x86_64-pc-windows-msvc.zip` into a directory
+on your `PATH`, or build it with `cargo install --locked wtf-wave`. Windows support is
+experimental: wtf is tested there, but not in a Windows terminal.
 
 ## Get the demo
 

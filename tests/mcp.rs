@@ -4,7 +4,11 @@
 
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Read, Write};
+#[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
+// the link on Windows (src/live.rs): AF_UNIX through uds_windows
+#[cfg(windows)]
+use uds_windows::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::mpsc;

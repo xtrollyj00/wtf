@@ -917,20 +917,20 @@ fn guide(app: &App, buf: &mut Buffer, w: usize, body: usize) {
     action_rows(buf, area, x, y0 + 5, cw, &actions);
 }
 
-/// A trace's whole path as the guide shows it: its directory (`~` for the home directory, with
-/// the `/` after it) and its file name.
+/// A trace's whole path as the guide shows it: its directory (`~` for the home directory, which is
+/// `HOME`, or `USERPROFILE` on Windows, with the separator after it) and its file name. The
+/// `\\?\` that canonicalize puts before a Windows path is left out.
 fn trace_path(path: &std::path::Path) -> (String, String) {
-    let full = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let full = crate::history::plain(std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()));
     let file = full.file_name().map_or(String::new(), |f| f.to_string_lossy().into_owned());
-    let mut dir = full.parent().map_or(String::new(), |d| d.to_string_lossy().into_owned());
-    if let Some(home) = std::env::var_os("HOME").map(|h| h.to_string_lossy().into_owned()).filter(|h| !h.is_empty())
-        && let Some(rest) = dir.strip_prefix(&home)
-        && (rest.is_empty() || rest.starts_with('/'))
-    {
-        dir = format!("~{rest}");
-    }
-    if !dir.ends_with('/') {
-        dir.push('/');
+    let parent = full.parent().unwrap_or(std::path::Path::new(""));
+    let sep = std::path::MAIN_SEPARATOR_STR;
+    let mut dir = match crate::tui::start::home().and_then(|h| parent.strip_prefix(h).ok().map(|r| r.to_path_buf())) {
+        Some(rest) => std::iter::once("~".to_string()).chain(rest.components().map(|c| c.as_os_str().to_string_lossy().into_owned())).collect::<Vec<_>>().join(sep),
+        None => parent.to_string_lossy().into_owned(),
+    };
+    if !dir.ends_with(std::path::MAIN_SEPARATOR) {
+        dir.push_str(sep);
     }
     (dir, file)
 }

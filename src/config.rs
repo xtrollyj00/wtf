@@ -32,10 +32,11 @@ pub fn load(bg: Option<theme::Rgb>) -> Config {
     }
 }
 
+/// `$XDG_CONFIG_HOME/wtf`, else `~/.config/wtf`, or `%APPDATA%\wtf` on Windows (spec §19).
 pub fn dir() -> Option<PathBuf> {
     let xdg = std::env::var_os("XDG_CONFIG_HOME").filter(|v| !v.is_empty());
-    let base = xdg.map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")));
-    base.map(|b| b.join("wtf"))
+    let home = if cfg!(windows) { std::env::var_os("APPDATA").map(PathBuf::from) } else { std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")) };
+    xdg.map(PathBuf::from).or(home).map(|b| b.join("wtf"))
 }
 
 /// The first start on this machine: there is no config file yet (spec §19 "First start").
