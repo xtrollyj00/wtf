@@ -145,7 +145,10 @@ fn write_answer(mut w: UnixStream, a: Result<String, String>) -> std::io::Result
     match a {
         Ok(text) => write!(w, "OK {}\n{text}", text.len()),
         Err(e) => writeln!(w, "ERR {}", e.replace('\n', " ")),
-    }
+    }?;
+    // end of answer for a reader to EOF, even while another handle to the socket lives on
+    // (Windows: the clone `serve` reads from, or one a child process inherited)
+    w.shutdown(std::net::Shutdown::Write)
 }
 
 /// An open session, as `INFO` describes it.
