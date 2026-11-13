@@ -5,7 +5,8 @@ travels with it; the config file is the user's terminal and taste, and stays on 
 
 ### The file
 
-`$XDG_CONFIG_HOME/wtf/config.toml`, or `~/.config/wtf/config.toml` without `XDG_CONFIG_HOME`. It is
+`$XDG_CONFIG_HOME/wtf/config.toml`, or `~/.config/wtf/config.toml` without `XDG_CONFIG_HOME`
+(`%APPDATA%\wtf\config.toml` on Windows). It is
 optional; without it wtf uses the defaults.
 
 ```toml

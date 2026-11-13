@@ -11,6 +11,12 @@ and doesn't guess the rest.
   mouse (xterm, VTE, kitty, Alacritty, WezTerm by default), so a `Shift` + click reaches wtf only
   where the terminal passes it on (kitty `terminal_select_modifiers`, WezTerm
   `bypass_mouse_reporting_modifiers`). `Ctrl` + click, `V` and `Space` do the same everywhere.
+- **Windows** is experimental: Windows 10 1803 or later, which has the AF_UNIX sockets the link
+  uses (through `uds_windows`; section 15 "Registry"). The sockets are in
+  `%LOCALAPPDATA%\wtf\runtime`, the config in `%APPDATA%\wtf`, the history in
+  `%LOCALAPPDATA%\wtf\history`, and `~` is `%USERPROFILE%`. CI builds and tests it, but no test
+  runs wtf in a Windows terminal: the terminal tests use a Unix pseudo-terminal (ConPTY is not
+  done), so the keys and mouse as a Windows terminal sends them are untested.
 - **Composite types** are shown as the simulator dumps them (fixtures `types-*`, made by
   `tests/data/types.sh`; pinned in `core/tests/types.rs`):
   - a packed struct dumped as one var (Verilator without `--trace-structs`, Icarus) has no field
