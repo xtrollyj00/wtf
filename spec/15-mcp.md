@@ -248,7 +248,8 @@ reuse wtf's own pieces:
 - `wtf --mcp` takes no trace. The agent lists what is open with `sessions`, opens traces with
   `open` (several at once, switching with `open` `session`), and works on the current workspace.
 - **Registry**: every session listens on a socket `wtf-<id>.sock` in `$XDG_RUNTIME_DIR`, or
-  without it in `wtf-<uid>` in the temp directory, made so only the user can enter it and refused
+  without it in `%LOCALAPPDATA%\wtf\runtime` on Windows (the user's own profile) and elsewhere in
+  `wtf-<uid>` in the temp directory, made so only the user can enter it and refused
   (with an error saying so) if someone else owns it or can enter it: a window's id is its process id, a workspace's is the server's process id and
   a number (`4123-1`). A third request, "who are you", answers the kind (window or agent) and
   the trace's full path without waiting for the window's main loop, so listing is instant.

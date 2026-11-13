@@ -62,7 +62,8 @@ the leader menu, completions) shows what fits or is left out, never more.
 - Nerd Font icons go before the actions and Recent's traces with the `nerd` glyphs only (section
   14).
 
-The history is `$XDG_STATE_HOME/wtf/history` (`~/.local/state/wtf/history` without it): one line
+The history is `$XDG_STATE_HOME/wtf/history` (`~/.local/state/wtf/history` without it,
+`%LOCALAPPDATA%\wtf\history` on Windows): one line
 per trace a window opens or an agent's `open` (section 15), `<unix seconds>\t<you|agent>\t<trace>`
 then `\t<session>` for a `-S`, absolute paths. The newest 1000 lines are kept. A `--snapshot`
 isn't an open; one that can't be written changes nothing else.

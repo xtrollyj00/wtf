@@ -69,7 +69,9 @@ from [crates.io](https://crates.io/crates/wtf-wave):
 cargo install --locked wtf-wave
 ```
 
-Windows is not supported.
+On Windows (experimental, Windows 10 1803 or later): take `wtf.exe` from the release's
+`wtf-x86_64-pc-windows-msvc.zip`, or `cargo install --locked wtf-wave`. Terminal behaviour is
+untested there (spec §18).
 
 ## Use
 

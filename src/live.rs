@@ -7,9 +7,13 @@
 //! is `OK <bytes>\n<text>` or `ERR <message>\n`. `INFO`'s text is `<kind>\n<trace path>`.
 
 use std::io::{BufRead, BufReader, Write};
+#[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, mpsc};
+// AF_UNIX on Windows 10 1803+ (spec §18): the same socket files and wire format
+#[cfg(windows)]
+use uds_windows::{UnixListener, UnixStream};
 
 pub enum Request {
     Get,
@@ -22,18 +26,30 @@ pub struct Incoming {
     pub reply: mpsc::Sender<Result<String, String>>,
 }
 
-/// Where the sockets are: `$XDG_RUNTIME_DIR`, which is the user's own, or else a directory of the
-/// user's in the temp directory, which all users share (spec §15 "Registry").
+/// Where the sockets are: `$XDG_RUNTIME_DIR`, which is the user's own; else on Windows
+/// `%LOCALAPPDATA%\wtf\runtime`, in the user's own profile; else a directory of the user's in the
+/// temp directory, which all users share (spec §15 "Registry").
 fn dir() -> std::io::Result<PathBuf> {
-    match std::env::var_os("XDG_RUNTIME_DIR") {
-        Some(d) => Ok(d.into()),
-        None => private_dir(&std::env::temp_dir()),
+    if let Some(d) = std::env::var_os("XDG_RUNTIME_DIR") {
+        return Ok(d.into());
     }
+    #[cfg(windows)]
+    {
+        let Some(local) = std::env::var_os("LOCALAPPDATA").filter(|d| !d.is_empty()) else {
+            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "LOCALAPPDATA is not set; set it, or set XDG_RUNTIME_DIR"));
+        };
+        let d = PathBuf::from(local).join("wtf").join("runtime");
+        std::fs::create_dir_all(&d)?;
+        Ok(d)
+    }
+    #[cfg(unix)]
+    private_dir(&std::env::temp_dir())
 }
 
 /// `<base>/wtf-<uid>`, made if missing so that only the user can enter it; refused if it is not a
 /// directory (a link), belongs to someone else or others can enter it, as someone may have made it
 /// first to read the sockets.
+#[cfg(unix)]
 fn private_dir(base: &Path) -> std::io::Result<PathBuf> {
     use std::os::unix::fs::{DirBuilderExt, MetadataExt};
     // SAFETY: getuid has no preconditions and can't fail
@@ -126,10 +142,13 @@ fn read_head(r: &mut impl BufRead) -> std::io::Result<(String, Option<String>)> 
 }
 
 fn write_answer(mut w: UnixStream, a: Result<String, String>) -> std::io::Result<()> {
-    match a {
+    let written = match a {
         Ok(text) => write!(w, "OK {}\n{text}", text.len()),
         Err(e) => writeln!(w, "ERR {}", e.replace('\n', " ")),
-    }
+    };
+    // end of answer for a reader to EOF, even while another handle to the socket lives on
+    // (Windows: the clone `serve` reads from, or one a child process inherited)
+    written.and_then(|()| w.shutdown(std::net::Shutdown::Write))
 }
 
 /// An open session, as `INFO` describes it.
@@ -198,8 +217,9 @@ fn call(id: &str, req: String) -> Result<String, String> {
     let path = sock(id).map_err(|e| e.to_string())?;
     let mut s = match UnixStream::connect(&path) {
         Ok(s) => s,
-        // left behind by a process that was killed: nothing listens there any more
-        Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => {
+        // left behind by a process that was killed: nothing listens there any more. Unix says
+        // ConnectionRefused; Windows says ERROR_FILE_NOT_FOUND (NotFound) though the file is there
+        Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused || (e.kind() == std::io::ErrorKind::NotFound && path.exists()) => {
             let _ = std::fs::remove_file(&path);
             return Err(format!("no session {id}"));
         }
@@ -219,6 +239,7 @@ fn call(id: &str, req: String) -> Result<String, String> {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
     #[test]
     fn private_dir_is_only_yours() {
         use std::os::unix::fs::{DirBuilderExt, PermissionsExt};

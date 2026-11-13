@@ -4,7 +4,11 @@
 
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Read, Write};
+#[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
+// the link on Windows (src/live.rs): AF_UNIX through uds_windows
+#[cfg(windows)]
+use uds_windows::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::mpsc;
@@ -18,7 +22,11 @@ struct Server {
 
 impl Server {
     fn start(runtime: &Path) -> Self {
-        let mut child = wtf(runtime).arg("--mcp").stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap();
+        Self::spawn(wtf(runtime))
+    }
+
+    fn spawn(mut c: Command) -> Self {
+        let mut child = c.arg("--mcp").stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap();
         let (stdin, stdout) = (child.stdin.take(), BufReader::new(child.stdout.take().unwrap()));
         let mut s = Server { child, stdin, stdout, id: 0 };
         let init = s.call("initialize", json!({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "test", "version": "0"}}));
@@ -181,7 +189,9 @@ fn opens_are_recent() {
     let mut s = Server::start(&dir.0);
     s.ok("open", json!({"trace": simple()}));
     let history = std::fs::read_to_string(dir.0.join("wtf/history")).unwrap();
-    assert!(history.ends_with(&format!("\tagent\t{}\n", simple().display())), "{history}");
+    // the history records the path without Windows' `\\?\`, as a user would type it
+    let path = simple().display().to_string();
+    assert!(history.ends_with(&format!("\tagent\t{}\n", path.trim_start_matches(r"\\?\"))), "{history}");
     let out = wtf(&dir.0).args(["--snapshot", "100x32"]).output().unwrap();
     let screen = String::from_utf8(out.stdout).unwrap();
     assert!(screen.contains("simple.vcd") && screen.contains("now          1"), "{screen}");
@@ -566,6 +576,24 @@ fn answers_are_capped() {
     many.push("clk".into());
     let cut = s.ok("values", json!({"signals": many, "from": "0ns", "to": "2100ns"}));
     assert!(cut.len() < 25_000 && cut.contains("... cut at 24000 bytes, ") && cut.ends_with("more lines; ask for less (a shorter range, fewer signals, `count`)"), "{}", &cut[cut.len() - 120..]);
+}
+
+/// Without `XDG_RUNTIME_DIR` the sockets go in the user's own directory in the temp directory,
+/// or `%LOCALAPPDATA%\wtf\runtime` on Windows (spec §15 "Registry").
+#[test]
+fn sockets_without_xdg_runtime_dir() {
+    let dir = Dir::new("no-xdg");
+    let mut c = wtf(&dir.0);
+    c.env_remove("XDG_RUNTIME_DIR").env("TMPDIR", &dir.0).env("LOCALAPPDATA", "");
+    let mut s = Server::spawn(c);
+    let listed = s.ok("sessions", json!({}));
+    if cfg!(windows) {
+        assert_eq!(listed, "can't list sessions: LOCALAPPDATA is not set; set it, or set XDG_RUNTIME_DIR");
+    } else {
+        assert_eq!(listed, "no sessions: the user has no wtf window open; `open` a trace");
+        let mine = std::fs::read_dir(&dir.0).unwrap().flatten().any(|e| e.file_name().to_string_lossy().starts_with("wtf-"));
+        assert!(mine, "no wtf-<uid> directory in {}", dir.0.display());
+    }
 }
 
 #[test]
