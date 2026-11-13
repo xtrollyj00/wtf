@@ -22,7 +22,11 @@ struct Server {
 
 impl Server {
     fn start(runtime: &Path) -> Self {
-        let mut child = wtf(runtime)
+        Self::spawn(wtf(runtime))
+    }
+
+    fn spawn(mut c: Command) -> Self {
+        let mut child = c
             .arg("--mcp")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -1374,6 +1378,35 @@ fn answers_are_capped() {
         "{}",
         &cut[cut.len() - 120..]
     );
+}
+
+/// Without `XDG_RUNTIME_DIR` the sockets go in the user's own directory in the temp directory,
+/// or `%LOCALAPPDATA%\wtf\runtime` on Windows (spec §15 "Registry").
+#[test]
+fn sockets_without_xdg_runtime_dir() {
+    let dir = Dir::new("no-xdg");
+    let mut c = wtf(&dir.0);
+    c.env_remove("XDG_RUNTIME_DIR")
+        .env("TMPDIR", &dir.0)
+        .env("LOCALAPPDATA", "");
+    let mut s = Server::spawn(c);
+    let listed = s.ok("sessions", json!({}));
+    if cfg!(windows) {
+        assert_eq!(
+            listed,
+            "can't list sessions: LOCALAPPDATA is not set; set it, or set XDG_RUNTIME_DIR"
+        );
+    } else {
+        assert_eq!(
+            listed,
+            "no sessions: the user has no wtf window open; `open` a trace"
+        );
+        let mine = std::fs::read_dir(&dir.0)
+            .unwrap()
+            .flatten()
+            .any(|e| e.file_name().to_string_lossy().starts_with("wtf-"));
+        assert!(mine, "no wtf-<uid> directory in {}", dir.0.display());
+    }
 }
 
 #[test]
