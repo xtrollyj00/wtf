@@ -185,7 +185,9 @@ fn opens_are_recent() {
     let mut s = Server::start(&dir.0);
     s.ok("open", json!({"trace": simple()}));
     let history = std::fs::read_to_string(dir.0.join("wtf/history")).unwrap();
-    assert!(history.ends_with(&format!("\tagent\t{}\n", simple().display())), "{history}");
+    // the history records the path without Windows' `\\?\`, as a user would type it
+    let path = simple().display().to_string();
+    assert!(history.ends_with(&format!("\tagent\t{}\n", path.trim_start_matches(r"\\?\"))), "{history}");
     let out = wtf(&dir.0).args(["--snapshot", "100x32"]).output().unwrap();
     let screen = String::from_utf8(out.stdout).unwrap();
     assert!(screen.contains("simple.vcd") && screen.contains("now          1"), "{screen}");
