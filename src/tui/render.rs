@@ -1197,9 +1197,10 @@ mod tests {
 
     #[test]
     fn trace_path_splits() {
-        // the whole path, its directory with the `/` after it, the file apart
+        // the whole path, its directory with the separator after it, the file apart
         let (dir, file) = trace_path(std::path::Path::new("tests/data/simple.vcd"));
-        assert!(dir.ends_with("/tests/data/") && (dir.starts_with('/') || dir.starts_with('~')), "{dir}");
+        let tail = ["", "tests", "data", ""].join(std::path::MAIN_SEPARATOR_STR);
+        assert!(dir.ends_with(&tail) && (std::path::Path::new(&dir).is_absolute() || dir.starts_with('~')), "{dir}");
         assert_eq!(file, "simple.vcd");
     }
 
