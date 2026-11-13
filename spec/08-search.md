@@ -107,10 +107,10 @@ clk      ▁▁▁▁▔▔▔▔▁▁▁▁▔▔▔▔
   - An unknown or high-impedance bit in an operand makes the result unknown, which compares as
     `x` does: equal to `x`, and neither equal nor unequal to a number (`u + 1 != 5` doesn't
     match where u is x).
-  - Sizes are checked before searching: an operand up to 64 bits, a result up to 127 (a shift by
-    a 32-bit amount could be 2^32 bits wide). Beyond that, an error names the part and the fix;
-    with 32-bit a and b: `a << b: b is 32 bits, so the result could be 2^32 bits; shift by a
-    slice, a << b[5:0]`. A shift amount can't be negative (signed).
+  - Sizes are checked before searching: operands of any width, a result up to 65536 bits (a
+    shift by a 32-bit amount could be 2^32 bits wide). Beyond that, an error names the part and
+    the fix; with 32-bit a and b: `a << b: b is 32 bits, so the result could be 2^32 bits; shift
+    by a slice, a << b[14:0]`. A shift amount can't be negative (signed).
     An unsigned `&` is as narrow as its narrower side, so `a << (b & 31)` is fine.
   - A comparison is a value, 1 or 0, and `!x` is one too: `(bd == 1) != !(a < b)`. In a
     `records` `where`, a field's slice or bit is written as a signal's: `b[4:0]`, `b[3]`, on

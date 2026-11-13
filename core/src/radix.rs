@@ -1,6 +1,8 @@
 //! Radixes (spec §10). Adding one = adding an entry to RADIXES.
 //! Values come in as wellen bit strings, MSB first: 0 1 x z u w l h -.
 
+use dashu_int::{UBig, ops::BitTest};
+
 pub struct Radix {
     pub name: &'static str,
     /// Value bits to the label. The number is the fraction bits of fixed point, 0 otherwise.
@@ -25,8 +27,8 @@ pub const RADIXES: &[Radix] = &[
     Radix { name: "oct", format: |b, _| grouped(b, 3, "0o"), parse: Some(parse_oct), fits: ANY, fixed: false },
     Radix { name: "ascii", format: |b, _| ascii(b), parse: None, fits: |w| w >= 8, fixed: false },
     Radix { name: "float", format: |b, _| float(b), parse: None, fits: |w| matches!(w, 16 | 32 | 64), fixed: false },
-    Radix { name: "q", format: |b, f| fixed(b, f, true), parse: None, fits: |w| w <= 128, fixed: true },
-    Radix { name: "uq", format: |b, f| fixed(b, f, false), parse: None, fits: |w| w <= 128, fixed: true },
+    Radix { name: "q", format: |b, f| fixed(b, f, true), parse: None, fits: ANY, fixed: true },
+    Radix { name: "uq", format: |b, f| fixed(b, f, false), parse: None, fits: ANY, fixed: true },
     // the names come from the var (`rows::label`); a value without one is shown in hex. It fits
     // signals with names, whatever their width (`fits`).
     Radix { name: "enum", format: |b, _| hex(b), parse: None, fits: |_| false, fixed: false },
@@ -114,8 +116,7 @@ pub fn parse_name(text: &str) -> Option<(usize, u32, Option<u32>)> {
     let (r, rest) = RADIXES.iter().enumerate().filter(|(_, r)| r.fixed).find_map(|(i, r)| Some((i, text.strip_prefix(r.name)?)))?;
     let (m, n) = rest.split_once('.')?;
     let (m, n) = (m.parse::<u32>().ok()?, n.parse::<u32>().ok()?);
-    // up to 38 fraction bits, so the decimal digits stay exact in a u128
-    (n <= 38).then_some((r, n, Some(m.checked_add(n)?)))
+    Some((r, n, Some(m.checked_add(n)?)))
 }
 
 /// The text `parse_name` reads back.
@@ -319,14 +320,16 @@ fn fixed(bits: &str, frac: u32, signed: bool) -> String {
     if let Some(u) = unknown(bits) {
         return u;
     }
-    let v = known(bits).fold(0u128, |v, x| v << 1 | x as u128);
-    let w = bits.len() as u32;
-    let negative = signed && w > 0 && v >> (w - 1) & 1 == 1;
+    let b: String = known(bits).map(|x| if x { '1' } else { '0' }).collect();
+    let v = UBig::from_str_radix(&b, 2).unwrap_or(UBig::ZERO);
+    let (w, frac) = (bits.len(), frac as usize);
+    let negative = signed && w > 0 && v.bit(w - 1);
     // the magnitude of a negative two's complement value
-    let m = if negative { (!v).wrapping_add(1) & (u128::MAX >> (128 - w)) } else { v };
-    let (int, f) = (m >> frac, m & ((1u128 << frac) - 1));
-    // f / 2^frac = f * 5^frac / 10^frac: exact decimal digits (frac <= 38, see parse_name)
-    let digits = format!("{:0>width$}", f * 5u128.pow(frac), width = frac as usize);
+    let m = if negative { (UBig::ONE << w) - v } else { v };
+    let int = &m >> frac;
+    let f = m & ((UBig::ONE << frac) - UBig::ONE);
+    // f / 2^frac = f * 5^frac / 10^frac: exact decimal digits
+    let digits = format!("{:0>frac$}", f * UBig::from(5u8).pow(frac));
     let digits = digits.trim_end_matches('0');
     format!("{}{int}.{}", if negative { "-" } else { "" }, if digits.is_empty() { "0" } else { digits })
 }
@@ -385,7 +388,10 @@ mod tests {
         assert_eq!(parse_name("q4.12"), Some((7, 12, Some(16))));
         assert_eq!(parse_name("uq0.8"), Some((8, 8, Some(8))));
         assert_eq!((parse_name("dec"), parse_name("q4"), parse_name("xyz")), (Some((2, 0, None)), None, None));
-        assert_eq!(parse_name("q2.39"), None);
+        assert_eq!(parse_name("q2.39"), Some((7, 39, Some(41))));
+        assert_eq!(fixed(&format!("1{}", "0".repeat(129)), 0, false), "680564733841876926926749214863536422912.0");
+        assert_eq!(fixed(&format!("{}1", "0".repeat(40)), 40, false), "0.0000000000009094947017729282379150390625");
+        assert_eq!(fixed(&"1".repeat(130), 2, true), "-0.25");
         assert_eq!(name(7, 12, 16), "q4.12");
         // r: float only for 16, 32 and 64 bits, fixed point never, enum only with names
         assert_eq!(next(5, 32, false), 6);
