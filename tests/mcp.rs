@@ -7,11 +7,11 @@ use std::io::{BufRead, BufReader, Read, Write};
 #[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
 // the link on Windows (src/live.rs): AF_UNIX through uds_windows
-#[cfg(windows)]
-use uds_windows::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::mpsc;
+#[cfg(windows)]
+use uds_windows::{UnixListener, UnixStream};
 
 struct Server {
     child: Child,
@@ -282,8 +282,10 @@ fn opens_are_recent() {
     let mut s = Server::start(&dir.0);
     s.ok("open", json!({"trace": simple()}));
     let history = std::fs::read_to_string(dir.0.join("wtf/history")).unwrap();
+    // the history records the path without Windows' `\\?\`, as a user would type it
+    let path = simple().display().to_string();
     assert!(
-        history.ends_with(&format!("\tagent\t{}\n", simple().display())),
+        history.ends_with(&format!("\tagent\t{}\n", path.trim_start_matches(r"\\?\"))),
         "{history}"
     );
     let out = wtf(&dir.0).args(["--snapshot", "100x32"]).output().unwrap();
