@@ -166,9 +166,9 @@ impl Panel {
     /// Highlight a match, opening every scope around it.
     fn jump(&mut self, k: usize) {
         let i = self.matches[k];
-        for j in 0..i {
-            if self.nodes[j].var.is_none() && self.nodes[j].end > i {
-                self.nodes[j].open = true;
+        for n in self.nodes.iter_mut().take(i) {
+            if n.var.is_none() && n.end > i {
+                n.open = true;
             }
         }
         self.sel = i;
