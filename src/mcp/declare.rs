@@ -61,6 +61,7 @@ fn declare(app: &mut Workspace, a: &WorkspaceArgs) -> Result<String, String> {
             when: p.when.clone(),
             fields,
             roles: p.roles.clone(),
+            wasm: None,
         };
         let mut t = Table::from_iter([
             ("name".into(), Value::from(def.name.clone())),

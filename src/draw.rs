@@ -5,6 +5,7 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
+use wtf_core::protocol::Severity;
 use wtf_core::rows::{self, Row, Sig};
 use wtf_core::stream::Stream;
 use wtf_core::time::{self, Tick};
@@ -24,6 +25,8 @@ pub struct Palette {
     pub fill: Color,
     pub unknown: Color,
     pub highz: Color,
+    /// A violation the protocol's spec only advises against (spec §16 severity).
+    pub warning: Color,
     /// The accent: the cursor's head on the time axis, the selected name.
     pub cursor: Color,
     pub cursor_text: Color,
@@ -72,6 +75,7 @@ impl Palette {
             fill: r,
             unknown: r,
             highz: r,
+            warning: r,
             cursor: r,
             cursor_text: r,
             column: r,
@@ -430,6 +434,24 @@ fn widest(ws: &Workspace, var: usize, bit: Option<u32>, row: &Sig) -> usize {
 pub fn red() -> Style {
     Style::new().fg(pal().unknown)
 }
+
+/// A violation's colour by its severity: an error as X, a warning in the theme's `warning`.
+pub fn severity_color(sev: Severity) -> Color {
+    match sev {
+        Severity::Error => pal().unknown,
+        Severity::Warning => pal().warning,
+    }
+}
+
+/// How a violations stream's record at `t` draws: its severity's colour, red without one;
+/// `None` for any other stream.
+fn violation(stream: Option<&Stream>, t: Tick) -> Option<Style> {
+    let s = stream.filter(|s| s.violations)?;
+    Some(
+        s.severity_at(t)
+            .map_or_else(red, |sev| Style::new().fg(severity_color(sev))),
+    )
+}
 pub fn green() -> Style {
     Style::new().fg(pal().highz)
 }
@@ -777,11 +799,7 @@ pub fn rows(
                 .value_of(var, l.bit, ws.view.cursor)
                 .filter(|_| !gap(&ws.trace, field_of(var), ws.view.cursor))?;
             let stream = ws.stream_of(var);
-            let st = if stream.is_some_and(|s| s.violations) {
-                red()
-            } else {
-                state_style(&v)
-            };
+            let st = violation(stream, ws.view.cursor).unwrap_or_else(|| state_style(&v));
             Some((label(&ws.trace, stream, &line_sig(ws, s, var), &v), st))
         })
         .map(Option::unwrap_or_default)
@@ -1274,7 +1292,8 @@ fn lines_of(v: &Option<Val>, own: Style) -> (bool, bool, Style) {
 /// One signal's waveform as (top, bottom) cells per column. Each column costs two binary
 /// searches, so drawing depends on the screen size, not on the number of transitions (spec §18).
 /// For a bit of a bus, `bits` holds its changes per column (`Trace::bit_changes`). A stream's own
-/// var draws its records' labels, red for violations, and nothing between records; so does a
+/// var draws its records' labels, violations in their severity's colour (red without one), and
+/// nothing between records; so does a
 /// stream's `field`, whose value there is all `z`.
 #[allow(clippy::too_many_arguments)]
 pub fn wave(
@@ -1350,12 +1369,11 @@ pub fn wave(
             let opens = n[c] == Changes::One;
             if let Some(v) = val(c).filter(|v| *v != Val::Text(String::new())) {
                 let text = label(trace, stream, row, &v);
-                let st = match stream.is_some_and(|s| s.violations) {
-                    true => red(),
-                    false => Some(state_style(&v))
+                let st = violation(stream, range(c).1 - 1).unwrap_or_else(|| {
+                    Some(state_style(&v))
                         .filter(|s| *s != Style::new())
-                        .unwrap_or(own),
-                };
+                        .unwrap_or(own)
+                });
                 out[c..e].iter_mut().for_each(|o| *o = [(rail(&v), st); 2]);
                 if opens {
                     let crossing = c > 0 && !busy[c - 1] && out[c - 1][0].0 != ' ';
@@ -1538,5 +1556,11 @@ mod tests {
             [0, 1, 3, 7, 10, 11, 4999].map(nice),
             [1, 1, 5, 10, 10, 20, 5000]
         );
+    }
+
+    #[test]
+    fn severity_colour() {
+        assert_eq!(severity_color(Severity::Error), pal().unknown);
+        assert_eq!(severity_color(Severity::Warning), pal().warning);
     }
 }

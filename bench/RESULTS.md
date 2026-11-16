@@ -79,6 +79,36 @@ size of its answer. On the same machine and 10 GiB traces (2026-10-22):
 - In an FST, the first call that reads a signal waits for all of it to load: `values` over 1 µs
   takes 7.2 s for `top.hot`'s 123M changes, as the first screen does.
 
+## Rust and WASM AXIS
+
+`wtf-bench protocol <dir>/bench.fst` decodes one generated AXI4-Stream port three ways, each on a
+server of its own — `open`, then one `decode`: the built-in `axilite` (re-measured), the built-in
+`axis`, and `axis-wasm`, that same decoder as a WebAssembly component (spec §16), loaded from the
+config directory the bench writes for it.
+
+wtf 0.4.0, commit f12aa17, an AMD Ryzen 5 7535U (12 threads), 14 GB of memory, 2026-11-16;
+`gen --size 1G --format fst`, so every `top.u<i>` has both a bus and a link:
+
+| open + decode | time | |
+|---|---|---|
+| `axilite` on `top.u0.s_axi_` | 16.1 s | the MCP section's decode of one port: 46.9 s on 10 GiB FST |
+| `axis` on `top.u0.s_axis_` | 27.8 s | |
+| `axis-wasm` on `top.u0.s_axis_` | 52.7 s | |
+| `wasm / rust` | 1.90x | the bar: within 3x |
+
+What they say:
+
+- The component is compiled once, when the server starts: what a decode pays is the guest's work a
+  cycle, not the read of its file.
+- The guest decodes the roles the port has — `tvalid`, `tready`, `tdata`, `tkeep`, `tlast`, `tid`,
+  `tdest`. `tstrb`, `tuser` and `twakeup` fall to the spec's defaults, so `frame` has no `pos`
+  field and the `wakeup` rules cannot fire: both decoders see the same seven signals.
+- Every role value crosses the boundary as text, a `string` in and out, and the `beat` record is a
+  copy of them: that is the difference the ratio is of, and why the guest's own state is only the
+  packets.
+- A violation is one record in `errors`, whatever its severity: the wasm arm makes none, so the
+  time is the streams' records.
+
 ## Agents with and without wtf
 
 `wtf-bench agent run --no-mcp` runs the fix tasks without wtf: the agent has the RTL, the

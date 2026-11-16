@@ -304,7 +304,7 @@ saying the `:decode` line that decodes it.
 - **Columns**: `stream` (a set of several), `n`, `start`, `length`, then a column per field
   (section 16), each as wide as its widest value up to 24 characters (a longer value is cut,
   `…`). `h` / `l` scroll the columns after `stream` and `n`, which stay. A record of a
-  violations stream is red.
+  violations stream is in its severity's colour (an error red, a warning in `warning`).
 - **Filter**: `/` edits the `where` expression (section 16, the `records` tool's), applied as
   typed; empty, the line names the set's fields. `Enter` or `Esc` stops editing, `Ctrl-u` clears it. An expression that doesn't parse
   keeps the records shown and says why at the right of its line. The top border counts the

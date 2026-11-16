@@ -138,6 +138,7 @@ fn sample(
         when: when.into(),
         fields,
         roles: roles.clone(),
+        wasm: None,
     })?;
     let signals = roles.iter().map(|r| (r.clone(), r.clone())).collect();
     ws.add_decode(wtf_core::stream::Decode {
@@ -246,6 +247,7 @@ fn stream_errors() {
         when: "1".into(),
         fields: vec![],
         roles: vec![],
+        wasm: None,
     };
     assert!(
         ws.add_protocol(none)
@@ -331,6 +333,7 @@ fn cmd() -> wtf_core::stream::Sampler {
         when: "valid && ready".into(),
         fields,
         roles: vec!["valid".into(), "ready".into(), "cmd".into()],
+        wasm: None,
     }
 }
 
@@ -561,4 +564,52 @@ fn set_columns_by_kind() {
             ("b.len", vec![None, Some(1)])
         ]
     );
+}
+
+/// Spec §16 "Results": a violation's severity, from the record open at a time.
+#[test]
+fn severity_at() {
+    use wtf_core::protocol::Severity;
+    use wtf_core::stream::Record;
+    let field = |n: &str| Field {
+        name: n.into(),
+        width: None,
+        time: false,
+        signed: false,
+    };
+    let rec = |start, end, sev: &str| Record {
+        start,
+        end,
+        fields: vec![bits("r"), Some(Val::Text(sev.into()))],
+    };
+    let s = Stream {
+        name: "rx.errors".into(),
+        schema: vec![field("rule"), field("severity")],
+        records: vec![
+            rec(10, 20, "warning"),
+            rec(30, 40, "error"),
+            rec(50, 50, "error"),
+            rec(60, 70, "fatal"),
+        ],
+        violations: true,
+        inputs: vec![],
+    };
+    assert_eq!(s.severity_at(10), Some(Severity::Warning));
+    assert_eq!(s.severity_at(19), Some(Severity::Warning));
+    assert_eq!(s.severity_at(35), Some(Severity::Error));
+    assert_eq!(s.severity_at(50), Some(Severity::Error)); // widthless, at its start
+    for t in [0, 9, 20, 25, 51, 99] {
+        assert_eq!(s.severity_at(t), None, "{t}"); // before, between, after
+    }
+    assert_eq!(s.severity_at(65), None); // other text
+    let plain = Stream {
+        schema: vec![field("rule")],
+        records: vec![Record {
+            start: 10,
+            end: 20,
+            fields: vec![bits("r")],
+        }],
+        ..s
+    };
+    assert_eq!(plain.severity_at(15), None); // no severity field
 }

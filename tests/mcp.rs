@@ -194,11 +194,12 @@ fn tools_list() {
     }
     // the tool definitions ride along on every turn of an agent: they grow only on purpose (spec
     // §15); raise a bound in the same commit as the text, saying why
-    // 14100: 15 tools (values took value_at, open took use and reload); user_view says what adopt drops
+    // 14150: 15 tools (values took value_at, open took use and reload); user_view says what adopt
+    // drops; the help description names the wasm topic
     let size = list.to_string().len();
     assert!(
-        size <= 14_100,
-        "the tool definitions are {size} bytes, past the 14100 allowed"
+        size <= 14_150,
+        "the tool definitions are {size} bytes, past the 14150 allowed"
     );
     for t in list["tools"].as_array().unwrap() {
         let d = t["description"].as_str().unwrap();
@@ -1638,6 +1639,11 @@ fn axis_frames_and_errors() {
         "open",
         json!({"trace": std::fs::canonicalize("tests/data/axis.vcd").unwrap()}),
     );
+    // the fields are the interface's: info offers them by their signals
+    assert!(
+        s.ok("info", json!({}))
+            .contains("\n  top.* axis: decode axis axis clock=top.clk prefix=top.")
+    );
     let decl = json!({
         "decode": [{"name": "rx", "protocol": "axis", "clock": "clk", "signals": ["tvalid = tvalid", "tready = tready", "tdata = tdata", "tlast = tlast", "tkeep = tkeep"]}],
         "rows": ["rx.frame", "rx.frame.len:dec", "rx.errors"],
@@ -1655,13 +1661,18 @@ fn axis_frames_and_errors() {
         s.ok("records", json!({"stream": "rx.frame", "count": 1})),
         "1 of 4\nn\tstart\tend\tbeats\tlen\tdata\tcomplete\n0\t15ns\t55ns\t0x3\t0xA\ta0 00 00 00 a1 00 00 00 a2 00\t1"
     );
+    // a rule's detail says what went wrong, its severity how serious it is
     assert_eq!(
         s.ok("records", json!({"stream": "rx.errors"})),
-        "2 of 2\nn\tstart\tend\trule\n0\t105ns\t115ns\tdropped\n1\t125ns\t135ns\tchanged"
+        "2 of 2\nn\tstart\tend\trule\tdetail\tseverity\n0\t105ns\t115ns\tdropped\ttvalid fell before tready\terror\n1\t125ns\t135ns\tchanged\ttdata changed while tvalid stalled\terror"
     );
     assert_eq!(
         s.ok("find", json!({"expr": "rx.errors.rule == changed"})),
         "time\n125ns"
+    );
+    assert_eq!(
+        s.ok("find", json!({"expr": "rx.errors.severity == error"})),
+        "time\n105ns\n125ns"
     );
     // the workspace draws each record with its label
     assert!(s.ok("render", json!({"width": 100})).contains("#0 10B"));
@@ -1715,7 +1726,7 @@ fn decode_with_command() {
     // where a stream has none; a filter keeps the streams having its fields
     assert_eq!(
         s.ok("records", json!({"stream": "bus", "count": 3})),
-        "3 of 13\nstream\tn\tstart\tend\tdelay\taddr\tdata\tstrb\tresp\trule\tkind\nbus.wr\t0\t30ns\t50ns\t10ns\t0x10\t0x11111111\t0xF\t0x0\t\t\nbus.wr\t1\t60ns\t120ns\t20ns\t0x14\t0x22222222\t0x3\t0x0\t\t\nbus.rd\t0\t130ns\t160ns\t20ns\t0x10\t0x11111111\t\t0x0\t\t"
+        "3 of 13\nstream\tn\tstart\tend\tdelay\taddr\tdata\tstrb\tresp\trule\tdetail\tseverity\tkind\nbus.wr\t0\t30ns\t50ns\t10ns\t0x10\t0x11111111\t0xF\t0x0\t\t\t\t\nbus.wr\t1\t60ns\t120ns\t20ns\t0x14\t0x22222222\t0x3\t0x0\t\t\t\t\nbus.rd\t0\t130ns\t160ns\t20ns\t0x10\t0x11111111\t\t0x0\t\t\t\t"
     );
     assert_eq!(
         s.ok(
@@ -1749,7 +1760,7 @@ fn decode_with_command() {
     );
     assert_eq!(
         s.ok("records", json!({"stream": "bus.errors"})),
-        "2 of 2\nn\tstart\tend\trule\n0\t180ns\t190ns\tr_resp\n1\t210ns\t220ns\taw_dropped"
+        "2 of 2\nn\tstart\tend\trule\tdetail\tseverity\n0\t180ns\t190ns\tr_resp\trresp is not OKAY\terror\n1\t210ns\t220ns\taw_dropped\tawvalid fell before awready\terror"
     );
     // a radix for every number field (not the delay, a time), or one field's
     let wr = |radix: &str| json!({"stream": "bus.wr", "radix": radix, "count": 1});
@@ -1789,7 +1800,7 @@ fn decode_with_command() {
             "records",
             json!({"stream": "bus.errors", "where": "rule == aw_dropped && past(rule) == r_resp"})
         ),
-        "1 of 1 matching, of 2\nn\tstart\tend\trule\n1\t210ns\t220ns\taw_dropped"
+        "1 of 1 matching, of 2\nn\tstart\tend\trule\tdetail\tseverity\n1\t210ns\t220ns\taw_dropped\tawvalid fell before awready\terror"
     );
     assert_eq!(
         s.tool("records", rd("adr == 1", false)),
@@ -1898,12 +1909,13 @@ fn protocols_describe_themselves() {
     for line in [
         "  awprot wstrb bresp arprot rresp (optional)",
         "  <name>.wr: delay addr prot data strb resp\n",
-        "  <name>.wr.unmatched: kind (violations: kind = no request | no response | no aw | no w)",
-        "  <name>.rd.unmatched: kind (violations: kind = no request | no response)",
-        // what each stream is: what it samples, its rules' expressions, a note for the rest
+        "  <name>.wr.unmatched: kind (violations)",
+        "  <name>.rd.unmatched: kind (violations)",
+        // what each stream is: what it samples, its rules with their severity and clause, a note
+        // for the rest
         "  <name>.aw: addr prot\n      a record per cycle where awvalid && awready; addr = awaddr, prot = awprot\n",
-        "        aw_dropped: fell(awvalid) && !past(awready)\n",
-        "        r_resp: rvalid && rready && rresp != 0\n",
+        "        aw_dropped: a valid fell before its ready: it stays until the handshake (error, spec A3.2.1)\n",
+        "        r_resp: a response that is not OKAY (error, spec A6.1)\n",
         "      writes: AW and W in either order, then B; delay from the later of AW and W to B\n",
         "      a B without a write (no request), a write never answered, or not within `timeout` (no response)",
         "example: decode bus axilite clock=aclk prefix=s_axi_",
@@ -1921,7 +1933,7 @@ fn protocols_describe_themselves() {
     // the fields come from the decoders themselves
     assert!(
         s.ok("protocols", json!({"name": "axis"}))
-            .contains("  <name>.frame: beats len data complete\n")
+            .contains("  <name>.frame: beats tid tdest len pos data complete\n")
     );
     assert_eq!(s.tool("protocols", json!({"name": "axi"})), Err("unknown protocol: axi (protocols: axis, axilite, axi4, spi, uart, frame, pair, check; `protocols <name>` describes one)".into()));
     // and the workspace's own, with how to put them on signals
@@ -1943,6 +1955,47 @@ fn protocols_describe_themselves() {
         .tool("command", json!({"line": "decode x hz v=valid"}))
         .unwrap_err();
     assert!(err.contains("unknown protocol: hz (protocols: axis, axilite, axi4, spi, uart, frame, pair, check, hs;"), "{err}");
+}
+
+/// A protocol in the config dir's `protocols/` decodes as a built-in does — before a trace is open,
+/// in a workspace, and under `protocols` — and a file that isn't a component is skipped (spec §19).
+#[test]
+fn protocols_loaded_from_the_config_dir() {
+    let dir = Dir::new("config-protocols");
+    let protocols = dir.0.join("wtf/protocols");
+    std::fs::create_dir_all(&protocols).unwrap();
+    std::fs::copy("tests/data/wasm/probe.wasm", protocols.join("probe.wasm")).unwrap();
+    std::fs::write(protocols.join("broken.wasm"), "not a component").unwrap();
+    let mut s = Server::start(&dir.0);
+    // the file's name is the protocol's, listed where a built-in is not; the broken file is listed
+    // nowhere, and the server still answers
+    let list = s.ok("protocols", json!({}));
+    assert!(
+        list.contains(
+            "loaded from files: decode <name> <protocol> ...\n  probe    one beat a cycle"
+        ),
+        "{list}"
+    );
+    assert!(!list.contains("broken"), "{list}");
+    let card = s.ok("protocols", json!({"name": "probe"}));
+    assert!(
+        card.starts_with("probe: one beat a cycle, from a component"),
+        "{card}"
+    );
+    assert!(
+        card.contains("  spin hog") && card.ends_with("example: decode p probe clock=aclk"),
+        "{card}"
+    );
+    // and the workspace opened after it decodes with it, as with a built-in
+    s.ok("open", json!({"trace": simple()}));
+    s.ok("command", json!({"line": "decode p probe clock=top.clk"}));
+    let beats = s.ok("records", json!({"stream": "p.beat", "count_only": true}));
+    assert!(beats.starts_with("7 records, first 5ns"), "{beats}");
+    // the host's own report: none, so the component stayed inside its caps
+    assert_eq!(
+        s.ok("records", json!({"stream": "p.errors"})),
+        "no records: no violations"
+    );
 }
 
 /// A trace in fs whose clock and signals lag by a femtosecond or two, as a real capture's: once a clock
@@ -2253,7 +2306,7 @@ fn spi_and_uart_with_command() {
         "roles: line (required)",
         "  baud bits parity stop idle\n",
         "  <name>.byte: data\n",
-        "  <name>.errors: rule (violations)\n",
+        "  <name>.errors: rule detail severity (violations)\n",
         "example: decode console uart line=uart_tx baud=115200",
     ] {
         assert!(uart.contains(line), "{line}\n{uart}");
@@ -2299,7 +2352,7 @@ fn spi_and_uart_with_command() {
     );
     assert_eq!(
         s.ok("records", json!({"stream": "console.errors"})),
-        "2 of 2\nn\tstart\tend\trule\n0\t25us\t36us\tparity\n1\t37us\t48us\tframing"
+        "2 of 2\nn\tstart\tend\trule\tdetail\tseverity\n0\t25us\t36us\tparity\tparity bit 1, expected 0\terror\n1\t37us\t48us\tframing\tstop bit 0, expected 1\terror"
     );
 }
 
@@ -2544,5 +2597,64 @@ fn found_interfaces_are_offered() {
     assert!(
         shot.contains("axilite at top.s_axi_") && shot.contains("decodes"),
         "{shot}"
+    );
+}
+
+/// A protocol's violations filter and group by their severity (spec §16 "Results").
+#[test]
+fn axis_errors_filter_by_severity() {
+    let dir = Dir::new("severity");
+    let mut s = Server::start(&dir.0);
+    s.ok(
+        "open",
+        json!({"trace": std::fs::canonicalize("tests/data/axis.vcd").unwrap()}),
+    );
+    s.ok("command", json!({"line": "decode rx axis clock=clk tvalid=tvalid tready=tready tdata=tdata tlast=tlast tkeep=tkeep"}));
+    assert!(
+        s.ok("records", json!({"stream": "rx.errors"}))
+            .starts_with("2 of 2\nn\tstart\tend\trule\tdetail\tseverity\n")
+    );
+    assert_eq!(
+        s.ok(
+            "records",
+            json!({"stream": "rx.errors", "where": "severity == warning"})
+        ),
+        "no matching records, of 2"
+    );
+    s.ok(
+        "open",
+        json!({"trace": std::fs::canonicalize("tests/data/axis_wakeup.vcd").unwrap()}),
+    );
+    s.ok(
+        "command",
+        json!({"line": "decode rx axis clock=clk tvalid=tvalid tready=tready twakeup=twakeup"}),
+    );
+    let w = s.ok(
+        "records",
+        json!({"stream": "rx.errors", "where": "severity == warning", "unit": "ns"}),
+    );
+    assert!(
+        w.starts_with("3 of 3 matching, of 5")
+            && w.contains("wakeup_early")
+            && w.matches("\tunknown\t").count() == 2,
+        "{w}"
+    );
+    let e = s.ok(
+        "records",
+        json!({"stream": "rx.errors", "where": "severity == error", "unit": "ns"}),
+    );
+    assert!(
+        e.starts_with("2 of 2 matching, of 5")
+            && e.contains("\twakeup\t")
+            && e.contains("\tdropped\t"),
+        "{e}"
+    );
+    let g = s.ok(
+        "records",
+        json!({"stream": "rx.errors", "group_by": ["severity"]}),
+    );
+    assert!(
+        g.contains("3 × severity=warning") && g.contains("2 × severity=error"),
+        "{g}"
     );
 }

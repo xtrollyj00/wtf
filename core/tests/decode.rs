@@ -123,7 +123,7 @@ fn frame_schema_and_errors() {
     );
     assert_eq!(
         decode::make("axi9", &s.schema, &[], None).err().unwrap(),
-        "unknown decoder: axi9 (decoders: frame, spi, uart)"
+        "unknown decoder: axi9 (decoders: frame)"
     );
     // an empty stream makes no frames
     let empty = Stream {

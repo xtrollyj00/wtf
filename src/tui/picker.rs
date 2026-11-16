@@ -477,22 +477,22 @@ impl App {
                     &format!("decode {name} "),
                     1,
                 );
-                let b = wtf_core::protocol::builtin(f.protocol).expect("detect finds built-ins");
-                let ready = f.clock.is_some() || !b.clocked;
+                let p = wtf_core::protocol::get(f.protocol).expect("detect finds built-ins");
+                let ready = f.clock.is_some() || !p.clocked();
                 let mut preview = vec![
                     format!("{} at {}", f.protocol, f.prefix),
                     line.clone(),
                     String::new(),
                 ];
-                let roles: Vec<&&str> = b
-                    .required
+                let (required, optional) = p.roles();
+                let roles: Vec<&&str> = required
                     .iter()
-                    .chain(b.optional)
+                    .chain(optional.iter())
                     .filter(|r| t.by_path.contains_key(&format!("{}{r}", f.prefix)))
                     .collect();
                 let rw = roles.iter().map(|r| r.len()).max().unwrap_or(0).max(5);
                 preview.extend(roles.iter().map(|r| format!("{r:<rw$}  {}{r}", f.prefix)));
-                if b.clocked {
+                if p.clocked() {
                     preview.push(format!(
                         "{:<rw$}  {}",
                         "clock",

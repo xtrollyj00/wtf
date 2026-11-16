@@ -45,6 +45,8 @@ struct State {
     workspaces: Vec<Opened>,
     current: usize,
     opened: usize,
+    /// Protocols loaded from files (spec §16): the agent's process, not a session's.
+    loaded: Arc<Vec<Arc<protocol::Loaded>>>,
 }
 
 /// A trace the agent opened.
@@ -55,9 +57,14 @@ struct Opened {
 }
 
 impl Wtf {
-    pub fn new() -> Self {
+    /// `loaded`: the config dir's protocols (spec §19), which every workspace the server opens
+    /// decodes with.
+    pub fn new(loaded: Vec<Arc<protocol::Loaded>>) -> Self {
         Wtf {
-            state: Default::default(),
+            state: Arc::new(Mutex::new(State {
+                loaded: loaded.into(),
+                ..Default::default()
+            })),
             tool_router: Self::tool_router(),
         }
     }
@@ -619,6 +626,9 @@ impl Wtf {
         let mut ws = Workspace::open(std::path::Path::new(&trace))?;
         // an agent writes patterns as regexes, everywhere (spec §15)
         ws.patterns = wtf_core::pattern::Syntax::Regex;
+        // the config dir's protocols, as a window opens with them (spec §19)
+        ws.loaded.clone_from(&lock(&self.state).loaded);
+        ws.loader = Some(crate::wasm::loader());
         let app = Arc::new(Mutex::new(ws));
         // the user's start screen shows what agents opened (spec §4 "Start screen")
         crate::history::opened(std::path::Path::new(&trace), None, true);
@@ -654,19 +664,22 @@ impl Wtf {
         annotations(read_only_hint = true, open_world_hint = false)
     )]
     fn protocols(&self, Parameters(a): Parameters<ProtocolsArgs>) -> Result<String, String> {
-        // works before a trace is open, without the session's own protocols
-        let own = current(self)
-            .ok()
-            .map(|w| lock(&w).protocols.clone())
-            .unwrap_or_default();
+        // works before a trace is open, without a session's own protocols
+        let loaded = lock(&self.state).loaded.clone();
+        let ws = current(self).ok();
+        let st = ws.as_ref().map(|w| lock(w));
+        let sources = protocol::Sources {
+            session: st.as_deref().map_or(&[], |s| &s.protocols),
+            loaded: &loaded[..],
+        };
         match a.name {
-            Some(n) => protocol::describe(&n, &own),
-            None => Ok(protocol::list(&own)),
+            Some(n) => protocol::describe(&n, sources),
+            None => Ok(protocol::list(sources)),
         }
     }
 
     #[tool(
-        description = "The reference for one concept: its form, recipes and details. Topics: names, patterns, times, radix, expressions, decode, records, workspace, commands; without a topic, lists them. Call it when an argument's doc or an error isn't enough.",
+        description = "The reference for one concept: its form, recipes and details. Topics: names, patterns, times, radix, expressions, decode, wasm, records, workspace, commands; without a topic, lists them. Call it when an argument's doc or an error isn't enough.",
         annotations(read_only_hint = true, open_world_hint = false)
     )]
     fn help(&self, Parameters(a): Parameters<HelpArgs>) -> Result<String, String> {
@@ -1580,13 +1593,13 @@ impl ServerHandler for Wtf {
 }
 
 /// Serve on stdin / stdout until the client disconnects.
-pub fn serve() -> Result<(), String> {
+pub fn serve(loaded: Vec<Arc<protocol::Loaded>>) -> Result<(), String> {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|e| e.to_string())?;
     rt.block_on(async {
-        let server = Wtf::new()
+        let server = Wtf::new(loaded)
             .serve(rmcp::transport::stdio())
             .await
             .map_err(|e| e.to_string())?;
@@ -1608,7 +1621,7 @@ mod tests {
         let dir = dir.canonicalize().unwrap();
         let trace = dir.join("simple.vcd");
         std::fs::copy("tests/data/simple.vcd", &trace).unwrap();
-        let agent = Wtf::new();
+        let agent = Wtf::new(Vec::new());
         let cmd = |l: &str| agent.command(Parameters(CommandArgs { line: l.into() }));
         assert!(agent.info().unwrap_err().starts_with("no trace is open"));
         let opened = agent

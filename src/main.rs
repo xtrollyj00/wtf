@@ -5,14 +5,16 @@ mod live;
 mod mcp;
 mod theme;
 mod tui;
+mod wasm;
 
 use clap::Parser;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tui::app::App;
 use tui::render;
-use wtf_core::{session, workspace};
+use wtf_core::{protocol, session, workspace};
 
 #[derive(Parser)]
 #[command(name = "wtf", version, about = "Waveform Terminal Frontend")]
@@ -70,9 +72,25 @@ fn main() {
     }
 }
 
+/// The protocols the config dir's `protocols/` holds (spec §19): every workspace decodes with them,
+/// and one that doesn't load is said rather than stopping wtf.
+fn protocols() -> (Vec<Arc<protocol::Loaded>>, Vec<String>) {
+    config::dir().map_or_else(
+        || (Vec::new(), Vec::new()),
+        |d| wasm::load_dir(&d.join("protocols")),
+    )
+}
+
 fn run(args: Args) -> Result<(), String> {
+    // the config dir's protocols, before any workspace is made: a module that doesn't load is said
+    // on the status line, and the rest still decode (spec §19)
+    let (loaded, failed) = protocols();
     if args.mcp {
-        return mcp::serve();
+        // no status line there: the server's stderr, before it answers anything
+        for f in &failed {
+            eprintln!("{f}");
+        }
+        return mcp::serve(loaded);
     }
     // the first start in a terminal asks how to draw (spec §19 "First start")
     use std::io::IsTerminal;
@@ -97,6 +115,7 @@ fn run(args: Args) -> Result<(), String> {
     draw::set_columns(config.columns);
     let mut warnings = config.warnings;
     warnings.extend(setup);
+    warnings.extend(failed);
     let Some(path) = args.trace else {
         return start(
             args.snapshot,
@@ -105,9 +124,10 @@ fn run(args: Args) -> Result<(), String> {
             config.palette,
             (config.keys, config.which_key, config.hints),
             &warnings,
+            &loaded,
         );
     };
-    let mut app = open(&path, args.session.clone(), warnings)?;
+    let mut app = open(&path, args.session.clone(), warnings, &loaded)?;
     (app.keymap, app.which_delay, app.hints) = (config.keys, config.which_key, config.hints);
     match args.snapshot {
         Some((w, h)) => {
@@ -151,6 +171,7 @@ fn start(
     palette: draw::Palette,
     keymap: (tui::keys::Keymap, std::time::Duration, bool),
     warnings: &[String],
+    loaded: &[Arc<protocol::Loaded>],
 ) -> Result<(), String> {
     let mut start = tui::start::Start::load();
     start.msg = (!warnings.is_empty()).then(|| warnings.join("; "));
@@ -183,7 +204,7 @@ fn start(
             tui::start::Choice::Join { trace, id } => (trace, None, Some(id)),
         };
         // a trace that doesn't open is said there, and the user picks again
-        let mut app = match open(&path, session.clone(), Vec::new()) {
+        let mut app = match open(&path, session.clone(), Vec::new(), loaded) {
             Ok(app) => app,
             Err(e) => {
                 start.msg = Some(e);
@@ -207,8 +228,12 @@ fn open(
     path: &std::path::Path,
     session: Option<PathBuf>,
     mut warnings: Vec<String>,
+    loaded: &[Arc<protocol::Loaded>],
 ) -> Result<App, String> {
     let mut app = App::new(workspace::Workspace::open(path)?);
+    // the config dir's protocols: a session's decode of one reads them, and so does `protocols`
+    app.ws.loaded = loaded.to_vec();
+    app.ws.loader = Some(wasm::loader());
 
     // -S may name a file that doesn't exist yet: that starts an empty session, and :w creates it.
     let session = session.unwrap_or_else(|| session::default_path(path));
@@ -2999,7 +3024,7 @@ mod tests {
         keys(&mut app, "\x1b:help nope\n");
         assert_eq!(
             app.msg.as_ref().unwrap().0,
-            "no help topic nope; topics: names patterns times radix expressions decode records workspace commands"
+            "no help topic nope; topics: names patterns times radix expressions decode wasm records workspace commands"
         );
     }
 
@@ -3304,7 +3329,7 @@ mod tests {
         keys(&mut app, ":records rx.fram\n");
         assert_eq!(
             msg(&app),
-            "unknown stream: rx.fram (streams: rx.beat, rx.errors, rx.frame; or a decode's name for its results)"
+            "unknown stream: rx.fram (streams: rx.beat, rx.frame, rx.errors; or a decode's name for its results)"
         );
         keys(&mut app, ":records rx.frame where len ==\n");
         assert!(app.browser.is_none() && !msg(&app).is_empty());
@@ -3360,15 +3385,14 @@ mod tests {
         // Tab goes through the decode's sets: all its results, then each stream
         let b = app.browser.as_ref().unwrap();
         assert_eq!(
-            (&b.tabs[..], b.tab),
-            (
-                &["rx", "rx.frame", "rx.errors", "rx.beat"].map(String::from)[..],
-                1
-            )
+            &b.tabs[..],
+            ["rx", "rx.frame", "rx.errors", "rx.beat"].map(String::from)
         );
-        keys(&mut app, "<Tab><Tab><Tab>");
+        // the row it was opened from is the stream it shows, whatever its place in the sets
+        assert_eq!(b.tabs[b.tab], "rx.frame");
+        keys(&mut app, "<Tab><Tab>");
         let b = app.browser.as_ref().unwrap();
-        assert_eq!((b.tab, b.streams.len()), (0, 2));
+        assert_eq!((b.tabs[b.tab].as_str(), b.streams.len()), ("rx.beat", 1));
         keys(&mut app, "\x1b");
         // Enter jumps to the highlighted record and selects its stream's row
         keys(&mut app, ":records rx.frame where len >= 8\nj\n");
@@ -3705,10 +3729,11 @@ mod tests {
             [("bad".to_string(), "tvalid && !tready".to_string())]
         );
         keys(&mut app, ":decode x axis tvalid=nope\n");
+        // tready has a default now, so the mistake it reports is the signal that isn't one
         assert!(
             app.msg
                 .as_ref()
-                .is_some_and(|(m, err)| *err && m.contains("no signal for tready")),
+                .is_some_and(|(m, err)| *err && m.contains("tvalid: unknown signal: nope")),
             "{:?}",
             app.msg
         );
@@ -3808,6 +3833,55 @@ signal = "stall"
         let mut app = open("vcd", None);
         keys(&mut app, ":add top.cpu.data\n:zoom 4ns\n");
         insta::assert_snapshot!(snapshot(&mut app, 40, None));
+    }
+
+    #[test]
+    fn severity_rows() {
+        // axis_wakeup.vcd: warnings 5-15 wakeup_early, 35-55 unknown; errors 15-25 wakeup, 25-35 dropped
+        let t = trace::Trace::open("tests/data/axis_wakeup.vcd".as_ref()).unwrap();
+        let mut app = App::new(workspace::Workspace::new(t, "axis".into()));
+        keys(
+            &mut app,
+            ":decode rx axis clock=clk tvalid=tvalid tready=tready twakeup=twakeup\n:add rx.errors\n:fit\n",
+        );
+        let s = app
+            .ws
+            .streams
+            .iter()
+            .find(|s| s.name == "rx.errors")
+            .unwrap();
+        use wtf_core::protocol::Severity;
+        assert_eq!(
+            [10, 20, 30, 40].map(|t| s.severity_at(t)),
+            [
+                Some(Severity::Warning),
+                Some(Severity::Error),
+                Some(Severity::Error),
+                Some(Severity::Warning)
+            ]
+        );
+        let draw_fgs = |app: &mut App| {
+            let area = Rect::new(0, 0, 100, draw::height(&app.ws) + 1);
+            let mut buf = Buffer::empty(area);
+            render::draw(app, area, &mut buf);
+            (0..area.height)
+                .flat_map(|y| (0..100).map(move |x| (x, y)))
+                .map(|p| buf[p].fg)
+                .collect::<Vec<_>>()
+        };
+        let fgs = draw_fgs(&mut app);
+        assert!(
+            fgs.contains(&draw::pal().warning) && fgs.contains(&draw::pal().unknown),
+            "{fgs:?}"
+        );
+        // the panel's value at the cursor on a warning
+        keys(&mut app, ":cursor 1 5ns\n");
+        let screen = snapshot(&mut app, 100, None);
+        assert!(
+            screen.contains("#0 wakeup_early warning") || screen.contains("#0 wakeup_early"),
+            "{screen}"
+        );
+        assert!(draw_fgs(&mut app).contains(&draw::pal().warning));
     }
 }
 

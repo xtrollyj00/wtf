@@ -120,6 +120,27 @@ pub fn apply(app: &mut Workspace, text: &str) -> Result<Vec<String>, String> {
                 ));
                 continue;
             }
+            // one from a file is that file and its name: nothing else belongs in the entry (§11)
+            if let (Some(name), Some(path)) = (text(&p, "name"), text(&p, "wasm")) {
+                if let Some(k) = ["when", "roles", "fields"]
+                    .into_iter()
+                    .find(|k| p.get(*k).is_some())
+                {
+                    warn.push(format!(
+                        "protocol {name}: wasm {path} keeps no {k}, its card is the file's"
+                    ));
+                    continue;
+                }
+                let def = crate::stream::Sampler {
+                    name: name.clone(),
+                    wasm: Some(path),
+                    ..Default::default()
+                };
+                app.add_protocol(def)
+                    .map(drop)
+                    .unwrap_or_else(|e| warn.push(format!("protocol {name}: {e}")));
+                continue;
+            }
             match (
                 text(&p, "name"),
                 text(&p, "when"),
@@ -132,6 +153,7 @@ pub fn apply(app: &mut Workspace, text: &str) -> Result<Vec<String>, String> {
                         when,
                         fields,
                         roles,
+                        wasm: None,
                     };
                     app.add_protocol(def)
                         .map(drop)
@@ -528,6 +550,11 @@ pub fn rows_toml(app: &Workspace) -> String {
     };
     for p in &app.protocols {
         out += &format!("\n[[protocol]]\nname = {}\n", quote(&p.name));
+        // a protocol from a file is that file: read back, it loads it again (spec §11)
+        if let Some(path) = &p.wasm {
+            out += &format!("wasm = {}\n", quote(path));
+            continue;
+        }
         out += &format!(
             "roles = [{}]\n",
             p.roles

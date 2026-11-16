@@ -1,0 +1,82 @@
+// wit/protocol.wit — the protocol world
+
+package wtf:protocol@0.1.0;
+
+/// What a protocol component tells the host: what it is, an instance of it for a trace, and its
+/// output, one clock cycle or violation at a time.
+interface api {
+  /// A role's value, as a row spells it: `1`, `010`, `1x`, or the text of a text signal.
+  variant value { bits(string), text(string) }
+
+  record field {
+    name: string,
+    /// none: the value's own width.
+    width: option<u32>,
+    /// A duration in ticks.
+    time: bool,
+    signed: bool,
+  }
+
+  /// How a role is filled in when the trace has no signal for it.
+  variant default-value { zero, ones, bytes(string), same(string) }
+
+  record role { name: string, required: bool, default: option<default-value>, about: string }
+
+  record stream-desc {
+    name: string,
+    fields: list<field>,
+    /// Violations: a record's `rule` is a rule's name, its `detail` what it saw, one record per
+    /// rule broken. The host reports a trap as rule `host`, so a component that can trap needs
+    /// one.
+    violations: bool,
+    about: list<string>,
+  }
+
+  enum severity { error, warning }
+
+  /// What the protocol is, with no trace yet: what `protocols <name>` shows.
+  record card {
+    about: string,
+    example: string,
+    clocked: bool,
+    sides: list<list<string>>,
+    roles: list<role>,
+    params: list<string>,
+  }
+
+  record found {
+    /// The name of one of the stream descriptions `create` returned.
+    stream-name: string,
+    start: u64,
+    end: u64,
+    /// One per field of that stream, in its order; none leaves it empty.
+    fields: list<option<value>>,
+  }
+
+  record violation {
+    rule: string,
+    start: u64,
+    end: u64,
+    detail: string,
+    severity: severity,
+  }
+
+  variant out { found(found), violation(violation) }
+
+  /// Load time: what the protocol is, with no trace.
+  describe: func() -> result<card, string>;
+
+  /// An instance: its roles with the widths the trace gives them (none for a text signal), and
+  /// its params. The streams it makes, which `found.stream-name` names. An error says why it
+  /// cannot decode this instance.
+  create: func(roles: list<tuple<string, option<u32>>>, params: list<tuple<string, string>>) -> result<list<stream-desc>, string>;
+
+  /// One cycle of the instance's clock: its start, and the time its role values are read.
+  /// `values` in the order `create` took the roles.
+  feed: func(start: u64, end: u64, values: list<option<value>>) -> list<out>;
+
+  /// The trace ended: what is still open.
+  finish: func() -> list<out>;
+}
+
+world protocol { export api; }

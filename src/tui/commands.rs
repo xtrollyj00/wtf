@@ -58,7 +58,7 @@ pub const COMMANDS: &[Command] = &[
     },
     Command {
         name: "protocol",
-        usage: ":protocol <name> roles=<a,b> when=<expr> <field>=<expr>...",
+        usage: ":protocol <name> roles=<a,b> when=<expr> <field>=<expr>... | :protocol <name> wasm=<file>",
         desc: "Define a protocol on its roles, a record per cycle where when holds, e.g. :protocol cmd roles=valid,ready,data when=valid && ready op=data[7:0]; :decode puts it on signals; alone, a form with the selected rows as roles; :protocol search, one filled in from the last clocked search",
         args: true,
     },
@@ -644,16 +644,20 @@ fn arguments(c: &Command, line: &str, app: &crate::tui::app::App) -> Completion 
                     };
                 }
                 None => {
-                    let roles: Vec<String> = match protocol::builtin(proto) {
-                        Some(b) => ["clock", "prefix"]
-                            .iter()
-                            .copied()
-                            .filter(|r| *r != "clock" || b.clocked)
-                            .chain(b.required.iter().copied())
-                            .chain(b.optional.iter().copied())
-                            .chain(b.params.iter().copied())
-                            .map(String::from)
-                            .collect(),
+                    let roles: Vec<String> = match ws.sources().get(proto) {
+                        Some(any) => {
+                            let def = any.def();
+                            let (required, optional) = def.roles();
+                            ["clock", "prefix"]
+                                .iter()
+                                .copied()
+                                .filter(|r| *r != "clock" || def.clocked())
+                                .chain(required)
+                                .chain(optional)
+                                .chain(def.params().iter().copied())
+                                .map(String::from)
+                                .collect()
+                        }
                         None => ws
                             .protocols
                             .iter()
@@ -732,9 +736,11 @@ fn key(word: &str) -> Option<&str> {
 /// line, then every protocol with what it makes.
 fn protocols(word: &str, ws: &wtf_core::workspace::Workspace) -> Vec<Item> {
     use wtf_core::protocol;
+    let sources = ws.sources();
     let about = |n: &str| -> String {
-        protocol::builtin(n)
-            .map(|b| b.about.to_string())
+        sources
+            .get(n)
+            .map(|p| p.def().about().to_string())
             .or_else(|| {
                 protocol::ON_STREAMS
                     .iter()
@@ -744,15 +750,14 @@ fn protocols(word: &str, ws: &wtf_core::workspace::Workspace) -> Vec<Item> {
             .unwrap_or_else(|| "in this session".into())
     };
     let found = protocol::detect(&ws.trace);
-    let names: Vec<&str> = protocol::BUILTINS
+    let names: Vec<&str> = protocol::ON_STREAMS
         .iter()
-        .copied()
-        .chain(protocol::ON_STREAMS.iter().map(|g| g.0))
-        .chain(ws.protocols.iter().map(|p| p.name.as_str()))
+        .map(|g| g.0)
+        .chain(sources.names())
         .collect();
     let (mut items, mut rest) = (Vec::new(), Vec::new());
     for n in fuzzy(word, names) {
-        let doc = protocol::brief(n, &ws.protocols).unwrap_or_default()
+        let doc = protocol::brief(n, sources).unwrap_or_default()
             + "\n\nTab takes it.  :help decode has the rest.";
         for f in found.iter().filter(|f| f.protocol == n) {
             // the line `decode_line` gives, from the protocol on
@@ -767,8 +772,8 @@ fn protocols(word: &str, ws: &wtf_core::workspace::Workspace) -> Vec<Item> {
                 doc: format!("This trace: {rest}\n\n{doc}"),
             });
         }
-        let then = match protocol::builtin(n) {
-            Some(b) if b.clocked => "clock=<clk> prefix=<prefix>",
+        let then = match sources.get(n) {
+            Some(p) if p.def().clocked() => "clock=<clk> prefix=<prefix>",
             Some(_) => "prefix=<prefix>",
             None => "",
         };

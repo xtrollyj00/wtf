@@ -747,8 +747,15 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
         if on {
             put(buf, x0 + 1, y, &gl().hl.to_string(), line.fg(pal().cursor));
         }
-        // a record of violations red
-        let red = !b.group && set.streams[b.rows[k].0].violations;
+        // a record of violations in its severity's colour, red without one
+        let viol = (!b.group)
+            .then(|| b.rows[k])
+            .filter(|at| set.streams[at.0].violations)
+            .map(|at| {
+                set.streams[at.0]
+                    .severity_at(set.record(at).start)
+                    .map_or(pal().unknown, crate::draw::severity_color)
+            });
         let cells = b.cells(&set, k, fpt);
         let mut x = ix + 2;
         for &c in &shown {
@@ -766,10 +773,10 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
                 false => cell.clone(),
             };
             // the stream, number and times dim
-            let s = match red {
-                true => line.fg(pal().unknown),
-                false if !b.group && c < b.fixed() => line.fg(pal().dim),
-                false => line,
+            let s = match viol {
+                Some(col) => line.fg(col),
+                None if !b.group && c < b.fixed() => line.fg(pal().dim),
+                None => line,
             };
             put(
                 buf,
@@ -828,7 +835,7 @@ mod tests {
         // spec §5 "Records": `s` sorts by the next column, blanks last; `S` reverses
         let mut app = axi();
         let ncols = b(&app).fixed() + b(&app).set(&app.ws).columns.len();
-        assert_eq!((b(&app).sort, ncols), ((2, false), 11));
+        assert_eq!((b(&app).sort, ncols), ((2, false), 13));
         for col in (2..ncols).chain(0..2) {
             let br = b(&app);
             assert_eq!(br.sort.0, col);
@@ -983,5 +990,27 @@ mod tests {
         assert_eq!(key(bits("111").as_ref(), false).1, 7);
         assert_eq!(key(bits("1x0").as_ref(), false), (1, 0, "1x0".into()));
         assert_eq!(key(None, false).0, 2);
+    }
+
+    #[test]
+    fn severity_rows() {
+        // spec §5 "Records": a warning's row in the theme's warning, an error's red
+        let t = Trace::open("tests/data/axis_wakeup.vcd".as_ref()).unwrap();
+        let mut app = App::new(Workspace::new(t, "x".into()));
+        app.keys(":decode rx axis clock=clk tvalid=tvalid tready=tready twakeup=twakeup\n:records rx.errors\n").unwrap();
+        let area = ratatui::layout::Rect::new(0, 0, 120, 30);
+        let mut buf = ratatui::buffer::Buffer::empty(area);
+        crate::tui::render::draw(&mut app, area, &mut buf);
+        let fg = |word: &str| {
+            (0..area.height).find_map(|y| {
+                let line: String = (0..area.width)
+                    .map(|x| buf[(x, y)].symbol().to_string())
+                    .collect();
+                line.find(word)
+                    .map(|x| buf[(line[..x].chars().count() as u16, y)].fg)
+            })
+        };
+        assert_eq!(fg("wakeup_early"), Some(crate::draw::pal().warning));
+        assert_eq!(fg("dropped"), Some(crate::draw::pal().unknown));
     }
 }

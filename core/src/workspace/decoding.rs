@@ -51,12 +51,47 @@ impl Workspace {
     /// Define a protocol, replacing one of that name: names only, its roles, which instances put
     /// on signals (`add_decode`).
     pub fn add_protocol(&mut self, p: Sampler) -> Result<(), String> {
-        protocol_names(&p).map_err(|r| r.to_string())?;
-        let name = &p.name;
-        // a type defined again: its instances sampled again, and those after them, which may stack on them
-        let first = self.decodes.iter().position(|d| d.protocol == p.name);
-        let name = name.clone();
-        match self.protocols.iter_mut().find(|x| x.name == p.name) {
+        // one from a file (spec §11): its card is the file's, in the registry `add_loaded` filled
+        // before the session was applied, and the file is not read again here (`:e` unsets nothing)
+        if let Some(path) = &p.wasm {
+            let path = path.clone();
+            let loaded = self.loaded.iter().any(|l| l.name == p.name);
+            // the entry stays even without the file, so the session keeps what it names and the
+            // next `:e` tries again
+            let made = self.define_protocol(p);
+            return match loaded {
+                true => made,
+                false => Err(format!("wasm {path} is not loaded")),
+            };
+        }
+        protocol_names(&p, self.sources()).map_err(|r| r.to_string())?;
+        self.define_protocol(p)
+    }
+
+    /// A protocol from a file (spec §16): it joins the registry, and the session keeps its
+    /// `[[protocol]] wasm=` entry, with the file it came from, as defining one does.
+    pub fn add_loaded(&mut self, loaded: Arc<protocol::Loaded>, path: &str) -> Result<(), String> {
+        let name = loaded.name.to_string();
+        if protocol::reserved(&name) {
+            return Err(format!("{name} is a built-in protocol"));
+        }
+        match self.loaded.iter_mut().find(|l| l.name == name) {
+            Some(old) => *old = loaded,
+            None => self.loaded.push(loaded),
+        }
+        self.define_protocol(Sampler {
+            name,
+            wasm: Some(path.to_string()),
+            ..Sampler::default()
+        })
+    }
+
+    /// A protocol in the session, replacing one of that name: its instances sampled again, and
+    /// those after them, which may stack on them.
+    fn define_protocol(&mut self, p: Sampler) -> Result<(), String> {
+        let name = p.name.clone();
+        let first = self.decodes.iter().position(|d| d.protocol == name);
+        match self.protocols.iter_mut().find(|x| x.name == name) {
             Some(old) => *old = p,
             None => self.protocols.push(p),
         }
@@ -85,7 +120,7 @@ impl Workspace {
         p: &Sampler,
         signals: &[(String, String)],
     ) -> Result<(), Reasons> {
-        protocol_names(p).map_err(|r| Reasons {
+        protocol_names(p, self.sources()).map_err(|r| Reasons {
             name: None,
             list: vec![r],
         })?;
@@ -188,12 +223,12 @@ impl Workspace {
             d.clock = self.full_path(&d.clock).unwrap_or(d.clock);
         }
         // a prefix too, through its first role: `s_axi_` + `awvalid` is `top.s_axi_awvalid`
-        if let (Some(b), Some((_, prefix))) = (
-            protocol::builtin(&d.protocol),
-            d.params.iter_mut().find(|p| p.0 == "prefix"),
-        ) {
+        let any = self.sources().get(&d.protocol);
+        if let (Some(p), Some((_, prefix))) =
+            (any.as_ref(), d.params.iter_mut().find(|p| p.0 == "prefix"))
+        {
             // the first role there is: a read-only port has no awvalid
-            let full = b.required.iter().find_map(|role| {
+            let full = p.def().roles().0.into_iter().find_map(|role| {
                 self.resolve(&format!("{prefix}{role}"))
                     .ok()
                     .map(|p| (role, self.trace.vars[p.0].path.clone()))
@@ -202,14 +237,11 @@ impl Workspace {
                 *prefix = full;
             }
         }
-        let var = if let Some(b) = protocol::builtin(&d.protocol) {
-            self.decode_builtin(&d, b)
-        } else if matches!(d.protocol.as_str(), "frame" | "pair") {
-            self.decode_streams(&d)
-        } else if d.protocol == "check" {
-            self.decode_check(&d)
-        } else {
-            self.decode_user(&d)
+        let var = match any {
+            Some(any) => self.decode_protocol(&d, any),
+            None if matches!(d.protocol.as_str(), "frame" | "pair") => self.decode_streams(&d),
+            None if d.protocol == "check" => self.decode_check(&d),
+            None => self.decode_user(&d),
         }
         .map_err(|e| format!("{}: {e}", d.name))?;
         match self.decodes.iter_mut().find(|x| x.name == d.name) {
@@ -341,23 +373,39 @@ impl Workspace {
     /// checks as it is filled in, spec §5 "Decode form").
     pub fn check_decode(&mut self, d: &Decode) -> Result<(), Reasons> {
         let mut errors: Vec<Reason> = Vec::new();
-        let clocked = if let Some(b) = protocol::builtin(&d.protocol) {
-            let required = self.required(d, &b);
-            self.bind(d, &required, b.optional, b.params, &mut errors);
-            b.clocked
+        let any = self.sources().get(&d.protocol);
+        let clocked = if let Some(any) = any {
+            let def = any.def();
+            let required = self.required(d, def);
+            let (_, optional) = def.roles();
+            self.bind(d, &required, &optional, def.params(), &mut errors);
+            def.clocked()
         } else if let Some(p) = self
             .protocols
             .iter()
             .find(|p| p.name == d.protocol)
             .cloned()
         {
-            let roles: Vec<&str> = p.roles.iter().map(String::as_str).collect();
-            self.bind(d, &roles, &[], &[], &mut errors);
-            true
+            match &p.wasm {
+                // its card is the file's, not a sampler: with no file there is no role to check
+                // against, and no clock to ask for (spec §11)
+                Some(path) => {
+                    errors.push(Reason {
+                        on: vec!["protocol".into()],
+                        why: Why::Said(format!("wasm {path} is not loaded")),
+                    });
+                    false
+                }
+                None => {
+                    let roles: Vec<&str> = p.roles.iter().map(String::as_str).collect();
+                    self.bind(d, &roles, &[], &[], &mut errors);
+                    true
+                }
+            }
         } else {
             errors.push(Reason {
                 on: vec!["protocol".into()],
-                why: Why::Said(protocol::unknown(&d.protocol, &self.protocols)),
+                why: Why::Said(protocol::unknown(&d.protocol, self.sources())),
             });
             false
         };
@@ -384,13 +432,13 @@ impl Workspace {
 
     /// A built-in protocol's required roles for this instance: a side none of whose roles is
     /// given, explicitly or under the prefix, may be left out (spec §16).
-    fn required(&mut self, d: &Decode, b: &protocol::Builtin) -> Vec<&'static str> {
+    pub(super) fn required(&mut self, d: &Decode, p: &protocol::Def) -> Vec<&'static str> {
         let prefix = d
             .params
             .iter()
             .find(|p| p.0 == "prefix")
             .map(|p| p.1.clone());
-        b.needed(|r| {
+        p.needed(|r| {
             d.signals.iter().any(|s| s.0 == r)
                 || prefix
                     .as_ref()
@@ -403,7 +451,7 @@ impl Workspace {
     /// The roles map to the signals' full paths, so names made by an earlier step can't change them.
     /// With the param `prefix` (`s_axi_`), a role not given is played by `<prefix><role>`, if there
     /// is one (the required roles must be).
-    fn bind(
+    pub(super) fn bind(
         &mut self,
         d: &Decode,
         required: &[&str],
@@ -544,7 +592,7 @@ impl Workspace {
     /// `base`, else `base1`, `base2`...: the first no protocol or decode is named.
     pub fn free_name(&self, base: &str) -> String {
         let taken = |n: &str| {
-            self.protocols.iter().any(|p| p.name == n) || self.decodes.iter().any(|d| d.name == n)
+            self.sources().names().contains(&n) || self.decodes.iter().any(|d| d.name == n)
         };
         std::iter::once(base.to_string())
             .chain((1..).map(|k| format!("{base}{k}")))
@@ -657,6 +705,7 @@ impl Workspace {
             when: on_roles.trim().into(),
             fields,
             roles: roles.clone(),
+            wasm: None,
         };
         let d = Decode {
             name: decode.into(),
@@ -668,14 +717,17 @@ impl Workspace {
         Ok((p, d))
     }
 
-    /// The protocols, built-in then the session's, `signals` play a role of, with how many,
-    /// most first.
+    /// The protocols, built-in, loaded from files then the session's, `signals` play a role of,
+    /// with how many, most first.
     pub fn playable(&self, signals: &[usize]) -> Vec<(String, usize)> {
-        let names = protocol::BUILTINS
-            .iter()
-            .map(|s| s.to_string())
-            .chain(self.protocols.iter().map(|p| p.name.clone()));
+        let names: Vec<String> = self
+            .sources()
+            .names()
+            .into_iter()
+            .map(str::to_string)
+            .collect();
         let mut found: Vec<(String, usize)> = names
+            .into_iter()
             .map(|n| {
                 let k = self.plays(&n, signals).signals.len();
                 (n, k)
@@ -688,14 +740,15 @@ impl Workspace {
 
     /// A protocol's roles, required then optional, and whether it samples at a clock.
     fn roles_of(&self, protocol: &str) -> (Vec<String>, bool) {
-        if let Some(b) = protocol::builtin(protocol) {
+        if let Some(any) = self.sources().get(protocol) {
+            let (required, optional) = any.def().roles();
             (
-                b.required
-                    .iter()
-                    .chain(b.optional)
-                    .map(|s| s.to_string())
+                required
+                    .into_iter()
+                    .chain(optional)
+                    .map(str::to_string)
                     .collect(),
-                b.clocked,
+                any.def().clocked(),
             )
         } else if let Some(p) = self.protocols.iter().find(|p| p.name == protocol) {
             (p.roles.clone(), true)
@@ -716,10 +769,10 @@ impl Workspace {
                 return Some(r.clone());
             }
             // kept as the full path's prefix (`add_decode`); a role given apart wins
-            let b = protocol::builtin(&d.protocol)?;
+            let (required, optional) = protocol::get(&d.protocol)?.roles();
             let prefix = &d.params.iter().find(|p| p.0 == "prefix")?.1;
             let r = path.strip_prefix(prefix.as_str())?;
-            (b.required.iter().chain(b.optional).any(|x| *x == r)
+            (required.iter().chain(&optional).any(|x| *x == r)
                 && !d.signals.iter().any(|(x, _)| x == r))
             .then(|| r.to_string())
         };
@@ -853,7 +906,11 @@ impl Workspace {
             .iter()
             .find(|p| p.name == d.protocol)
             .cloned()
-            .ok_or_else(|| protocol::unknown(&d.protocol, &self.protocols))?;
+            .ok_or_else(|| protocol::unknown(&d.protocol, self.sources()))?;
+        // its card is the file's; with the file not loaded there is nothing to sample (spec §11)
+        if let Some(path) = &p.wasm {
+            return Err(format!("wasm {path} is not loaded"));
+        }
         let mut errors: Vec<Reason> = Vec::new();
         let roles: Vec<&str> = p.roles.iter().map(String::as_str).collect();
         self.bind(d, &roles, &[], &[], &mut errors);
@@ -884,139 +941,6 @@ impl Workspace {
         self.only_roles = None;
         self.roles.clear();
         var
-    }
-
-    /// A protocol written in Rust on signals: its steps' streams, `<instance>.<step>`.
-    fn decode_builtin(&mut self, d: &Decode, b: protocol::Builtin) -> Result<usize, String> {
-        let mut errors: Vec<Reason> = Vec::new();
-        let required = self.required(d, &b);
-        let given = self.bind(d, &required, b.optional, b.params, &mut errors);
-        if d.clock.is_empty() && b.clocked {
-            errors.push(Reason {
-                on: vec!["clock".into()],
-                why: Why::NoClock,
-            });
-        }
-        if !errors.is_empty() {
-            self.roles.clear();
-            return Err(Reasons {
-                name: None,
-                list: errors,
-            }
-            .to_string());
-        }
-        let given: Vec<(&str, Option<u32>)> = given.iter().map(|(r, w)| (r.as_str(), *w)).collect();
-        let params: Vec<(String, String)> = d
-            .params
-            .iter()
-            .filter(|p| p.0 != "prefix")
-            .cloned()
-            .collect();
-        let (mut vars, mut scratch) = (Vec::new(), Vec::new());
-        let mut r = Ok(());
-        for step in (b.steps)(&given, &params) {
-            let var = match step {
-                protocol::Step::Changes { name, signal } => {
-                    // kept for the decoders after it, not a stream of the instance's
-                    let made = self.resolve(&signal).map(|p| {
-                        self.trace.load(&[p.0]);
-                        stream::changes(&self.trace, name, p)
-                    });
-                    match made {
-                        Ok(s) => {
-                            scratch.push(s);
-                            continue;
-                        }
-                        Err(e) => Err(e),
-                    }
-                }
-                protocol::Step::Sample { name, when, fields } => {
-                    let p = Sampler {
-                        name: name.into(),
-                        when,
-                        fields,
-                        roles: vec![],
-                    };
-                    self.make_stream(&format!("{}.{name}", d.name), &d.clock, &p)
-                }
-                protocol::Step::Check { name, rules } => self
-                    .check(&format!("{}.{name}", d.name), &d.clock, &rules)
-                    .and_then(|s| self.add_signals(s)),
-                protocol::Step::Join {
-                    name,
-                    requests,
-                    response,
-                    id,
-                } => {
-                    let find = |x: &str| {
-                        self.streams
-                            .iter()
-                            .position(|s| s.name == format!("{}.{x}", d.name))
-                            .ok_or(format!("no stream {}.{x}", d.name))
-                    };
-                    let timeout = match params.iter().find(|p| p.0 == "timeout") {
-                        Some((_, v)) => crate::time::parse(v, self.trace.fs_per_tick)
-                            .map(|t| Some(t.round() as Tick))
-                            .map_err(|e| format!("join: timeout: {e}")),
-                        None => Ok(None),
-                    };
-                    let made = timeout.and_then(|timeout| {
-                        let reqs = requests
-                            .iter()
-                            .map(|&r| find(r).map(|i| (r, i)))
-                            .collect::<Result<Vec<_>, _>>()?;
-                        let reqs: Vec<(&str, &Stream)> = reqs
-                            .into_iter()
-                            .map(|(r, i)| (r, &self.streams[i]))
-                            .collect();
-                        decode::join(
-                            &format!("{}.{name}", d.name),
-                            &reqs,
-                            &self.streams[find(response)?],
-                            id,
-                            timeout,
-                        )
-                    });
-                    made.and_then(|(done, unmatched)| {
-                        let v = self.add_signals(done)?;
-                        self.add_signals(unmatched).map(|_| v)
-                    })
-                }
-                protocol::Step::Decode {
-                    name,
-                    input,
-                    decoder,
-                    params,
-                } => {
-                    let full = format!("{}.{input}", d.name);
-                    let input = scratch
-                        .iter()
-                        .find(|s| s.name == input)
-                        .or_else(|| self.streams.iter().find(|s| s.name == full))
-                        .ok_or(format!("no stream {full}"));
-                    let made = input.and_then(|i| {
-                        let mut s = decode::run(
-                            &format!("{}.{name}", d.name),
-                            i,
-                            decode::make(decoder, &i.schema, &params, self.trace.fs_per_tick)?,
-                        );
-                        // a signal's changes are no stream of the workspace's
-                        s.inputs.retain(|x| *x == full);
-                        Ok(s)
-                    });
-                    made.and_then(|s| self.add_signals(s))
-                }
-            };
-            match var {
-                Ok(v) => vars.push(v),
-                Err(e) => {
-                    r = Err(e);
-                    break;
-                }
-            }
-        }
-        self.roles.clear();
-        r.map(|()| vars[0])
     }
 
     /// `frame` on a stream (role `input`), or `pair` on two (`request`, `response`), named in
@@ -1150,7 +1074,7 @@ impl Workspace {
 
     /// Add a stream as signals (`Stream::signals`): `rx`, `rx.tdata` ... replacing a stream of that
     /// name. Returns the stream's own var.
-    fn add_signals(&mut self, s: Stream) -> Result<usize, String> {
+    pub(super) fn add_signals(&mut self, s: Stream) -> Result<usize, String> {
         let signals = s.signals(self.trace.start());
         // all or nothing: no signal of the file is taken
         if let Some((path, ..)) = signals.iter().find(|(p, ..)| {
@@ -1197,8 +1121,9 @@ impl Workspace {
     }
 }
 
-/// A protocol's own names: its name, its roles' and fields', and that it has roles.
-fn protocol_names(p: &Sampler) -> Result<(), Reason> {
+/// A protocol's own names: its name, its roles' and fields', and that it has roles. A built-in
+/// protocol and one loaded from a file have their names taken.
+fn protocol_names(p: &Sampler, sources: protocol::Sources<'_>) -> Result<(), Reason> {
     let said = |on: &str, text: String| Reason {
         on: vec![on.to_string()],
         why: Why::Said(text),
@@ -1211,8 +1136,14 @@ fn protocol_names(p: &Sampler) -> Result<(), Reason> {
     {
         return Err(said("name", format!("not a protocol name: {name}")));
     }
-    if protocol::reserved(name) {
-        return Err(said("name", format!("{name} is a built-in protocol")));
+    let loaded = sources.loaded.iter().any(|l| l.name == name.as_str());
+    if protocol::reserved(name) || loaded {
+        let what = if loaded {
+            "a protocol loaded from a file; give another name"
+        } else {
+            "a built-in protocol"
+        };
+        return Err(said("name", format!("{name} is {what}")));
     }
     // a field is the last part of its signal's path; a role is a name in expressions
     let plain = |f: &String| !f.is_empty() && f.chars().all(|c| c.is_alphanumeric() || c == '_');

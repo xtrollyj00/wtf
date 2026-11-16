@@ -123,7 +123,10 @@ pub fn run(app: &mut Workspace, line: &str) -> Result<Option<Msg>, String> {
 /// Answers with the streams the instance made and how many records each has, violations apart,
 /// so what there is to look at shows: `bus: records bus.aw 2, ...; violations bus.errors 2, ...`.
 /// A `:decode` line's argument as an instance, not made yet (the TUI's decode form checks it).
-pub fn parse_decode(arg: &str) -> Result<crate::stream::Decode, String> {
+pub fn parse_decode(
+    arg: &str,
+    from: crate::protocol::Sources<'_>,
+) -> Result<crate::stream::Decode, String> {
     let usage = "usage: :decode <name> <protocol> <role>=<signal>...";
     let (name, rest) = word(arg);
     let (protocol, rest) = word(rest);
@@ -141,8 +144,9 @@ pub fn parse_decode(arg: &str) -> Result<crate::stream::Decode, String> {
         // a built-in's params (`mode=0`, `baud=115200`) aren't roles
         false => {
             k != "prefix"
-                && !crate::protocol::builtin(protocol)
-                    .is_some_and(|b| b.params.contains(&k.as_str()))
+                && !from
+                    .get(protocol)
+                    .is_some_and(|p| p.def().params().contains(&k.as_str()))
         }
     });
     Ok(crate::stream::Decode {
@@ -160,7 +164,7 @@ fn decode(app: &mut Workspace, arg: &str) -> Result<String, String> {
         app.remove_decode(name)?;
         return Ok(format!("{name}: removed"));
     }
-    let d = parse_decode(arg)?;
+    let d = parse_decode(arg, app.sources())?;
     let name = d.name.clone();
     let name = name.as_str();
     app.add_decode(d)?;
@@ -194,7 +198,7 @@ fn decode(app: &mut Workspace, arg: &str) -> Result<String, String> {
 /// on its roles, no signals; `:decode` puts it on signals at a clock. The other keys are its
 /// fields in order.
 fn protocol(app: &mut Workspace, arg: &str) -> Result<(), String> {
-    let usage = "usage: :protocol <name> roles=<a,b> when=<expr> <field>=<expr>...";
+    let usage = "usage: :protocol <name> roles=<a,b> when=<expr> <field>=<expr>... | :protocol <name> wasm=<file>";
     let (name, rest) = word(arg);
     if name.is_empty() {
         return Err(usage.into());
@@ -211,6 +215,29 @@ fn protocol(app: &mut Workspace, arg: &str) -> Result<(), String> {
             "a protocol names no signals, its clock neither: :decode gives it (:decode x {name} clock={c} ...)"
         ));
     }
+    if let Some(path) = take("wasm") {
+        // the file's name is the protocol's, and the session keeps both (spec §11)
+        let stem = std::path::Path::new(&path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default();
+        if stem != name {
+            return Err(format!(
+                "wasm {path} holds {stem}, not {name}: :protocol {stem} wasm={path}"
+            ));
+        }
+        if !fields.is_empty() {
+            return Err(format!(
+                "a protocol from a file has no roles, when or fields of its own: :protocol {name} wasm={path}"
+            ));
+        }
+        let loader = app
+            .loader
+            .clone()
+            .ok_or_else(|| format!("{path}: this wtf has no host for protocols from files"))?;
+        let loaded = loader(&path)?;
+        return app.add_loaded(loaded, &path);
+    }
     let (when, roles) = (take("when").ok_or(usage)?, take("roles").ok_or(usage)?);
     let roles = roles
         .split(',')
@@ -222,6 +249,7 @@ fn protocol(app: &mut Workspace, arg: &str) -> Result<(), String> {
         when,
         fields,
         roles,
+        wasm: None,
     };
     app.add_protocol(p)
         .map(drop)

@@ -14,8 +14,10 @@ use crate::trace::{Trace, Val};
 use crate::view::View;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 mod decoding;
+mod play;
 pub mod reason;
 pub mod unknown;
 
@@ -89,6 +91,12 @@ pub struct Workspace {
     pub protocols: Vec<Sampler>,
     pub decodes: Vec<Decode>,
     pub streams: Vec<Stream>,
+    /// Protocols loaded from files (spec §16): the process's, not the session's, so `:e` reads no
+    /// file and a new workspace on the same trace decodes with them too.
+    pub loaded: Vec<Arc<protocol::Loaded>>,
+    /// How a `[[protocol]] wasm=` entry gets its protocol (spec §11): the binary sets it, which
+    /// has the host; a workspace core's tests build leaves it None.
+    pub loader: Option<protocol::Loader>,
     /// While an instance samples: its roles, names that stand for its signals.
     roles: HashMap<String, String>,
     /// While a sampled protocol's instance samples: names other than roles are errors, with the
@@ -244,6 +252,8 @@ impl Workspace {
             protocols: Vec::new(),
             decodes: Vec::new(),
             streams: Vec::new(),
+            loaded: Vec::new(),
+            loader: None,
             roles: HashMap::new(),
             only_roles: None,
             sel: 0,
@@ -251,6 +261,15 @@ impl Workspace {
             anchor: None,
             undo: Vec::new(),
             redo: Vec::new(),
+        }
+    }
+
+    /// Where a decode's protocol may come from (spec §16): the built-ins, the protocols loaded
+    /// from files, and this session's own.
+    pub fn sources(&self) -> protocol::Sources<'_> {
+        protocol::Sources {
+            session: &self.protocols,
+            loaded: &self.loaded,
         }
     }
 

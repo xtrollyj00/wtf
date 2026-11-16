@@ -3,17 +3,20 @@
 //!   cargo run -p wtf-bench --release -- gen --size 10G --format fst <dir>
 //!   cargo build --release && cargo run -p wtf-bench --release -- run <dir>/bench.fst
 //!   cargo run -p wtf-bench --release -- mcp <dir>/bench.fst
+//!   cargo run -p wtf-bench --release -- protocol <dir>/bench.fst   (Rust and WASM AXIS, spec §16)
 //!   cargo run -p wtf-bench --release -- agent run [<task>...]   (spec §17, milestone 10)
 
 mod agent;
 mod generate;
 mod mcp;
+mod protocol;
 mod run;
 
 const USAGE: &str = "usage:
   wtf-bench gen [--size 1G] [--format vcd|fst] [--modules 200] [--mem 0] <dir>
   wtf-bench run [--wtf <path>] <trace>
   wtf-bench mcp [--wtf <path>] <trace>
+  wtf-bench protocol [--wtf <path>] [--wasm <path>] <trace>
   wtf-bench agent run|report ...";
 
 fn main() {
@@ -22,6 +25,7 @@ fn main() {
         Some("gen") => generate::main(&args[1..]),
         Some("run") => run::main(&args[1..]),
         Some("mcp") => mcp::main(&args[1..]),
+        Some("protocol") => protocol::main(&args[1..]),
         Some("agent") => agent::main(&args[1..]),
         _ => Err(USAGE.into()),
     };

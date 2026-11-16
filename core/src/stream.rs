@@ -32,7 +32,8 @@ pub struct Stream {
     pub schema: Vec<Field>,
     /// In order of start.
     pub records: Vec<Record>,
-    /// Its records are violations (`check`, a pair's `unmatched`), drawn red.
+    /// Its records are violations (`check`, a pair's `unmatched`, a protocol's `errors`), drawn in
+    /// their severity's colour (`severity_at`), red without one.
     pub violations: bool,
     /// The streams it is made from (a frame's beats, a join's parts): those are intermediate,
     /// it may be a result (spec §16 "Results").
@@ -51,6 +52,9 @@ pub struct Sampler {
     pub when: String,
     pub fields: Vec<(String, String)>,
     pub roles: Vec<String>,
+    /// The file it is loaded from (spec §11 `[[protocol]] wasm=`): such an entry is the file's
+    /// card, not a sampler, so `when`, `fields` and `roles` are empty.
+    pub wasm: Option<String>,
 }
 
 /// An instance of a protocol (`[[decode]]`): the stream `name`, the protocol's roles played by
@@ -69,6 +73,14 @@ pub struct Decode {
 impl Sampler {
     /// The `:protocol` line that defines it, without the `:`.
     pub fn line(&self) -> String {
+        // one from a file keeps its name and that file, nothing else (spec §11)
+        if let Some(path) = &self.wasm {
+            return format!(
+                "protocol {} wasm={}",
+                self.name,
+                crate::command::quote(path)
+            );
+        }
         let mut s = format!(
             "protocol {} roles={} when={}",
             self.name,
@@ -117,6 +129,25 @@ pub struct Page<'a> {
 }
 
 impl Stream {
+    /// The severity of the record open at `t` (spec §16 "Results"): the last one starting at or
+    /// before `t` and not yet ended, a widthless one at its own start. `None` between records, for
+    /// a stream without a `severity` field, or a value that is neither `error` nor `warning`.
+    pub fn severity_at(&self, t: Tick) -> Option<crate::protocol::Severity> {
+        let f = self.schema.iter().position(|f| f.name == "severity")?;
+        let i = self
+            .records
+            .partition_point(|r| r.start <= t)
+            .checked_sub(1)?;
+        let r = &self.records[i];
+        if t >= r.end && !(r.start == r.end && t == r.start) {
+            return None;
+        }
+        match r.fields.get(f)? {
+            Some(Val::Text(s)) => crate::protocol::Severity::of(s),
+            _ => None,
+        }
+    }
+
     /// The stream as signals (path, width, values from `start`): itself, `#n` while record n
     /// lasts and empty between records, and a signal per field, `z` (or empty) between records.
     /// Where records overlap (pairs), the latest started of those still open is shown.
@@ -172,7 +203,9 @@ impl Stream {
         let mut out = format!("#{i}");
         for (f, v) in self.schema.iter().zip(&self.records[i].fields) {
             match v {
-                Some(Val::Text(t)) if !t.is_empty() && f.name != "data" => out += &format!(" {t}"),
+                Some(Val::Text(t)) if !t.is_empty() && f.name != "data" && f.name != "detail" => {
+                    out += &format!(" {t}")
+                }
                 Some(Val::Bits(_)) if f.time => {
                     out += &format!(" {}", value_text(f, v, fpt, None, Some(3)))
                 }

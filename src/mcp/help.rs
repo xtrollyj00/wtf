@@ -38,6 +38,11 @@ pub const TOPICS: &[(&str, &str, &str)] = &[
         include_str!("guide/decode.md"),
     ),
     (
+        "wasm",
+        "protocols in the config dir's protocols/, written as WebAssembly components",
+        include_str!("guide/wasm.md"),
+    ),
+    (
         "records",
         "reading streams: where, group_by, count_only, n",
         include_str!("guide/records.md"),

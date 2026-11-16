@@ -1,0 +1,78 @@
+$timescale 1ns $end
+$scope module top $end
+$var wire 1 ! clk $end
+$var wire 1 " tvalid $end
+$var wire 1 # tready $end
+$var wire 32 $ tdata [31:0] $end
+$var wire 1 % tlast $end
+$var wire 4 & tkeep [3:0] $end
+$var wire 2 ' tid [1:0] $end
+$var wire 2 ( tdest [1:0] $end
+$var wire 4 ) tstrb [3:0] $end
+$upscope $end
+$enddefinitions $end
+#0
+0!
+0"
+1#
+b10100000 $
+0%
+b1111 &
+b01 '
+b00 (
+b1111 )
+#5
+1!
+#10
+0!
+#15
+1!
+1"
+#20
+0!
+#25
+1!
+b10100001 $
+1%
+#30
+0!
+#35
+1!
+b10110000 $
+0%
+b1110 &
+b10 '
+b11 (
+b1111 )
+#40
+0!
+#45
+1!
+b11000000 $
+b1111 &
+b01 '
+b00 (
+b1111 )
+#50
+0!
+#55
+1!
+0"
+#60
+0!
+#65
+1!
+1"
+0#
+bx $
+#70
+0!
+#75
+1!
+0"
+#80
+0!
+#85
+1!
+#90
+0!

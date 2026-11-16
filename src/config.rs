@@ -320,7 +320,7 @@ mod tests {
                 "config: unknown key foo (keys: glyphs, theme, which_key, name_width, value_width, hints, colors, keys, leader)",
                 "config: glyphs = \"utf8\"? (unicode, box, ascii, nerd)",
                 "config: theme = 3? (dark, light)",
-                "config: unknown key colors.curser (keys: line, bus, fill, unknown, highz, cursor, cursor_text, column, cursor_dim, mark, selected, panel, hatch, dim, background, text, red, orange, yellow, green, cyan, blue, magenta, gray)",
+                "config: unknown key colors.curser (keys: line, bus, fill, unknown, highz, warning, cursor, cursor_text, column, cursor_dim, mark, selected, panel, hatch, dim, background, text, red, orange, yellow, green, cyan, blue, magenta, gray)",
                 "config: colors.cursor = \"blue\"? (\"#rrggbb\", 0-255, [\"#rrggbb\", 0-255] or \"default\")",
             ]
         );

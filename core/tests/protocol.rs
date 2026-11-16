@@ -79,7 +79,7 @@ fn axis_beats_and_frames() {
             .iter()
             .map(|f| (f.name.as_str(), f.width))
             .collect::<Vec<_>>(),
-        [("tdata", Some(32)), ("tlast", Some(1)), ("tkeep", Some(4))]
+        [("tdata", Some(32)), ("tkeep", Some(4)), ("tlast", Some(1))]
     );
     let data: Vec<(u64, String)> = table(beat)
         .into_iter()
@@ -123,8 +123,64 @@ fn axis_beats_and_frames() {
     );
     ws.add_decode(decode("b", "axis", "clk", &AXIS[..3], &[]))
         .unwrap();
-    assert!(ws.streams.iter().all(|s| s.name != "b.frame"));
+    // tlast not given reads 1: every beat ends its own packet
+    assert_eq!(
+        table(stream(&ws, "b.frame"))[0],
+        row(15, 25, &["1", "4", "a0 00 00 00", "1"])
+    );
     assert_eq!(stream(&ws, "b.beat").schema.len(), 1);
+}
+
+/// Spec §16 "Results": a protocol declares what each of its streams is made from, so a decode's
+/// own `frame` makes its `beat` intermediate. There, the 7 beats are what the 4 frames are made
+/// from, and the decode still goes when no other one reads it.
+#[test]
+fn axis_stream_provenance() {
+    let mut ws = open("axis.vcd");
+    let names = |ws: &Workspace, v: Vec<usize>| {
+        v.into_iter()
+            .map(|i| ws.streams[i].name.clone())
+            .collect::<Vec<_>>()
+    };
+    // the line the TUI runs, and the sets its answer names
+    let line =
+        "decode rx axis clock=clk tvalid=tvalid tready=tready tdata=tdata tlast=tlast tkeep=tkeep";
+    assert_eq!(
+        wtf_core::command::run(&mut ws, line),
+        Ok(Some((
+            "rx: records rx.frame 4; violations rx.errors 2; made from rx.beat 7".into(),
+            false
+        )))
+    );
+    assert_eq!(names(&ws, ws.results("rx")), ["rx.frame", "rx.errors"]);
+    assert_eq!(
+        names(&ws, ws.stream_set("rx").unwrap()),
+        ["rx.frame", "rx.errors"]
+    );
+    // named by the instance's names, and a stream made of the trace alone is made from nothing
+    assert_eq!(stream(&ws, "rx.frame").inputs, ["rx.beat"]);
+    assert!(stream(&ws, "rx.beat").inputs.is_empty() && stream(&ws, "rx.errors").inputs.is_empty());
+    // its own frame does not read the decode; another decode's does
+    ws.add_decode(decode(
+        "f",
+        "frame",
+        "",
+        &[("input", "rx.beat")],
+        &[("gap", "100ns")],
+    ))
+    .unwrap();
+    assert_eq!(
+        wtf_core::command::run(&mut ws, "decode rx off"),
+        Err("rx is read by f: remove it first".into())
+    );
+    assert_eq!(
+        wtf_core::command::run(&mut ws, "decode f off"),
+        Ok(Some(("f: removed".into(), false)))
+    );
+    assert_eq!(
+        wtf_core::command::run(&mut ws, "decode rx off"),
+        Ok(Some(("rx: removed".into(), false)))
+    );
 }
 
 #[test]
@@ -134,7 +190,14 @@ fn axis_errors_are_the_injected_ones() {
         .unwrap();
     assert_eq!(
         table(stream(&ws, "rx.errors")),
-        [row(105, 115, &["dropped"]), row(125, 135, &["changed"])]
+        [
+            row(105, 115, &["dropped", "tvalid fell before tready", "error"]),
+            row(
+                125,
+                135,
+                &["changed", "tdata changed while tvalid stalled", "error"]
+            )
+        ]
     );
     // without tkeep / tlast the payload is what there is
     ws.add_decode(decode("b", "axis", "clk", &AXIS[..3], &[]))
@@ -214,11 +277,11 @@ fn builtin_instance_errors() {
                 "rx",
                 "axis",
                 "",
-                &[("tvalid", "tvalid"), ("tuser", "tdata"), ("tdata", "nope")],
+                &[("tfoo", "tdata"), ("tdata", "nope")],
                 &[("x", "1")]
             )
         ),
-        "rx: no signal for tready (the file has: decode rx axis clock=top.clk prefix=top.); axis has no role tuser; tdata: unknown signal: nope; axis has no param x (params: prefix); no clock"
+        "rx: no signal for tvalid (the file has: decode rx axis clock=top.clk prefix=top.); axis has no role tfoo; tdata: unknown signal: nope; axis has no param x (params: prefix, reset_active); no clock"
     );
     // its names are taken
     let p = Sampler {
@@ -226,6 +289,7 @@ fn builtin_instance_errors() {
         when: "tvalid".into(),
         fields: vec![],
         roles: vec!["tvalid".into()],
+        wasm: None,
     };
     assert_eq!(
         ws.add_protocol(p),
@@ -244,6 +308,7 @@ fn reqresp() -> Workspace {
         when: "valid".into(),
         fields: pairs(&[("id", "id")]),
         roles: vec!["valid".into(), "id".into()],
+        wasm: None,
     })
     .unwrap();
     for (name, v, id) in [
@@ -379,6 +444,7 @@ fn instance_names_signals_in_full() {
             when: "b".into(),
             fields: pairs(&[("s", "s")]),
             roles: vec!["b".into(), "s".into()],
+            wasm: None,
         },
     );
     let state = ws.var_named("top.cpu.state").unwrap();
@@ -442,7 +508,14 @@ fn axilite_transactions_and_errors() {
     // only the injected ones: X -> 0 in reset is no dropped valid
     assert_eq!(
         table(stream(&ws, "s.errors")),
-        [row(180, 190, &["r_resp"]), row(210, 220, &["aw_dropped"])]
+        [
+            row(180, 190, &["r_resp", "rresp is not OKAY", "error"]),
+            row(
+                210,
+                220,
+                &["aw_dropped", "awvalid fell before awready", "error"]
+            )
+        ]
     );
     assert_eq!(
         table(stream(&ws, "s.wr.unmatched")),
@@ -599,6 +672,7 @@ fn check_decode_names_only() {
         when: "valid && ready".into(),
         fields: vec![],
         roles: vec!["valid".into(), "ready".into()],
+        wasm: None,
     })
     .unwrap();
     assert_eq!(
@@ -648,6 +722,7 @@ fn check_protocol_names_only() {
         when: when.into(),
         fields: pairs(fields),
         roles: vec!["valid".into(), "ready".into(), "data".into()],
+        wasm: None,
     };
     let sigs = pairs(&[
         ("valid", "s_axi_wvalid"),
@@ -787,6 +862,7 @@ fn plays_by_endings() {
         when: "busy".into(),
         fields: vec![],
         roles: vec!["state".into(), "busy".into()],
+        wasm: None,
     })
     .unwrap();
     let d = ws.plays("hs", &sigs);
@@ -856,6 +932,7 @@ fn remove_and_redecode() {
         when: "valid && ready".into(),
         fields: vec![(field.into(), "valid".into())],
         roles: vec!["valid".into(), "ready".into()],
+        wasm: None,
     };
     ws.add_protocol(p("pa", "a")).unwrap();
     ws.add_protocol(p("pb", "b")).unwrap();
@@ -970,7 +1047,14 @@ fn axi4_bursts_by_id() {
     );
     assert_eq!(
         table(stream(&ws, "m.errors")),
-        [row(50, 60, &["b_resp"]), row(140, 150, &["ar_dropped"])]
+        [
+            row(50, 60, &["b_resp", "bresp is not OKAY", "error"]),
+            row(
+                140,
+                150,
+                &["ar_dropped", "arvalid fell before arready", "error"]
+            )
+        ]
     );
     assert!(
         stream(&ws, "m.wr.unmatched").records.is_empty()
@@ -994,6 +1078,20 @@ fn axi4_bursts_by_id() {
             .collect::<Vec<_>>(),
         [("256", "2"), ("512", "0")]
     );
+}
+
+/// Each AXI4 stream says the streams it was made from (spec §16: `from`).
+#[test]
+fn axi4_records_from() {
+    let mut ws = open("axi4.vcd");
+    ws.add_decode(decode("m", "axi4", "aclk", &[], &[("prefix", "m_axi_")]))
+        .unwrap();
+    let inputs = |s: &str| stream(&ws, s).inputs.clone();
+    assert_eq!(inputs("m.wburst"), ["m.w"]);
+    assert_eq!(inputs("m.rburst"), ["m.r"]);
+    assert_eq!(inputs("m.wr"), ["m.aw", "m.wburst", "m.b"]);
+    assert_eq!(inputs("m.rd"), ["m.ar", "m.rburst"]);
+    assert!(inputs("m.aw").is_empty() && inputs("m.errors").is_empty());
 }
 
 /// SPI in spi.vcd (mode 0): a transfer of 0xA5 0x3C out and 0x5A 0xC3 in; a pulse of sclk with cs
@@ -1090,8 +1188,16 @@ fn uart_bytes_and_errors() {
     assert_eq!(
         table(errors),
         [
-            row(25000, 36000, &["parity"]),
-            row(37000, 48000, &["framing"])
+            row(
+                25000,
+                36000,
+                &["parity", "parity bit 1, expected 0", "error"]
+            ),
+            row(
+                37000,
+                48000,
+                &["framing", "stop bit 0, expected 1", "error"]
+            )
         ]
     );
     // without parity the parity bit is taken for the stop bit: 0 for 0x55, 0xA3 and 0x81
@@ -1104,12 +1210,16 @@ fn uart_bytes_and_errors() {
         &[("baud", "1000000")],
     ))
     .unwrap();
+    let errors = table(stream(&ws, "u.errors"));
     assert_eq!(
-        table(stream(&ws, "u.errors"))
-            .iter()
-            .map(|r| r.0)
-            .collect::<Vec<_>>(),
+        errors.iter().map(|r| r.0).collect::<Vec<_>>(),
         [1000, 13000, 37000]
+    );
+    assert!(
+        errors
+            .iter()
+            .all(|r| r.2 == ["framing", "stop bit 0, expected 1", "error"]),
+        "{errors:?}"
     );
     let err = ws
         .add_decode(decode("v", "uart", "", &[("line", "uart_tx")], &[]))
@@ -1141,6 +1251,8 @@ fn detects_interfaces() {
         found("axis.vcd"),
         ["decode axis axis clock=top.clk prefix=top."]
     );
+    // UART has one role: `line` is never an interface
+    assert!(found("uart.vcd").is_empty());
     // AXI4 over AXI-Lite, whose roles it has too
     assert_eq!(
         found("axi4.vcd")
@@ -1155,6 +1267,18 @@ fn detects_interfaces() {
         found("axi4.vcd")
     );
     assert!(found("simple.vcd").is_empty());
+}
+
+/// One role is no interface: a lone `tvalid`, every other AXIS role at its default, is a stray
+/// signal rather than a port.
+#[test]
+fn one_role_is_no_interface() {
+    let dir = Dir::new("one-role");
+    let vcd = dir.0.join("tvalid.vcd");
+    let text = "$timescale 1ns $end\n$scope module top $end\n$var wire 1 ! clk $end\n$var wire 1 \" tvalid $end\n$upscope $end\n$enddefinitions $end\n#0\n0!\n0\"\n#5\n1!\n1\"\n";
+    std::fs::write(&vcd, text).unwrap();
+    let t = wtf_core::trace::Trace::open(&vcd).unwrap();
+    assert!(wtf_core::protocol::detect(&t).is_empty());
 }
 
 /// A write-only or read-only AXI-Lite port: the side given is decoded, the other left out, and a
@@ -1316,8 +1440,12 @@ fn uart_break_and_stop_bits() {
     assert_eq!(
         table(stream(&ws, "u.errors")),
         [
-            row(1000, 12000, &["framing"]),
-            row(20000, 31000, &["break"])
+            row(1000, 12000, &["framing", "stop bit 0, expected 1", "error"]),
+            row(
+                20000,
+                31000,
+                &["break", "the line was low for a whole frame", "warning"]
+            )
         ]
     );
     assert_eq!(
@@ -1405,6 +1533,121 @@ fn spi_last_bit_at_cs() {
     ))
     .unwrap();
     assert_eq!(table(stream(&ws, "s.bit")), [row(20, 50, &["1"])]);
+}
+
+/// The three streams are one chain: a word from bits, a transfer from words, so only the transfer
+/// is a result (spec §16 "Results").
+#[test]
+fn spi_streams_are_made_from_bits() {
+    let pins = [
+        ("sclk", "spi_clk"),
+        ("cs", "spi_cs_n"),
+        ("mosi", "spi_mosi"),
+        ("miso", "spi_miso"),
+    ];
+    let mut ws = open("spi.vcd");
+    let first = ws.add_decode(decode("f", "spi", "", &pins, &[])).unwrap();
+    assert_eq!(first, var(&ws, "f.bit"));
+    let inputs = |s: &str| stream(&ws, s).inputs.clone();
+    assert!(inputs("f.bit").is_empty());
+    assert_eq!(inputs("f.word"), ["f.bit"]);
+    assert_eq!(inputs("f.transfer"), ["f.word"]);
+    let names: Vec<String> = ws
+        .results("f")
+        .into_iter()
+        .map(|i| ws.streams[i].name.clone())
+        .collect();
+    assert_eq!(names, ["f.transfer"]);
+}
+
+/// A bit still open where the trace ends ends there, in the last cycle it was given.
+#[test]
+fn spi_edge_at_trace_end() {
+    let dir = Dir::new("spi-end");
+    let vcd = dir.0.join("e.vcd");
+    // cs falls at 10, sclk rises at 20 with mosi 1, sclk falls at 30, where the trace ends
+    let text = "$timescale 1ns $end\n$scope module top $end\n$var wire 1 ! sclk $end\n$var wire 1 \" cs $end\n$var wire 1 # mosi $end\n$upscope $end\n$enddefinitions $end\n#0\n0!\n1\"\n1#\n#10\n0\"\n#20\n1!\n#30\n0!\n";
+    std::fs::write(&vcd, text).unwrap();
+    let mut ws = Workspace::open(&vcd).unwrap();
+    ws.add_decode(decode(
+        "s",
+        "spi",
+        "",
+        &[("sclk", "sclk"), ("cs", "cs"), ("mosi", "mosi")],
+        &[("bits", "1")],
+    ))
+    .unwrap();
+    assert_eq!(table(stream(&ws, "s.bit")), [row(20, 31, &["1"])]);
+}
+
+/// A protocol without a clock is fed the changes of its own roles, not of every signal: a clock
+/// and a signal it doesn't name change nothing.
+#[test]
+fn spi_ignores_other_signals() {
+    let dir = Dir::new("spi-noisy");
+    let pins = [("sclk", "sclk"), ("cs", "cs"), ("mosi", "mosi")];
+    let build = |extra: bool| {
+        // 4 bits out, 1 0 1 1 (0xB), sclk rising at 20, 40, 60 and 80, cs low from 10 to 100
+        let mut ev: Vec<(u64, String)> = [
+            (0, "0!"),
+            (0, "1\""),
+            (0, "0#"),
+            (10, "0\""),
+            (15, "1#"),
+            (20, "1!"),
+            (30, "0!"),
+            (35, "0#"),
+            (40, "1!"),
+            (50, "0!"),
+            (55, "1#"),
+            (60, "1!"),
+            (70, "0!"),
+            (75, "1#"),
+            (80, "1!"),
+            (90, "0!"),
+            (100, "1\""),
+        ]
+        .iter()
+        .map(|&(t, l)| (t, l.to_string()))
+        .collect();
+        if extra {
+            ev.extend(
+                (0..=120)
+                    .step_by(5)
+                    .map(|t| (t, format!("{}$", (t / 5) % 2))),
+            );
+            ev.extend(
+                (0..=120)
+                    .step_by(7)
+                    .map(|t| (t, format!("{}%", (t / 7) % 2))),
+            );
+        }
+        ev.sort_by_key(|e| e.0);
+        let mut text = String::from(
+            "$timescale 1ns $end\n$scope module top $end\n$var wire 1 ! sclk $end\n$var wire 1 \" cs $end\n$var wire 1 # mosi $end\n",
+        );
+        if extra {
+            text += "$var wire 1 $ clk $end\n$var wire 1 % other $end\n";
+        }
+        text += "$upscope $end\n$enddefinitions $end\n";
+        let mut at = None;
+        for (t, line) in ev {
+            if at != Some(t) {
+                text += &format!("#{t}\n");
+                at = Some(t);
+            }
+            text += &format!("{line}\n");
+        }
+        let path = dir.0.join(if extra { "noisy.vcd" } else { "plain.vcd" });
+        std::fs::write(&path, text).unwrap();
+        let mut ws = Workspace::open(&path).unwrap();
+        ws.add_decode(decode("f", "spi", "", &pins, &[("bits", "4")]))
+            .unwrap();
+        table(stream(&ws, "f.word"))
+    };
+    let plain = build(false);
+    assert_eq!(plain, [row(20, 90, &["11", "1"])]);
+    assert_eq!(build(true), plain);
 }
 
 #[test]
@@ -1520,7 +1763,7 @@ fn results_and_sets() {
             .iter()
             .map(|c| c.name.as_str())
             .collect::<Vec<_>>(),
-        ["rule", "kind"]
+        ["rule", "detail", "severity", "kind"]
     );
 }
 
@@ -1553,7 +1796,7 @@ fn set_errors_and_briefs() {
     );
 
     // `protocols <name>` in short: a built-in, a generic one, one of the session's, none
-    let brief = |n: &str, ws: &Workspace| wtf_core::protocol::brief(n, &ws.protocols);
+    let brief = |n: &str, ws: &Workspace| wtf_core::protocol::brief(n, ws.sources());
     assert!(
         brief("axilite", &ws)
             .unwrap()
@@ -1570,6 +1813,7 @@ fn set_errors_and_briefs() {
         when: "valid && ready".into(),
         fields: vec![("op".into(), "cmd[3:0]".into())],
         roles: vec!["valid".into(), "ready".into(), "cmd".into()],
+        wasm: None,
     })
     .unwrap();
     assert_eq!(
@@ -1659,7 +1903,11 @@ fn protocol_of_a_search() {
     );
     // the lines read back as what they say
     assert_eq!(
-        wtf_core::command::parse_decode(d.line().strip_prefix("decode ").unwrap()).unwrap(),
+        wtf_core::command::parse_decode(
+            d.line().strip_prefix("decode ").unwrap(),
+            wtf_core::protocol::Sources::default()
+        )
+        .unwrap(),
         d
     );
     wtf_core::command::run(&mut ws, &p.line()).unwrap();
@@ -1680,4 +1928,443 @@ fn free_names() {
     assert_eq!(ws.free_name("ev"), "ev");
     wtf_core::command::run(&mut ws, "protocol ev roles=a when=a").unwrap();
     assert_eq!(ws.free_name("ev"), "ev1");
+}
+
+/// The packets fixture's signals: every role but the reset and `tuser`.
+const PACKETS: &[(&str, &str)] = &[
+    ("tvalid", "tvalid"),
+    ("tready", "tready"),
+    ("tdata", "tdata"),
+    ("tlast", "tlast"),
+    ("tkeep", "tkeep"),
+    ("tstrb", "tstrb"),
+    ("tid", "tid"),
+    ("tdest", "tdest"),
+];
+
+/// axis_packets.vcd: clk rises at 5, 15 ...; two packets by (tid, tdest), one of them left open,
+/// a beat whose tkeep drops a byte tstrb keeps, then an x payload and a tvalid that falls.
+#[test]
+fn axis_frames_per_tid_tdest() {
+    let mut ws = open("axis_packets.vcd");
+    assert_eq!(
+        ws.add_decode(decode("rx", "axis", "clk", PACKETS, &[]))
+            .unwrap(),
+        var(&ws, "rx.beat")
+    );
+    // beats, tid, tdest, len (bytes tkeep marks), pos (tstrb's), the bytes, complete
+    let frames = table(stream(&ws, "rx.frame"));
+    let want = [
+        row(
+            15,
+            35,
+            &["2", "1", "0", "8", "0", "a0 00 00 00 a1 00 00 00", "1"],
+        ),
+        row(35, 45, &["1", "2", "3", "3", "0", "00 00 00", "0"]),
+        row(45, 55, &["1", "1", "0", "4", "0", "c0 00 00 00", "0"]),
+    ];
+    assert_eq!(frames, want);
+    assert_eq!(
+        stream(&ws, "rx.frame")
+            .schema
+            .iter()
+            .map(|f| f.name.as_str())
+            .collect::<Vec<_>>(),
+        ["beats", "tid", "tdest", "len", "pos", "data", "complete"]
+    );
+    // the beat's fields follow the spec's order, those given only
+    assert_eq!(
+        stream(&ws, "rx.beat")
+            .schema
+            .iter()
+            .map(|f| f.name.as_str())
+            .collect::<Vec<_>>(),
+        ["tdata", "tkeep", "tstrb", "tlast", "tid", "tdest"]
+    );
+    // one rule per packet, found as a signal
+    ws.search("rx.frame.tid == 2", true, 1).unwrap();
+    assert_eq!(ws.view.cursor, 35);
+}
+
+/// axis_reset.vcd: aresetn low for the first cycles with tvalid up, then a beat after it is
+/// released; `reset_active=high` reads the same signal upside down.
+#[test]
+fn axis_reset_takes_no_beats() {
+    let mut ws = open("axis_reset.vcd");
+    let reset = [
+        ("tvalid", "tvalid"),
+        ("tready", "tready"),
+        ("tdata", "tdata"),
+        ("aresetn", "aresetn"),
+    ];
+    ws.add_decode(decode("rx", "axis", "clk", &reset, &[]))
+        .unwrap();
+    // tvalid up in reset is an error, and the cycle it is released is still too early
+    assert_eq!(
+        table(stream(&ws, "rx.errors")),
+        [
+            row(5, 15, &["reset", "tvalid in reset", "error"]),
+            row(
+                15,
+                25,
+                &["reset", "tvalid in the cycle reset is released", "error"]
+            )
+        ]
+    );
+    assert_eq!(table(stream(&ws, "rx.beat")), [row(25, 35, &["160"])]);
+    // read as active high, the same signal holds the other cycles: the first beat is out of it
+    let mut ws = open("axis_reset.vcd");
+    ws.add_decode(decode(
+        "rx",
+        "axis",
+        "clk",
+        &reset,
+        &[("reset_active", "high")],
+    ))
+    .unwrap();
+    // the same signal holds the other cycles, so the beat is the early one
+    assert_eq!(
+        table(stream(&ws, "rx.errors")),
+        [
+            row(15, 25, &["reset", "tvalid in reset", "error"]),
+            row(25, 35, &["reset", "tvalid in reset", "error"])
+        ]
+    );
+    assert_eq!(table(stream(&ws, "rx.beat")), [row(5, 15, &["160"])]);
+}
+
+/// What `protocols uart` says: the one role, the params, the two streams, and the three rules its
+/// `errors` carries — with their severity, which the step's `notes` line could not give.
+#[test]
+fn host_uart_describe() {
+    let text =
+        wtf_core::protocol::describe("uart", wtf_core::protocol::Sources::default()).unwrap();
+    assert!(
+        text.starts_with("uart: UART: bytes from an idle-high line (idle=low: inverted) at a baud rate, framing and parity errors, breaks\nroles: line (required)"),
+        "{text}"
+    );
+    assert!(text.contains("\n  baud bits parity stop idle\n"), "{text}");
+    assert!(text.contains("  <name>.byte: data\n"), "{text}");
+    assert!(
+        text.contains("  <name>.errors: rule detail severity (violations)"),
+        "{text}"
+    );
+    assert_eq!(
+        text.lines()
+            .filter(|l| l.starts_with("        ") && l.contains(", spec "))
+            .count(),
+        3,
+        "{text}"
+    );
+}
+
+/// What `protocols axis` says: the roles, the defaults that make a short instance decode, and the
+/// streams the trait makes.
+#[test]
+fn host_defaults_and_describe() {
+    let text =
+        wtf_core::protocol::describe("axis", wtf_core::protocol::Sources::default()).unwrap();
+    assert!(
+        text.starts_with("axis: AXI4-Stream: beats, packets by tlast and (tid, tdest), the handshake's errors\nroles: tvalid (required)"),
+        "{text}"
+    );
+    // a signal not given reads a default, not an error: that is what makes a short instance decode
+    assert!(text.contains("  when not given: tready 1, tdata 0, tkeep bytes of tdata, tstrb same as tkeep, tlast 1, tid 0, tdest 0, tuser 0"), "{text}");
+    assert!(text.contains("\n  reset_active\n"), "{text}");
+    assert!(
+        text.contains("  <name>.errors: rule detail severity (violations)"),
+        "{text}"
+    );
+    assert_eq!(
+        text.lines()
+            .filter(|l| l.starts_with("        ") && l.contains(", spec "))
+            .count(),
+        8,
+        "{text}"
+    );
+}
+
+/// A protocol from a file, as a later phase will make one: a card, and a factory the registry
+/// calls for each instance.
+struct Beats;
+
+impl wtf_core::protocol::Protocol for Beats {
+    fn desc(&self) -> &wtf_core::protocol::Desc {
+        static DESC: std::sync::OnceLock<wtf_core::protocol::Desc> = std::sync::OnceLock::new();
+        DESC.get_or_init(|| wtf_core::protocol::Desc {
+            streams: vec![wtf_core::protocol::StreamDesc {
+                name: "beat",
+                fields: Vec::new(),
+                violations: false,
+                about: Vec::new(),
+                from: &[],
+            }],
+        })
+    }
+
+    fn feed(
+        &mut self,
+        start: u64,
+        end: u64,
+        _roles: &wtf_core::protocol::Roles<'_>,
+    ) -> Vec<wtf_core::protocol::Out> {
+        vec![wtf_core::protocol::Out::Record {
+            stream: "beat",
+            start,
+            end,
+            fields: Vec::new(),
+        }]
+    }
+
+    fn finish(&mut self) -> Vec<wtf_core::protocol::Out> {
+        Vec::new()
+    }
+}
+
+fn loaded(name: &'static str, about: &'static str) -> std::sync::Arc<wtf_core::protocol::Loaded> {
+    use wtf_core::protocol;
+    const ROLES: &[protocol::RoleDef] = &[protocol::RoleDef {
+        name: "valid",
+        required: true,
+        default: None,
+        about: "a beat this cycle",
+    }];
+    let make: protocol::Factory =
+        std::sync::Arc::new(|_, _, _| Ok(Box::new(Beats) as Box<dyn protocol::Protocol>));
+    let def = protocol::Def {
+        about,
+        example: "decode b clock=<clk> prefix=<prefix> valid=<signal>",
+        clocked: true,
+        sides: &[],
+        roles: ROLES,
+        params: &[],
+        make: protocol::NO_MAKE,
+    };
+    std::sync::Arc::new(protocol::Loaded { name, def, make })
+}
+
+/// Spec §16: protocols loaded from files are the registry's third source — listed between the
+/// on-streams and the session's, described and decoded as a built-in is, and their names kept.
+#[test]
+fn loaded_protocols() {
+    use wtf_core::protocol;
+    let mut ws = open("axilite.vcd");
+    ws.loaded
+        .push(loaded("beats", "one beat a cycle, from a file"));
+
+    // listed between the on-streams protocols and the session's own
+    let list = protocol::list(ws.sources());
+    assert!(list.contains("\nloaded from files: decode <name> <protocol> ...\n  beats    one beat a cycle, from a file\nprotocols <name>"), "{list}");
+
+    // described and briefed as a built-in is
+    let text = protocol::describe("beats", ws.sources()).unwrap();
+    assert!(
+        text.starts_with("beats: one beat a cycle, from a file\nroles: valid (required)"),
+        "{text}"
+    );
+    assert!(text.contains("  <name>.beat:"), "{text}");
+    assert_eq!(
+        protocol::brief("beats", ws.sources()).unwrap(),
+        "decode <name> beats clock=<clk> prefix=<prefix>\n\none beat a cycle, from a file\nRoles: valid\nStreams: beat"
+    );
+
+    // decoded on signals: its factory makes the instance
+    ws.add_decode(decode("b", "beats", "aclk", &[], &[("prefix", "s_axi_aw")]))
+        .unwrap();
+    assert!(!stream(&ws, "b.beat").records.is_empty());
+
+    // a loaded name is taken: the session may not define another, and `free_name` goes around it
+    let cmd = Sampler {
+        name: "beats".into(),
+        when: "valid".into(),
+        fields: Vec::new(),
+        roles: vec!["valid".into()],
+        wasm: None,
+    };
+    assert_eq!(
+        ws.add_protocol(cmd).unwrap_err(),
+        "beats is a protocol loaded from a file; give another name"
+    );
+    assert_eq!(ws.free_name("beats"), "beats1");
+
+    // a built-in shadows a loaded one of its name
+    ws.loaded.push(loaded("axis", "never reached"));
+    assert!(
+        protocol::describe("axis", ws.sources())
+            .unwrap()
+            .starts_with("axis: AXI4-Stream"),
+        "a loaded axis must not win"
+    );
+
+    // `:e` reads the trace again; the loaded protocol is the process's, so the decode stays
+    ws.reload().unwrap();
+    assert!(!stream(&ws, "b.beat").records.is_empty());
+}
+
+/// Only tvalid and the clock: tready reads 1, tlast reads 1, the rest read 0.
+#[test]
+fn axis_tvalid_only_decodes() {
+    let mut ws = open("axis.vcd");
+    ws.add_decode(decode("v", "axis", "clk", &[("tvalid", "tvalid")], &[]))
+        .unwrap();
+    // no payload role given, so the beat carries no fields — but every tvalid cycle is one
+    assert_eq!(table(stream(&ws, "v.beat"))[0], row(15, 25, &[]));
+    // tlast reads 1: every beat ends its own packet, with no bytes and complete
+    assert_eq!(
+        stream(&ws, "v.frame")
+            .schema
+            .iter()
+            .map(|f| f.name.as_str())
+            .collect::<Vec<_>>(),
+        ["beats", "len", "complete"]
+    );
+    assert_eq!(
+        table(stream(&ws, "v.frame"))[0],
+        row(15, 25, &["1", "0", "1"])
+    );
+}
+
+/// The error rules the packets fixture reaches: tkeep where tstrb is 1, and a tvalid that falls.
+/// (Its x payload reports the `payload_unknown` warning, asserted in `axis_warning_rules`.)
+/// Twakeup's drop needs a stalled cycle with `twakeup` high, which the packets fixture never sets:
+/// that rule, and the handshake-unknown warnings, are pinned by `axis_wakeup.vcd` below.
+#[test]
+fn axis_error_rules() {
+    let mut ws = open("axis_packets.vcd");
+    let signals: &[(&str, &str)] = &[
+        ("tvalid", "tvalid"),
+        ("tready", "tready"),
+        ("tdata", "tdata"),
+        ("tlast", "tlast"),
+        ("tkeep", "tkeep"),
+        ("tstrb", "tstrb"),
+        ("tid", "tid"),
+        ("tdest", "tdest"),
+    ];
+    ws.add_decode(decode("rx", "axis", "clk", signals, &[]))
+        .unwrap();
+    let errors: Vec<_> = table(stream(&ws, "rx.errors"))
+        .into_iter()
+        .filter(|(_, _, f)| f[2] == "error")
+        .collect();
+    assert_eq!(
+        errors,
+        [
+            row(35, 45, &["keep", "tkeep 0, tstrb 1 on byte 0", "error"]),
+            row(75, 85, &["dropped", "tvalid fell before tready", "error"])
+        ]
+    );
+    // twakeup's drop: a stall with `twakeup` high, then low while the transfer still waits
+    let mut ws = open("axis_wakeup.vcd");
+    ws.add_decode(decode(
+        "rx",
+        "axis",
+        "clk",
+        &[
+            ("tvalid", "tvalid"),
+            ("tready", "tready"),
+            ("twakeup", "twakeup"),
+        ],
+        &[],
+    ))
+    .unwrap();
+    let errors: Vec<_> = table(stream(&ws, "rx.errors"))
+        .into_iter()
+        .filter(|(_, _, f)| f[2] == "error")
+        .collect();
+    assert_eq!(
+        errors,
+        [
+            row(
+                15,
+                25,
+                &["wakeup", "twakeup fell while the transfer stalled", "error"]
+            ),
+            row(25, 35, &["dropped", "tvalid fell before tready", "error"])
+        ]
+    );
+}
+
+/// The warning rules: an x payload while tvalid (packets fixture), and twakeup's timing plus x/z
+/// on the handshake itself (`axis_wakeup.vcd`, which stalls without ever transferring).
+#[test]
+fn axis_warning_rules() {
+    let mut ws = open("axis_packets.vcd");
+    let signals: &[(&str, &str)] = &[
+        ("tvalid", "tvalid"),
+        ("tready", "tready"),
+        ("tdata", "tdata"),
+        ("tlast", "tlast"),
+        ("tkeep", "tkeep"),
+        ("tstrb", "tstrb"),
+        ("tid", "tid"),
+        ("tdest", "tdest"),
+    ];
+    ws.add_decode(decode("rx", "axis", "clk", signals, &[]))
+        .unwrap();
+    let warnings: Vec<_> = table(stream(&ws, "rx.errors"))
+        .into_iter()
+        .filter(|(_, _, f)| f[2] == "warning")
+        .collect();
+    assert_eq!(
+        warnings,
+        [row(
+            65,
+            75,
+            &["payload_unknown", "tdata is x or z while tvalid", "warning"]
+        )]
+    );
+    let mut ws = open("axis_wakeup.vcd");
+    ws.add_decode(decode(
+        "rx",
+        "axis",
+        "clk",
+        &[
+            ("tvalid", "tvalid"),
+            ("tready", "tready"),
+            ("twakeup", "twakeup"),
+        ],
+        &[],
+    ))
+    .unwrap();
+    let warnings: Vec<_> = table(stream(&ws, "rx.errors"))
+        .into_iter()
+        .filter(|(_, _, f)| f[2] == "warning")
+        .collect();
+    assert_eq!(
+        warnings,
+        [
+            row(
+                5,
+                15,
+                &[
+                    "wakeup_early",
+                    "twakeup in the same cycle as tvalid",
+                    "warning"
+                ]
+            ),
+            row(
+                35,
+                45,
+                &["unknown", "tvalid is x or z out of reset", "warning"]
+            ),
+            row(
+                45,
+                55,
+                &["unknown", "tready is x or z out of reset", "warning"]
+            ),
+        ]
+    );
+}
+
+/// A protocol from a file takes its params from its card: `spin=` is one of `probe`'s, not a
+/// signal of the instance (spec §16 "A protocol from a file").
+#[test]
+fn wasm_protocol_params() {
+    let mut ws = open("simple.vcd");
+    ws.loaded.push(common::loaded("probe", &["spin"]));
+    wtf_core::command::run(&mut ws, "decode p probe clock=top.clk spin=3").unwrap();
+    let d = ws.decodes.iter().find(|d| d.name == "p").unwrap();
+    assert!(d.signals.is_empty(), "{:?}", d.signals);
+    assert_eq!(d.params, vec![("spin".to_string(), "3".to_string())]);
 }

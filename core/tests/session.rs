@@ -275,3 +275,42 @@ fn files() {
     assert_eq!(names(&back), ["clk"]);
     assert!(session::write(&dir.0.join("no/such/dir/s.toml"), "x").is_err());
 }
+
+/// A `[[protocol]] wasm=` entry the file is loaded for: the entry is the file's, so it reads and
+/// writes back as its name and that file (spec §11).
+#[test]
+fn wasm_protocol_round_trip() {
+    let mut ws = open();
+    ws.loaded.push(loaded("probe", &[]));
+    let text = "\n[[protocol]]\nname = \"probe\"\nwasm = \"dir/probe.wasm\"\n";
+    assert_eq!(session::apply(&mut ws, text), Ok(vec![]));
+    let p = ws.protocols.iter().find(|p| p.name == "probe").unwrap();
+    assert_eq!(
+        (p.wasm.as_deref(), p.when.as_str(), p.roles.len()),
+        (Some("dir/probe.wasm"), "", 0)
+    );
+    let back = session::to_toml(&ws);
+    assert!(
+        back.contains("[[protocol]]\nname = \"probe\"\nwasm = \"dir/probe.wasm\"\n"),
+        "{back}"
+    );
+    assert!(!back.contains("roles = []"), "{back}");
+}
+
+/// The same entry with the file not loaded: it says so and keeps the entry, so the session still
+/// names its protocol and the next `:e` tries the file again (spec §11).
+#[test]
+fn wasm_protocol_without_the_load() {
+    let mut ws = open();
+    let text = "\n[[protocol]]\nname = \"probe\"\nwasm = \"dir/probe.wasm\"\n";
+    assert_eq!(
+        session::apply(&mut ws, text),
+        Ok(vec![
+            "protocol probe: wasm dir/probe.wasm is not loaded".into()
+        ])
+    );
+    assert!(
+        session::to_toml(&ws)
+            .contains("[[protocol]]\nname = \"probe\"\nwasm = \"dir/probe.wasm\"\n")
+    );
+}

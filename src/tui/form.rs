@@ -13,7 +13,7 @@ use nucleo_matcher::{Config, Matcher, Utf32Str};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
-use wtf_core::protocol::{self, Found};
+use wtf_core::protocol::Found;
 use wtf_core::stream::Decode;
 use wtf_core::workspace::Workspace;
 use wtf_core::workspace::reason::Reasons;
@@ -121,13 +121,14 @@ pub enum Fill {
     Close,
 }
 
-/// The protocols the form decodes: the built-in ones, then the session's (spec §16). `frame`,
-/// `pair` and `check` work on streams and rules: their `:decode` line is typed.
+/// The protocols the form decodes: the built-in ones, the protocols loaded from files, then the
+/// session's own (spec §16). `frame`, `pair` and `check` work on streams and rules: their
+/// `:decode` line is typed.
 pub fn protocols(ws: &Workspace) -> Vec<String> {
-    protocol::BUILTINS
-        .iter()
-        .map(|s| s.to_string())
-        .chain(ws.protocols.iter().map(|p| p.name.clone()))
+    ws.sources()
+        .names()
+        .into_iter()
+        .map(str::to_string)
         .collect()
 }
 
@@ -316,18 +317,20 @@ impl Form {
                 value,
             });
         };
-        if let Some(b) = protocol::builtin(&name) {
-            if b.clocked {
+        if let Some(any) = ws.sources().get(&name) {
+            let def = any.def();
+            if def.clocked() {
                 add("clock", Kind::Clock);
             }
             add("prefix", Kind::Prefix);
-            b.required
-                .iter()
+            let (required, optional) = def.roles();
+            required
+                .into_iter()
                 .for_each(|r| add(r, Kind::Role { required: true }));
-            b.optional
-                .iter()
+            optional
+                .into_iter()
                 .for_each(|r| add(r, Kind::Role { required: false }));
-            b.params.iter().for_each(|p| add(p, Kind::Param));
+            def.params().iter().for_each(|p| add(p, Kind::Param));
         } else if let Some(p) = ws.protocols.iter().find(|p| p.name == name) {
             add("clock", Kind::Clock);
             p.roles
@@ -404,6 +407,7 @@ impl Form {
                 .map(|(n, e)| (n.trim().to_string(), e.trim().to_string()))
                 .filter(|(n, e)| !n.is_empty() || !e.is_empty())
                 .collect(),
+            wasm: None,
         }
     }
 
@@ -608,7 +612,10 @@ impl App {
                 },
                 self.range_vars(),
             ),
-            l => (wtf_core::command::parse_decode(l)?, Vec::new()),
+            l => (
+                wtf_core::command::parse_decode(l, self.ws.sources())?,
+                Vec::new(),
+            ),
         };
         self.form = Some(Form::new(&mut self.ws, &d, &self.found, &from));
         self.form_check();
@@ -851,7 +858,10 @@ impl App {
         }
         let (line, name) = (f.line(), f.value("name").to_string());
         let taken = match f.protocol {
-            true => self.ws.protocols.iter().any(|p| p.name == name),
+            true => {
+                self.ws.sources().get(&name).is_some()
+                    || self.ws.protocols.iter().any(|p| p.name == name)
+            }
             false => {
                 self.ws.decodes.iter().any(|d| d.name == name)
                     && f.editing.as_deref() != Some(name.as_str())
@@ -875,13 +885,15 @@ impl App {
                 .ws
                 .check_protocol(&f.sampler(), &f.role_signals())
                 .map_err(|r| f.wrong(&r)),
-            false => match wtf_core::command::parse_decode(&line["decode ".len()..]) {
-                Ok(d) => self.ws.check_decode(&d).map_err(|r| f.wrong(&r)),
-                Err(e) => Err(Wrong {
-                    text: e,
-                    fields: Vec::new(),
-                }),
-            },
+            false => {
+                match wtf_core::command::parse_decode(&line["decode ".len()..], self.ws.sources()) {
+                    Ok(d) => self.ws.check_decode(&d).map_err(|r| f.wrong(&r)),
+                    Err(e) => Err(Wrong {
+                        text: e,
+                        fields: Vec::new(),
+                    }),
+                }
+            }
         };
         if let Some(f) = &mut self.form {
             f.check = r;
@@ -949,7 +961,7 @@ impl App {
         );
         // edited: made again in place, its rows kept where it still makes their streams
         let r = match editing {
-            true => wtf_core::command::parse_decode(&line["decode ".len()..])
+            true => wtf_core::command::parse_decode(&line["decode ".len()..], self.ws.sources())
                 .and_then(|d| self.ws.redecode(d))
                 .map(|failed| {
                     self.msg = Some(match failed.is_empty() {
@@ -1195,7 +1207,11 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
                     .count();
                 Some(format!("plays {n} of {} roles", roles.len()))
             }
-            Kind::Protocol => protocol::builtin(field.value.trim()).map(|b| b.about.to_string()),
+            Kind::Protocol => app
+                .ws
+                .sources()
+                .get(field.value.trim())
+                .map(|p| p.def().about().to_string()),
             Kind::Param if field.value.is_empty() => Some("default".into()),
             Kind::Value { count } => Some(format!(
                 "{count} {}",

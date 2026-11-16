@@ -29,18 +29,22 @@ pub fn make(
 ) -> Result<Box<dyn Decoder>, String> {
     match name {
         "frame" => Frame::new(input, params, fs_per_tick).map(|f| Box::new(f) as Box<dyn Decoder>),
-        "spi" => Spi::new(input, params).map(|f| Box::new(f) as Box<dyn Decoder>),
-        "uart" => Uart::new(params, fs_per_tick).map(|f| Box::new(f) as Box<dyn Decoder>),
-        _ => Err(format!(
-            "unknown decoder: {name} (decoders: frame, spi, uart)"
-        )),
+        _ => Err(format!("unknown decoder: {name} (decoders: frame)")),
     }
 }
 
 /// Feed a whole stream through a decoder: the stream `name` it makes.
-pub fn run(name: &str, input: &Stream, mut d: Box<dyn Decoder>) -> Stream {
+pub fn run(name: &str, input: &Stream, d: Box<dyn Decoder>) -> Stream {
+    Stream {
+        inputs: vec![input.name.clone()],
+        ..run_records(name, &input.records, d)
+    }
+}
+
+/// `run` over records alone, for a decoder fed from a stream it copies none of.
+pub fn run_records(name: &str, records: &[Record], mut d: Box<dyn Decoder>) -> Stream {
     // shortcut (#23): the whole stream at once; decode by time window if huge traces make it slow.
-    let mut records: Vec<Record> = input.records.iter().flat_map(|r| d.feed(r)).collect();
+    let mut records: Vec<Record> = records.iter().flat_map(|r| d.feed(r)).collect();
     records.extend(d.finish());
     records.sort_by_key(|r| r.start);
     Stream {
@@ -48,7 +52,7 @@ pub fn run(name: &str, input: &Stream, mut d: Box<dyn Decoder>) -> Stream {
         schema: d.schema(),
         records,
         violations: d.violations(),
-        inputs: vec![input.name.clone()],
+        inputs: Vec::new(),
     }
 }
 
@@ -301,7 +305,7 @@ impl Decoder for Frame {
 
 /// A value's bytes as hex, the lowest first (`xx` where a bit is unknown); with `keep`, only those
 /// whose bit in it is 1.
-fn data_bytes(v: &Option<Val>, keep: Option<&Val>) -> Vec<String> {
+pub(crate) fn data_bytes(v: &Option<Val>, keep: Option<&Val>) -> Vec<String> {
     let Some(Val::Bits(b)) = v else {
         return Vec::new();
     };
@@ -620,7 +624,7 @@ pub fn pair(
 }
 
 /// A param's value: the one given, or `default`; `what` says what it must be.
-fn param<T: std::str::FromStr>(
+pub(crate) fn param<T: std::str::FromStr>(
     params: &[(String, String)],
     name: &str,
     default: Option<T>,
@@ -644,520 +648,11 @@ fn param<T: std::str::FromStr>(
     }
 }
 
-/// Bits, MSB first, as a number's hex digits for `width` bits (`x` digits where a bit isn't 0 or 1).
-fn hex(b: &str) -> String {
-    let digits = b.len().div_ceil(4);
-    match u64::from_str_radix(b, 2) {
-        Ok(n) if b.len() <= 64 => format!("{n:0digits$x}"),
-        _ => "x".repeat(digits),
-    }
-}
-
-#[derive(Clone, Copy, PartialEq)]
-enum SpiOut {
-    Bit,
-    Word,
-    Transfer,
-}
-
-/// `spi`: SPI from the changes of `{cs, sclk, mosi}` or `{cs, sclk, mosi, miso}` (the field
-/// `value`), cs active low (`cs_active=high`: high). A bit is sampled at each edge of sclk that
-/// `mode` (0 - 3, CPOL and CPHA) samples on, rising for modes 0 and 3, falling for 1 and 2, with cs
-/// low, from the values just before it; it lasts to the next one, the last of a transfer to sclk's
-/// next edge. `bits` of them (MSB first, or LSB with `order=lsb`) make a word; a transfer runs
-/// from cs falling to cs rising, with its words as hex text. `out` picks the stream: `bit` (mosi,
-/// miso), `word` (mosi, miso, complete: 0 if cs rose first) or `transfer` (words, mosi, miso,
-/// complete: 0 if the trace ended first).
-pub struct Spi {
-    out: SpiOut,
-    rising: bool,
-    bits: usize,
-    lsb: bool,
-    miso: bool,
-    /// cs is active high: read inverted.
-    cs_high: bool,
-    prev: Option<Vec<u8>>,
-    end: Tick,
-    /// The bit sampled last, waiting for its end: its start, mosi, miso.
-    bit: Option<(Tick, u8, u8)>,
-    /// sclk's first other edge after it, where the last bit of a transfer ends.
-    shift: Option<Tick>,
-    /// The word being shifted in: its start, and its bits.
-    word: Option<(Tick, Vec<(u8, u8)>)>,
-    /// The transfer since cs fell: its start, and its words' mosi and miso.
-    transfer: Option<(Tick, Vec<String>, Vec<String>)>,
-}
-
-impl Spi {
-    fn new(input: &[Field], params: &[(String, String)]) -> Result<Self, String> {
-        let mut errors = Vec::new();
-        let miso = match input.first().and_then(|f| f.width) {
-            Some(3) => false,
-            Some(4) => true,
-            _ => {
-                errors.push(
-                    "spi: the input is {cs, sclk, mosi} or {cs, sclk, mosi, miso}, each 1 bit"
-                        .into(),
-                );
-                false
-            }
-        };
-        let mode = param(
-            params,
-            "mode",
-            Some(0u8),
-            |m| *m < 4,
-            "0, 1, 2 or 3",
-            &mut errors,
-        );
-        let bits = param(
-            params,
-            "bits",
-            Some(8usize),
-            |b| (1..=64).contains(b),
-            "1 - 64",
-            &mut errors,
-        );
-        let order = param(
-            params,
-            "order",
-            Some("msb".to_string()),
-            |o| o == "msb" || o == "lsb",
-            "msb or lsb",
-            &mut errors,
-        );
-        let cs_active = param(
-            params,
-            "cs_active",
-            Some("low".to_string()),
-            |a| a == "low" || a == "high",
-            "low or high",
-            &mut errors,
-        );
-        let out = match param(
-            params,
-            "out",
-            None::<String>,
-            |o| ["bit", "word", "transfer"].contains(&o.as_str()),
-            "bit, word or transfer",
-            &mut errors,
-        )
-        .as_deref()
-        {
-            Some("bit") => SpiOut::Bit,
-            Some("word") => SpiOut::Word,
-            _ => SpiOut::Transfer,
-        };
-        if let Some((k, _)) = params
-            .iter()
-            .find(|p| !["mode", "bits", "order", "cs_active", "out"].contains(&p.0.as_str()))
-        {
-            errors.push(format!("no param {k} (mode, bits, order, cs_active)"));
-        }
-        if !errors.is_empty() {
-            return Err(format!("spi: {}", errors.join("; ")));
-        }
-        let mode = mode.unwrap_or(0);
-        Ok(Spi {
-            out,
-            rising: mode == 0 || mode == 3,
-            bits: bits.unwrap_or(8),
-            lsb: order.as_deref() == Some("lsb"),
-            miso,
-            cs_high: cs_active.as_deref() == Some("high"),
-            prev: None,
-            end: 0,
-            bit: None,
-            shift: None,
-            word: None,
-            transfer: None,
-        })
-    }
-
-    /// The sampled bit ends at `t`: shifted into the word, which ends with it once full.
-    fn end_bit(&mut self, t: Tick, out: &mut Vec<Record>) {
-        let Some((start, mosi, miso)) = self.bit.take() else {
-            return;
-        };
-        if self.out == SpiOut::Bit {
-            let mut fields = vec![Some(Val::Bits((mosi as char).into()))];
-            if self.miso {
-                fields.push(Some(Val::Bits((miso as char).into())));
-            }
-            out.push(Record {
-                start,
-                end: t,
-                fields,
-            });
-        }
-        let word = self.word.get_or_insert((start, Vec::new()));
-        word.1.push((mosi, miso));
-        if word.1.len() == self.bits {
-            self.end_word(t, true, out);
-        }
-    }
-
-    fn end_word(&mut self, t: Tick, complete: bool, out: &mut Vec<Record>) {
-        let Some((start, mut bits)) = self.word.take() else {
-            return;
-        };
-        if self.lsb {
-            bits.reverse();
-        }
-        let line = |k: usize| {
-            bits.iter()
-                .map(|b| [b.0, b.1][k] as char)
-                .collect::<String>()
-        };
-        let (mosi, miso) = (line(0), line(1));
-        if let Some(tr) = &mut self.transfer {
-            tr.1.push(hex(&mosi));
-            tr.2.push(hex(&miso));
-        }
-        if self.out == SpiOut::Word {
-            let mut fields = vec![Some(Val::Bits(mosi))];
-            if self.miso {
-                fields.push(Some(Val::Bits(miso)));
-            }
-            fields.push(bits_val(complete));
-            out.push(Record {
-                start,
-                end: t,
-                fields,
-            });
-        }
-    }
-
-    fn end_transfer(&mut self, t: Tick, complete: bool, out: &mut Vec<Record>) {
-        let Some((start, mosi, miso)) = self.transfer.take() else {
-            return;
-        };
-        if self.out == SpiOut::Transfer {
-            let mut fields = vec![
-                Some(Val::Bits(format!("{:032b}", mosi.len()))),
-                Some(Val::Text(mosi.join(" "))),
-            ];
-            if self.miso {
-                fields.push(Some(Val::Text(miso.join(" "))));
-            }
-            fields.push(bits_val(complete));
-            out.push(Record {
-                start,
-                end: t,
-                fields,
-            });
-        }
-    }
-}
-
 /// A level read the other way round; x and z stay.
-fn invert(b: u8) -> u8 {
+pub(crate) fn invert(b: u8) -> u8 {
     match b {
         b'0' => b'1',
         b'1' => b'0',
         b => b,
-    }
-}
-
-fn bits_val(b: bool) -> Option<Val> {
-    Some(Val::Bits(if b { "1" } else { "0" }.into()))
-}
-
-impl Decoder for Spi {
-    fn schema(&self) -> Vec<Field> {
-        let w = match self.out {
-            SpiOut::Bit => Some(1),
-            SpiOut::Word => Some(self.bits as u32),
-            SpiOut::Transfer => None,
-        };
-        let mut out = Vec::new();
-        if self.out == SpiOut::Transfer {
-            out.push(Field {
-                name: "words".into(),
-                width: Some(32),
-                time: false,
-                signed: false,
-            });
-        }
-        out.push(Field {
-            name: "mosi".into(),
-            width: w,
-            time: false,
-            signed: false,
-        });
-        if self.miso {
-            out.push(Field {
-                name: "miso".into(),
-                width: w,
-                time: false,
-                signed: false,
-            });
-        }
-        if self.out != SpiOut::Bit {
-            out.push(Field {
-                name: "complete".into(),
-                width: Some(1),
-                time: false,
-                signed: false,
-            });
-        }
-        out
-    }
-
-    fn feed(&mut self, r: &Record) -> Vec<Record> {
-        let mut out = Vec::new();
-        let Some(Val::Bits(b)) = &r.fields[0] else {
-            return out;
-        };
-        // cs, sclk, mosi, miso; a missing miso reads as 0
-        let mut v = b.as_bytes().to_vec();
-        v.resize(4, b'0');
-        if self.cs_high {
-            v[0] = invert(v[0]);
-        }
-        let t = r.start;
-        self.end = r.end;
-        if let Some(p) = self.prev.replace(v.clone()) {
-            let edge = if self.rising {
-                (p[1], v[1]) == (b'0', b'1')
-            } else {
-                (p[1], v[1]) == (b'1', b'0')
-            };
-            if p[0] == b'0' && edge {
-                self.end_bit(t, &mut out);
-                self.bit = Some((t, p[2], p[3]));
-                self.shift = None;
-            } else if p[1] != v[1] && self.bit.is_some() {
-                self.shift = self.shift.or(Some(t));
-            }
-            if p[0] == b'0' && v[0] == b'1' {
-                // the last bit ends where sclk shifts, not where cs rises however long after
-                self.end_bit(self.shift.unwrap_or(t), &mut out);
-                self.end_word(t, false, &mut out);
-                self.end_transfer(t, true, &mut out);
-            }
-            if p[0] == b'1' && v[0] == b'0' {
-                self.transfer = Some((t, Vec::new(), Vec::new()));
-            }
-        }
-        out
-    }
-
-    fn finish(&mut self) -> Vec<Record> {
-        let mut out = Vec::new();
-        let end = self.end;
-        self.end_bit(end, &mut out);
-        self.end_word(end, false, &mut out);
-        self.end_transfer(end, false, &mut out);
-        out
-    }
-}
-
-/// `uart`: bytes from the changes of an idle-high line (the field `value`; `idle=low` for an inverted
-/// one) at `baud` bits a second:
-/// a frame starts where the line falls, and each bit is sampled in its middle: the start bit (a
-/// frame whose start bit isn't 0 was a glitch, and is dropped), `bits` data bits (5 - 9, LSB first),
-/// a `parity` bit (`none`, `even` or `odd`) and `stop` stop bits (1 or 2, each checked).
-/// `out` picks the stream: `byte` (data) or `errors` (violations, `rule`: `framing`, a stop bit
-/// that isn't 1, `parity`, or `break`, the line low for a whole frame, which makes no byte).
-pub struct Uart {
-    errors: bool,
-    /// Ticks a bit lasts.
-    period: f64,
-    bits: usize,
-    parity: Option<bool>,
-    stop: usize,
-    /// The line idles low: read inverted.
-    inverted: bool,
-    level: Option<u8>,
-    /// The frame being sampled: its start, and the bits sampled so far.
-    frame: Option<(Tick, Vec<u8>)>,
-}
-
-impl Uart {
-    fn new(params: &[(String, String)], fs_per_tick: Option<u128>) -> Result<Self, String> {
-        let mut errors = Vec::new();
-        let baud = param(
-            params,
-            "baud",
-            None::<f64>,
-            |b| *b > 0.0,
-            "a positive number of bits a second",
-            &mut errors,
-        );
-        let bits = param(
-            params,
-            "bits",
-            Some(8usize),
-            |b| (5..=9).contains(b),
-            "5 - 9",
-            &mut errors,
-        );
-        let parity = param(
-            params,
-            "parity",
-            Some("none".to_string()),
-            |p| ["none", "even", "odd"].contains(&p.as_str()),
-            "none, even or odd",
-            &mut errors,
-        );
-        let stop = param(
-            params,
-            "stop",
-            Some(1usize),
-            |s| *s == 1 || *s == 2,
-            "1 or 2",
-            &mut errors,
-        );
-        let idle = param(
-            params,
-            "idle",
-            Some("high".to_string()),
-            |i| i == "high" || i == "low",
-            "high or low",
-            &mut errors,
-        );
-        let out = param(
-            params,
-            "out",
-            None::<String>,
-            |o| o == "byte" || o == "errors",
-            "byte or errors",
-            &mut errors,
-        );
-        if let Some((k, _)) = params
-            .iter()
-            .find(|p| !["baud", "bits", "parity", "stop", "idle", "out"].contains(&p.0.as_str()))
-        {
-            errors.push(format!("no param {k} (baud, bits, parity, stop, idle)"));
-        }
-        if fs_per_tick.is_none() {
-            errors.push("the trace has no timescale to time bits by".into());
-        }
-        if !errors.is_empty() {
-            return Err(format!("uart: {}", errors.join("; ")));
-        }
-        let period = 1e15 / baud.unwrap_or(1.0) / fs_per_tick.unwrap_or(1) as f64;
-        let parity = match parity.as_deref() {
-            Some("even") => Some(false),
-            Some("odd") => Some(true),
-            _ => None,
-        };
-        Ok(Uart {
-            errors: out.as_deref() == Some("errors"),
-            period,
-            bits: bits.unwrap_or(8),
-            parity,
-            stop: stop.unwrap_or(1),
-            inverted: idle.as_deref() == Some("low"),
-            level: None,
-            frame: None,
-        })
-    }
-
-    /// Sample the open frame's bits whose middles fall before `t`, at the line's level; the record
-    /// of a frame sampled whole.
-    fn sample_until(&mut self, t: f64, out: &mut Vec<Record>) {
-        let need = 1 + self.bits + self.parity.is_some() as usize + self.stop;
-        while let (Some((start, got)), Some(level)) = (&mut self.frame, self.level) {
-            if *start as f64 + (got.len() as f64 + 0.5) * self.period >= t {
-                return;
-            }
-            got.push(level);
-            if got.len() == 1 && level != b'0' {
-                self.frame = None;
-            } else if got.len() == need {
-                let (start, got) = self.frame.take().unwrap();
-                out.extend(self.frame_record(start, &got));
-            }
-        }
-    }
-
-    fn frame_record(&self, start: Tick, got: &[u8]) -> Option<Record> {
-        let len = 1 + self.bits + self.parity.is_some() as usize + self.stop;
-        let end = start + (len as f64 * self.period).round() as Tick;
-        let data: String = got[1..=self.bits]
-            .iter()
-            .rev()
-            .map(|&b| b as char)
-            .collect();
-        // the line held low for the whole frame: a break, no byte
-        let brk = got.iter().all(|&b| b == b'0');
-        if brk {
-            return self.errors.then(|| Record {
-                start,
-                end,
-                fields: vec![Some(Val::Text("break".into()))],
-            });
-        }
-        if !self.errors {
-            return Some(Record {
-                start,
-                end,
-                fields: vec![Some(Val::Bits(data))],
-            });
-        }
-        let ones = got[1..=self.bits].iter().filter(|&&b| b == b'1').count();
-        let parity_bad = self
-            .parity
-            .is_some_and(|odd| (ones + (got[self.bits + 1] == b'1') as usize) % 2 != odd as usize);
-        let rule = if got[got.len() - self.stop..].iter().any(|&b| b != b'1') {
-            "framing"
-        } else if parity_bad {
-            "parity"
-        } else {
-            return None;
-        };
-        Some(Record {
-            start,
-            end,
-            fields: vec![Some(Val::Text(rule.into()))],
-        })
-    }
-}
-
-impl Decoder for Uart {
-    fn schema(&self) -> Vec<Field> {
-        if self.errors {
-            vec![Field {
-                name: "rule".into(),
-                width: None,
-                time: false,
-                signed: false,
-            }]
-        } else {
-            vec![Field {
-                name: "data".into(),
-                width: Some(self.bits as u32),
-                time: false,
-                signed: false,
-            }]
-        }
-    }
-
-    fn feed(&mut self, r: &Record) -> Vec<Record> {
-        let mut out = Vec::new();
-        let Some(Val::Bits(b)) = &r.fields[0] else {
-            return out;
-        };
-        let v = b.as_bytes()[0].to_ascii_lowercase();
-        let v = if self.inverted { invert(v) } else { v };
-        self.sample_until(r.start as f64, &mut out);
-        if self.frame.is_none() && self.level == Some(b'1') && v == b'0' {
-            self.frame = Some((r.start, Vec::new()));
-        }
-        self.level = Some(v);
-        out
-    }
-
-    fn finish(&mut self) -> Vec<Record> {
-        // the line keeps its last level
-        let mut out = Vec::new();
-        self.sample_until(f64::INFINITY, &mut out);
-        out
-    }
-
-    fn violations(&self) -> bool {
-        self.errors
     }
 }

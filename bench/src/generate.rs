@@ -1,6 +1,7 @@
 //! Writes `<dir>/bench.vcd` or `.fst`: a clock, a reset, `top.hot` (a 32-bit count of the cycles,
 //! so it has as many transitions as the trace has cycles) and `top.u<i>` modules, each an
-//! AXI4-Lite slave port with random transactions, a count of them and its state. With `--mem N`,
+//! AXI4-Lite slave port with random transactions, a count of them and its state, and an
+//! AXI4-Stream link (what the Rust and WASM `axis` bench decodes). With `--mem N`,
 //! also `top.mem[0..N-1]`, a 32-bit array one element of which is written each cycle (a composite
 //! row, spec §6). The same arguments write the same trace. It runs until the file reaches the size
 //! asked for.
@@ -18,7 +19,7 @@ pub const PERIOD: u64 = 10;
 const RESET_CYCLES: u64 = 4;
 
 /// Each module's signals, in this order.
-const PORT: [(&str, u32); 19] = [
+const PORT: [(&str, u32); 26] = [
     ("s_axi_awvalid", 1),
     ("s_axi_awready", 1),
     ("s_axi_awaddr", 32),
@@ -38,6 +39,13 @@ const PORT: [(&str, u32); 19] = [
     ("s_axi_rresp", 2),
     ("count", 16),
     ("state", 3),
+    ("s_axis_tvalid", 1),
+    ("s_axis_tready", 1),
+    ("s_axis_tdata", 32),
+    ("s_axis_tkeep", 4),
+    ("s_axis_tlast", 1),
+    ("s_axis_tid", 2),
+    ("s_axis_tdest", 2),
 ];
 const AWVALID: usize = 0;
 const AWREADY: usize = 1;
@@ -58,6 +66,13 @@ const RDATA: usize = 15;
 const RRESP: usize = 16;
 const COUNT: usize = 17;
 const STATE: usize = 18;
+const AXIS_TVALID: usize = 19;
+const AXIS_TREADY: usize = 20;
+const AXIS_TDATA: usize = 21;
+const AXIS_TKEEP: usize = 22;
+const AXIS_TLAST: usize = 23;
+const AXIS_TID: usize = 24;
+const AXIS_TDEST: usize = 25;
 /// Top-level signals: clk, rst_n, hot.
 const TOP: [(&str, u32); 3] = [("clk", 1), ("rst_n", 1), ("hot", 32)];
 
@@ -138,6 +153,9 @@ fn simulate(
             wait: 0,
             count: 0,
             rng: 0x9E37_79B9_7F4A_7C15 ^ (i as u64 + 1),
+            axis: 0,
+            beat: 0,
+            data: 0,
         })
         .collect();
     sink.time(0)?;
@@ -200,6 +218,10 @@ struct Module {
     wait: u64,
     count: u64,
     rng: u64,
+    /// The AXI4-Stream link: the cycles since reset, the beats handed over, the payload on the wire.
+    axis: u64,
+    beat: u64,
+    data: u64,
 }
 
 impl Module {
@@ -270,6 +292,24 @@ impl Module {
             }
         };
         ch.push((STATE, self.phase));
+        // AXI4-Stream: tvalid stays up, tready falls one cycle in ten (the beat is held), tlast
+        // closes the packet in the tenth, and the payload moves only once a packet is closed
+        // (2.2.1), so no rule of the spec breaks
+        let k = self.axis;
+        self.axis += 1;
+        if k.is_multiple_of(10) {
+            self.beat += 1;
+            self.data = self.rand();
+        }
+        ch.extend([
+            (AXIS_TVALID, 1),
+            (AXIS_TREADY, (k % 10 != 7) as u64),
+            (AXIS_TDATA, self.data & 0xFFFF_FFFF),
+            (AXIS_TKEEP, 0xF),
+            (AXIS_TLAST, (k % 10 == 9) as u64),
+            (AXIS_TID, self.beat & 3),
+            (AXIS_TDEST, (self.beat >> 2) & 1),
+        ]);
         ch
     }
 }
@@ -458,5 +498,20 @@ impl Sink for Fst {
 
     fn finish(self: Box<Self>) -> std::io::Result<()> {
         self.out.finish().map(drop).map_err(fst_err)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The AXI4-Stream link is the port's tail, where the bench's decode lines point.
+    #[test]
+    fn the_protocol_port_ends_with_axis() {
+        assert_eq!(PORT.len(), 26);
+        assert_eq!(AXIS_TVALID, STATE + 1);
+        assert_eq!(AXIS_TDEST, PORT.len() - 1);
+        assert_eq!(PORT[AXIS_TDATA].1, 32, "tdata is four bytes");
+        assert_eq!(PORT[AXIS_TKEEP].1, 4, "tkeep marks one per byte");
     }
 }

@@ -4,7 +4,7 @@
 
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::time::Instant;
 
@@ -15,7 +15,7 @@ pub fn main(args: &[String]) -> Result<(), String> {
     // a runtime directory of its own, so the user's `sessions` don't list this server
     let runtime = std::env::temp_dir().join(format!("wtf-bench-mcp-{}", std::process::id()));
     std::fs::create_dir_all(&runtime).map_err(|e| e.to_string())?;
-    let mut s = Server::start(&wtf, &runtime)?;
+    let mut s = Server::start(&wtf, &runtime, None)?;
     println!("{}, wtf --mcp", trace.display());
     println!("{:<56}{:>10}{:>10}", "call", "time", "answer");
 
@@ -100,7 +100,7 @@ pub fn main(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-struct Server {
+pub(crate) struct Server {
     child: Child,
     stdin: Option<ChildStdin>,
     stdout: BufReader<ChildStdout>,
@@ -108,14 +108,22 @@ struct Server {
 }
 
 impl Server {
-    fn start(wtf: &PathBuf, runtime: &PathBuf) -> Result<Self, String> {
-        let mut child = Command::new(wtf)
-            .arg("--mcp")
+    /// A server of its own; `config` is its `XDG_CONFIG_HOME`, the directory its `protocols/` is
+    /// read from (left alone when none is given).
+    pub(crate) fn start(
+        wtf: &PathBuf,
+        runtime: &PathBuf,
+        config: Option<&Path>,
+    ) -> Result<Self, String> {
+        let mut cmd = Command::new(wtf);
+        cmd.arg("--mcp")
             .env("XDG_RUNTIME_DIR", runtime)
             .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .map_err(|e| format!("{}: {e}", wtf.display()))?;
+            .stdout(Stdio::piped());
+        if let Some(config) = config {
+            cmd.env("XDG_CONFIG_HOME", config);
+        }
+        let mut child = cmd.spawn().map_err(|e| format!("{}: {e}", wtf.display()))?;
         let (stdin, stdout) = (
             child.stdin.take(),
             BufReader::new(child.stdout.take().unwrap()),
@@ -159,7 +167,11 @@ impl Server {
     }
 
     /// A tool's text answer, or its error; Err outside for the server failing.
-    fn tool(&mut self, name: &str, args: Value) -> Result<Result<String, String>, String> {
+    pub(crate) fn tool(
+        &mut self,
+        name: &str,
+        args: Value,
+    ) -> Result<Result<String, String>, String> {
         let r = self.call("tools/call", json!({"name": name, "arguments": args}))?;
         let text = r["content"][0]["text"]
             .as_str()

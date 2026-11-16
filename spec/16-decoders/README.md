@@ -5,6 +5,15 @@ API, so the TUI, the MCP server and later protocols all build on one mechanism. 
 answers by hand: transfers, frames, request/response pairs with their delay, and protocol
 checks that return only violations.
 
+| file | covers |
+| --- | --- |
+| [axis.md](axis.md) | `axis`: beats, packets by (tid, tdest), the handshake's rules, the matrix against IHI 0051B |
+| [axilite.md](axilite.md) | `axilite`: the five channels, sides, `wr` and `rd`, `timeout` |
+| [axi4.md](axi4.md) | `axi4`: bursts by ID, `wburst`/`rburst`, `wr`/`rd` |
+| [spi.md](spi.md) | `spi`: bits, words and transfers sampled by time |
+| [uart.md](uart.md) | `uart`: bytes and errors sampled by time |
+| [streams.md](streams.md) | `frame`, `pair`, `check`, `join`, and the `Decoder` trait |
+
 - **Computed signals are vars.** Everything in wtf names signals by var (rows, search,
   `values`, `find`, `render`, the panel), so a computed signal is a var too, after the file's.
   It is evaluated once into a list of changes (materialized), queried like a file signal, and
@@ -32,13 +41,13 @@ checks that return only violations.
   and fields (`Record { start, end, fields }`), a stream has a name and a schema of field names
   and widths. A beat, a frame, a transaction and a violation are records.
 - **Results.** A stream another stream is made from is intermediate (axilite's `aw`, `w`, `b`,
-  `ar`, `r`, joined into `wr` and `rd`; axis's `beat`, framed into `frame`), across decodes too:
+  `ar`, `r`, joined into `wr` and `rd`), across decodes too:
   a `frame` put on `bus.rd` makes `bus.rd` intermediate. A stream nothing is made from is a
   result, or violations. Each stream keeps the names of the streams it was made from, so this is
-  known from the steps, never from the trace. A decode's results and violations are what a person
-  reads: `decode` answers with them first (`bus: records bus.wr 2, bus.rd 8; violations
-  bus.errors 2, ...; made from bus.aw 2, ...`), decoding from the interfaces picker adds them
-  alone as rows, and a decode's name in `records` means them.
+  known from each stream's declaration, never from the trace. A decode's results and violations are
+  what a person reads: `decode` answers with them first (`bus: records bus.wr 2, bus.rd 8;
+  violations bus.errors 2, ...; made from bus.aw 2, ...`), decoding from the interfaces picker adds
+  them alone as rows, and a decode's name in `records` means them.
 - **Records of a set.** `records` (the tool and `:records`) reads a set of streams: a stream
   (`bus.rd`), a decode's name (`bus`: its results, then its violations), a glob (`bus.*`), or
   several of these separated by spaces. A name of an interface the file has but nothing decoded
@@ -64,8 +73,8 @@ checks that return only violations.
   `tlast`). A decoder's input is a stream, sampled or another decoder's output, so protocols
   stack:
   ```
-  AXIS:  tvalid tready tdata tlast  -> axis.beat -> axis.frame
-                                       axis.errors (valid dropped, payload changed while stalled)
+  AXIS:  tvalid tready tdata tlast  -> axis.beat, axis.frame (a packet per tid, tdest)
+                                       axis.errors (a rule's name, what it saw, error or warning)
   AXI4-Lite: AW W B AR R            -> aw w b ar r -> wr (AW, W, B in order), rd (AR, R), with delay
                                        errors (dropped valid, payload changed while stalled, resp != OKAY)
   AXI4:  AW W B AR R beats          -> aw w b ar r -> wburst (W to wlast), rburst (R to rlast, per ID)
@@ -73,20 +82,11 @@ checks that return only violations.
                                           with delay (latency to B / the first R beat); errors as AXI4-Lite
   SPI:   sclk cs mosi miso          -> bit (at sclk's sampling edge for mode 0 - 3, cs low)
                                        -> word (bits, msb or lsb first), transfer (cs low to high)
-  UART:  the line and a baud rate   -> byte (each bit sampled in its middle), errors (framing, parity, break)
+  UART:  the line and a baud rate   -> byte (each bit sampled in its middle), errors (framing, parity, break; rule, detail, severity)
   ```
-  An AXI-Lite or AXI4 port that only writes or only reads is decoded too: a side none of whose
-  roles is given (explicitly or under the prefix) is left out, and the instance makes only the
-  other side's streams. A side given in part is still an error, naming the missing roles; where
-  the file has that protocol's ports, the error ends with the line that decodes them (`no signal
-  for tvalid (the file has: decode rx axis clock=top.clk prefix=top.)`).
-  SPI and UART sample by time, not at a clock: their decoder reads the changes of the pins (for
-  SPI, of `{cs, sclk, mosi, miso}`) as records and keeps the edges and bit times itself, so they
-  take no `clock`. Their settings are params of the instance: SPI's `mode`, `bits`, `order`,
-  `cs_active` (`low`, the default, or `high`); UART's `baud`, `bits`, `parity` (`none`, `even`,
-  `odd`), `stop`, `idle` (`high`, the default, or `low`, which reads the line inverted as RS-232
-  levels do). An SPI bit lasts to the next sampling edge, the last of a transfer to sclk's next
-  edge. UART checks every stop bit; the line low for a whole frame is a `break`, with no byte.
+  What each protocol's streams sample, its rules and its params are its own page: [AXIS](axis.md),
+  [AXI4-Lite](axilite.md), [AXI4](axi4.md), [SPI](spi.md), [UART](uart.md); the protocols that read
+  streams are [streams.md](streams.md).
 - **Protocols come in three kinds:**
   - **Sampled protocols**, defined in the session without Rust (`[[protocol]]`, `:protocol`):
     roles, a predicate and fields as expressions of the roles. A definition names no signal and
@@ -109,22 +109,29 @@ checks that return only violations.
     clock = "top.clk"
     signals = { valid = "top.cmd_valid", ready = "top.cmd_ready", cmd = "top.cmd" }
     ```
-  - **Built-in protocols** (`axis`, `axilite`, `axi4`, `spi`, `uart`), written in Rust as a list
-    of steps: sample a stream, feed a signal's changes, run a decoder on a stream, join or check
-    streams. A new one is a new list of steps, and `protocols` describes it from them.
+  - **Built-in protocols** (`axis`, `axilite`, `axi4`, `spi`, `uart`), written in Rust: each a
+    `Protocol` the host feeds its roles cycle by cycle, so a record of one packet, a beat, a frame
+    or a violation is one cycle's decision.
+    One file each, in that order: [axis.md](axis.md), [axilite.md](axilite.md), [axi4.md](axi4.md),
+    [spi.md](spi.md), [uart.md](uart.md).
+    A `Protocol` names its roles with a default each, so a signal not given is no error: `axis`
+    reads `tready` 1, `tkeep` the bytes of `tdata`, `tstrb` the same as `tkeep` and `tlast` 1.
+    It names its rules too, each with the spec clause it comes from and its severity (an error or
+    a warning), so `errors` carries `rule`, `detail` and `severity`: what happened, and how bad.
+    A new one is a new `Protocol`, and `protocols` describes it.
   - **Protocols on streams**, generic, whose input is streams of other instances: `frame`
     (records grouped by a last flag, a gap or a select, with `key` a frame per value of a field,
     side by side, as AXI4's interleaved read bursts by ID; with `data`, the frame's bytes as hex
     text, `tkeep`'s bytes only for AXIS), `pair` (a request stream and a response stream, by
     order or by an ID field, with the delay; unmatched ones are violations) and `check` (rules,
     emitting a violation record where one holds). Checks answer yes or no with counterexamples.
+    [streams.md](streams.md) has them, and `join`.
 - **Decoders** implement one trait, `Decoder { schema, feed(record) -> records }`, made by name
-  (`frame`, `spi`, `uart`). `pair`, `join` (several request streams answered by one, in order, as
+  (`frame`). `pair`, `join` (several request streams answered by one, in order, as
   AXI-Lite's AW and W by B, or by an ID, as AXI4's B by BID) and `check` work on whole streams
-  instead, as functions; built-in protocols use them as steps too. `axilite` and `axi4` take a
-  `timeout` param (`timeout=1us`): a request still unanswered more than that after it completed is
-  `no response` when the next response comes, so a lost B or R doesn't pair every later
-  response with the request before its own.
+  instead, as functions. `axilite` and `axi4` take a `timeout` param (`timeout=1us`): a request
+  still unanswered more than that after it completed is `no response` when the next response
+  comes, so a lost B or R doesn't pair every later response with the request before its own.
 - **Instances** are kept in the session, so they persist, and agents declare them like the rest
   of the workspace:
   ```toml
@@ -144,7 +151,9 @@ checks that return only violations.
   the decode form's edit (section 5 "Decodes") also drops the rows of streams it no longer makes
   and makes the instances that read it again.
 - **TUI.** A stream row draws like a bus, a segment per record with a short label
-  (`#3 64B`); `Enter` expands it into a row per field. Violation records draw red. Field
+  (`#3 64B`); `Enter` expands it into a row per field. Violation records draw in their
+  severity's colour: an error red (`unknown`), a warning in `warning` (section 19); a stream
+  without a `severity` field (`check`, a pair's `unmatched`) red. Field
   signals search like any other (`/len == 64`). `:decode <name> <protocol> <role>=<signal>...`
   adds an instance.
 - **MCP.** Streams and fields are signal names for every tool; `records` lists a stream's records

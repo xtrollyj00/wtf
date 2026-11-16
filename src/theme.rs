@@ -245,6 +245,7 @@ fn slot<'a>(p: &'a mut Palette, key: &str) -> Option<&'a mut Color> {
         "fill" => &mut p.fill,
         "unknown" => &mut p.unknown,
         "highz" => &mut p.highz,
+        "warning" => &mut p.warning,
         "cursor" => &mut p.cursor,
         "cursor_text" => &mut p.cursor_text,
         "column" => &mut p.column,
@@ -261,12 +262,13 @@ fn slot<'a>(p: &'a mut Palette, key: &str) -> Option<&'a mut Color> {
 }
 
 fn keys() -> String {
-    const FIELDS: [&str; 16] = [
+    const FIELDS: [&str; 17] = [
         "line",
         "bus",
         "fill",
         "unknown",
         "highz",
+        "warning",
         "cursor",
         "cursor_text",
         "column",
