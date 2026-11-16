@@ -35,7 +35,8 @@ fn engine() -> &'static Engine {
 }
 
 /// A store of its own per instance (a trapped decode leaves the others alive), with fuel refilled
-/// before each call.
+/// before each call. It starts full too: instantiating spends fuel on some targets (16,385 on
+/// aarch64, none on x86_64).
 fn store() -> Store<StoreLimits> {
     let mut store = Store::new(
         engine(),
@@ -45,6 +46,7 @@ fn store() -> Store<StoreLimits> {
             .build(),
     );
     store.limiter(|limits| limits);
+    store.set_fuel(FUEL).expect("the engine consumes fuel");
     store
 }
 
