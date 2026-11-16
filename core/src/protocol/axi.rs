@@ -245,7 +245,7 @@ impl Handshakes {
                     Kind::Changed,
                     start,
                     end,
-                    format!("{} changed while {} stalled", p.payload[i].0, p.valid),
+                    format!("{} changed while {} stalled", p.payload[i].1, p.valid),
                 ));
             }
             if let Some(resp) = &p.resp

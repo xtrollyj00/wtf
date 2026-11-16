@@ -480,6 +480,32 @@ fn instance_names_signals_in_full() {
     assert_eq!(table(stream(&back, "cpu")), table(stream(&ws, "cpu")));
 }
 
+/// axilite.vcd with awaddr changed at 92ns, with the awready that ends the stall awvalid has been
+/// in since 82ns: a payload that moves while stalled breaks `aw_changed`.
+#[test]
+fn axilite_payload_changed_while_stalled() {
+    let dir = Dir::new("axi-changed");
+    let path = dir.0.join("changed.vcd");
+    let text = std::fs::read_to_string(fixture("vcd").with_file_name("axilite.vcd")).unwrap();
+    let text = text.replacen("#92\n1#\n", "#92\n1#\nb10101 $\n", 1);
+    std::fs::write(&path, text).unwrap();
+    let mut ws = Workspace::open(&path).unwrap();
+    ws.add_decode(decode("s", "axilite", "aclk", &[], &[("prefix", "s_axi_")]))
+        .unwrap();
+    assert_eq!(
+        table(stream(&ws, "s.errors"))[0],
+        row(
+            90,
+            100,
+            &[
+                "aw_changed",
+                "awaddr changed while awvalid stalled",
+                "error"
+            ]
+        )
+    );
+}
+
 /// AXI-Lite in axilite.vcd: two writes (the second's W before its AW), two reads (the second
 /// SLVERR), an AW valid dropped before its ready, a B without a request, every valid X in reset,
 /// then six polling reads from 260ns.
