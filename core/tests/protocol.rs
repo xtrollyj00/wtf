@@ -283,6 +283,13 @@ fn builtin_instance_errors() {
         ),
         "rx: no signal for tvalid (the file has: decode rx axis clock=top.clk prefix=top.); axis has no role tfoo; tdata: unknown signal: nope; axis has no param x (params: prefix, reset_active); no clock"
     );
+    assert_eq!(
+        err(
+            &mut ws,
+            decode("rx", "axis", "clk", AXIS, &[("reset_active", "up")])
+        ),
+        "rx: reset_active: low or high, not up"
+    );
     // its names are taken
     let p = Sampler {
         name: "axis".into(),
@@ -2367,4 +2374,55 @@ fn wasm_protocol_params() {
     let d = ws.decodes.iter().find(|d| d.name == "p").unwrap();
     assert!(d.signals.is_empty(), "{:?}", d.signals);
     assert_eq!(d.params, vec![("spin".to_string(), "3".to_string())]);
+}
+
+/// A protocol from a file (spec §11): the file's name is the protocol's, the entry keeps nothing
+/// of its own, a built-in's name is taken, and loading it again replaces it. A session naming one
+/// that didn't load decodes nothing of it and says why.
+#[test]
+fn protocol_from_a_file() {
+    use std::sync::Arc;
+    use wtf_core::command::run;
+    use wtf_core::protocol;
+    let mut ws = open("axis.vcd");
+    assert_eq!(
+        run(&mut ws, "protocol foo wasm=p/bar.wasm"),
+        Err("wasm p/bar.wasm holds bar, not foo: :protocol bar wasm=p/bar.wasm".into())
+    );
+    assert_eq!(
+        run(&mut ws, "protocol bar wasm=p/bar.wasm when=tvalid"),
+        Err(
+            "a protocol from a file has no roles, when or fields of its own: :protocol bar wasm=p/bar.wasm"
+                .into()
+        )
+    );
+    ws.loader = Some(Arc::new(|path: &str| {
+        let stem = std::path::Path::new(path).file_stem().unwrap();
+        Ok(loaded(
+            protocol::intern(stem.to_str().unwrap()),
+            "a test's protocol",
+        ))
+    }));
+    assert_eq!(
+        run(&mut ws, "protocol axis wasm=p/axis.wasm"),
+        Err("axis is a built-in protocol".into())
+    );
+    run(&mut ws, "protocol bar wasm=p/bar.wasm").unwrap();
+    run(&mut ws, "protocol bar wasm=p/bar.wasm").unwrap();
+    assert_eq!(ws.loaded.iter().filter(|l| l.name == "bar").count(), 1);
+
+    let mut ws = open("axis.vcd");
+    let session = "[[protocol]]\nname = \"baz\"\nwasm = \"p/baz.wasm\"\n\n\
+        [[protocol]]\nname = \"qux\"\nwasm = \"p/qux.wasm\"\nroles = [\"a\"]\n\n\
+        [[decode]]\nname = \"z\"\nprotocol = \"baz\"\nclock = \"clk\"\n";
+    let warnings = wtf_core::session::apply(&mut ws, session).unwrap();
+    assert_eq!(
+        warnings,
+        [
+            "protocol baz: wasm p/baz.wasm is not loaded",
+            "protocol qux: wasm p/qux.wasm keeps no roles, its card is the file's",
+            "decode z: wasm p/baz.wasm is not loaded"
+        ]
+    );
+    assert!(ws.streams.is_empty());
 }

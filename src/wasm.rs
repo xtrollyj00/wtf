@@ -123,22 +123,8 @@ pub fn load_dir(dir: &Path) -> (Vec<Arc<protocol::Loaded>>, Vec<String>) {
         .collect();
     files.sort();
     let (mut loaded, mut failed) = (Vec::new(), Vec::new());
+    // file names in one directory differ, so the protocols named after them do too
     for file in files {
-        let name = file
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or_default()
-            .to_string();
-        if loaded
-            .iter()
-            .any(|l: &Arc<protocol::Loaded>| l.name == name)
-        {
-            failed.push(format!(
-                "{}: a protocol named {name} is loaded already",
-                file.display()
-            ));
-            continue;
-        }
         match load_one(&file) {
             Ok(l) => loaded.push(l),
             // load_one's own words, path first: the status line names the file that didn't load
@@ -366,16 +352,10 @@ mod tests {
     }
 
     fn stream<'a>(ws: &'a Workspace, name: &str) -> &'a Stream {
-        let all = || {
-            ws.streams
-                .iter()
-                .map(|s| s.name.as_str())
-                .collect::<Vec<_>>()
-        };
         ws.streams
             .iter()
             .find(|s| s.name == name)
-            .unwrap_or_else(|| panic!("no stream {name} (streams: {:?})", all()))
+            .expect("a stream of that name")
     }
 
     fn text(s: &str) -> Option<Val> {
@@ -478,6 +458,52 @@ mod tests {
             errors.records[0].fields[1],
             text("wasm trap: all fuel consumed by WebAssembly")
         );
+    }
+
+    /// `wit/axis` as a component decodes what the built-in `axis` does, violations and their
+    /// severity, text fields and role defaults (`tkeep`, `tstrb` absent) included.
+    #[test]
+    fn axis_wasm_is_axis() {
+        for trace in ["axis.vcd", "axis_packets.vcd"] {
+            let mut ws = Workspace::open(&PathBuf::from(format!(
+                "{}/tests/data/{trace}",
+                env!("CARGO_MANIFEST_DIR")
+            )))
+            .unwrap();
+            ws.loaded.push(
+                load_one(&PathBuf::from(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/tests/data/wasm/axis-wasm.wasm"
+                )))
+                .unwrap(),
+            );
+            let roles = "clock=clk tvalid=tvalid tready=tready tdata=tdata tlast=tlast";
+            command::run(&mut ws, &format!("decode r axis {roles}")).unwrap();
+            command::run(&mut ws, &format!("decode w axis-wasm {roles}")).unwrap();
+            let records = |prefix: &str| {
+                let mut all: Vec<_> = ws
+                    .streams
+                    .iter()
+                    .filter_map(|s| Some((s.name.strip_prefix(prefix)?, s)))
+                    .map(|(name, s)| {
+                        let rs: Vec<_> = s
+                            .records
+                            .iter()
+                            .map(|r| (r.start, r.end, r.fields.clone()))
+                            .collect();
+                        (name.to_string(), rs)
+                    })
+                    .collect();
+                all.sort_by(|a, b| a.0.cmp(&b.0));
+                all
+            };
+            let rust = records("r.");
+            assert!(
+                rust.iter().any(|(_, rs)| !rs.is_empty()),
+                "{trace} decodes nothing"
+            );
+            assert_eq!(records("w."), rust, "{trace}");
+        }
     }
 
     /// A path that holds no component, or nothing at all: the error says which file and why.
