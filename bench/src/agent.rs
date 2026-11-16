@@ -29,7 +29,10 @@ const REVIEW: &str = "Review your run, briefly: which wtf calls were wasted or f
 cost the most tokens, and what wtf tool or answer would have saved you the most. Rank by cost.";
 
 pub fn main(args: &[String]) -> Result<(), String> {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().ok_or("no repository root")?.to_path_buf();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .ok_or("no repository root")?
+        .to_path_buf();
     match args.first().map(String::as_str) {
         Some("run") => run(&root, &args[1..]),
         Some("check") => check(&root, &args[1..]),
@@ -52,20 +55,55 @@ struct Opts {
 }
 
 fn opts(args: &[String]) -> Result<Opts, String> {
-    let mut o = Opts { wtf: None, model: None, runs: 1, budget: "1.0".into(), timeout: 600, review: false, no_mcp: false, max_sims: None, jobs: 1, tasks: vec![] };
+    let mut o = Opts {
+        wtf: None,
+        model: None,
+        runs: 1,
+        budget: "1.0".into(),
+        timeout: 600,
+        review: false,
+        no_mcp: false,
+        max_sims: None,
+        jobs: 1,
+        tasks: vec![],
+    };
     let mut it = args.iter();
     while let Some(a) = it.next() {
-        let mut val = || it.next().cloned().ok_or(format!("{a} needs a value\n{USAGE}"));
+        let mut val = || {
+            it.next()
+                .cloned()
+                .ok_or(format!("{a} needs a value\n{USAGE}"))
+        };
         match a.as_str() {
             "--wtf" => o.wtf = Some(val()?),
             "--model" => o.model = Some(val()?),
-            "--runs" => o.runs = val()?.parse().map_err(|_| format!("--runs: a number\n{USAGE}"))?,
+            "--runs" => {
+                o.runs = val()?
+                    .parse()
+                    .map_err(|_| format!("--runs: a number\n{USAGE}"))?
+            }
             "--budget" => o.budget = val()?,
-            "--timeout" => o.timeout = val()?.parse().map_err(|_| format!("--timeout: seconds\n{USAGE}"))?,
+            "--timeout" => {
+                o.timeout = val()?
+                    .parse()
+                    .map_err(|_| format!("--timeout: seconds\n{USAGE}"))?
+            }
             "--review" => o.review = true,
             "--no-mcp" => o.no_mcp = true,
-            "--jobs" => o.jobs = val()?.parse().ok().filter(|&n| n > 0).ok_or(format!("--jobs: a number above 0\n{USAGE}"))?,
-            "--max-sims" => o.max_sims = Some(val()?.parse().map_err(|_| format!("--max-sims: a number\n{USAGE}"))?),
+            "--jobs" => {
+                o.jobs = val()?
+                    .parse()
+                    .ok()
+                    .filter(|&n| n > 0)
+                    .ok_or(format!("--jobs: a number above 0\n{USAGE}"))?
+            }
+            "--max-sims" => {
+                o.max_sims = Some(
+                    val()?
+                        .parse()
+                        .map_err(|_| format!("--max-sims: a number\n{USAGE}"))?,
+                )
+            }
             s if s.starts_with("--") => return Err(format!("unknown option {s}\n{USAGE}")),
             s => o.tasks.push(s.to_string()),
         }
@@ -105,62 +143,158 @@ fn tasks(root: &Path, names: &[String]) -> Result<Vec<Task>, String> {
     if let Some(bad) = names.iter().find(|n| !all.contains(n)) {
         return Err(format!("no task {bad} (tasks: {})", all.join(", ")));
     }
-    let picked = if names.is_empty() { all } else { names.to_vec() };
-    picked.into_iter().map(|name| task(&dir, root, name)).collect()
+    let picked = if names.is_empty() {
+        all
+    } else {
+        names.to_vec()
+    };
+    picked
+        .into_iter()
+        .map(|name| task(&dir, root, name))
+        .collect()
 }
 
 fn task(dir: &Path, root: &Path, name: String) -> Result<Task, String> {
     let fix_dir = dir.join(&name);
-    let path = if fix_dir.is_dir() { fix_dir.join("task.toml") } else { dir.join(format!("{name}.toml")) };
-    let t: toml::Table = std::fs::read_to_string(&path).map_err(|e| e.to_string())?.parse().map_err(|e| format!("{}: {e}", path.display()))?;
-    let s = |k: &str| t.get(k).and_then(|v| v.as_str()).map(String::from).ok_or(format!("{}: needs {k}", path.display()));
+    let path = if fix_dir.is_dir() {
+        fix_dir.join("task.toml")
+    } else {
+        dir.join(format!("{name}.toml"))
+    };
+    let t: toml::Table = std::fs::read_to_string(&path)
+        .map_err(|e| e.to_string())?
+        .parse()
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    let s = |k: &str| {
+        t.get(k)
+            .and_then(|v| v.as_str())
+            .map(String::from)
+            .ok_or(format!("{}: needs {k}", path.display()))
+    };
     let (prompt, fix) = if fix_dir.is_dir() {
         let files: Vec<(String, String)> = t
             .get("files")
             .and_then(|v| v.as_table())
-            .map(|f| f.iter().filter_map(|(to, from)| Some((to.clone(), from.as_str()?.to_string()))).collect())
+            .map(|f| {
+                f.iter()
+                    .filter_map(|(to, from)| Some((to.clone(), from.as_str()?.to_string())))
+                    .collect()
+            })
             .unwrap_or_default();
         if files.is_empty() {
-            return Err(format!("{}: needs files, a table of work path = upstream path", path.display()));
+            return Err(format!(
+                "{}: needs files, a table of work path = upstream path",
+                path.display()
+            ));
         }
-        let fix = Fix { dir: fix_dir, upstream: s("upstream")?, commit: s("commit")?, files };
+        let fix = Fix {
+            dir: fix_dir,
+            upstream: s("upstream")?,
+            commit: s("commit")?,
+            files,
+        };
         (s("prompt")?, Some(fix))
     } else {
         let trace = root.join(s("trace")?);
         if !trace.exists() {
             return Err(format!("{}: no trace {}", path.display(), trace.display()));
         }
-        (s("prompt")?.replace("{trace}", &trace.display().to_string()), None)
+        (
+            s("prompt")?.replace("{trace}", &trace.display().to_string()),
+            None,
+        )
     };
-    let prompt = format!("{}\nEnd your answer with a ```json block of exactly this shape, with the values you found:\n{}", prompt.trim(), s("answer")?);
-    let expect = serde_json::from_str(&s("expect")?).map_err(|e| format!("{}: expect: {e}", path.display()))?;
-    let ordered = t.get("ordered").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
-    Ok(Task { name, prompt, expect, ordered, fix })
+    let prompt = format!(
+        "{}\nEnd your answer with a ```json block of exactly this shape, with the values you found:\n{}",
+        prompt.trim(),
+        s("answer")?
+    );
+    let expect = serde_json::from_str(&s("expect")?)
+        .map_err(|e| format!("{}: expect: {e}", path.display()))?;
+    let ordered = t
+        .get("ordered")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(Task {
+        name,
+        prompt,
+        expect,
+        ordered,
+        fix,
+    })
 }
 
 fn run(root: &Path, args: &[String]) -> Result<(), String> {
     let o = opts(args)?;
     let tasks = tasks(root, &o.tasks)?;
-    if o.no_mcp && let Some(t) = tasks.iter().find(|t| t.fix.is_none()) {
-        return Err(format!("{}: --no-mcp runs fix tasks only; without wtf an agent has no way to read the trace", t.name));
+    if o.no_mcp
+        && let Some(t) = tasks.iter().find(|t| t.fix.is_none())
+    {
+        return Err(format!(
+            "{}: --no-mcp runs fix tasks only; without wtf an agent has no way to read the trace",
+            t.name
+        ));
     }
     let wtf = match &o.wtf {
         Some(p) => PathBuf::from(p),
         None => root.join("target/release/wtf"),
     };
-    let wtf = wtf.canonicalize().map_err(|_| format!("{}: no wtf binary; `cargo build --release` first, or give --wtf <path>", wtf.display()))?;
-    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e| e.to_string())?.as_secs();
+    let wtf = wtf.canonicalize().map_err(|_| {
+        format!(
+            "{}: no wtf binary; `cargo build --release` first, or give --wtf <path>",
+            wtf.display()
+        )
+    })?;
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_secs();
     let runs = root.join(format!("bench/agent/runs/{stamp}"));
     std::fs::create_dir_all(&runs).map_err(|e| e.to_string())?;
-    let version = |cmd: &mut Command| cmd.output().ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
-    let commit = version(Command::new("git").current_dir(root).args(["rev-parse", "--short", "HEAD"]));
-    let dirty = !version(Command::new("git").current_dir(root).args(["status", "--porcelain", "--untracked-files=no"])).is_empty();
+    let version = |cmd: &mut Command| {
+        cmd.output()
+            .ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default()
+    };
+    let commit =
+        version(
+            Command::new("git")
+                .current_dir(root)
+                .args(["rev-parse", "--short", "HEAD"]),
+        );
+    let dirty = !version(Command::new("git").current_dir(root).args([
+        "status",
+        "--porcelain",
+        "--untracked-files=no",
+    ]))
+    .is_empty();
     let claude = version(Command::new("claude").arg("--version"));
-    let mut results = std::fs::OpenOptions::new().create(true).append(true).open(root.join("bench/agent/results.jsonl")).map_err(|e| e.to_string())?;
+    let mut results = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(root.join("bench/agent/results.jsonl"))
+        .map_err(|e| e.to_string())?;
     // a fix task's checkout and the tree make sees, once per task: runs at once share them
-    let upstreams: Vec<Option<(PathBuf, PathBuf)>> =
-        tasks.iter().map(|t| t.fix.as_ref().map(|f| checkout(root, f).and_then(|full| Ok((deps(root, f, &t.name, &full)?, full)))).transpose()).collect::<Result<_, _>>()?;
-    let todo: Vec<(usize, usize)> = (0..tasks.len()).flat_map(|t| (1..=o.runs).map(move |i| (t, i))).collect();
+    let upstreams: Vec<Option<(PathBuf, PathBuf)>> = tasks
+        .iter()
+        .map(|t| {
+            t.fix
+                .as_ref()
+                .map(|f| {
+                    checkout(root, f).and_then(|full| Ok((deps(root, f, &t.name, &full)?, full)))
+                })
+                .transpose()
+        })
+        .collect::<Result<_, _>>()?;
+    let todo: Vec<(usize, usize)> = (0..tasks.len())
+        .flat_map(|t| (1..=o.runs).map(move |i| (t, i)))
+        .collect();
     let next = std::sync::atomic::AtomicUsize::new(0);
     let (send, done) = std::sync::mpsc::channel();
     println!("task\trun\tpass\tscore\tcalls\terrors\tanswers\ttokens\tpeak\tcost\twall");
@@ -168,12 +302,21 @@ fn run(root: &Path, args: &[String]) -> Result<(), String> {
     std::thread::scope(|scope| {
         for _ in 0..o.jobs.min(todo.len()) {
             let send = send.clone();
-            let (o, wtf, tasks, upstreams, todo, next, runs) = (&o, &wtf, &tasks, &upstreams, &todo, &next, &runs);
+            let (o, wtf, tasks, upstreams, todo, next, runs) =
+                (&o, &wtf, &tasks, &upstreams, &todo, &next, &runs);
             scope.spawn(move || {
-                while let Some(&(ti, i)) = todo.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed)) {
+                while let Some(&(ti, i)) =
+                    todo.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+                {
                     let t = &tasks[ti];
-                    let up = upstreams[ti].as_ref().map(|(d, u)| (d.as_path(), u.as_path()));
-                    let _ = send.send((ti, i, once(o, wtf, t, &runs.join(format!("{}-{i}", t.name)), up)));
+                    let up = upstreams[ti]
+                        .as_ref()
+                        .map(|(d, u)| (d.as_path(), u.as_path()));
+                    let _ = send.send((
+                        ti,
+                        i,
+                        once(o, wtf, t, &runs.join(format!("{}-{i}", t.name)), up),
+                    ));
                 }
             });
         }
@@ -190,7 +333,15 @@ fn run(root: &Path, args: &[String]) -> Result<(), String> {
             };
             let t = &tasks[ti];
             let m = row.as_object_mut().expect("a row is an object");
-            for (k, v) in [("stamp", json!(stamp)), ("task", json!(t.name)), ("run", json!(i)), ("wtf", json!(commit)), ("dirty", json!(dirty)), ("claude", json!(claude)), ("jobs", json!(o.jobs))] {
+            for (k, v) in [
+                ("stamp", json!(stamp)),
+                ("task", json!(t.name)),
+                ("run", json!(i)),
+                ("wtf", json!(commit)),
+                ("dirty", json!(dirty)),
+                ("claude", json!(claude)),
+                ("jobs", json!(o.jobs)),
+            ] {
                 m.insert(k.into(), v);
             }
             if let Err(e) = writeln!(results, "{row}") {
@@ -199,9 +350,18 @@ fn run(root: &Path, args: &[String]) -> Result<(), String> {
             let g = |k: &str| row.get(k).cloned().unwrap_or(Value::Null);
             println!(
                 "{}\t{i}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t${:.3}\t{:.0}s{}",
-                t.name, g("pass"), g("score"), g("calls"), g("tool_errors"), g("answer_bytes"), g("tokens"), g("peak_context"),
-                g("cost_usd").as_f64().unwrap_or(0.0), g("wall_s").as_f64().unwrap_or(0.0),
-                row.get("failure").map_or(String::new(), |f| format!("\t{f}"))
+                t.name,
+                g("pass"),
+                g("score"),
+                g("calls"),
+                g("tool_errors"),
+                g("answer_bytes"),
+                g("tokens"),
+                g("peak_context"),
+                g("cost_usd").as_f64().unwrap_or(0.0),
+                g("wall_s").as_f64().unwrap_or(0.0),
+                row.get("failure")
+                    .map_or(String::new(), |f| format!("\t{f}"))
             );
         }
     });
@@ -215,8 +375,18 @@ fn run(root: &Path, args: &[String]) -> Result<(), String> {
 /// files there (Claude Code's default: reads and, with acceptEdits, edits inside the working
 /// directory only) and run `make sim`; `upstream` is (deps, the checkout): make gets deps, the
 /// checkout is only read here, for the work files and the diff.
-fn once(o: &Opts, wtf: &Path, t: &Task, out: &Path, upstream: Option<(&Path, &Path)>) -> Result<Value, String> {
-    let tmp = std::env::temp_dir().join(format!("wtf-agent-{}-{}", std::process::id(), out.file_name().unwrap_or_default().to_string_lossy()));
+fn once(
+    o: &Opts,
+    wtf: &Path,
+    t: &Task,
+    out: &Path,
+    upstream: Option<(&Path, &Path)>,
+) -> Result<Value, String> {
+    let tmp = std::env::temp_dir().join(format!(
+        "wtf-agent-{}-{}",
+        std::process::id(),
+        out.file_name().unwrap_or_default().to_string_lossy()
+    ));
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(tmp.join("run")).map_err(|e| e.to_string())?;
     let rt = tmp.join("run").display().to_string();
@@ -230,7 +400,10 @@ fn once(o: &Opts, wtf: &Path, t: &Task, out: &Path, upstream: Option<(&Path, &Pa
         // the buggy files as the agent got them, for the diff of what it changed
         prepare(f, up, &tmp.join("bug"), false)?;
         if make(&work, deps, "sim")? {
-            return Err(format!("{}: `make sim` passes with the bug; `wtf-bench agent check {}`", t.name, t.name));
+            return Err(format!(
+                "{}: `make sim` passes with the bug; `wtf-bench agent check {}`",
+                t.name, t.name
+            ));
         }
     }
     let sims = tmp.join("sims");
@@ -239,10 +412,33 @@ fn once(o: &Opts, wtf: &Path, t: &Task, out: &Path, upstream: Option<(&Path, &Pa
     }
     let claude = |prompt: &str, resume: Option<&str>| {
         let mut c = Command::new("claude");
-        c.args(["-p", prompt, "--output-format", "stream-json", "--verbose", "--strict-mcp-config", "--setting-sources", ""]);
+        c.args([
+            "-p",
+            prompt,
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--strict-mcp-config",
+            "--setting-sources",
+            "",
+        ]);
         match fix {
-            Some((_, (deps, _))) => c.current_dir(&work).env("UPSTREAM", deps).env("PATH", path_with(&tmp.join("bin"))).args(["--tools", "Read,Edit,Grep,Bash", "--permission-mode", "acceptEdits", "--allowedTools", "mcp__wtf", "Bash(make sim:*)"]),
-            None => c.current_dir(&tmp).args(["--tools", "", "--allowedTools", "mcp__wtf"]),
+            Some((_, (deps, _))) => c
+                .current_dir(&work)
+                .env("UPSTREAM", deps)
+                .env("PATH", path_with(&tmp.join("bin")))
+                .args([
+                    "--tools",
+                    "Read,Edit,Grep,Bash",
+                    "--permission-mode",
+                    "acceptEdits",
+                    "--allowedTools",
+                    "mcp__wtf",
+                    "Bash(make sim:*)",
+                ]),
+            None => c
+                .current_dir(&tmp)
+                .args(["--tools", "", "--allowedTools", "mcp__wtf"]),
         };
         if !o.no_mcp {
             c.arg("--mcp-config").arg(&config);
@@ -270,7 +466,10 @@ fn once(o: &Opts, wtf: &Path, t: &Task, out: &Path, upstream: Option<(&Path, &Pa
     let (lines, failure) = stream(claude(&prompt, None), Duration::from_secs(o.timeout))?;
     let wall = start.elapsed().as_secs_f64();
     std::fs::write(out.with_extension("jsonl"), lines.join("\n")).map_err(|e| e.to_string())?;
-    let events: Vec<Value> = lines.iter().filter_map(|l| serde_json::from_str(l).ok()).collect();
+    let events: Vec<Value> = lines
+        .iter()
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .collect();
     let mut row = metrics(&events);
     let m = row.as_object_mut().expect("metrics are an object");
     m.insert("wall_s".into(), json!((wall * 10.0).round() / 10.0));
@@ -279,11 +478,21 @@ fn once(o: &Opts, wtf: &Path, t: &Task, out: &Path, upstream: Option<(&Path, &Pa
     }
     if fix.is_some() {
         // the runs make let through, from the shim's count of asks
-        let asked: u64 = std::fs::read_to_string(&sims).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
-        m.insert("sims".into(), json!(o.max_sims.map_or(asked, |n| asked.min(n))));
+        let asked: u64 = std::fs::read_to_string(&sims)
+            .ok()
+            .and_then(|s| s.trim().parse().ok())
+            .unwrap_or(0);
+        m.insert(
+            "sims".into(),
+            json!(o.max_sims.map_or(asked, |n| asked.min(n))),
+        );
         m.insert("max_sims".into(), json!(o.max_sims));
     }
-    let answer = m.get("answer").and_then(Value::as_str).unwrap_or("").to_string();
+    let answer = m
+        .get("answer")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
     let (score, mut pass, keys) = grade(&answer, &t.expect, &t.ordered);
     if let Some((f, (deps, up))) = fix {
         // the agent's RTL with the task's own Makefile and testbench
@@ -305,8 +514,15 @@ fn once(o: &Opts, wtf: &Path, t: &Task, out: &Path, upstream: Option<(&Path, &Pa
         && let Some(id) = m.get("session").and_then(Value::as_str).map(String::from)
     {
         let (lines, _) = stream(claude(REVIEW, Some(&id)), Duration::from_secs(o.timeout))?;
-        let review: Vec<Value> = lines.iter().filter_map(|l| serde_json::from_str(l).ok()).collect();
-        let text = review.iter().rev().find_map(|e| e.get("result").and_then(Value::as_str)).unwrap_or("(no review)");
+        let review: Vec<Value> = lines
+            .iter()
+            .filter_map(|l| serde_json::from_str(l).ok())
+            .collect();
+        let text = review
+            .iter()
+            .rev()
+            .find_map(|e| e.get("result").and_then(Value::as_str))
+            .unwrap_or("(no review)");
         std::fs::write(out.with_extension("review.md"), text).map_err(|e| e.to_string())?;
     }
     let _ = std::fs::remove_dir_all(&tmp);
@@ -320,10 +536,23 @@ fn checkout(root: &Path, f: &Fix) -> Result<PathBuf, String> {
         return Ok(dir);
     }
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    for args in [vec!["init", "-q"], vec!["fetch", "-q", "--depth", "1", &f.upstream, &f.commit], vec!["checkout", "-q", "FETCH_HEAD"]] {
-        let ok = Command::new("git").current_dir(&dir).args(&args).status().map_err(|e| format!("git: {e}"))?.success();
+    for args in [
+        vec!["init", "-q"],
+        vec!["fetch", "-q", "--depth", "1", &f.upstream, &f.commit],
+        vec!["checkout", "-q", "FETCH_HEAD"],
+    ] {
+        let ok = Command::new("git")
+            .current_dir(&dir)
+            .args(&args)
+            .status()
+            .map_err(|e| format!("git: {e}"))?
+            .success();
         if !ok {
-            return Err(format!("git {} failed in {}", args.join(" "), dir.display()));
+            return Err(format!(
+                "git {} failed in {}",
+                args.join(" "),
+                dir.display()
+            ));
         }
     }
     Ok(dir)
@@ -337,7 +566,9 @@ fn shim(bin: &Path, count: &Path, max: Option<u64>) -> Result<(), String> {
         .find(|p| p.is_file())
         .ok_or("no make on PATH")?;
     let refuse = match max {
-        Some(n) => format!("  if [ $n -gt {n} ]; then echo \"make sim: the budget of {n} runs is spent; finish with what you have\" >&2; exit 2; fi\n"),
+        Some(n) => format!(
+            "  if [ $n -gt {n} ]; then echo \"make sim: the budget of {n} runs is spent; finish with what you have\" >&2; exit 2; fi\n"
+        ),
         None => String::new(),
     };
     let script = format!(
@@ -349,35 +580,56 @@ fn shim(bin: &Path, count: &Path, max: Option<u64>) -> Result<(), String> {
     let path = bin.join("make");
     std::fs::write(&path, script).map_err(|e| e.to_string())?;
     use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+        .map_err(|e| e.to_string())
 }
 
 /// PATH with `dir` first.
 fn path_with(dir: &Path) -> std::ffi::OsString {
     let rest = std::env::var_os("PATH").unwrap_or_default();
-    std::env::join_paths(std::iter::once(dir.to_path_buf()).chain(std::env::split_paths(&rest))).unwrap_or(rest)
+    std::env::join_paths(std::iter::once(dir.to_path_buf()).chain(std::env::split_paths(&rest)))
+        .unwrap_or(rest)
 }
 
 /// The checkout as make sees it, in target/upstream/<commit>-<task>/, rebuilt each time:
 /// hardlinks, without .git and without the HDL sources under the task's `files`, so the correct
 /// files can't be read or restored from it; the rest (a cocotb model beside them) stays.
 fn deps(root: &Path, f: &Fix, task: &str, full: &Path) -> Result<PathBuf, String> {
-    let dir = root.join("target/upstream").join(format!("{}-{task}", f.commit));
+    let dir = root
+        .join("target/upstream")
+        .join(format!("{}-{task}", f.commit));
     let _ = std::fs::remove_dir_all(&dir);
-    let ok = Command::new("cp").arg("-al").arg(full).arg(&dir).status().map_err(|e| format!("cp: {e}"))?.success();
+    let ok = Command::new("cp")
+        .arg("-al")
+        .arg(full)
+        .arg(&dir)
+        .status()
+        .map_err(|e| format!("cp: {e}"))?
+        .success();
     if !ok {
-        return Err(format!("linking {} to {} failed", full.display(), dir.display()));
+        return Err(format!(
+            "linking {} to {} failed",
+            full.display(),
+            dir.display()
+        ));
     }
-    std::fs::remove_dir_all(dir.join(".git")).map_err(|e| format!("{}: {e}", dir.join(".git").display()))?;
+    std::fs::remove_dir_all(dir.join(".git"))
+        .map_err(|e| format!("{}: {e}", dir.join(".git").display()))?;
     for (_, from) in &f.files {
         let ok = Command::new("find")
             .arg(dir.join(from))
-            .args(["-type", "f", "(", "-name", "*.vhd", "-o", "-name", "*.vhdl", "-o", "-name", "*.v", "-o", "-name", "*.sv", ")", "-delete"])
+            .args([
+                "-type", "f", "(", "-name", "*.vhd", "-o", "-name", "*.vhdl", "-o", "-name", "*.v",
+                "-o", "-name", "*.sv", ")", "-delete",
+            ])
             .status()
             .map_err(|e| format!("find: {e}"))?
             .success();
         if !ok {
-            return Err(format!("removing the HDL under {from} from {} failed", dir.display()));
+            return Err(format!(
+                "removing the HDL under {from} from {} failed",
+                dir.display()
+            ));
         }
     }
     Ok(dir)
@@ -385,13 +637,22 @@ fn deps(root: &Path, f: &Fix, task: &str, full: &Path) -> Result<PathBuf, String
 
 /// The task's files (all but task.toml and bug.patch) copied into `work`, over what is there.
 fn copy_task(f: &Fix, work: &Path) -> Result<(), String> {
-    for e in std::fs::read_dir(&f.dir).map_err(|e| e.to_string())?.flatten() {
+    for e in std::fs::read_dir(&f.dir)
+        .map_err(|e| e.to_string())?
+        .flatten()
+    {
         if ["task.toml", "bug.patch"].contains(&e.file_name().to_str().unwrap_or("")) {
             continue;
         }
         let to = work.join(e.file_name());
         let _ = std::fs::remove_dir_all(&to).or_else(|_| std::fs::remove_file(&to));
-        let ok = Command::new("cp").arg("-r").arg(e.path()).arg(&to).status().map_err(|e| format!("cp: {e}"))?.success();
+        let ok = Command::new("cp")
+            .arg("-r")
+            .arg(e.path())
+            .arg(&to)
+            .status()
+            .map_err(|e| format!("cp: {e}"))?
+            .success();
         if !ok {
             return Err(format!("copying {} failed", e.path().display()));
         }
@@ -407,13 +668,25 @@ fn prepare(f: &Fix, upstream: &Path, work: &Path, fixed: bool) -> Result<(), Str
     for (to, from) in &f.files {
         let to = work.join(to);
         std::fs::create_dir_all(to.parent().unwrap_or(work)).map_err(|e| e.to_string())?;
-        let ok = Command::new("cp").arg("-r").arg(upstream.join(from)).arg(&to).status().map_err(|e| format!("cp: {e}"))?.success();
+        let ok = Command::new("cp")
+            .arg("-r")
+            .arg(upstream.join(from))
+            .arg(&to)
+            .status()
+            .map_err(|e| format!("cp: {e}"))?
+            .success();
         if !ok {
             return Err(format!("copying {from} from the upstream checkout failed"));
         }
     }
     if !fixed {
-        let ok = Command::new("git").current_dir(work).arg("apply").arg(f.dir.join("bug.patch")).status().map_err(|e| format!("git: {e}"))?.success();
+        let ok = Command::new("git")
+            .current_dir(work)
+            .arg("apply")
+            .arg(f.dir.join("bug.patch"))
+            .status()
+            .map_err(|e| format!("git: {e}"))?
+            .success();
         if !ok {
             return Err(format!("{}: bug.patch doesn't apply", f.dir.display()));
         }
@@ -424,9 +697,23 @@ fn prepare(f: &Fix, upstream: &Path, work: &Path, fixed: bool) -> Result<(), Str
 /// What the agent changed, as a diff from the buggy files (`bug`, prepared as the agent got them),
 /// and whether its files are upstream's again (a fix that restores upstream exactly).
 fn changes(f: &Fix, bug: &Path, upstream: &Path, work: &Path) -> (String, bool) {
-    let diff = |a: &Path, b: &Path| Command::new("git").args(["diff", "--no-index", "--"]).arg(a).arg(b).output().ok();
-    let text = f.files.iter().filter_map(|(to, _)| diff(&bug.join(to), &work.join(to))).map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).collect();
-    let same = f.files.iter().all(|(to, from)| diff(&upstream.join(from), &work.join(to)).is_some_and(|o| o.status.success()));
+    let diff = |a: &Path, b: &Path| {
+        Command::new("git")
+            .args(["diff", "--no-index", "--"])
+            .arg(a)
+            .arg(b)
+            .output()
+            .ok()
+    };
+    let text = f
+        .files
+        .iter()
+        .filter_map(|(to, _)| diff(&bug.join(to), &work.join(to)))
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .collect();
+    let same = f.files.iter().all(|(to, from)| {
+        diff(&upstream.join(from), &work.join(to)).is_some_and(|o| o.status.success())
+    });
     (text, same)
 }
 
@@ -446,7 +733,10 @@ fn make(work: &Path, upstream: &Path, target: &str) -> Result<bool, String> {
 /// Prove a fix task without an agent: with the bug `make sim` and `make hidden` fail, with the
 /// upstream file they pass.
 fn check(root: &Path, names: &[String]) -> Result<(), String> {
-    let tasks: Vec<Task> = tasks(root, names)?.into_iter().filter(|t| t.fix.is_some()).collect();
+    let tasks: Vec<Task> = tasks(root, names)?
+        .into_iter()
+        .filter(|t| t.fix.is_some())
+        .collect();
     if tasks.is_empty() {
         return Err("no fix tasks to check".into());
     }
@@ -454,16 +744,33 @@ fn check(root: &Path, names: &[String]) -> Result<(), String> {
         let f = t.fix.as_ref().expect("filtered");
         let upstream = checkout(root, f)?;
         let deps = deps(root, f, &t.name, &upstream)?;
-        let work = std::env::temp_dir().join(format!("wtf-check-{}-{}", std::process::id(), t.name));
+        let work =
+            std::env::temp_dir().join(format!("wtf-check-{}-{}", std::process::id(), t.name));
         for fixed in [false, true] {
             prepare(f, &upstream, &work, fixed)?;
             for target in ["sim", "hidden"] {
                 let start = Instant::now();
                 let passed = make(&work, &deps, target)?;
                 let verdict = if passed == fixed { "ok" } else { "WRONG" };
-                println!("{}\t{}\t{target}\t{}\t{verdict}\t{:.0}s", t.name, if fixed { "upstream" } else { "bug" }, if passed { "passes" } else { "fails" }, start.elapsed().as_secs_f64());
+                println!(
+                    "{}\t{}\t{target}\t{}\t{verdict}\t{:.0}s",
+                    t.name,
+                    if fixed { "upstream" } else { "bug" },
+                    if passed { "passes" } else { "fails" },
+                    start.elapsed().as_secs_f64()
+                );
                 if passed != fixed {
-                    return Err(format!("{}: {target} {} with {}; its logs are in {}", t.name, if passed { "passes" } else { "fails" }, if fixed { "the upstream file" } else { "the bug" }, work.display()));
+                    return Err(format!(
+                        "{}: {target} {} with {}; its logs are in {}",
+                        t.name,
+                        if passed { "passes" } else { "fails" },
+                        if fixed {
+                            "the upstream file"
+                        } else {
+                            "the bug"
+                        },
+                        work.display()
+                    ));
                 }
             }
         }
@@ -474,9 +781,19 @@ fn check(root: &Path, names: &[String]) -> Result<(), String> {
 
 /// The command's stream-json lines; killed after the timeout, which is then the failure.
 fn stream(mut cmd: Command, timeout: Duration) -> Result<(Vec<String>, Option<String>), String> {
-    let mut child = cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().map_err(|e| format!("claude: {e}"))?;
+    let mut child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("claude: {e}"))?;
     let stdout = child.stdout.take().expect("piped");
-    let reader = std::thread::spawn(move || BufReader::new(stdout).lines().map_while(Result::ok).collect::<Vec<_>>());
+    let reader = std::thread::spawn(move || {
+        BufReader::new(stdout)
+            .lines()
+            .map_while(Result::ok)
+            .collect::<Vec<_>>()
+    });
     let start = Instant::now();
     let mut failure = None;
     loop {
@@ -491,7 +808,9 @@ fn stream(mut cmd: Command, timeout: Duration) -> Result<(Vec<String>, Option<St
         std::thread::sleep(Duration::from_millis(200));
     }
     let status = child.wait().map_err(|e| e.to_string())?;
-    let lines = reader.join().map_err(|_| "reading claude's output failed")?;
+    let lines = reader
+        .join()
+        .map_err(|_| "reading claude's output failed")?;
     if failure.is_none() && !status.success() && lines.is_empty() {
         let mut err = String::new();
         if let Some(mut e) = child.stderr.take() {
@@ -505,26 +824,45 @@ fn stream(mut cmd: Command, timeout: Duration) -> Result<(Vec<String>, Option<St
 /// What a run cost, from its stream-json events.
 fn metrics(events: &[Value]) -> Value {
     let mut calls = Map::new();
-    let (mut n, mut errors, mut bytes, mut largest, mut peak, mut other, mut denials) = (0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
+    let (mut n, mut errors, mut bytes, mut largest, mut peak, mut other, mut denials) =
+        (0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
     let mut seen = std::collections::HashSet::new();
     let mut wtf_ids = std::collections::HashSet::new();
     let mut presented = false;
-    let content = |e: &Value| e.pointer("/message/content").and_then(Value::as_array).cloned().unwrap_or_default();
+    let content = |e: &Value| {
+        e.pointer("/message/content")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+    };
     for e in events {
         match e.get("type").and_then(Value::as_str) {
             Some("assistant") => {
                 // one event per content block, each with its message's usage: count a message once
-                let id = e.pointer("/message/id").and_then(Value::as_str).unwrap_or("").to_string();
+                let id = e
+                    .pointer("/message/id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
                 if seen.insert(id) {
-                    let u = |k: &str| e.pointer(&format!("/message/usage/{k}")).and_then(Value::as_u64).unwrap_or(0);
-                    peak = peak.max(u("input_tokens") + u("cache_read_input_tokens") + u("cache_creation_input_tokens"));
+                    let u = |k: &str| {
+                        e.pointer(&format!("/message/usage/{k}"))
+                            .and_then(Value::as_u64)
+                            .unwrap_or(0)
+                    };
+                    peak = peak.max(
+                        u("input_tokens")
+                            + u("cache_read_input_tokens")
+                            + u("cache_creation_input_tokens"),
+                    );
                 }
                 for b in content(e).iter().filter(|b| b["type"] == "tool_use") {
                     let name = b["name"].as_str().unwrap_or("?");
                     match name.strip_prefix("mcp__wtf__") {
                         Some(tool) => {
                             n += 1;
-                            *calls.entry(tool).or_insert(json!(0)) = json!(calls.get(tool).and_then(Value::as_u64).unwrap_or(0) + 1);
+                            *calls.entry(tool).or_insert(json!(0)) =
+                                json!(calls.get(tool).and_then(Value::as_u64).unwrap_or(0) + 1);
                             presented |= tool == "present";
                             wtf_ids.insert(b["id"].as_str().unwrap_or("").to_string());
                         }
@@ -541,7 +879,9 @@ fn metrics(events: &[Value]) -> Value {
                     };
                     if !wtf_ids.contains(b["tool_use_id"].as_str().unwrap_or("")) {
                         // the sandbox saying no, apart from the agent's own failures
-                        let denied = ["approval", "permission", "was blocked"].iter().any(|w| text.contains(w));
+                        let denied = ["approval", "permission", "was blocked"]
+                            .iter()
+                            .any(|w| text.contains(w));
                         denials += (b["is_error"] == true && denied) as u64;
                         continue;
                     }
@@ -554,11 +894,32 @@ fn metrics(events: &[Value]) -> Value {
             _ => {}
         }
     }
-    let init = events.iter().find(|e| e["type"] == "system" && e["subtype"] == "init");
-    let result = events.iter().rev().find(|e| e["type"] == "result").cloned().unwrap_or(Value::Null);
-    let u = |k: &str| result.pointer(&format!("/usage/{k}")).and_then(Value::as_u64).unwrap_or(0);
-    let (input, output, read, write) = (u("input_tokens"), u("output_tokens"), u("cache_read_input_tokens"), u("cache_creation_input_tokens"));
-    let wtf_status = init.and_then(|i| i["mcp_servers"].as_array()).and_then(|s| s.iter().find(|s| s["name"] == "wtf")).and_then(|s| s["status"].as_str()).unwrap_or("?");
+    let init = events
+        .iter()
+        .find(|e| e["type"] == "system" && e["subtype"] == "init");
+    let result = events
+        .iter()
+        .rev()
+        .find(|e| e["type"] == "result")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let u = |k: &str| {
+        result
+            .pointer(&format!("/usage/{k}"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+    };
+    let (input, output, read, write) = (
+        u("input_tokens"),
+        u("output_tokens"),
+        u("cache_read_input_tokens"),
+        u("cache_creation_input_tokens"),
+    );
+    let wtf_status = init
+        .and_then(|i| i["mcp_servers"].as_array())
+        .and_then(|s| s.iter().find(|s| s["name"] == "wtf"))
+        .and_then(|s| s["status"].as_str())
+        .unwrap_or("?");
     json!({
         "model": init.and_then(|i| i["model"].as_str()).unwrap_or("?"),
         "session": result["session_id"],
@@ -590,9 +951,14 @@ fn metrics(events: &[Value]) -> Value {
 /// suffix don't matter, a name is its last part (`dut.x` is `x`), lists are compared as sets
 /// unless the task orders them, and an expected `a|b` takes either.
 fn grade(answer: &str, expect: &Value, ordered: &[String]) -> (f64, bool, Value) {
-    let block = answer.rsplit_once("```json").and_then(|(_, b)| b.split_once("```")).map(|(b, _)| b);
+    let block = answer
+        .rsplit_once("```json")
+        .and_then(|(_, b)| b.split_once("```"))
+        .map(|(b, _)| b);
     let got: Option<Value> = block.and_then(|b| serde_json::from_str(b).ok());
-    let Some(exp) = expect.as_object() else { return (0.0, false, json!({})) };
+    let Some(exp) = expect.as_object() else {
+        return (0.0, false, json!({}));
+    };
     let keys: Map<String, Value> = exp
         .iter()
         .map(|(k, v)| {
@@ -601,7 +967,11 @@ fn grade(answer: &str, expect: &Value, ordered: &[String]) -> (f64, bool, Value)
                 Value::String(s) => s.split('|').map(|a| json!(a)).collect(),
                 _ => vec![v.clone()],
             };
-            let ok = got.as_ref().and_then(|g| g.get(k)).is_some_and(|g| alternatives.iter().any(|v| canon(g, sort) == canon(v, sort)));
+            let ok = got.as_ref().and_then(|g| g.get(k)).is_some_and(|g| {
+                alternatives
+                    .iter()
+                    .any(|v| canon(g, sort) == canon(v, sort))
+            });
             (k.clone(), json!(ok))
         })
         .collect();
@@ -620,7 +990,10 @@ fn canon(v: &Value, sort: bool) -> Value {
                 None => s.parse().ok(),
             };
             // a signal named by its full path is still that signal
-            n.map_or(Value::String(s.rsplit('.').next().unwrap_or(s).to_string()), Value::from)
+            n.map_or(
+                Value::String(s.rsplit('.').next().unwrap_or(s).to_string()),
+                Value::from,
+            )
         }
         Value::Number(n) => n.as_u64().map_or(v.clone(), Value::from),
         Value::Array(a) => {
@@ -630,21 +1003,43 @@ fn canon(v: &Value, sort: bool) -> Value {
             }
             Value::Array(a)
         }
-        Value::Object(o) => Value::Object(o.iter().map(|(k, x)| (canon(&json!(k), false).to_string().trim_matches('"').to_string(), canon(x, sort))).collect()),
+        Value::Object(o) => Value::Object(
+            o.iter()
+                .map(|(k, x)| {
+                    (
+                        canon(&json!(k), false)
+                            .to_string()
+                            .trim_matches('"')
+                            .to_string(),
+                        canon(x, sort),
+                    )
+                })
+                .collect(),
+        ),
         other => other.clone(),
     }
 }
 
 /// The results so far, averaged per task, wtf commit and model, oldest first.
 fn report(root: &Path) -> Result<(), String> {
-    let text = std::fs::read_to_string(root.join("bench/agent/results.jsonl")).map_err(|_| "no results yet: `wtf-bench agent run` first")?;
-    let rows: Vec<Value> = text.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
+    let text = std::fs::read_to_string(root.join("bench/agent/results.jsonl"))
+        .map_err(|_| "no results yet: `wtf-bench agent run` first")?;
+    let rows: Vec<Value> = text
+        .lines()
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .collect();
     type Key = (String, String, String, &'static str, String); // task, wtf commit, model, mcp, sim budget
     let mut groups: Vec<(Key, Vec<&Value>)> = Vec::new();
     for r in &rows {
         let s = |k: &str| r[k].as_str().unwrap_or("?").to_string();
         let budget = r["max_sims"].as_u64().map_or("-".into(), |n| n.to_string());
-        let key = (s("task"), format!("{}{}", s("wtf"), if r["dirty"] == true { "+" } else { "" }), s("model"), if r["mcp"] == "off" { "off" } else { "on" }, budget);
+        let key = (
+            s("task"),
+            format!("{}{}", s("wtf"), if r["dirty"] == true { "+" } else { "" }),
+            s("model"),
+            if r["mcp"] == "off" { "off" } else { "on" },
+            budget,
+        );
         match groups.iter_mut().find(|(k, _)| *k == key) {
             Some((_, g)) => g.push(r),
             None => groups.push((key, vec![r])),
@@ -652,12 +1047,18 @@ fn report(root: &Path) -> Result<(), String> {
     }
     groups.sort_by(|a, b| a.0.0.cmp(&b.0.0));
     // fixed: the hidden test passed (fix tasks); evidence: the answer's keys right; costs are medians
-    println!("task\twtf\tmodel\tmcp\tbudget\truns\tpass\tfixed\tevidence\tcalls\terrors\tdenials\tother\tsims\tanswers\ttokens\tpeak\tcost\twall");
+    println!(
+        "task\twtf\tmodel\tmcp\tbudget\truns\tpass\tfixed\tevidence\tcalls\terrors\tdenials\tother\tsims\tanswers\ttokens\tpeak\tcost\twall"
+    );
     for ((task, wtf, model, mcp, budget), g) in groups {
         // rows from before a metric existed don't have it: `-`
         let mean = |k: &str| {
             let v: Vec<f64> = g.iter().filter_map(|r| r[k].as_f64()).collect();
-            if v.is_empty() { f64::NAN } else { v.iter().sum::<f64>() / v.len() as f64 }
+            if v.is_empty() {
+                f64::NAN
+            } else {
+                v.iter().sum::<f64>() / v.len() as f64
+            }
         };
         let median = |k: &str| {
             let mut v: Vec<f64> = g.iter().filter_map(|r| r[k].as_f64()).collect();
@@ -669,13 +1070,34 @@ fn report(root: &Path) -> Result<(), String> {
             }
         };
         let count = |k: &str| g.iter().filter(|r| r[k] == true).count();
-        let fixed = if g.iter().any(|r| r.get("fixed").is_some()) { format!("{}/{}", count("fixed"), g.len()) } else { "-".into() };
-        let f = |x: f64, decimals: usize| if x.is_nan() { "-".to_string() } else { format!("{x:.decimals$}") };
+        let fixed = if g.iter().any(|r| r.get("fixed").is_some()) {
+            format!("{}/{}", count("fixed"), g.len())
+        } else {
+            "-".into()
+        };
+        let f = |x: f64, decimals: usize| {
+            if x.is_nan() {
+                "-".to_string()
+            } else {
+                format!("{x:.decimals$}")
+            }
+        };
         println!(
             "{task}\t{wtf}\t{model}\t{mcp}\t{budget}\t{}\t{}/{}\t{fixed}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t${}\t{}s",
-            g.len(), count("pass"), g.len(), f(mean("score"), 2), f(mean("calls"), 1), f(mean("tool_errors"), 1), f(mean("denials"), 1),
-            f(mean("other_tools"), 1), f(median("sims"), 0), f(median("answer_bytes"), 0), f(median("tokens"), 0), f(median("peak_context"), 0),
-            f(median("cost_usd"), 3), f(median("wall_s"), 0)
+            g.len(),
+            count("pass"),
+            g.len(),
+            f(mean("score"), 2),
+            f(mean("calls"), 1),
+            f(mean("tool_errors"), 1),
+            f(mean("denials"), 1),
+            f(mean("other_tools"), 1),
+            f(median("sims"), 0),
+            f(median("answer_bytes"), 0),
+            f(median("tokens"), 0),
+            f(median("peak_context"), 0),
+            f(median("cost_usd"), 3),
+            f(median("wall_s"), 0)
         );
     }
     Ok(())
@@ -687,11 +1109,20 @@ mod tests {
 
     #[test]
     fn loads_every_task() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().expect("the repository");
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("the repository");
         let all = tasks(root, &[]).expect("tasks load");
-        let fix = all.iter().find(|t| t.name == "head-trimmer-boundary").and_then(|t| t.fix.as_ref()).expect("a fix task");
+        let fix = all
+            .iter()
+            .find(|t| t.name == "head-trimmer-boundary")
+            .and_then(|t| t.fix.as_ref())
+            .expect("a fix task");
         assert!(fix.dir.join("bug.patch").exists());
-        assert!(all.iter().any(|t| t.name == "axis-frames" && t.fix.is_none()));
+        assert!(
+            all.iter()
+                .any(|t| t.name == "axis-frames" && t.fix.is_none())
+        );
     }
 
     #[test]
@@ -700,18 +1131,53 @@ mod tests {
         let ordered = vec!["frames".to_string()];
         // hex case, decimal for hex, a `ns` suffix, list order where unordered: all the same
         let answer = "Found them.\n```json\n{\"writes\": [{\"data\": \"0X11111111\", \"addr\": 16}], \"frames\": [10, 4], \"n\": \"1\", \"lat\": {\"1\": \"40ns\"}}\n```";
-        assert_eq!(grade(answer, &expect, &ordered), (1.0, true, json!({"writes": true, "frames": true, "n": true, "lat": true})));
+        assert_eq!(
+            grade(answer, &expect, &ordered),
+            (
+                1.0,
+                true,
+                json!({"writes": true, "frames": true, "n": true, "lat": true})
+            )
+        );
         // an ordered list out of order, a missing key; the last block counts
         let answer = "```json\n{}\n```\n```json\n{\"writes\": [{\"addr\": \"0x10\", \"data\": \"0x11111111\"}], \"frames\": [4, 10], \"n\": 1}\n```";
-        assert_eq!(grade(answer, &expect, &ordered), (0.5, false, json!({"writes": true, "frames": false, "n": true, "lat": false})));
+        assert_eq!(
+            grade(answer, &expect, &ordered),
+            (
+                0.5,
+                false,
+                json!({"writes": true, "frames": false, "n": true, "lat": false})
+            )
+        );
         assert_eq!(grade("no json here", &expect, &ordered).0, 0.0);
         // a name by its full path
         let sig = json!({"signal": "packets_in_flight"});
-        assert!(grade("```json\n{\"signal\": \"axis_eth_parser.PACKETS_IN_FLIGHT\"}\n```", &sig, &[]).1);
-        assert!(!grade("```json\n{\"signal\": \"headers_accepted\"}\n```", &sig, &[]).1);
+        assert!(
+            grade(
+                "```json\n{\"signal\": \"axis_eth_parser.PACKETS_IN_FLIGHT\"}\n```",
+                &sig,
+                &[]
+            )
+            .1
+        );
+        assert!(
+            !grade(
+                "```json\n{\"signal\": \"headers_accepted\"}\n```",
+                &sig,
+                &[]
+            )
+            .1
+        );
         // either of the names a task takes
         let either = json!({"signal": "rf_ren_b_o|rf_ren_b"});
-        assert!(grade("```json\n{\"signal\": \"decoder.rf_ren_b\"}\n```", &either, &[]).1);
+        assert!(
+            grade(
+                "```json\n{\"signal\": \"decoder.rf_ren_b\"}\n```",
+                &either,
+                &[]
+            )
+            .1
+        );
         assert!(!grade("```json\n{\"signal\": \"rf_ren\"}\n```", &either, &[]).1);
     }
 
@@ -720,15 +1186,27 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("wtf-shim-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("a temp dir");
-        std::fs::write(dir.join("Makefile"), "sim:\n\t@true\nbuild:\n\t@true\n").expect("a Makefile");
+        std::fs::write(dir.join("Makefile"), "sim:\n\t@true\nbuild:\n\t@true\n")
+            .expect("a Makefile");
         shim(&dir.join("bin"), &dir.join("sims"), Some(1)).expect("the shim");
-        let make = |target: &str| Command::new(dir.join("bin/make")).current_dir(&dir).arg(target).output().expect("make runs");
+        let make = |target: &str| {
+            Command::new(dir.join("bin/make"))
+                .current_dir(&dir)
+                .arg(target)
+                .output()
+                .expect("make runs")
+        };
         assert!(make("sim").status.success());
         assert!(make("build").status.success(), "only sim counts");
         let refused = make("sim");
         assert!(!refused.status.success());
         assert!(String::from_utf8_lossy(&refused.stderr).contains("budget of 1 runs is spent"));
-        assert_eq!(std::fs::read_to_string(dir.join("sims")).expect("the count").trim(), "2");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("sims"))
+                .expect("the count")
+                .trim(),
+            "2"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -747,9 +1225,34 @@ mod tests {
         ]
         .into();
         let m = metrics(&events);
-        assert_eq!((m["calls"].clone(), m["calls_by_tool"].clone(), m["tool_errors"].clone()), (json!(2), json!({"find": 1, "present": 1}), json!(1)));
-        assert_eq!((m["answer_bytes"].clone(), m["largest_answer"].clone(), m["presented"].clone()), (json!(6), json!(4), json!(true)));
-        assert_eq!((m["other_tools"].clone(), m["denials"].clone()), (json!(2), json!(1)));
-        assert_eq!((m["tokens"].clone(), m["peak_context"].clone(), m["mcp"].clone(), m["api_s"].clone()), (json!(322), json!(205), json!("connected"), json!(1.5)));
+        assert_eq!(
+            (
+                m["calls"].clone(),
+                m["calls_by_tool"].clone(),
+                m["tool_errors"].clone()
+            ),
+            (json!(2), json!({"find": 1, "present": 1}), json!(1))
+        );
+        assert_eq!(
+            (
+                m["answer_bytes"].clone(),
+                m["largest_answer"].clone(),
+                m["presented"].clone()
+            ),
+            (json!(6), json!(4), json!(true))
+        );
+        assert_eq!(
+            (m["other_tools"].clone(), m["denials"].clone()),
+            (json!(2), json!(1))
+        );
+        assert_eq!(
+            (
+                m["tokens"].clone(),
+                m["peak_context"].clone(),
+                m["mcp"].clone(),
+                m["api_s"].clone()
+            ),
+            (json!(322), json!(205), json!("connected"), json!(1.5))
+        );
     }
 }

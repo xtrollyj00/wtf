@@ -28,7 +28,10 @@ fn a_slice_goes_when_nothing_shows_it() {
     assert!(has(&ws, "top.cpu.data[3:0]"));
     cmd(&mut ws, "undo");
     assert_eq!(names(&ws), ["clk", "data[3:0]"]);
-    assert_eq!(ws.trace.vars[ws.rows[1].sig().unwrap().var].path, "top.cpu.data[3:0]");
+    assert_eq!(
+        ws.trace.vars[ws.rows[1].sig().unwrap().var].path,
+        "top.cpu.data[3:0]"
+    );
 
     // a named signal stays without a row
     cmd(&mut ws, "signal lo = cpu.data[1:0]");
@@ -38,8 +41,14 @@ fn a_slice_goes_when_nothing_shows_it() {
 #[test]
 fn sampling_again_with_fewer_fields_drops_the_old_ones() {
     let mut ws = with(&["top.clk"]);
-    cmd(&mut ws, "protocol t roles=rst,data,state when=!rst d=data s=state");
-    cmd(&mut ws, "decode p t clock=top.clk rst=top.rst data=top.cpu.data state=top.cpu.state");
+    cmd(
+        &mut ws,
+        "protocol t roles=rst,data,state when=!rst d=data s=state",
+    );
+    cmd(
+        &mut ws,
+        "decode p t clock=top.clk rst=top.rst data=top.cpu.data state=top.cpu.state",
+    );
     assert!(has(&ws, "p.s"));
     cmd(&mut ws, "protocol t roles=rst,data,state when=!rst d=data");
     assert!(has(&ws, "p.d") && !has(&ws, "p.s"));
@@ -49,7 +58,10 @@ fn sampling_again_with_fewer_fields_drops_the_old_ones() {
 fn present_shows_only_what_the_session_names() {
     let mut ws = with(&["top.clk"]);
     cmd(&mut ws, "protocol t roles=rst,data when=!rst d=data");
-    cmd(&mut ws, "decode p t clock=top.clk rst=top.rst data=top.cpu.data");
+    cmd(
+        &mut ws,
+        "decode p t clock=top.clk rst=top.rst data=top.cpu.data",
+    );
     cmd(&mut ws, "signal hi = cpu.data[7:4]");
     let clk = ws.trace.by_path["top.clk"];
     let session = wtf_core::session::to_toml(&with(&["top.clk"]));

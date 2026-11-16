@@ -28,9 +28,16 @@ impl Syntax {
         let glob = w.contains('*') && crate::computed::form(w).is_none();
         match self {
             Syntax::Glob => Ok(glob.then(|| Pattern::Glob(w.to_string()))),
-            Syntax::Regex => match w.strip_prefix('/').and_then(|r| r.strip_suffix('/')).filter(|_| w.len() >= 2) {
+            Syntax::Regex => match w
+                .strip_prefix('/')
+                .and_then(|r| r.strip_suffix('/'))
+                .filter(|_| w.len() >= 2)
+            {
                 Some(re) => regex(re).map(|r| Some(Pattern::Regex(r))),
-                None if glob => Err(format!("{w} is a glob; a pattern is a regex in slashes: /{}/", glob_regex(w))),
+                None if glob => Err(format!(
+                    "{w} is a glob; a pattern is a regex in slashes: /{}/",
+                    glob_regex(w)
+                )),
                 None => Ok(None),
             },
         }
@@ -39,13 +46,26 @@ impl Syntax {
 
 /// A regex, in any case. Its error says that it is one, not a glob.
 pub fn regex(re: &str) -> Result<regex::Regex, String> {
-    regex::RegexBuilder::new(re).case_insensitive(true).build().map_err(|e| {
-        let why = e.to_string().lines().rev().find(|l| !l.trim().is_empty()).unwrap_or_default().trim_start_matches("error: ").to_string();
-        match re.contains('*') {
-            true => format!("not a regex: /{re}/ ({why}); `/{}/` for that glob", glob_regex(re)),
-            false => format!("not a regex: /{re}/ ({why})"),
-        }
-    })
+    regex::RegexBuilder::new(re)
+        .case_insensitive(true)
+        .build()
+        .map_err(|e| {
+            let why = e
+                .to_string()
+                .lines()
+                .rev()
+                .find(|l| !l.trim().is_empty())
+                .unwrap_or_default()
+                .trim_start_matches("error: ")
+                .to_string();
+            match re.contains('*') {
+                true => format!(
+                    "not a regex: /{re}/ ({why}); `/{}/` for that glob",
+                    glob_regex(re)
+                ),
+                false => format!("not a regex: /{re}/ ({why})"),
+            }
+        })
 }
 
 /// A glob as the regex meant (`*uart*` is `uart`, `**.{a,b}` is `(a|b)`, `top.cpu.*` is
@@ -84,12 +104,21 @@ mod tests {
         assert_eq!(is(Syntax::Regex, "top.cpu"), Ok(false));
         assert_eq!(is(Syntax::Regex, "(a * b)"), Ok(false));
         assert_eq!(is(Syntax::Regex, "/"), Ok(false));
-        assert_eq!(is(Syntax::Regex, "top.cpu.*"), Err("top.cpu.* is a glob; a pattern is a regex in slashes: /top\\.cpu\\./".into()));
-        assert_eq!(is(Syntax::Regex, "**"), Err("** is a glob; a pattern is a regex in slashes: /.*/".into()));
+        assert_eq!(
+            is(Syntax::Regex, "top.cpu.*"),
+            Err("top.cpu.* is a glob; a pattern is a regex in slashes: /top\\.cpu\\./".into())
+        );
+        assert_eq!(
+            is(Syntax::Regex, "**"),
+            Err("** is a glob; a pattern is a regex in slashes: /.*/".into())
+        );
         assert_eq!(is(Syntax::Regex, "/*uart*/"), Err("not a regex: /*uart*/ (repetition operator missing expression); `/uart/` for that glob".into()));
         // without a `*`, no glob to offer
         let e = regex("(").unwrap_err();
-        assert!(e.starts_with("not a regex: /(/ (") && !e.contains("glob"), "{e}");
+        assert!(
+            e.starts_with("not a regex: /(/ (") && !e.contains("glob"),
+            "{e}"
+        );
     }
 
     #[test]

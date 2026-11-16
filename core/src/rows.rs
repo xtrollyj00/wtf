@@ -38,23 +38,38 @@ pub struct Look {
 impl Look {
     /// The default radix for `v`, no colour of its own.
     pub fn of(v: &Var) -> Look {
-        Look { radix: radix::default_for(v.names.is_some(), v.signed), frac: 0, color: None }
+        Look {
+            radix: radix::default_for(v.names.is_some(), v.signed),
+            frac: 0,
+            color: None,
+        }
     }
 }
 
 impl Sig {
     /// A row for `var` in its default look, folded and ungrouped.
     pub fn of(var: usize, v: &Var) -> Sig {
-        Sig { var, look: Look::of(v), grouped: false, open: Vec::new(), looks: Vec::new() }
+        Sig {
+            var,
+            look: Look::of(v),
+            grouped: false,
+            open: Vec::new(),
+            looks: Vec::new(),
+        }
     }
 }
 
 /// The colours a row can have. The interfaces give each its shade.
-pub const COLORS: [&str; 8] = ["red", "orange", "yellow", "green", "cyan", "blue", "magenta", "gray"];
+pub const COLORS: [&str; 8] = [
+    "red", "orange", "yellow", "green", "cyan", "blue", "magenta", "gray",
+];
 
 /// A colour by name, or an error listing them.
 pub fn color_named(name: &str) -> Result<usize, String> {
-    COLORS.iter().position(|c| *c == name).ok_or_else(|| format!("unknown colour: {name} (colours: {})", COLORS.join(", ")))
+    COLORS
+        .iter()
+        .position(|c| *c == name)
+        .ok_or_else(|| format!("unknown colour: {name} (colours: {})", COLORS.join(", ")))
 }
 
 impl Row {
@@ -97,7 +112,11 @@ pub fn header_of(rows: &[Row], i: usize) -> Option<usize> {
 
 /// Vars of the signals in the group at `h`.
 pub fn members(rows: &[Row], h: usize) -> Vec<usize> {
-    rows[h + 1..group_end(rows, h)].iter().filter_map(Row::sig).map(|s| s.var).collect()
+    rows[h + 1..group_end(rows, h)]
+        .iter()
+        .filter_map(Row::sig)
+        .map(|s| s.var)
+        .collect()
 }
 
 /// Rows on screen, as indices: the signals of collapsed groups are hidden.
@@ -130,7 +149,11 @@ pub fn tidy(rows: &mut Vec<Row>) {
 /// The rows `a..=b` (any order) as a range, widened to whole groups at the ends.
 pub fn range(rows: &[Row], a: usize, b: usize) -> std::ops::Range<usize> {
     let (a, b) = (a.min(b), a.max(b));
-    let end = if rows[b].is_group() { group_end(rows, b) } else { b + 1 };
+    let end = if rows[b].is_group() {
+        group_end(rows, b)
+    } else {
+        b + 1
+    };
     a..end
 }
 
@@ -152,13 +175,22 @@ pub fn block(rows: &[Row], a: usize, b: usize) -> std::ops::Range<usize> {
 /// `rows.len()` for the end). Its signals before any header in it become `grouped` or not there.
 /// The caller keeps groups whole: no ungrouped signal between a header and its rows, no group
 /// inside another. Returns the block's new start.
-pub fn place(rows: &mut Vec<Row>, from: std::ops::Range<usize>, before: usize, grouped: bool) -> usize {
+pub fn place(
+    rows: &mut Vec<Row>,
+    from: std::ops::Range<usize>,
+    before: usize,
+    grouped: bool,
+) -> usize {
     let len = from.len();
     let at = match before {
         _ if (from.start..=from.end).contains(&before) => from.start,
         _ => {
             let block: Vec<Row> = rows.drain(from.clone()).collect();
-            let at = if before > from.start { before - len } else { before };
+            let at = if before > from.start {
+                before - len
+            } else {
+                before
+            };
             rows.splice(at..at, block);
             at
         }
@@ -176,7 +208,12 @@ pub fn place(rows: &mut Vec<Row>, from: std::ops::Range<usize>, before: usize, g
 /// they land next to its rows (above or below a grouped row, below an expanded header); a block
 /// with a header never lands in a group, but above or below the whole group, the way it moves.
 /// Returns the block's new place, or None when `r` is in it.
-pub fn next_to(rows: &mut Vec<Row>, block: std::ops::Range<usize>, r: usize, below: bool) -> Option<std::ops::Range<usize>> {
+pub fn next_to(
+    rows: &mut Vec<Row>,
+    block: std::ops::Range<usize>,
+    r: usize,
+    below: bool,
+) -> Option<std::ops::Range<usize>> {
     if block.contains(&r) {
         return None;
     }
@@ -188,7 +225,12 @@ pub fn next_to(rows: &mut Vec<Row>, block: std::ops::Range<usize>, r: usize, bel
             None => (r + below as usize, false),
         },
         (Row::Group { .. }, false) if !below => (r, false),
-        (Row::Group { collapsed: true, .. }, false) => (group_end(rows, r), false),
+        (
+            Row::Group {
+                collapsed: true, ..
+            },
+            false,
+        ) => (group_end(rows, r), false),
         (Row::Group { .. }, false) => (r + 1, true),
         (Row::Signal(s), false) => (r + below as usize, s.grouped),
     };
@@ -199,7 +241,11 @@ pub fn next_to(rows: &mut Vec<Row>, block: std::ops::Range<usize>, r: usize, bel
 
 /// Move the rows `block` past the next row on screen, down or up, as `next_to` does (`J` / `K`
 /// on a `V` range). Returns its new place, or None at the end.
-pub fn step(rows: &mut Vec<Row>, block: std::ops::Range<usize>, down: bool) -> Option<std::ops::Range<usize>> {
+pub fn step(
+    rows: &mut Vec<Row>,
+    block: std::ops::Range<usize>,
+    down: bool,
+) -> Option<std::ops::Range<usize>> {
     let vis = visible(rows);
     let r = match down {
         true => vis.into_iter().find(|&v| v >= block.end),
@@ -218,14 +264,26 @@ pub fn move_row(rows: &mut [Row], i: usize, down: bool) -> usize {
             s.grouped = g;
         }
     };
-    let collapsed = |r: &Row| matches!(r, Row::Group { collapsed: true, .. });
+    let collapsed = |r: &Row| {
+        matches!(
+            r,
+            Row::Group {
+                collapsed: true,
+                ..
+            }
+        )
+    };
     if rows[i].is_group() {
         let end = group_end(rows, i);
         if down {
             if end == rows.len() {
                 return i;
             }
-            let next = if rows[end].is_group() { group_end(rows, end) } else { end + 1 };
+            let next = if rows[end].is_group() {
+                group_end(rows, end)
+            } else {
+                end + 1
+            };
             rows[i..next].rotate_left(end - i);
             return i + next - end;
         }
@@ -299,8 +357,12 @@ fn out_of_group(rows: &mut Vec<Row>, r: std::ops::Range<usize>) -> Result<Option
     }
     if inside < r.len() {
         let h = header_of(rows, r.clone().find(|&i| rows[i].grouped()).unwrap()).unwrap();
-        let Row::Group { name: g, .. } = &rows[h] else { unreachable!() };
-        return Err(format!("the selection is partly in group {g}: select rows all in it or all outside"));
+        let Row::Group { name: g, .. } = &rows[h] else {
+            unreachable!()
+        };
+        return Err(format!(
+            "the selection is partly in group {g}: select rows all in it or all outside"
+        ));
     }
     let h = header_of(rows, r.start).expect("a grouped row has a header");
     let end = group_end(rows, h);
@@ -325,7 +387,13 @@ pub fn group(rows: &mut Vec<Row>, r: std::ops::Range<usize>, name: &str) -> Resu
             s.grouped = true;
         }
     });
-    rows.insert(start, Row::Group { name: name.into(), collapsed: false });
+    rows.insert(
+        start,
+        Row::Group {
+            name: name.into(),
+            collapsed: false,
+        },
+    );
     Ok(start)
 }
 
@@ -370,8 +438,14 @@ pub fn put(rows: &mut Vec<Row>, block: Vec<Row>, r: usize, below: bool) -> std::
 /// Equal apart from which groups are collapsed and which buses are expanded.
 pub fn same_layout(a: &[Row], b: &[Row]) -> bool {
     let norm = |r: &Row| match r {
-        Row::Group { name, .. } => Row::Group { name: name.clone(), collapsed: false },
-        Row::Signal(s) => Row::Signal(Sig { open: Vec::new(), ..s.clone() }),
+        Row::Group { name, .. } => Row::Group {
+            name: name.clone(),
+            collapsed: false,
+        },
+        Row::Signal(s) => Row::Signal(Sig {
+            open: Vec::new(),
+            ..s.clone()
+        }),
     };
     a.iter().map(norm).eq(b.iter().map(norm))
 }
@@ -392,9 +466,19 @@ pub fn display_names(trace: &Trace, rows: &[Row]) -> Vec<String> {
     rows.iter()
         .enumerate()
         .map(|(i, r)| match r {
-            Row::Group { name, collapsed: false } => format!("▾ {name}"),
-            Row::Group { name, collapsed: true } => format!("▸ {name} ({})", members(rows, i).len()),
-            Row::Signal(s) => format!("{}{}", if s.grouped { "  " } else { "" }, leaves.next().unwrap_or_default()),
+            Row::Group {
+                name,
+                collapsed: false,
+            } => format!("▾ {name}"),
+            Row::Group {
+                name,
+                collapsed: true,
+            } => format!("▸ {name} ({})", members(rows, i).len()),
+            Row::Signal(s) => format!(
+                "{}{}",
+                if s.grouped { "  " } else { "" },
+                leaves.next().unwrap_or_default()
+            ),
         })
         .collect()
 }
@@ -403,13 +487,31 @@ pub fn display_names(trace: &Trace, rows: &[Row]) -> Vec<String> {
 fn unique_leaves(trace: &Trace, vars: &[usize]) -> Vec<String> {
     // a concatenation `{top.a,top.b}` and an expression `top.a+1` are shown whole; other computed
     // names (`top.x[7:4]`) split at the dots only, so a slice stays with its signal
-    let whole = |p: &str| p.starts_with('{') || matches!(crate::computed::form(p), Some(crate::computed::Form::Expr(_)));
+    let whole = |p: &str| {
+        p.starts_with('{')
+            || matches!(
+                crate::computed::form(p),
+                Some(crate::computed::Form::Expr(_))
+            )
+    };
     let parts: Vec<Vec<&str>> = vars
         .iter()
         .map(|&v| (v, trace.vars[v].path.as_str()))
-        .map(|(v, p)| if whole(p) { vec![p] } else if trace.is_computed(v) && !trace.is_composite(v) { p.split('.').collect() } else { crate::trace::parts(p) })
+        .map(|(v, p)| {
+            if whole(p) {
+                vec![p]
+            } else if trace.is_computed(v) && !trace.is_composite(v) {
+                p.split('.').collect()
+            } else {
+                crate::trace::parts(p)
+            }
+        })
         .collect();
-    let mut depth: Vec<usize> = vars.iter().zip(&parts).map(|(&v, p)| trace.vars[v].decl.min(p.len())).collect();
+    let mut depth: Vec<usize> = vars
+        .iter()
+        .zip(&parts)
+        .map(|(&v, p)| trace.vars[v].decl.min(p.len()))
+        .collect();
     // a name never starts at an index: `gen[0].p.hi`, not `[0].p.hi`
     let name = |i: usize, d: usize| {
         let p = &parts[i];
@@ -423,7 +525,12 @@ fn unique_leaves(trace: &Trace, vars: &[usize]) -> Vec<String> {
         let names: Vec<String> = (0..vars.len()).map(|i| name(i, depth[i])).collect();
         let mut changed = false;
         for i in 0..vars.len() {
-            if depth[i] < parts[i].len() && names.iter().enumerate().any(|(j, n)| j != i && *n == names[i]) {
+            if depth[i] < parts[i].len()
+                && names
+                    .iter()
+                    .enumerate()
+                    .any(|(j, n)| j != i && *n == names[i])
+            {
                 depth[i] += 1;
                 changed = true;
             }
@@ -438,7 +545,11 @@ fn unique_leaves(trace: &Trace, vars: &[usize]) -> Vec<String> {
 pub fn label(var: &Var, look: &Look, v: &Val) -> String {
     match v {
         Val::Bits(b) if b.len() == 1 => b.to_uppercase(),
-        Val::Bits(b) => match (var.time, u64::from_str_radix(b, 2), var.name_of(b).filter(|_| look.radix == radix::ENUM)) {
+        Val::Bits(b) => match (
+            var.time,
+            u64::from_str_radix(b, 2),
+            var.name_of(b).filter(|_| look.radix == radix::ENUM),
+        ) {
             (Some(fpt), Ok(t), _) => crate::time::format(t, Some(fpt)),
             (_, _, Some(name)) => name.into(),
             _ => (RADIXES[look.radix].format)(b, look.frac),
@@ -452,13 +563,33 @@ mod tests {
     use super::*;
 
     fn sig(var: usize, grouped: bool) -> Row {
-        Row::Signal(Sig { var, look: Look { radix: 0, frac: 0, color: None }, grouped, open: Vec::new(), looks: Vec::new() })
+        Row::Signal(Sig {
+            var,
+            look: Look {
+                radix: 0,
+                frac: 0,
+                color: None,
+            },
+            grouped,
+            open: Vec::new(),
+            looks: Vec::new(),
+        })
     }
 
     #[test]
     fn groups() {
-        let g = |collapsed| Row::Group { name: "g".into(), collapsed };
-        let mut rows = vec![sig(0, false), g(true), sig(1, true), sig(2, true), sig(3, false), g(false)];
+        let g = |collapsed| Row::Group {
+            name: "g".into(),
+            collapsed,
+        };
+        let mut rows = vec![
+            sig(0, false),
+            g(true),
+            sig(1, true),
+            sig(2, true),
+            sig(3, false),
+            g(false),
+        ];
         assert_eq!(group_end(&rows, 1), 4);
         assert_eq!(header_of(&rows, 3), Some(1));
         assert_eq!(header_of(&rows, 4), None);
@@ -480,7 +611,10 @@ mod tests {
 
     #[test]
     fn moves() {
-        let g = Row::Group { name: "g".into(), collapsed: false };
+        let g = Row::Group {
+            name: "g".into(),
+            collapsed: false,
+        };
         let mut rows = vec![sig(0, false), g, sig(1, true), sig(2, true), sig(3, false)];
         // 0 walks down into the group, through it and out again
         let mut i = 0;
@@ -489,7 +623,16 @@ mod tests {
             i = move_row(&mut rows, i, true);
             seen.push(vars(&rows));
         }
-        assert_eq!(seen, ["[ g0 g1 g2 3", "[ g1 g0 g2 3", "[ g1 g2 g0 3", "[ g1 g2 0 3", "[ g1 g2 3 0"]);
+        assert_eq!(
+            seen,
+            [
+                "[ g0 g1 g2 3",
+                "[ g1 g0 g2 3",
+                "[ g1 g2 g0 3",
+                "[ g1 g2 0 3",
+                "[ g1 g2 3 0"
+            ]
+        );
         // and back up
         for _ in 0..5 {
             i = move_row(&mut rows, i, false);
@@ -502,7 +645,10 @@ mod tests {
         assert_eq!(move_row(&mut rows, 1, false), 0);
         assert_eq!(vars(&rows), "[ g1 g2 0 3");
         // a collapsed group is passed over
-        rows[0] = Row::Group { name: "g".into(), collapsed: true };
+        rows[0] = Row::Group {
+            name: "g".into(),
+            collapsed: true,
+        };
         assert_eq!(move_row(&mut rows, 3, false), 0);
         assert_eq!(vars(&rows), "0 [ g1 g2 3");
         assert_eq!(move_row(&mut rows, 0, true), 3);
@@ -510,7 +656,10 @@ mod tests {
 
     #[test]
     fn places() {
-        let g = Row::Group { name: "g".into(), collapsed: false };
+        let g = Row::Group {
+            name: "g".into(),
+            collapsed: false,
+        };
         let mut rows = vec![sig(0, false), g, sig(1, true), sig(2, true), sig(3, false)];
         // a header takes its whole group into the block
         assert_eq!(block(&rows, 1, 1), 1..4);
@@ -531,7 +680,16 @@ mod tests {
         // several rows: the signals before a header take the place's group, the group keeps its own
         assert_eq!(place(&mut rows, 2..4, 1, true), 1);
         assert_eq!(vars(&rows), "[ g2 g3 g1 0");
-        let mut rows = vec![sig(0, false), sig(1, false), Row::Group { name: "h".into(), collapsed: false }, sig(2, true), sig(3, false)];
+        let mut rows = vec![
+            sig(0, false),
+            sig(1, false),
+            Row::Group {
+                name: "h".into(),
+                collapsed: false,
+            },
+            sig(2, true),
+            sig(3, false),
+        ];
         assert_eq!(place(&mut rows, 1..4, 5, false), 2);
         assert_eq!(vars(&rows), "0 3 1 [ g2");
     }
@@ -539,7 +697,10 @@ mod tests {
     #[test]
     fn steps() {
         // a range of two walks down into a group, through it and out, as a drag would move it
-        let g = Row::Group { name: "g".into(), collapsed: false };
+        let g = Row::Group {
+            name: "g".into(),
+            collapsed: false,
+        };
         let mut rows = vec![sig(0, false), sig(1, false), g, sig(2, true), sig(3, false)];
         let mut b = 0..2;
         let mut seen = Vec::new();
@@ -555,7 +716,19 @@ mod tests {
         assert_eq!((vars(&rows), b), ("0 1 [ g2 3".into(), 0..2));
         assert_eq!(step(&mut rows, 2..5, false), Some(1..4));
         assert_eq!(vars(&rows), "0 [ g2 3 1");
-        let mut rows = vec![Row::Group { name: "h".into(), collapsed: false }, sig(0, true), sig(1, false), Row::Group { name: "g".into(), collapsed: false }, sig(2, true)];
+        let mut rows = vec![
+            Row::Group {
+                name: "h".into(),
+                collapsed: false,
+            },
+            sig(0, true),
+            sig(1, false),
+            Row::Group {
+                name: "g".into(),
+                collapsed: false,
+            },
+            sig(2, true),
+        ];
         assert_eq!(step(&mut rows, 0..3, true), Some(2..5));
         assert_eq!(vars(&rows), "[ g2 [ g0 1");
     }

@@ -11,14 +11,30 @@ pub fn main(args: &[String]) -> Result<(), String> {
     let wtf = wtf_binary(opts)?;
     let trace = PathBuf::from(trace);
     let fst = trace.extension().is_some_and(|e| e == "fst");
-    let bytes = std::fs::metadata(&trace).map_err(|e| format!("{}: {e}", trace.display()))?.len();
+    let bytes = std::fs::metadata(&trace)
+        .map_err(|e| format!("{}: {e}", trace.display()))?
+        .len();
 
     let (open, ws) = time(|| Workspace::open(&trace));
     let mut ws = ws?;
     let rss_open = rss();
     let end = ws.trace.end();
-    println!("{}: {:.2} GiB, {} signals, {} cycles", trace.display(), bytes as f64 / (1u64 << 30) as f64, ws.trace.vars.len(), end / PERIOD + 1);
-    row("open, in the core", open, if fst { "1 s, first screen" } else { "2 s, first screen" });
+    println!(
+        "{}: {:.2} GiB, {} signals, {} cycles",
+        trace.display(),
+        bytes as f64 / (1u64 << 30) as f64,
+        ws.trace.vars.len(),
+        end / PERIOD + 1
+    );
+    row(
+        "open, in the core",
+        open,
+        if fst {
+            "1 s, first screen"
+        } else {
+            "2 s, first screen"
+        },
+    );
 
     let (add, r) = time(|| command::run(&mut ws, "add top.hot"));
     r?;
@@ -30,46 +46,125 @@ pub fn main(args: &[String]) -> Result<(), String> {
     let (search, r) = time(|| ws.search(&format!("0x{:x}", last & 0xFFFF_FFFF), true, 1));
     r?;
     if ws.view.cursor != last * PERIOD {
-        return Err(format!("value search ended at {}, not {}", ws.view.cursor, last * PERIOD));
+        return Err(format!(
+            "value search ended at {}, not {}",
+            ws.view.cursor,
+            last * PERIOD
+        ));
     }
-    row(&format!("value search, {} transitions", last + 1), search, "1 s for 10M");
+    row(
+        &format!("value search, {} transitions", last + 1),
+        search,
+        "1 s for 10M",
+    );
 
     let (clocked, found) = time(|| -> Result<u64, String> {
         let q = ws.query("@top.clk top.u0.s_axi_awvalid && top.u0.s_axi_awready")?;
-        let s = query::Search { from: 0, to: None, forward: true, merge: true, runs: usize::MAX, matches: u64::MAX };
+        let s = query::Search {
+            from: 0,
+            to: None,
+            forward: true,
+            merge: true,
+            runs: usize::MAX,
+            matches: u64::MAX,
+        };
         Ok(query::find(&ws.trace, &q, &s).total)
     });
-    row(&format!("clocked search, {} matches", found?), clocked, "none yet");
+    row(
+        &format!("clocked search, {} matches", found?),
+        clocked,
+        "none yet",
+    );
     let rss_loaded = rss();
 
-    let session = std::env::temp_dir().join(format!("wtf-bench-{}.session.toml", std::process::id()));
-    let rows: String = ["top.clk", "top.hot", "top.u0.s_axi_awvalid", "top.u0.s_axi_awready", "top.u0.s_axi_awaddr", "top.u0.state"]
-        .iter()
-        .map(|s| format!("[[rows]]\nsignal = \"{s}\"\n\n"))
-        .collect();
-    let first = snapshot(&wtf, &trace, &session, "time = \"0ns\"\nzoom = \"1ns\"", &rows)?;
-    row("first screen, wtf --snapshot", first, if fst { "1 s" } else { "2 s" });
-    let whole = snapshot(&wtf, &trace, &session, &format!("time = \"0ns\"\nto = \"{end}ns\""), &rows)?;
-    row("whole trace on screen, wtf --snapshot", whole, "the first screen + 50 ms");
+    let session =
+        std::env::temp_dir().join(format!("wtf-bench-{}.session.toml", std::process::id()));
+    let rows: String = [
+        "top.clk",
+        "top.hot",
+        "top.u0.s_axi_awvalid",
+        "top.u0.s_axi_awready",
+        "top.u0.s_axi_awaddr",
+        "top.u0.state",
+    ]
+    .iter()
+    .map(|s| format!("[[rows]]\nsignal = \"{s}\"\n\n"))
+    .collect();
+    let first = snapshot(
+        &wtf,
+        &trace,
+        &session,
+        "time = \"0ns\"\nzoom = \"1ns\"",
+        &rows,
+    )?;
+    row(
+        "first screen, wtf --snapshot",
+        first,
+        if fst { "1 s" } else { "2 s" },
+    );
+    let whole = snapshot(
+        &wtf,
+        &trace,
+        &session,
+        &format!("time = \"0ns\"\nto = \"{end}ns\""),
+        &rows,
+    )?;
+    row(
+        "whole trace on screen, wtf --snapshot",
+        whole,
+        "the first screen + 50 ms",
+    );
     // `gen --mem N`: the array as one row, folded and one level open (spec §6)
     if let Some(&mem) = ws.trace.by_path.get("top.mem") {
         let n = ws.trace.vars[mem].children.len();
         let (add, r) = time(|| command::run(&mut ws, "add top.mem"));
         r?;
         row(&format!("add top.mem ({n} x 32 bits)"), add, "1 s");
-        let (value, v) = time(|| ws.trace.value_at(mem, end).map_or(0, |v| format!("{v:?}").len()));
+        let (value, v) = time(|| {
+            ws.trace
+                .value_at(mem, end)
+                .map_or(0, |v| format!("{v:?}").len())
+        });
         row(&format!("its value at the end ({v} B)"), value, "none yet");
         let mem_rows = "[[rows]]\nsignal = \"top.mem\"\n";
-        let folded = snapshot(&wtf, &trace, &session, &format!("time = \"0ns\"\nto = \"{end}ns\""), mem_rows)?;
-        row("top.mem folded, whole trace", folded, "the first screen + 50 ms");
-        let open = snapshot(&wtf, &trace, &session, &format!("time = \"0ns\"\nto = \"{end}ns\""), &format!("{mem_rows}open = [\"mem\"]\n"))?;
-        row("top.mem open, whole trace", open, "the first screen + 50 ms");
+        let folded = snapshot(
+            &wtf,
+            &trace,
+            &session,
+            &format!("time = \"0ns\"\nto = \"{end}ns\""),
+            mem_rows,
+        )?;
+        row(
+            "top.mem folded, whole trace",
+            folded,
+            "the first screen + 50 ms",
+        );
+        let open = snapshot(
+            &wtf,
+            &trace,
+            &session,
+            &format!("time = \"0ns\"\nto = \"{end}ns\""),
+            &format!("{mem_rows}open = [\"mem\"]\n"),
+        )?;
+        row(
+            "top.mem open, whole trace",
+            open,
+            "the first screen + 50 ms",
+        );
     }
     std::fs::remove_file(&session).ok();
 
     let mb = |b: Option<u64>| b.map_or("n/a".into(), |b| format!("{} MB", b >> 20));
-    println!("{:<44}{:>10}    target: proportional to the hierarchy", "memory after open (peak)", mb(rss_open));
-    println!("{:<44}{:>10}", "memory after the searches (peak)", mb(rss_loaded));
+    println!(
+        "{:<44}{:>10}    target: proportional to the hierarchy",
+        "memory after open (peak)",
+        mb(rss_open)
+    );
+    println!(
+        "{:<44}{:>10}",
+        "memory after the searches (peak)",
+        mb(rss_loaded)
+    );
     Ok(())
 }
 
@@ -77,10 +172,15 @@ pub fn main(args: &[String]) -> Result<(), String> {
 pub fn wtf_binary(opts: Vec<(String, String)>) -> Result<PathBuf, String> {
     let wtf = match opts.into_iter().next() {
         Some((_, p)) => PathBuf::from(p),
-        None => std::env::current_exe().map_err(|e| e.to_string())?.with_file_name("wtf"),
+        None => std::env::current_exe()
+            .map_err(|e| e.to_string())?
+            .with_file_name("wtf"),
     };
     if !wtf.exists() {
-        return Err(format!("{}: no wtf binary; `cargo build --release` first, or give --wtf <path>", wtf.display()));
+        return Err(format!(
+            "{}: no wtf binary; `cargo build --release` first, or give --wtf <path>",
+            wtf.display()
+        ));
     }
     Ok(wtf)
 }
@@ -96,12 +196,31 @@ fn row(what: &str, d: Duration, target: &str) {
 }
 
 /// One screen of these rows, with this `[view]`; the wall time of it.
-fn snapshot(wtf: &Path, trace: &Path, session: &Path, view: &str, rows: &str) -> Result<Duration, String> {
-    std::fs::write(session, format!("version = 1\n\n[view]\n{view}\n\n{rows}")).map_err(|e| e.to_string())?;
-    let (d, out) = time(|| std::process::Command::new(wtf).env("XDG_CONFIG_HOME", "/nonexistent").arg("--snapshot").arg("200x40").arg("-S").arg(session).arg(trace).output());
+fn snapshot(
+    wtf: &Path,
+    trace: &Path,
+    session: &Path,
+    view: &str,
+    rows: &str,
+) -> Result<Duration, String> {
+    std::fs::write(session, format!("version = 1\n\n[view]\n{view}\n\n{rows}"))
+        .map_err(|e| e.to_string())?;
+    let (d, out) = time(|| {
+        std::process::Command::new(wtf)
+            .env("XDG_CONFIG_HOME", "/nonexistent")
+            .arg("--snapshot")
+            .arg("200x40")
+            .arg("-S")
+            .arg(session)
+            .arg(trace)
+            .output()
+    });
     let out = out.map_err(|e| format!("{}: {e}", wtf.display()))?;
     if !out.status.success() {
-        return Err(format!("wtf --snapshot failed: {}", String::from_utf8_lossy(&out.stderr)));
+        return Err(format!(
+            "wtf --snapshot failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        ));
     }
     Ok(d)
 }
@@ -110,6 +229,13 @@ fn snapshot(wtf: &Path, trace: &Path, session: &Path, view: &str, rows: &str) ->
 fn rss() -> Option<u64> {
     // shortcut: Linux only (/proc); n/a elsewhere until someone benchmarks on macOS.
     let s = std::fs::read_to_string("/proc/self/status").ok()?;
-    let kb = s.lines().find_map(|l| l.strip_prefix("VmHWM:"))?.trim().strip_suffix("kB")?.trim().parse::<u64>().ok()?;
+    let kb = s
+        .lines()
+        .find_map(|l| l.strip_prefix("VmHWM:"))?
+        .trim()
+        .strip_suffix("kB")?
+        .trim()
+        .parse::<u64>()
+        .ok()?;
     Some(kb << 10)
 }

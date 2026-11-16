@@ -37,7 +37,12 @@ fn options(args: &[String], names: &[&str]) -> Result<(Vec<(String, String)>, St
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.strip_prefix("--") {
-            Some(n) if names.contains(&n) => opts.push((n.to_string(), it.next().ok_or(format!("--{n} needs a value\n{USAGE}"))?.clone())),
+            Some(n) if names.contains(&n) => opts.push((
+                n.to_string(),
+                it.next()
+                    .ok_or(format!("--{n} needs a value\n{USAGE}"))?
+                    .clone(),
+            )),
             Some(n) => return Err(format!("unknown option --{n}\n{USAGE}")),
             None if pos.is_none() => pos = Some(a.clone()),
             None => return Err(format!("one path only\n{USAGE}")),

@@ -45,8 +45,14 @@ fn private_dir(base: &Path) -> std::io::Result<PathBuf> {
     }
     let m = std::fs::symlink_metadata(&d)?;
     if !m.is_dir() || m.uid() != uid || m.mode() & 0o077 != 0 {
-        let why = format!("{}: not a directory only you can enter; remove it, or set XDG_RUNTIME_DIR", d.display());
-        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, why));
+        let why = format!(
+            "{}: not a directory only you can enter; remove it, or set XDG_RUNTIME_DIR",
+            d.display()
+        );
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            why,
+        ));
     }
     Ok(d)
 }
@@ -68,7 +74,12 @@ impl Drop for Listener {
 
 /// Listen as session `id` of `kind` (`window` or `agent`) on `trace`; `handle` answers `GET` and
 /// `PUT`, on the listener's threads.
-pub fn listen(id: &str, kind: &str, trace: &Path, handle: impl Fn(Request) -> Result<String, String> + Send + Sync + 'static) -> std::io::Result<Listener> {
+pub fn listen(
+    id: &str,
+    kind: &str,
+    trace: &Path,
+    handle: impl Fn(Request) -> Result<String, String> + Send + Sync + 'static,
+) -> std::io::Result<Listener> {
     let path = sock(id)?;
     let _ = std::fs::remove_file(&path);
     let listener = UnixListener::bind(&path)?;
@@ -101,7 +112,11 @@ pub fn window(id: &str, trace: &Path) -> std::io::Result<(Listener, mpsc::Receiv
     Ok((l, rx))
 }
 
-fn serve(stream: UnixStream, info: &str, handle: &dyn Fn(Request) -> Result<String, String>) -> std::io::Result<()> {
+fn serve(
+    stream: UnixStream,
+    info: &str,
+    handle: &dyn Fn(Request) -> Result<String, String>,
+) -> std::io::Result<()> {
     let mut r = BufReader::new(stream.try_clone()?);
     let a = match read_head(&mut r)? {
         (head, None) if head == "INFO" => Ok(info.to_string()),
@@ -118,11 +133,19 @@ fn read_head(r: &mut impl BufRead) -> std::io::Result<(String, Option<String>)> 
     let mut line = String::new();
     r.read_line(&mut line)?;
     let line = line.trim_end();
-    let sized = line.split_once(' ').filter(|(w, _)| matches!(*w, "PUT" | "OK")).and_then(|(w, n)| Some((w, n.parse::<usize>().ok()?)));
-    let Some((word, n)) = sized else { return Ok((line.to_string(), None)) };
+    let sized = line
+        .split_once(' ')
+        .filter(|(w, _)| matches!(*w, "PUT" | "OK"))
+        .and_then(|(w, n)| Some((w, n.parse::<usize>().ok()?)));
+    let Some((word, n)) = sized else {
+        return Ok((line.to_string(), None));
+    };
     let mut buf = vec![0; n];
     r.read_exact(&mut buf)?;
-    Ok((word.to_string(), Some(String::from_utf8_lossy(&buf).into_owned())))
+    Ok((
+        word.to_string(),
+        Some(String::from_utf8_lossy(&buf).into_owned()),
+    ))
 }
 
 fn write_answer(mut w: UnixStream, a: Result<String, String>) -> std::io::Result<()> {
@@ -142,11 +165,18 @@ pub struct Session {
 /// The sessions that answer, most recently started first; an error if the sockets' directory
 /// can't be used.
 pub fn sessions() -> Result<Vec<Session>, String> {
-    let entries = dir().and_then(std::fs::read_dir).map_err(|e| format!("can't list sessions: {e}"))?;
+    let entries = dir()
+        .and_then(std::fs::read_dir)
+        .map_err(|e| format!("can't list sessions: {e}"))?;
     let mut socks: Vec<(std::time::SystemTime, String)> = entries
         .flatten()
         .filter_map(|e| {
-            let id = e.file_name().to_str()?.strip_prefix("wtf-")?.strip_suffix(".sock")?.to_string();
+            let id = e
+                .file_name()
+                .to_str()?
+                .strip_prefix("wtf-")?
+                .strip_suffix(".sock")?
+                .to_string();
             Some((e.metadata().ok()?.modified().ok()?, id))
         })
         .collect();
@@ -157,7 +187,11 @@ pub fn sessions() -> Result<Vec<Session>, String> {
         .filter_map(|(_, id)| {
             let info = call(&id, "INFO\n".into()).ok()?;
             let (kind, trace) = info.split_once('\n')?;
-            Some(Session { kind: kind.into(), trace: trace.into(), id })
+            Some(Session {
+                kind: kind.into(),
+                trace: trace.into(),
+                id,
+            })
         })
         .collect())
 }
@@ -170,8 +204,15 @@ pub fn window_on(trace: &Path) -> Option<String> {
 /// The sessions of `kind` (`window`, `agent`) on this trace, most recently started first (spec
 /// §15 "Joining").
 pub fn on_trace(kind: &str, trace: &Path) -> Vec<String> {
-    let Ok(trace) = std::fs::canonicalize(trace) else { return Vec::new() };
-    sessions().unwrap_or_default().into_iter().filter(|s| s.kind == kind && s.trace == trace).map(|s| s.id).collect()
+    let Ok(trace) = std::fs::canonicalize(trace) else {
+        return Vec::new();
+    };
+    sessions()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|s| s.kind == kind && s.trace == trace)
+        .map(|s| s.id)
+        .collect()
 }
 
 /// Send a request to session `id` and wait for its answer.
@@ -203,7 +244,9 @@ fn call(id: &str, req: String) -> Result<String, String> {
             let _ = std::fs::remove_file(&path);
             return Err(format!("no session {id}"));
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(format!("no session {id}")),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(format!("no session {id}"));
+        }
         Err(e) => return Err(format!("session {id}: {e}")),
     };
     let err = |e: std::io::Error| format!("session {id}: {e}");
@@ -225,15 +268,26 @@ mod tests {
         let base = std::env::temp_dir().join(format!("wtf-private-{}", std::process::id()));
         std::fs::create_dir_all(&base).unwrap();
         let d = private_dir(&base).unwrap();
-        assert_eq!(std::fs::metadata(&d).unwrap().permissions().mode() & 0o777, 0o700);
+        assert_eq!(
+            std::fs::metadata(&d).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
         assert_eq!(private_dir(&base).unwrap(), d); // found again
         // opened to others (or made so by someone else): refused
         std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o755)).unwrap();
-        assert!(private_dir(&base).unwrap_err().to_string().contains("not a directory only you can enter"));
+        assert!(
+            private_dir(&base)
+                .unwrap_err()
+                .to_string()
+                .contains("not a directory only you can enter")
+        );
         // a link in its place: refused, even to a directory of the user's
         std::fs::remove_dir(&d).unwrap();
         let other = base.join("other");
-        std::fs::DirBuilder::new().mode(0o700).create(&other).unwrap();
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&other)
+            .unwrap();
         std::os::unix::fs::symlink(&other, &d).unwrap();
         assert!(private_dir(&base).is_err());
         std::fs::remove_dir_all(&base).unwrap();
@@ -255,11 +309,21 @@ mod tests {
                 inc.reply.send(a).unwrap();
             }
         });
-        let s = sessions().unwrap().into_iter().find(|s| s.id == id).expect("listed");
-        assert_eq!((s.kind.as_str(), s.trace), ("window", std::fs::canonicalize(trace).unwrap()));
+        let s = sessions()
+            .unwrap()
+            .into_iter()
+            .find(|s| s.id == id)
+            .expect("listed");
+        assert_eq!(
+            (s.kind.as_str(), s.trace),
+            ("window", std::fs::canonicalize(trace).unwrap())
+        );
         assert_eq!(window_on(trace), Some(id.clone()));
         assert_eq!(request(&id, Request::Get), Ok("version = 1\n".into()));
-        assert_eq!(request(&id, Request::Put("héllo\nworld".into())), Err("got 12 bytes".into()));
+        assert_eq!(
+            request(&id, Request::Put("héllo\nworld".into())),
+            Err("got 12 bytes".into())
+        );
         window.join().unwrap();
         let path = l.path.clone();
         drop(l);

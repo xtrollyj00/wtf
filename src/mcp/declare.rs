@@ -26,7 +26,10 @@ fn declare(app: &mut Workspace, a: &WorkspaceArgs) -> Result<String, String> {
             continue;
         };
         match app.define(name, expr) {
-            Ok(_) => signals.push(Value::Table(Table::from_iter([("name".into(), name.trim().into()), ("expr".into(), expr.trim().into())]))),
+            Ok(_) => signals.push(Value::Table(Table::from_iter([
+                ("name".into(), name.trim().into()),
+                ("expr".into(), expr.trim().into()),
+            ]))),
             Err(e) => errors.push(format!("signal {}: {e}", name.trim())),
         }
     }
@@ -42,13 +45,32 @@ fn declare(app: &mut Workspace, a: &WorkspaceArgs) -> Result<String, String> {
             })
             .collect()
     };
-    let table = |pairs: &[(String, String)]| Value::Table(pairs.iter().map(|(f, s)| (f.clone(), Value::from(s.clone()))).collect());
+    let table = |pairs: &[(String, String)]| {
+        Value::Table(
+            pairs
+                .iter()
+                .map(|(f, s)| (f.clone(), Value::from(s.clone())))
+                .collect(),
+        )
+    };
     let mut protocols = Vec::new();
     for p in &a.protocols {
         let fields = split(&format!("protocol {}", p.name), &p.fields, &mut errors);
-        let def = wtf_core::stream::Sampler { name: p.name.clone(), when: p.when.clone(), fields, roles: p.roles.clone() };
-        let mut t = Table::from_iter([("name".into(), Value::from(def.name.clone())), ("when".into(), def.when.clone().into()), ("fields".into(), table(&def.fields))]);
-        t.insert("roles".into(), Value::Array(def.roles.iter().map(|r| Value::from(r.clone())).collect()));
+        let def = wtf_core::stream::Sampler {
+            name: p.name.clone(),
+            when: p.when.clone(),
+            fields,
+            roles: p.roles.clone(),
+        };
+        let mut t = Table::from_iter([
+            ("name".into(), Value::from(def.name.clone())),
+            ("when".into(), def.when.clone().into()),
+            ("fields".into(), table(&def.fields)),
+        ]);
+        t.insert(
+            "roles".into(),
+            Value::Array(def.roles.iter().map(|r| Value::from(r.clone())).collect()),
+        );
         match app.add_protocol(def) {
             Ok(_) => protocols.push(Value::Table(t)),
             Err(e) => errors.push(format!("protocol {}: {e}", p.name)),
@@ -58,8 +80,18 @@ fn declare(app: &mut Workspace, a: &WorkspaceArgs) -> Result<String, String> {
     for d in &a.decode {
         let signals = split(&format!("decode {}", d.name), &d.signals, &mut errors);
         let params = split(&format!("decode {}", d.name), &d.params, &mut errors);
-        let def = wtf_core::stream::Decode { name: d.name.clone(), protocol: d.protocol.clone(), clock: d.clock.clone(), signals, params };
-        let mut t = Table::from_iter([("name".into(), Value::from(def.name.clone())), ("protocol".into(), def.protocol.clone().into()), ("signals".into(), table(&def.signals))]);
+        let def = wtf_core::stream::Decode {
+            name: d.name.clone(),
+            protocol: d.protocol.clone(),
+            clock: d.clock.clone(),
+            signals,
+            params,
+        };
+        let mut t = Table::from_iter([
+            ("name".into(), Value::from(def.name.clone())),
+            ("protocol".into(), def.protocol.clone().into()),
+            ("signals".into(), table(&def.signals)),
+        ]);
         if !def.params.is_empty() {
             t.insert("params".into(), table(&def.params));
         }
@@ -85,7 +117,10 @@ fn declare(app: &mut Workspace, a: &WorkspaceArgs) -> Result<String, String> {
             }
         };
         let mut row = Table::new();
-        row.insert("signal".into(), Value::String(app.trace.vars[var].path.clone()));
+        row.insert(
+            "signal".into(),
+            Value::String(app.trace.vars[var].path.clone()),
+        );
         look_keys(app, var, name, radix, color, &mut row, &mut errors);
         Some(Value::Table(row))
     };
@@ -93,22 +128,47 @@ fn declare(app: &mut Workspace, a: &WorkspaceArgs) -> Result<String, String> {
     for spec in &a.rows {
         match spec {
             RowSpec::Signal(n) => rows.extend(signal(n)),
-            RowSpec::Open { signal: n, open, fields } => {
-                let Some(Value::Table(mut row)) = signal(n) else { continue };
-                opens.push((n.clone(), row["signal"].as_str().unwrap_or_default().to_string(), open.clone()));
+            RowSpec::Open {
+                signal: n,
+                open,
+                fields,
+            } => {
+                let Some(Value::Table(mut row)) = signal(n) else {
+                    continue;
+                };
+                opens.push((
+                    n.clone(),
+                    row["signal"].as_str().unwrap_or_default().to_string(),
+                    open.clone(),
+                ));
                 if !fields.is_empty() {
-                    with_fields.push((rows.len(), n.clone(), row["signal"].as_str().unwrap_or_default().to_string(), fields.clone()));
+                    with_fields.push((
+                        rows.len(),
+                        n.clone(),
+                        row["signal"].as_str().unwrap_or_default().to_string(),
+                        fields.clone(),
+                    ));
                 }
-                row.insert("open".into(), Value::Array(open.iter().map(|o| Value::String(o.clone())).collect()));
+                row.insert(
+                    "open".into(),
+                    Value::Array(open.iter().map(|o| Value::String(o.clone())).collect()),
+                );
                 rows.push(Value::Table(row));
             }
-            RowSpec::Group { group, rows: members, collapsed } => {
+            RowSpec::Group {
+                group,
+                rows: members,
+                collapsed,
+            } => {
                 let mut g = Table::new();
                 g.insert("group".into(), Value::String(group.clone()));
                 if *collapsed {
                     g.insert("collapsed".into(), Value::Boolean(true));
                 }
-                g.insert("rows".into(), Value::Array(members.iter().filter_map(|n| signal(n)).collect()));
+                g.insert(
+                    "rows".into(),
+                    Value::Array(members.iter().filter_map(|n| signal(n)).collect()),
+                );
                 rows.push(Value::Table(g));
             }
         }
@@ -120,7 +180,10 @@ fn declare(app: &mut Workspace, a: &WorkspaceArgs) -> Result<String, String> {
         for spec in &fields {
             let (name, radix, color) = look_spec(spec);
             let Some(f) = session::open_var(app, var, name).filter(|&f| f != var) else {
-                errors.push(format!("{n} has no field {name}; fields are named from {} on", session::open_name(app, var, var)));
+                errors.push(format!(
+                    "{n} has no field {name}; fields are named from {} on",
+                    session::open_name(app, var, var)
+                ));
                 continue;
             };
             let mut t = Table::from_iter([("field".into(), Value::String(name.into()))]);
@@ -133,12 +196,22 @@ fn declare(app: &mut Workspace, a: &WorkspaceArgs) -> Result<String, String> {
     }
     for (n, path, open) in opens {
         let var = app.trace.by_path[&path];
-        for name in open.iter().filter(|o| session::open_var(app, var, o).is_none()) {
-            errors.push(format!("{n} has no {name} to open; its levels are named from {} on", session::open_name(app, var, var)));
+        for name in open
+            .iter()
+            .filter(|o| session::open_var(app, var, o).is_none())
+        {
+            errors.push(format!(
+                "{n} has no {name} to open; its levels are named from {} on",
+                session::open_name(app, var, var)
+            ));
         }
     }
     let exact = |t: Tick| Value::String(time::format_exact(t, app.trace.fs_per_tick));
-    let time_of = |s: &str, errors: &mut Vec<String>| at(app, s).map_err(|e| errors.push(format!("{s}: {e}"))).ok();
+    let time_of = |s: &str, errors: &mut Vec<String>| {
+        at(app, s)
+            .map_err(|e| errors.push(format!("{s}: {e}")))
+            .ok()
+    };
     let mut cursors = Table::new();
     for (n, c) in &a.cursors {
         let (t, name, note) = match c {
@@ -148,7 +221,10 @@ fn declare(app: &mut Workspace, a: &WorkspaceArgs) -> Result<String, String> {
         if !matches!(n.parse::<u8>(), Ok(1..=9)) {
             errors.push(format!("cursors: no cursor {n} (1-9)"));
         } else if n == "1" && matches!(c, CursorSpec::Mark { .. }) {
-            errors.push("cursors: 1 is the cursor and moves, so it takes a time only; name a mark (2-9)".into());
+            errors.push(
+                "cursors: 1 is the cursor and moves, so it takes a time only; name a mark (2-9)"
+                    .into(),
+            );
         } else if let Some((lo, hi)) = time_of(t, &mut errors) {
             // a cursor stays at the time written, not the end of its span (spec §15 "Times")
             let at = exact((lo + hi).div_ceil(2));
@@ -166,7 +242,10 @@ fn declare(app: &mut Workspace, a: &WorkspaceArgs) -> Result<String, String> {
         }
     }
     let (from, to) = match &a.range {
-        Some([f, t]) => (time_of(f, &mut errors).map_or(0, |s| s.0), time_of(t, &mut errors).map_or(0, |s| s.1)),
+        Some([f, t]) => (
+            time_of(f, &mut errors).map_or(0, |s| s.0),
+            time_of(t, &mut errors).map_or(0, |s| s.1),
+        ),
         None => (app.trace.start(), app.trace.end().max(1)),
     };
     if a.range.is_some() && to <= from {
@@ -192,7 +271,6 @@ fn declare(app: &mut Workspace, a: &WorkspaceArgs) -> Result<String, String> {
     Ok(t.to_string())
 }
 
-
 /// A row's or field's spec: its name, radix and colour (`awaddr:hex:red`, `wvalid:red`). A colour
 /// comes last; its names are no radix's.
 fn look_spec(spec: &str) -> (&str, Option<&str>, Option<&str>) {
@@ -205,12 +283,25 @@ fn look_spec(spec: &str) -> (&str, Option<&str>, Option<&str>) {
 }
 
 /// A line's `radix` and `color` keys, the radix checked against `var`.
-fn look_keys(app: &Workspace, var: usize, name: &str, radix: Option<&str>, color: Option<&str>, t: &mut toml::Table, errors: &mut Vec<String>) {
+fn look_keys(
+    app: &Workspace,
+    var: usize,
+    name: &str,
+    radix: Option<&str>,
+    color: Option<&str>,
+    t: &mut toml::Table,
+    errors: &mut Vec<String>,
+) {
     use toml::Value;
     let v = &app.trace.vars[var];
     if let Some(r) = radix {
         match radix_for(r, v.width.unwrap_or(0), v.names.is_some(), name) {
-            Ok((r, frac)) => _ = t.insert("radix".into(), Value::String(radix::name(r, frac, v.width.unwrap_or(0)))),
+            Ok((r, frac)) => {
+                _ = t.insert(
+                    "radix".into(),
+                    Value::String(radix::name(r, frac, v.width.unwrap_or(0))),
+                )
+            }
             Err(e) => errors.push(e),
         }
     }

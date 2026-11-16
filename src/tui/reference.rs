@@ -13,7 +13,11 @@ fn cell(s: &str) -> String {
 
 /// Keys as `<kbd>`s, each word of `j k` or `Ctrl-d/u` its own.
 fn kbd(keys: &str) -> String {
-    keys.split(' ').filter(|k| !k.is_empty()).map(|k| format!("<kbd>{}</kbd>", cell(&k.replace('<', "&lt;")))).collect::<Vec<_>>().join(" ")
+    keys.split(' ')
+        .filter(|k| !k.is_empty())
+        .map(|k| format!("<kbd>{}</kbd>", cell(&k.replace('<', "&lt;"))))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// The `?` box's sections as tables, a heading each.
@@ -22,7 +26,9 @@ fn sections(out: &mut String, app: &App) {
     // side by side on a wide page, as the `?` box puts them (markdown inside, between blank lines)
     out.push_str("<div class=\"keys\">\n\n");
     for (head, keys) in sections {
-        out.push_str(&format!("<section>\n\n### {head}\n\n| Keys | Does |\n|---|---|\n"));
+        out.push_str(&format!(
+            "<section>\n\n### {head}\n\n| Keys | Does |\n|---|---|\n"
+        ));
         for (k, d) in keys {
             out.push_str(&format!("| {} | {} |\n", kbd(&k), cell(d)));
         }
@@ -46,8 +52,16 @@ fn sections(out: &mut String, app: &App) {
 /// The leader menu: the top's entries, then a table per group.
 fn leader(out: &mut String, items: &[(Key, Entry)]) {
     let run = |out: &mut String, path: &str, k: &Key, label: &str, line: &str, why: &str| {
-        let what = if why.is_empty() { cell(label) } else { format!("{}: {}", cell(label), cell(why)) };
-        out.push_str(&format!("| {} | {what} | `{}` |\n", kbd(&format!("{path}{}", k.show())), cell(line.trim_end())));
+        let what = if why.is_empty() {
+            cell(label)
+        } else {
+            format!("{}: {}", cell(label), cell(why))
+        };
+        out.push_str(&format!(
+            "| {} | {what} | `{}` |\n",
+            kbd(&format!("{path}{}", k.show())),
+            cell(line.trim_end())
+        ));
     };
     out.push_str("| Keys | Does | Runs |\n|---|---|---|\n");
     for (k, e) in items {
@@ -58,7 +72,10 @@ fn leader(out: &mut String, items: &[(Key, Entry)]) {
     out.push('\n');
     for (k, e) in items {
         if let Entry::Group { name, items } = e {
-            out.push_str(&format!("### {} {name}\n\n| Keys | Does | Runs |\n|---|---|---|\n", kbd(&format!("Space {}", k.show()))));
+            out.push_str(&format!(
+                "### {} {name}\n\n| Keys | Does | Runs |\n|---|---|---|\n",
+                kbd(&format!("Space {}", k.show()))
+            ));
             for (k2, e2) in items {
                 if let Entry::Run { label, line, why } = e2 {
                     run(out, &format!("Space {} ", k.show()), k2, label, line, why);
@@ -83,17 +100,47 @@ pub fn keys_page(app: &mut App) -> String {
     let adding = std::mem::replace(&mut app.adding, true);
     sections(&mut out, app);
     app.adding = adding;
-    let browser: Vec<_> = App::BROWSER_KEYS.iter().map(|(k, d)| (crate::tui::keys::fixed_keys(k), *d)).collect();
-    let picker: Vec<_> = App::PICKER_KEYS.iter().map(|(k, d)| (crate::tui::keys::fixed_keys(k), *d)).collect();
-    let form: Vec<_> = App::FORM_KEYS.iter().map(|(k, d)| (crate::tui::keys::fixed_keys(k), *d)).collect();
-    let decodes: Vec<_> = App::DECODES_KEYS.iter().map(|(k, d)| (crate::tui::keys::fixed_keys(k), *d)).collect();
+    let browser: Vec<_> = App::BROWSER_KEYS
+        .iter()
+        .map(|(k, d)| (crate::tui::keys::fixed_keys(k), *d))
+        .collect();
+    let picker: Vec<_> = App::PICKER_KEYS
+        .iter()
+        .map(|(k, d)| (crate::tui::keys::fixed_keys(k), *d))
+        .collect();
+    let form: Vec<_> = App::FORM_KEYS
+        .iter()
+        .map(|(k, d)| (crate::tui::keys::fixed_keys(k), *d))
+        .collect();
+    let decodes: Vec<_> = App::DECODES_KEYS
+        .iter()
+        .map(|(k, d)| (crate::tui::keys::fixed_keys(k), *d))
+        .collect();
     for (head, intro, keys) in [
-        ("In the records table", "`:records` opens it on a set of streams. The keys are fixed.", browser),
-        ("In the picker", "`:pick <source>` opens it: typing edits the query. The keys are fixed.", picker),
-        ("In the decode form", "`:decode` alone, or `Space d D`, opens it: typing edits the field. The keys are fixed.", form),
-        ("In the decodes list", "`:decodes`, or `Space d l`, opens it. The keys are fixed.", decodes),
+        (
+            "In the records table",
+            "`:records` opens it on a set of streams. The keys are fixed.",
+            browser,
+        ),
+        (
+            "In the picker",
+            "`:pick <source>` opens it: typing edits the query. The keys are fixed.",
+            picker,
+        ),
+        (
+            "In the decode form",
+            "`:decode` alone, or `Space d D`, opens it: typing edits the field. The keys are fixed.",
+            form,
+        ),
+        (
+            "In the decodes list",
+            "`:decodes`, or `Space d l`, opens it. The keys are fixed.",
+            decodes,
+        ),
     ] {
-        out.push_str(&format!("## {head}\n\n{intro}\n\n| Keys | Does |\n|---|---|\n"));
+        out.push_str(&format!(
+            "## {head}\n\n{intro}\n\n| Keys | Does |\n|---|---|\n"
+        ));
         for (k, d) in keys {
             out.push_str(&format!("| {} | {} |\n", kbd(&k), cell(d)));
         }
@@ -109,7 +156,12 @@ pub fn keys_page(app: &mut App) -> String {
     }
     out.push_str("\n## Names for `[keys]`\n\nEach key's name in the config file's `[keys]` table, with its default. A count before a key marked *count* repeats it (`5l`), or numbers a mark (`3m`).\n\n```toml\n[keys]\nzoom_in = \"i\"       # z\nstart = \"<C-g>\"     # gg\n```\n\n| Name | Default | Does |\n|---|---|---|\n");
     for &(_, name, key, desc, count) in ACTIONS {
-        out.push_str(&format!("| `{name}` | `{}` | {}{} |\n", cell(key), cell(desc), if count { ", *count*" } else { "" }));
+        out.push_str(&format!(
+            "| `{name}` | `{}` | {}{} |\n",
+            cell(key),
+            cell(desc),
+            if count { ", *count*" } else { "" }
+        ));
     }
     out
 }

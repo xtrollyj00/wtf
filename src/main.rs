@@ -6,13 +6,13 @@ mod mcp;
 mod theme;
 mod tui;
 
-use tui::app::App;
-use tui::render;
-use wtf_core::{session, workspace};
 use clap::Parser;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use std::path::PathBuf;
+use tui::app::App;
+use tui::render;
+use wtf_core::{session, workspace};
 
 #[derive(Parser)]
 #[command(name = "wtf", version, about = "Waveform Terminal Frontend")]
@@ -43,7 +43,11 @@ struct Args {
 }
 
 fn parse_size(s: &str) -> Result<(u16, Option<u16>), String> {
-    let num = |x: &str| x.parse::<u16>().ok().filter(|n| *n > 0).ok_or(format!("bad size: {s}; give <width> or <width>x<height>, e.g. 100x30"));
+    let num = |x: &str| {
+        x.parse::<u16>().ok().filter(|n| *n > 0).ok_or(format!(
+            "bad size: {s}; give <width> or <width>x<height>, e.g. 100x30"
+        ))
+    };
     let (w, h) = match s.split_once('x') {
         Some((w, h)) => (num(w)?, Some(num(h)?)),
         None => (num(s)?, None),
@@ -51,7 +55,9 @@ fn parse_size(s: &str) -> Result<(u16, Option<u16>), String> {
     // the window's smallest screen (spec §4 "Too small"); without a height, as tall as the content
     let (mw, mh) = draw::MIN_SIZE;
     if w < mw || h.is_some_and(|h| h < mh) {
-        return Err(format!("{s} is too small; the smallest screen is {mw}x{mh}"));
+        return Err(format!(
+            "{s} is too small; the smallest screen is {mw}x{mh}"
+        ));
     }
     Ok((w, h))
 }
@@ -70,12 +76,18 @@ fn run(args: Args) -> Result<(), String> {
     }
     // the first start in a terminal asks how to draw (spec §19 "First start")
     use std::io::IsTerminal;
-    let window = args.snapshot.is_none() && std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+    let window = args.snapshot.is_none()
+        && std::io::stdin().is_terminal()
+        && std::io::stdout().is_terminal();
     // asked once, before anything reads keys: the themes fit their surfaces to it
-    let (bg, fg) = (window && !no_color()).then(theme::terminal_colors).unwrap_or_default();
+    let (bg, fg) = (window && !no_color())
+        .then(theme::terminal_colors)
+        .unwrap_or_default();
     // what the terminal's own text fades from (spec §4 "Notifications")
     draw::set_terminal_colors(bg, fg);
-    let setup = (args.setup || (window && config::first_start())).then(|| tui::setup::run(no_color(), bg)).flatten();
+    let setup = (args.setup || (window && config::first_start()))
+        .then(|| tui::setup::run(no_color(), bg))
+        .flatten();
     if args.setup && args.trace.is_none() {
         return setup.map_or(Ok(()), Err);
     }
@@ -86,7 +98,14 @@ fn run(args: Args) -> Result<(), String> {
     let mut warnings = config.warnings;
     warnings.extend(setup);
     let Some(path) = args.trace else {
-        return start(args.snapshot, args.ansi, args.keys.as_deref(), config.palette, (config.keys, config.which_key, config.hints), &warnings);
+        return start(
+            args.snapshot,
+            args.ansi,
+            args.keys.as_deref(),
+            config.palette,
+            (config.keys, config.which_key, config.hints),
+            &warnings,
+        );
     };
     let mut app = open(&path, args.session.clone(), warnings)?;
     (app.keymap, app.which_delay, app.hints) = (config.keys, config.which_key, config.hints);
@@ -105,7 +124,14 @@ fn run(args: Args) -> Result<(), String> {
                 app.key(k);
             }
             let buf = screen(&mut app, w, h);
-            print!("{}", if args.ansi { draw::ansi(&buf) } else { draw::text(&buf) });
+            print!(
+                "{}",
+                if args.ansi {
+                    draw::ansi(&buf)
+                } else {
+                    draw::text(&buf)
+                }
+            );
             Ok(())
         }
         None => {
@@ -118,7 +144,14 @@ fn run(args: Args) -> Result<(), String> {
 
 /// Without a trace: the start screen (spec §4), then the trace picked in a window, or its
 /// snapshot.
-fn start(snapshot: Option<(u16, Option<u16>)>, ansi: bool, keys: Option<&str>, palette: draw::Palette, keymap: (tui::keys::Keymap, std::time::Duration, bool), warnings: &[String]) -> Result<(), String> {
+fn start(
+    snapshot: Option<(u16, Option<u16>)>,
+    ansi: bool,
+    keys: Option<&str>,
+    palette: draw::Palette,
+    keymap: (tui::keys::Keymap, std::time::Duration, bool),
+    warnings: &[String],
+) -> Result<(), String> {
     let mut start = tui::start::Start::load();
     start.msg = (!warnings.is_empty()).then(|| warnings.join("; "));
     if let Some((w, h)) = snapshot {
@@ -132,7 +165,14 @@ fn start(snapshot: Option<(u16, Option<u16>)>, ansi: bool, keys: Option<&str>, p
         let area = Rect::new(0, 0, w, h.unwrap_or_else(|| start.height()));
         let mut buf = Buffer::empty(area);
         start.draw(area, &mut buf);
-        print!("{}", if ansi { draw::ansi(&buf) } else { draw::text(&buf) });
+        print!(
+            "{}",
+            if ansi {
+                draw::ansi(&buf)
+            } else {
+                draw::text(&buf)
+            }
+        );
         return Ok(());
     }
     set_palette(palette);
@@ -163,14 +203,19 @@ fn start(snapshot: Option<(u16, Option<u16>)>, ansi: bool, keys: Option<&str>, p
 
 /// The trace opened with its session (`-S`, or the one next to it), and an agent's evidence left
 /// for it; `warnings` go on the status line.
-fn open(path: &std::path::Path, session: Option<PathBuf>, mut warnings: Vec<String>) -> Result<App, String> {
+fn open(
+    path: &std::path::Path,
+    session: Option<PathBuf>,
+    mut warnings: Vec<String>,
+) -> Result<App, String> {
     let mut app = App::new(workspace::Workspace::open(path)?);
 
     // -S may name a file that doesn't exist yet: that starts an empty session, and :w creates it.
     let session = session.unwrap_or_else(|| session::default_path(path));
     app.ws.session_path = session.clone();
     if session.exists() {
-        let text = std::fs::read_to_string(&session).map_err(|e| format!("{}: {e}", session.display()))?;
+        let text =
+            std::fs::read_to_string(&session).map_err(|e| format!("{}: {e}", session.display()))?;
         warnings.extend(session::apply(&mut app.ws, &text)?);
     }
     // an agent's evidence for this trace, left while no window was open (spec §15 "Present"):
@@ -184,12 +229,18 @@ fn open(path: &std::path::Path, session: Option<PathBuf>, mut warnings: Vec<Stri
                 warnings.push(format!("{}: {e}", agent.display()));
             }
         } else {
-            offer = Some("an agent presented this trace before your last :w; :agent shows it".to_string());
+            offer = Some(
+                "an agent presented this trace before your last :w; :agent shows it".to_string(),
+            );
         }
     }
     // interfaces a built-in protocol decodes, said once when nothing is decoded yet (spec §4)
     if offer.is_none() && app.ws.decodes.is_empty() && !app.found.is_empty() {
-        let what: Vec<String> = app.found.iter().map(|f| format!("{} at {}", f.protocol, f.prefix)).collect();
+        let what: Vec<String> = app
+            .found
+            .iter()
+            .map(|f| format!("{} at {}", f.protocol, f.prefix))
+            .collect();
         let key = render::leader_key(&app, ":pick interfaces").unwrap_or(":pick interfaces".into());
         offer = Some(format!("found: {}; {key} decodes", what.join(", ")));
     }
@@ -213,7 +264,11 @@ fn no_color() -> bool {
 
 /// Without a height, as tall as the content: the rows (or the guide) plus the status line.
 fn screen(app: &mut App, w: u16, h: Option<u16>) -> Buffer {
-    let h = h.unwrap_or(if app.ws.rows.is_empty() { render::guide_height(app) + 1 } else { draw::height(&app.ws) + 1 });
+    let h = h.unwrap_or(if app.ws.rows.is_empty() {
+        render::guide_height(app) + 1
+    } else {
+        draw::height(&app.ws) + 1
+    });
     let area = Rect::new(0, 0, w, h);
     let mut buf = Buffer::empty(area);
     render::draw(app, area, &mut buf);
@@ -230,16 +285,20 @@ fn snapshot(app: &mut App, w: u16, h: Option<u16>) -> String {
 mod tests {
     use super::*;
     use crate::tui::app;
-    use wtf_core::{radix, rows, trace};
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use crate::tui::commands;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::style::{Color, Modifier};
+    use wtf_core::{radix, rows, trace};
 
     fn open(ext: &str, session: Option<&str>) -> App {
         let t = trace::Trace::open(format!("tests/data/simple.{ext}").as_ref()).unwrap();
         let mut app = App::new(workspace::Workspace::new(t, "simple".into()));
         if let Some(s) = session {
-            assert!(session::apply(&mut app.ws, &std::fs::read_to_string(s).unwrap()).unwrap().is_empty());
+            assert!(
+                session::apply(&mut app.ws, &std::fs::read_to_string(s).unwrap())
+                    .unwrap()
+                    .is_empty()
+            );
         }
         app
     }
@@ -264,7 +323,11 @@ mod tests {
     fn vcd_equals_fst() {
         for w in [40, 100, 300] {
             let a = snapshot(&mut open("vcd", Some(SESSION)), w, None);
-            assert_eq!(a, snapshot(&mut open("fst", Some(SESSION)), w, None), "width {w}");
+            assert_eq!(
+                a,
+                snapshot(&mut open("fst", Some(SESSION)), w, None),
+                "width {w}"
+            );
         }
     }
 
@@ -272,7 +335,13 @@ mod tests {
     fn unit_is_for_agents() {
         let mut app = open("vcd", None);
         keys(&mut app, ":unit ns\n");
-        assert!(app.msg.as_ref().unwrap().0.starts_with("unit sets the time unit of an agent's answers"));
+        assert!(
+            app.msg
+                .as_ref()
+                .unwrap()
+                .0
+                .starts_with("unit sets the time unit of an agent's answers")
+        );
         assert_eq!(app.ws.unit, None);
         // one an agent set shows on the status line
         app.ws.unit = Some(wtf_core::time::unit_named("ns").unwrap());
@@ -309,7 +378,10 @@ mod tests {
         keys(&mut app, ":42ns\n");
         assert_eq!(app.ws.view.cursor, 42);
         keys(&mut app, "q");
-        assert_eq!(app.msg.as_ref().unwrap().0, "unsaved session (:w to save, :q! to quit)");
+        assert_eq!(
+            app.msg.as_ref().unwrap().0,
+            "unsaved session (:w to save, :q! to quit)"
+        );
         keys(&mut app, ":q!\n");
         assert!(app.quit);
     }
@@ -331,7 +403,10 @@ mod tests {
         assert_eq!(app.ws.view.start, half);
         // L stops with the end at the left edge
         keys(&mut app, "99L");
-        assert_eq!((app.ws.view.start, app.ws.view.cursor), (app.ws.view.end, 0));
+        assert_eq!(
+            (app.ws.view.start, app.ws.view.cursor),
+            (app.ws.view.end, 0)
+        );
         keys(&mut app, "99H");
         assert_eq!(app.ws.view.start, 0);
         keys(&mut app, "2L");
@@ -361,7 +436,9 @@ mod tests {
         assert_eq!(app.ws.view.cursor, 10); // the group's first change, then it stops
         keys(&mut app, "j");
         assert_eq!(app.msg, None);
-        assert!(matches!(&app.ws.rows[app.ws.sel], rows::Row::Signal(s) if app.ws.trace.vars[s.var].path == "top.dma.state"));
+        assert!(
+            matches!(&app.ws.rows[app.ws.sel], rows::Row::Signal(s) if app.ws.trace.vars[s.var].path == "top.dma.state")
+        );
         keys(&mut app, "k<CR>");
         assert_eq!(rows::visible(&app.ws.rows).len(), 6);
     }
@@ -376,8 +453,14 @@ mod tests {
     fn group_keys() {
         let mut app = open("vcd", None);
         keys(&mut app, ":add top.**\nkkkVkk>");
-        assert_eq!(names(&app), "▾ group,  clk,  rst,  cpu.state,data,busy,dma.state");
-        assert!(snapshot(&mut app, 80, Some(16)).contains("NAME     Enter keeps the name  Esc as it was"));
+        assert_eq!(
+            names(&app),
+            "▾ group,  clk,  rst,  cpu.state,data,busy,dma.state"
+        );
+        assert!(
+            snapshot(&mut app, 80, Some(16))
+                .contains("NAME     Enter keeps the name  Esc as it was")
+        );
         // typing replaces the name, one undo step on Enter; other keys do nothing
         keys(&mut app, "bux\x08<Tab>s");
         assert_eq!(names(&app).split(',').next(), Some("▾ bus"));
@@ -388,28 +471,46 @@ mod tests {
         keys(&mut app, "<C-r>");
         // R: empty is refused, Esc puts back the name it had
         keys(&mut app, "R<C-u>\n");
-        assert_eq!((app.naming.is_some(), app.msg.as_ref().map(|m| m.0.as_str())), (true, Some("a group needs a name; Esc keeps the one it had")));
+        assert_eq!(
+            (app.naming.is_some(), app.msg.as_ref().map(|m| m.0.as_str())),
+            (true, Some("a group needs a name; Esc keeps the one it had"))
+        );
         keys(&mut app, "x\x1b");
         assert_eq!(names(&app).split(',').next(), Some("▾ bus"));
         // <: a member out, after the group; on the header, the group dissolved
         keys(&mut app, "jj<");
-        assert_eq!(names(&app), "▾ bus,  clk,  cpu.state,rst,data,busy,dma.state");
+        assert_eq!(
+            names(&app),
+            "▾ bus,  clk,  cpu.state,rst,data,busy,dma.state"
+        );
         keys(&mut app, "<");
-        assert_eq!(app.msg.as_ref().map(|m| m.0.as_str()), Some("not in a group"));
+        assert_eq!(
+            app.msg.as_ref().map(|m| m.0.as_str()),
+            Some("not in a group")
+        );
         keys(&mut app, "kkk<");
         assert_eq!(names(&app), "clk,cpu.state,rst,data,busy,dma.state");
         keys(&mut app, "R");
-        assert_eq!(app.msg.as_ref().map(|m| m.0.as_str()), Some("not in a group: > groups the row"));
+        assert_eq!(
+            app.msg.as_ref().map(|m| m.0.as_str()),
+            Some("not in a group: > groups the row")
+        );
         // nothing removed yet; then dd and p / P
         keys(&mut app, "p");
-        assert_eq!(app.msg.as_ref().map(|m| m.0.as_str()), Some("nothing to put: dd removes rows, then p puts them below a row"));
+        assert_eq!(
+            app.msg.as_ref().map(|m| m.0.as_str()),
+            Some("nothing to put: dd removes rows, then p puts them below a row")
+        );
         keys(&mut app, "jjdd");
         assert_eq!(names(&app), "clk,cpu.state,data,busy,dma.state");
         keys(&mut app, "jjp");
         assert_eq!(names(&app), "clk,cpu.state,data,busy,dma.state,rst");
         // put again: what dd removed stays to put
         keys(&mut app, "kkkP");
-        assert_eq!(names(&app), "clk,cpu.state,top.rst,data,busy,dma.state,top.rst");
+        assert_eq!(
+            names(&app),
+            "clk,cpu.state,top.rst,data,busy,dma.state,top.rst"
+        );
     }
 
     /// A new group's name: the start its signals' names share; the menu offers the keys.
@@ -421,15 +522,45 @@ mod tests {
         assert_eq!(names(&app).split(',').next(), Some("▾ s_axi_aw"));
         // right click on a member: out of the group, rename; after dd, put
         snapshot(&mut app, 100, Some(16));
-        let y = app.hit.lines.iter().find(|(_, (r, _), _)| *r == 1).map(|&(y, ..)| y as u16 + 1).unwrap();
+        let y = app
+            .hit
+            .lines
+            .iter()
+            .find(|(_, (r, _), _)| *r == 1)
+            .map(|&(y, ..)| y as u16 + 1)
+            .unwrap();
         right(&mut app, 2, y);
-        let labels = |app: &App| app.menu.as_ref().map(|m| m.items.iter().map(|i| format!("{} {}", i.label, i.key)).collect::<Vec<_>>()).unwrap_or_default();
-        assert!(labels(&app).contains(&"Out of the group <".into()) && labels(&app).contains(&"Rename the group R".into()), "{:?}", labels(&app));
+        let labels = |app: &App| {
+            app.menu
+                .as_ref()
+                .map(|m| {
+                    m.items
+                        .iter()
+                        .map(|i| format!("{} {}", i.label, i.key))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        };
+        assert!(
+            labels(&app).contains(&"Out of the group <".into())
+                && labels(&app).contains(&"Rename the group R".into()),
+            "{:?}",
+            labels(&app)
+        );
         keys(&mut app, "\x1bdd");
         snapshot(&mut app, 100, Some(16));
         let y = app.hit.lines.first().map(|&(y, ..)| y as u16 + 1).unwrap();
         right(&mut app, 2, y);
-        assert_eq!(labels(&app)[2..], ["Rename R", "Ungroup <", "Remove with its rows dd", "Put below p", "Put above P"]);
+        assert_eq!(
+            labels(&app)[2..],
+            [
+                "Rename R",
+                "Ungroup <",
+                "Remove with its rows dd",
+                "Put below p",
+                "Put above P"
+            ]
+        );
     }
 
     /// Ctrl-g names a scope's group by the scope, indices kept (spec §5) — the same rule `:add` uses.
@@ -438,7 +569,12 @@ mod tests {
         let t = trace::Trace::open("tests/data/hdl.vcd".as_ref()).unwrap();
         let mut app = App::new(workspace::Workspace::new(t, "hdl".into()));
         keys(&mut app, "a");
-        app.panel.sel = app.panel.nodes.iter().position(|n| n.path == "dut.gen_stages[0]").unwrap();
+        app.panel.sel = app
+            .panel
+            .nodes
+            .iter()
+            .position(|n| n.path == "dut.gen_stages[0]")
+            .unwrap();
         keys(&mut app, "\x07");
         assert_eq!(names(&app).split(',').next(), Some("▾ gen_stages[0]"));
         assert_eq!(app.line, "rename gen_stages[0]");
@@ -449,23 +585,41 @@ mod tests {
     fn edit_rows() {
         let mut app = open("vcd", Some(SESSION));
         keys(&mut app, "J");
-        assert_eq!(names(&app), "▾ cpu,  clk,  cpu.state,  data,  busy,dma.state");
+        assert_eq!(
+            names(&app),
+            "▾ cpu,  clk,  cpu.state,  data,  busy,dma.state"
+        );
         keys(&mut app, "kVj:group g\n");
-        assert_eq!(app.msg.as_ref().unwrap().0, "groups can't be nested yet: the selection has a group's header");
+        assert_eq!(
+            app.msg.as_ref().unwrap().0,
+            "groups can't be nested yet: the selection has a group's header"
+        );
         keys(&mut app, "\x1bjjjj:group g\n");
         assert!(app.mode == app::Mode::Normal);
-        assert_eq!(names(&app), "▾ cpu,  clk,  cpu.state,  data,  busy,▾ g,  dma.state");
+        assert_eq!(
+            names(&app),
+            "▾ cpu,  clk,  cpu.state,  data,  busy,▾ g,  dma.state"
+        );
         keys(&mut app, "kkr");
         assert_eq!(app.msg, None);
-        assert!(matches!(&app.ws.rows[3], rows::Row::Signal(s) if radix::RADIXES[s.look.radix].name == "bin"));
+        assert!(
+            matches!(&app.ws.rows[3], rows::Row::Signal(s) if radix::RADIXES[s.look.radix].name == "bin")
+        );
         keys(&mut app, "kddkdd");
         assert_eq!(names(&app), "▾ cpu,  data,  busy,▾ g,  state");
         keys(&mut app, "uuu");
-        assert_eq!(names(&app), "▾ cpu,  clk,  cpu.state,  data,  busy,▾ g,  dma.state");
-        assert!(matches!(&app.ws.rows[3], rows::Row::Signal(s) if radix::RADIXES[s.look.radix].name == "hex"));
+        assert_eq!(
+            names(&app),
+            "▾ cpu,  clk,  cpu.state,  data,  busy,▾ g,  dma.state"
+        );
+        assert!(
+            matches!(&app.ws.rows[3], rows::Row::Signal(s) if radix::RADIXES[s.look.radix].name == "hex")
+        );
         keys(&mut app, ":redo\n9jkdd");
         assert_eq!(names(&app), "▾ cpu,  clk,  state,  data,  busy");
-        assert!(matches!(&app.ws.rows[3], rows::Row::Signal(s) if radix::RADIXES[s.look.radix].name == "bin"));
+        assert!(
+            matches!(&app.ws.rows[3], rows::Row::Signal(s) if radix::RADIXES[s.look.radix].name == "bin")
+        );
         keys(&mut app, "\x1b");
         assert!(app.mode == app::Mode::Normal);
     }
@@ -475,17 +629,32 @@ mod tests {
         // rows all in one group leave it for a new group right after it; the last ones take its place
         let mut app = open("vcd", Some(SESSION));
         keys(&mut app, "J");
-        assert_eq!(names(&app), "▾ cpu,  clk,  cpu.state,  data,  busy,dma.state");
+        assert_eq!(
+            names(&app),
+            "▾ cpu,  clk,  cpu.state,  data,  busy,dma.state"
+        );
         keys(&mut app, "jVj:group g\n");
-        assert_eq!(names(&app), "▾ cpu,  clk,  busy,▾ g,  cpu.state,  data,dma.state");
+        assert_eq!(
+            names(&app),
+            "▾ cpu,  clk,  busy,▾ g,  cpu.state,  data,dma.state"
+        );
         assert_eq!(app.ws.sel, 3);
         keys(&mut app, "u");
-        assert_eq!(names(&app), "▾ cpu,  clk,  cpu.state,  data,  busy,dma.state");
+        assert_eq!(
+            names(&app),
+            "▾ cpu,  clk,  cpu.state,  data,  busy,dma.state"
+        );
         keys(&mut app, ":select clk busy\n:group all\n");
-        assert_eq!(names(&app), "▾ all,  clk,  cpu.state,  data,  busy,dma.state");
+        assert_eq!(
+            names(&app),
+            "▾ all,  clk,  cpu.state,  data,  busy,dma.state"
+        );
         assert_eq!(app.ws.sel, 0);
         keys(&mut app, ":select busy dma.state\n:group g\n");
-        assert_eq!(app.msg.as_ref().unwrap().0, "the selection is partly in group all: select rows all in it or all outside");
+        assert_eq!(
+            app.msg.as_ref().unwrap().0,
+            "the selection is partly in group all: select rows all in it or all outside"
+        );
     }
 
     #[test]
@@ -525,7 +694,10 @@ mod tests {
             snapshot(&mut app, w, Some(h)); // tiny screens draw without panicking
         }
         keys(&mut app, "/rst\x01\n\n\n");
-        assert_eq!(names(&app), "▾ cpu,  cpu.state,  data,  busy,  dma.state,  clk,  rst");
+        assert_eq!(
+            names(&app),
+            "▾ cpu,  cpu.state,  data,  busy,  dma.state,  clk,  rst"
+        );
         keys(&mut app, "/STATE\nn");
         assert_eq!(app.panel.nodes[app.panel.sel].path, "top.dma.state");
         keys(&mut app, "N/nope\n");
@@ -534,7 +706,10 @@ mod tests {
         keys(&mut app, "\x1b");
         assert!(!app.adding && app.mode == app::Mode::Normal);
         keys(&mut app, "u\x12\x1b");
-        assert_eq!(names(&app), "▾ cpu,  cpu.state,  data,  busy,  dma.state,  clk,  rst");
+        assert_eq!(
+            names(&app),
+            "▾ cpu,  cpu.state,  data,  busy,  dma.state,  clk,  rst"
+        );
         assert!(app.mode == app::Mode::Normal);
     }
 
@@ -543,7 +718,14 @@ mod tests {
         // a computed var draws as a file's does: a bus with its values, and its bits
         let mut app = open("vcd", None);
         let b = |s: &str| trace::Val::Bits(s.into());
-        app.ws.trace.add_computed("calc.mode", Some(4), vec![(0, b("0000")), (25, b("0011")), (55, b("1010"))]).unwrap();
+        app.ws
+            .trace
+            .add_computed(
+                "calc.mode",
+                Some(4),
+                vec![(0, b("0000")), (25, b("0011")), (55, b("1010"))],
+            )
+            .unwrap();
         // added before a key: a computed var no row or name uses is dropped after each (spec §16)
         app.run("add calc.mode").unwrap();
         app.run("add top.clk").unwrap();
@@ -557,7 +739,12 @@ mod tests {
         let mut app = open("vcd", None);
         keys(&mut app, ":signal hi = data[7:4]\n");
         snapshot(&mut app, 80, None);
-        assert!(app.panel.nodes.iter().any(|n| n.var == Some(app.ws.trace.by_path["hi"])));
+        assert!(
+            app.panel
+                .nodes
+                .iter()
+                .any(|n| n.var == Some(app.ws.trace.by_path["hi"]))
+        );
     }
 
     #[test]
@@ -579,7 +766,10 @@ mod tests {
         keys(&mut app, "Vjjj\n");
         assert_eq!(names(&app), "cpu.state,data,busy,dma.state");
         keys(&mut app, "GkVj \x07\n");
-        assert_eq!(names(&app), "cpu.state,data,busy,dma.state,▾ top,  clk,  rst");
+        assert_eq!(
+            names(&app),
+            "cpu.state,data,busy,dma.state,▾ top,  clk,  rst"
+        );
         keys(&mut app, "u");
         keys(&mut app, "\x1b\x1b");
         assert!(!app.adding);
@@ -597,7 +787,10 @@ mod tests {
         // (gen[0].p and gen[1].p both shown keep their scope; gen[1].p is selected)
         keys(&mut app, ":add gen(0).p gen(1).p\n");
         let screen = snapshot(&mut app, 80, None);
-        let line = screen.lines().find(|l| l.starts_with("▸ gen[0]")).unwrap_or_else(|| panic!("{screen}"));
+        let line = screen
+            .lines()
+            .find(|l| l.starts_with("▸ gen[0]"))
+            .unwrap_or_else(|| panic!("{screen}"));
         assert!(line.starts_with("▸ gen[0].p │ 0x0 "), "{line}");
         keys(&mut app, ":rm gen(0).p gen(1).p\n");
         insta::assert_snapshot!("composite_folded", snapshot(&mut app, 80, None));
@@ -618,7 +811,10 @@ mod tests {
         keys(&mut app, "j<CR>jjj<CR>");
         insta::assert_snapshot!("composite_pkt_pair", snapshot(&mut app, 80, None));
         keys(&mut app, "j");
-        assert_eq!(app.ws.trace.vars[app.ws.probe(app.ws.rows[1].sig().unwrap(), app.ws.bit).0].path, "types.pkt.pair.hi");
+        assert_eq!(
+            app.ws.trace.vars[app.ws.probe(app.ws.rows[1].sig().unwrap(), app.ws.bit).0].path,
+            "types.pkt.pair.hi"
+        );
         // e on a folded struct and array: the fields, nested, without opening it
         keys(&mut app, "k<CR>kkke");
         assert_eq!(
@@ -626,8 +822,26 @@ mod tests {
             Some(app::Examine {
                 title: "types.pkt".into(),
                 at: "10ns".into(),
-                lines: [("", "0x101A5"), ("", ""), ("valid", "1"), ("state", "busy"), ("pair", ""), ("  hi", "0xA"), ("  lo", "0x5")].map(|(n, v)| (n.to_string(), v.to_string())).to_vec(),
-                of: (app.ws.trace.vars.iter().position(|v| v.path == "types.pkt").unwrap(), None),
+                lines: [
+                    ("", "0x101A5"),
+                    ("", ""),
+                    ("valid", "1"),
+                    ("state", "busy"),
+                    ("pair", ""),
+                    ("  hi", "0xA"),
+                    ("  lo", "0x5")
+                ]
+                .map(|(n, v)| (n.to_string(), v.to_string()))
+                .to_vec(),
+                of: (
+                    app.ws
+                        .trace
+                        .vars
+                        .iter()
+                        .position(|v| v.path == "types.pkt")
+                        .unwrap(),
+                    None
+                ),
             })
         );
         keys(&mut app, "e<CR>je");
@@ -659,7 +873,10 @@ mod tests {
         keys(&mut app, "u");
         assert!(matches!(&app.ws.rows[3], rows::Row::Signal(s) if app.ws.subs(s).len() == 8));
         keys(&mut app, "<CR>");
-        assert!(matches!(&app.ws.rows[3], rows::Row::Signal(s) if s.open.is_empty()) && app.ws.bit.is_none());
+        assert!(
+            matches!(&app.ws.rows[3], rows::Row::Signal(s) if s.open.is_empty())
+                && app.ws.bit.is_none()
+        );
         keys(&mut app, "u");
         assert_eq!(app.msg.as_ref().unwrap().0, "already at oldest change");
     }
@@ -673,45 +890,87 @@ mod tests {
         keys(&mut app, ":trail\n");
         assert!(msg(&app).starts_with("no trail yet"));
         app.msg = None;
-        let step = |tool: &str, ask: &str, answer: &str, time| wtf_core::workspace::Step { tool: tool.into(), ask: ask.into(), answer: answer.into(), time };
+        let step = |tool: &str, ask: &str, answer: &str, time| wtf_core::workspace::Step {
+            tool: tool.into(),
+            ask: ask.into(),
+            answer: answer.into(),
+            time,
+        };
         let mut agent = open("vcd", None);
         keys(&mut agent, ":add top.cpu\n:30ns\n");
-        agent.ws.add_step(step("command", "add top.cpu", "added 4", None));
+        agent
+            .ws
+            .add_step(step("command", "add top.cpu", "added 4", None));
         let id = "4123-1".to_string();
         assert!(app.agents_now(vec![(id.clone(), session::to_link_toml(&agent.ws))]));
-        assert_eq!(msg(&app), "agent 4123-1 joined (:follow shows its workspace)");
+        assert_eq!(
+            msg(&app),
+            "agent 4123-1 joined (:follow shows its workspace)"
+        );
         assert_eq!((app.ws.rows.len(), app.ws.trail.len()), (0, 1));
         assert!(!app.agents_now(vec![(id.clone(), session::to_link_toml(&agent.ws))])); // nothing new
         // a new step: on the status line, the view as it was
-        agent.ws.add_step(step("find", "top.cpu.busy", "1 matches, first 20ns, last 20ns", Some(20)));
+        agent.ws.add_step(step(
+            "find",
+            "top.cpu.busy",
+            "1 matches, first 20ns, last 20ns",
+            Some(20),
+        ));
         assert!(app.agents_now(vec![(id.clone(), session::to_link_toml(&agent.ws))]));
-        assert_eq!(msg(&app), "agent: find top.cpu.busy  ·  1 matches, first 20ns, last 20ns");
+        assert_eq!(
+            msg(&app),
+            "agent: find top.cpu.busy  ·  1 matches, first 20ns, last 20ns"
+        );
         assert_eq!((app.ws.rows.len(), app.ws.trail.len()), (0, 2));
         // the user's own message stays; the step is still on the trail
         keys(&mut app, ":nope\n");
-        agent.ws.add_step(step("find", "top.rst", "1 matches, first 0, last 0", Some(0)));
+        agent.ws.add_step(step(
+            "find",
+            "top.rst",
+            "1 matches, first 0, last 0",
+            Some(0),
+        ));
         assert!(app.agents_now(vec![(id.clone(), session::to_link_toml(&agent.ws))]));
-        assert_eq!((msg(&app), app.ws.trail.len()), ("unknown command: nope".into(), 3));
+        assert_eq!(
+            (msg(&app), app.ws.trail.len()),
+            ("unknown command: nope".into(), 3)
+        );
         app.msg = None;
         keys(&mut app, ":trail\n");
         let r = app.records.as_ref().unwrap();
-        assert_eq!((r.title.as_str(), r.hl, r.items[1].0), ("3 steps", 2, Some(20)));
+        assert_eq!(
+            (r.title.as_str(), r.hl, r.items[1].0),
+            ("3 steps", 2, Some(20))
+        );
         keys(&mut app, "k<CR>");
         assert_eq!((app.records.is_none(), app.ws.view.cursor), (true, 20));
         // followed (as :follow does it): the agent's changes show, the user's moves stay till then
         let text = session::to_link_toml(&agent.ws);
         let own = session::to_shared_toml(&app.ws);
         app.present(&text).unwrap();
-        app.follow = Some(tui::app::Follow { id: id.clone(), shown: text, own, presented: false });
+        app.follow = Some(tui::app::Follow {
+            id: id.clone(),
+            shown: text,
+            own,
+            presented: false,
+        });
         assert_eq!((app.ws.rows.len(), app.ws.view.cursor), (4, 30));
         keys(&mut app, "5l");
-        agent.ws.add_step(step("values", "top.cpu.data at 40ns", "top.cpu.data: 40ns 0x2A", Some(40)));
+        agent.ws.add_step(step(
+            "values",
+            "top.cpu.data at 40ns",
+            "top.cpu.data: 40ns 0x2A",
+            Some(40),
+        ));
         assert!(app.agents_now(vec![(id.clone(), session::to_link_toml(&agent.ws))]));
         assert_eq!(app.ws.view.cursor, 35);
         // the agent steers the view: its cursor and a range it renders show too
         keys(&mut agent, ":60ns\n:fit 50ns 70ns\n");
         assert!(app.agents_now(vec![(id.clone(), session::to_link_toml(&agent.ws))]));
-        assert_eq!((app.ws.rows.len(), app.ws.view.cursor, app.ws.view.start), (4, 60, 50));
+        assert_eq!(
+            (app.ws.rows.len(), app.ws.view.cursor, app.ws.view.start),
+            (4, 60, 50)
+        );
         keys(&mut agent, ":add top.dma.state\n");
         assert!(app.agents_now(vec![(id.clone(), session::to_link_toml(&agent.ws))]));
         assert_eq!((app.ws.rows.len(), app.ws.view.cursor), (5, 60));
@@ -719,36 +978,84 @@ mod tests {
         assert!(screen.contains("following 4123-1"), "{screen}");
         // a second agent's steps carry its id, and don't replace the followed agent's trail
         let mut other = open("vcd", None);
-        other.ws.add_step(step("find", "top.rst", "1 matches, first 0, last 0", Some(0)));
-        let both = |a: &App, o: &App| vec![(id.clone(), session::to_link_toml(&a.ws)), ("4123-2".to_string(), session::to_link_toml(&o.ws))];
+        other.ws.add_step(step(
+            "find",
+            "top.rst",
+            "1 matches, first 0, last 0",
+            Some(0),
+        ));
+        let both = |a: &App, o: &App| {
+            vec![
+                (id.clone(), session::to_link_toml(&a.ws)),
+                ("4123-2".to_string(), session::to_link_toml(&o.ws)),
+            ]
+        };
         assert!(app.agents_now(both(&agent, &other)));
-        assert_eq!(msg(&app), "agent 4123-2 joined (:follow shows its workspace)");
-        other.ws.add_step(step("find", "top.clk", "8 matches, first 5, last 75", Some(5)));
+        assert_eq!(
+            msg(&app),
+            "agent 4123-2 joined (:follow shows its workspace)"
+        );
+        other.ws.add_step(step(
+            "find",
+            "top.clk",
+            "8 matches, first 5, last 75",
+            Some(5),
+        ));
         assert!(app.agents_now(both(&agent, &other)));
         assert_eq!(app.ws.trail.len(), 4);
         // :follow off: the user's own view back, one undo step
         keys(&mut app, ":follow off\n");
-        assert_eq!((app.follow.is_none(), app.ws.rows.len(), msg(&app)), (true, 0, "not following 4123-1; your view is back (u: what you followed)".into()));
+        assert_eq!(
+            (app.follow.is_none(), app.ws.rows.len(), msg(&app)),
+            (
+                true,
+                0,
+                "not following 4123-1; your view is back (u: what you followed)".into()
+            )
+        );
         keys(&mut app, "u");
         assert_eq!(app.ws.rows.len(), 5);
         keys(&mut app, ":follow off\n");
         assert_eq!(msg(&app), "not following an agent");
         // a present while following is what :follow off comes back to
         let text = session::to_link_toml(&agent.ws);
-        app.follow = Some(tui::app::Follow { id: id.clone(), shown: text, own: session::to_shared_toml(&app.ws), presented: false });
+        app.follow = Some(tui::app::Follow {
+            id: id.clone(),
+            shown: text,
+            own: session::to_shared_toml(&app.ws),
+            presented: false,
+        });
         keys(&mut agent, ":rm top.dma.state\n");
-        app.take_present(&session::to_shared_toml(&agent.ws)).unwrap();
+        app.take_present(&session::to_shared_toml(&agent.ws))
+            .unwrap();
         keys(&mut agent, ":add top.rst\n");
         assert!(app.agents_now(both(&agent, &other)));
         assert_eq!(app.ws.rows.len(), 5);
         keys(&mut app, ":follow off\n");
-        assert_eq!((app.ws.rows.len(), msg(&app)), (4, "not following 4123-1; the agent's present is back (u: what you followed)".into()));
+        assert_eq!(
+            (app.ws.rows.len(), msg(&app)),
+            (
+                4,
+                "not following 4123-1; the agent's present is back (u: what you followed)".into()
+            )
+        );
         // the followed agent leaves: the window stays as it is
         let text = session::to_link_toml(&agent.ws);
-        app.follow = Some(tui::app::Follow { id: id.clone(), shown: text, own: session::to_shared_toml(&app.ws), presented: false });
+        app.follow = Some(tui::app::Follow {
+            id: id.clone(),
+            shown: text,
+            own: session::to_shared_toml(&app.ws),
+            presented: false,
+        });
         app.msg = None;
-        assert!(app.agents_now(vec![("4123-2".to_string(), session::to_link_toml(&other.ws))]));
-        assert_eq!((app.follow.is_none(), msg(&app), app.ws.rows.len()), (true, "agent 4123-1 left; not following it".into(), 4));
+        assert!(app.agents_now(vec![(
+            "4123-2".to_string(),
+            session::to_link_toml(&other.ws)
+        )]));
+        assert_eq!(
+            (app.follow.is_none(), msg(&app), app.ws.rows.len()),
+            (true, "agent 4123-1 left; not following it".into(), 4)
+        );
         assert!(app.agents_now(vec![]));
         assert_eq!(msg(&app), "agent 4123-2 left");
     }
@@ -764,12 +1071,21 @@ mod tests {
         assert_eq!(app.yank.take().as_deref(), Some("25ns"));
         keys(&mut app, "kkyy");
         assert!(matches!(app.ws.rows[app.ws.sel], rows::Row::Group { .. }));
-        assert_eq!((app.yank.take(), app.msg.as_ref().unwrap().0.as_str()), (None, "select a signal to copy its value"));
+        assert_eq!(
+            (app.yank.take(), app.msg.as_ref().unwrap().0.as_str()),
+            (None, "select a signal to copy its value")
+        );
         // on a stream's row, its record at the cursor
         let t = trace::Trace::open("tests/data/axis.vcd".as_ref()).unwrap();
         let mut app = App::new(workspace::Workspace::new(t, "axis".into()));
-        keys(&mut app, ":decode rx axis clock=clk tvalid=tvalid tready=tready tdata=tdata tlast=tlast tkeep=tkeep\n:add rx.frame\n:70ns\nyy");
-        assert_eq!(app.yank.take().as_deref(), Some("rx.frame #2 65ns–85ns beats=0x2 len=0x8 data=c0 00 00 00 c1 00 00 00 complete=1"));
+        keys(
+            &mut app,
+            ":decode rx axis clock=clk tvalid=tvalid tready=tready tdata=tdata tlast=tlast tkeep=tkeep\n:add rx.frame\n:70ns\nyy",
+        );
+        assert_eq!(
+            app.yank.take().as_deref(),
+            Some("rx.frame #2 65ns–85ns beats=0x2 len=0x8 data=c0 00 00 00 c1 00 00 00 complete=1")
+        );
     }
 
     #[test]
@@ -816,16 +1132,27 @@ mod tests {
         assert!(!app.ws.modified());
         keys(&mut app, "rk<CR>k<CR>3z:30ns\n");
         keys(&mut app, &format!(":w {}\n", file.display()));
-        assert_eq!(app.msg.as_ref().unwrap().0, format!("written: {}", file.display()));
+        assert_eq!(
+            app.msg.as_ref().unwrap().0,
+            format!("written: {}", file.display())
+        );
         assert!(!app.ws.modified() && app.ws.session_path == file);
         let text = std::fs::read_to_string(&file).unwrap();
-        assert!(text.contains("radix = \"bin\"") && text.contains("open = [\"state\"]") && text.contains("collapsed = true"), "{text}");
+        assert!(
+            text.contains("radix = \"bin\"")
+                && text.contains("open = [\"state\"]")
+                && text.contains("collapsed = true"),
+            "{text}"
+        );
         // the file reads back to the same session
         let mut back = open("fst", Some(file.to_str().unwrap()));
         assert_eq!(session::to_toml(&back.ws), session::to_toml(&app.ws));
         app.msg = None;
         back.ws.sel = app.ws.sel; // the selection is not part of a session
-        assert_eq!(snapshot(&mut back, 100, None), snapshot(&mut app, 100, None));
+        assert_eq!(
+            snapshot(&mut back, 100, None),
+            snapshot(&mut app, 100, None)
+        );
         // :e keeps everything; a file that can't be read changes nothing
         keys(&mut app, ":e\n");
         assert_eq!(app.msg.as_ref().unwrap().0, "reloaded");
@@ -837,7 +1164,10 @@ mod tests {
         assert_eq!(session::to_toml(&back.ws), session::to_toml(&app.ws));
         // a failed save leaves no file behind and keeps [+]
         keys(&mut app, "dd");
-        keys(&mut app, &format!(":w {}\n", dir.join("no/such/dir.toml").display()));
+        keys(
+            &mut app,
+            &format!(":w {}\n", dir.join("no/such/dir.toml").display()),
+        );
         assert!(app.msg.as_ref().unwrap().1 && app.ws.modified());
         keys(&mut app, ":wq\n");
         assert!(app.quit && !app.ws.modified());
@@ -853,8 +1183,17 @@ mod tests {
         keys(&mut app, "/@clk fell(valid) && !past(ready)\n");
         assert_eq!(app.ws.view.cursor, 85);
         keys(&mut app, "n");
-        assert_eq!((app.ws.view.cursor, msg(&app)), (85, "not found after 85ns: @clk fell(valid) && !past(ready)".into()));
-        keys(&mut app, ":0\n/@clk past(valid) && !past(ready) && !stable(data[3:0] )\n");
+        assert_eq!(
+            (app.ws.view.cursor, msg(&app)),
+            (
+                85,
+                "not found after 85ns: @clk fell(valid) && !past(ready)".into()
+            )
+        );
+        keys(
+            &mut app,
+            ":0\n/@clk past(valid) && !past(ready) && !stable(data[3:0] )\n",
+        );
         assert_eq!(app.ws.view.cursor, 75);
         keys(&mut app, "/rose(valid\n");
         assert_eq!(msg(&app), "missing )");
@@ -870,7 +1209,10 @@ mod tests {
         keys(&mut app, "/64\n");
         assert_eq!(app.ws.view.cursor, 60);
         keys(&mut app, "N");
-        assert_eq!((app.ws.view.cursor, msg(&app)), (60, "not found before 60ns: 64".into()));
+        assert_eq!(
+            (app.ws.view.cursor, msg(&app)),
+            (60, "not found before 60ns: 64".into())
+        );
         keys(&mut app, "/z\nN");
         assert_eq!(app.ws.view.cursor, 50);
         // n / N search the row selected now: cpu.state was 0b10 from 20ns
@@ -888,9 +1230,15 @@ mod tests {
         keys(&mut app, "/@clk busy\n");
         assert_eq!(app.ws.view.cursor, 25);
         keys(&mut app, "n");
-        assert_eq!((app.ws.view.cursor, msg(&app)), (25, "not found after 25ns: @clk busy".into()));
+        assert_eq!(
+            (app.ws.view.cursor, msg(&app)),
+            (25, "not found after 25ns: @clk busy".into())
+        );
         keys(&mut app, "N");
-        assert_eq!((app.ws.view.cursor, msg(&app)), (15, "match 1 of 2; Space d m: records of them".into()));
+        assert_eq!(
+            (app.ws.view.cursor, msg(&app)),
+            (15, "match 1 of 2; Space d m: records of them".into())
+        );
         keys(&mut app, "n");
         assert_eq!(msg(&app), "match 2 of 2; Space d m: records of them");
         // another search counts its own matches
@@ -899,7 +1247,10 @@ mod tests {
         keys(&mut app, ":0\n/data[7] && top.cpu.busy\n");
         assert_eq!(app.ws.view.cursor, 20);
         keys(&mut app, "/state == 1\n");
-        assert_eq!(msg(&app), "ambiguous: state (2 signals: top.cpu.state, top.dma.state)");
+        assert_eq!(
+            msg(&app),
+            "ambiguous: state (2 signals: top.cpu.state, top.dma.state)"
+        );
         keys(&mut app, "/rst || nope\n");
         assert_eq!(msg(&app), "unknown signal: nope");
         keys(&mut app, "/k\n");
@@ -925,9 +1276,15 @@ mod tests {
         keys(&mut app, ":select cpu.state data\n");
         assert_eq!((app.ws.sel, app.ws.anchor), (3, Some(2)));
         keys(&mut app, ":select top.clk dma.state\n:group edge\n");
-        assert_eq!(app.msg.as_ref().unwrap().0, "groups can't be nested yet: the selection has a group's header");
+        assert_eq!(
+            app.msg.as_ref().unwrap().0,
+            "groups can't be nested yet: the selection has a group's header"
+        );
         keys(&mut app, ":select top.dma.state\n:group edge\n");
-        assert_eq!(names(&app), "clk,▾ cpu,  cpu.state,  data,  busy,▾ edge,  dma.state");
+        assert_eq!(
+            names(&app),
+            "clk,▾ cpu,  cpu.state,  data,  busy,▾ edge,  dma.state"
+        );
         keys(&mut app, ":select cpu\n:radix dec\n:select rst\n");
         assert_eq!(app.msg.as_ref().unwrap().0, "not shown: rst");
     }
@@ -949,7 +1306,10 @@ mod tests {
         key(&mut app, KeyCode::Delete);
         key(&mut app, KeyCode::Right);
         keys(&mut app, "é");
-        assert_eq!((app.line.as_str(), app.cursor()), ("aélid && data == 0x0", 2));
+        assert_eq!(
+            (app.line.as_str(), app.cursor()),
+            ("aélid && data == 0x0", 2)
+        );
         keys(&mut app, "\x05\x15"); // Ctrl-e, Ctrl-u
         assert_eq!(app.line, "");
         keys(&mut app, "\x1b");
@@ -959,7 +1319,14 @@ mod tests {
     fn cursors() {
         let mut app = open("vcd", Some(SESSION));
         let msg = |app: &App| app.msg.as_ref().map_or(String::new(), |m| m.0.clone());
-        let at = |app: &App| app.ws.cursor_list().iter().map(|&(i, t)| format!("{}:{t}", i + 1)).collect::<Vec<_>>().join(" ");
+        let at = |app: &App| {
+            app.ws
+                .cursor_list()
+                .iter()
+                .map(|&(i, t)| format!("{}:{t}", i + 1))
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
         // measure: the cursor at 12, a mark there, the cursor on to data's next changes, mark 3 at the first
         keys(&mut app, "M");
         assert_eq!(msg(&app), "no mark under the cursor");
@@ -987,9 +1354,18 @@ mod tests {
         keys(&mut app, "mmmmmmmm");
         assert_eq!(msg(&app), "all 8 marks in use");
         // :cursor places and removes them by number, as an agent would
-        let time = |app: &App, n: usize| app.ws.cursor_list().iter().find(|c| c.0 == n - 1).map(|c| c.1);
+        let time = |app: &App, n: usize| {
+            app.ws
+                .cursor_list()
+                .iter()
+                .find(|c| c.0 == n - 1)
+                .map(|c| c.1)
+        };
         keys(&mut app, ":cursor 9 50ns\n:cursor 2 off\n:cursor 1 5\n");
-        assert_eq!((time(&app, 9), time(&app, 2), time(&app, 1)), (Some(50), None, Some(5)));
+        assert_eq!(
+            (time(&app, 9), time(&app, 2), time(&app, 1)),
+            (Some(50), None, Some(5))
+        );
         keys(&mut app, ":cursor 9 off\n:cursor 1 off\n");
         assert_eq!(msg(&app), "cursor 1 can't be removed");
         // they are saved and come back
@@ -1034,7 +1410,11 @@ mod tests {
         let msg = |app: &App| app.msg.as_ref().map_or(String::new(), |m| m.0.clone());
         let value = |app: &App| {
             let s = app.ws.rows[app.ws.sel].sig().unwrap();
-            wtf_core::rows::label(&app.ws.trace.vars[s.var], &s.look, &app.ws.trace.value_at(s.var, app.ws.view.cursor).unwrap())
+            wtf_core::rows::label(
+                &app.ws.trace.vars[s.var],
+                &s.look,
+                &app.ws.trace.value_at(s.var, app.ws.view.cursor).unwrap(),
+            )
         };
         // data is 0x43 at 12ns
         keys(&mut app, "jjj:radix q4.4\n");
@@ -1067,15 +1447,27 @@ mod tests {
         // Vim's names and raw control characters press the same keys; an unknown <name> is text
         let (mut a, mut b) = (open("vcd", Some(SESSION)), open("vcd", Some(SESSION)));
         keys(&mut a, ":<lt>x<CR>l<C-d>?<Esc><Tab><esc>");
-        assert!(open("vcd", None).keys("<Space>a<Foo>").unwrap_err().starts_with("unknown key <Foo> (keys: "));
+        assert!(
+            open("vcd", None)
+                .keys("<Space>a<Foo>")
+                .unwrap_err()
+                .starts_with("unknown key <Foo> (keys: ")
+        );
         keys(&mut b, ":<x\nl\x04?\x1b\t\x1b");
         assert_eq!(snapshot(&mut a, 80, None), snapshot(&mut b, 80, None));
         assert_eq!(a.ws.view.cursor, b.ws.view.cursor);
         // the colours as SGR codes: the theme's cursor as a background, one reset per line
         draw::set_palette(theme::builtin("dark", true).unwrap());
         let screen = draw::ansi(&super::screen(&mut a, 80, None));
-        assert!(screen.contains("\x1b[0;1;38;2;30;30;30;48;2;229;192;123m"), "{screen}");
-        assert!(screen.lines().all(|l| l.rsplit("\x1b[").next().is_none_or(|last| !l.contains('\x1b') || last.starts_with("0m"))));
+        assert!(
+            screen.contains("\x1b[0;1;38;2;30;30;30;48;2;229;192;123m"),
+            "{screen}"
+        );
+        assert!(screen.lines().all(|l| {
+            l.rsplit("\x1b[")
+                .next()
+                .is_none_or(|last| !l.contains('\x1b') || last.starts_with("0m"))
+        }));
         // and without colour, the cursor column reversed
         draw::set_palette(draw::Palette::mono());
         assert!(draw::ansi(&super::screen(&mut a, 80, None)).contains("\x1b[0;1;7m"));
@@ -1086,12 +1478,30 @@ mod tests {
         use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
         let mut app = open("vcd", Some(SESSION));
         snapshot(&mut app, 100, None); // where the waveforms start
-        let at = |kind, column, row, modifiers| MouseEvent { kind, column, row, modifiers };
+        let at = |kind, column, row, modifiers| MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers,
+        };
         // a click on data's lower line, 20 columns into the waveforms
-        app.mouse(at(MouseEventKind::Down(MouseButton::Left), app.wave_x as u16 + 20, 8, KeyModifiers::NONE));
-        assert_eq!((app.ws.sel, app.ws.view.cursor), (3, app.ws.view.col_start(20)));
+        app.mouse(at(
+            MouseEventKind::Down(MouseButton::Left),
+            app.wave_x as u16 + 20,
+            8,
+            KeyModifiers::NONE,
+        ));
+        assert_eq!(
+            (app.ws.sel, app.ws.view.cursor),
+            (3, app.ws.view.col_start(20))
+        );
         // below the rows: nothing
-        app.mouse(at(MouseEventKind::Down(MouseButton::Left), app.wave_x as u16 + 2, 19, KeyModifiers::NONE));
+        app.mouse(at(
+            MouseEventKind::Down(MouseButton::Left),
+            app.wave_x as u16 + 2,
+            19,
+            KeyModifiers::NONE,
+        ));
         assert_eq!(app.ws.view.cursor, app.ws.view.col_start(20));
         app.mouse(at(MouseEventKind::ScrollDown, 0, 0, KeyModifiers::NONE));
         assert_eq!(app.ws.sel, 4);
@@ -1110,7 +1520,12 @@ mod tests {
 
     /// A mouse event at a column and line, with modifiers.
     fn at(kind: MouseEventKind, x: u16, y: u16, mods: KeyModifiers) -> MouseEvent {
-        MouseEvent { kind, column: x, row: y, modifiers: mods }
+        MouseEvent {
+            kind,
+            column: x,
+            row: y,
+            modifiers: mods,
+        }
     }
 
     /// A left click (press and release), `t` ms after `t0`.
@@ -1126,7 +1541,12 @@ mod tests {
 
     /// The screen line of a panel node, by path, as last drawn.
     fn line(app: &App, path: &str) -> u16 {
-        app.hit.panel.iter().find(|&&(_, n)| app.panel.nodes[n].path == path).map(|&(y, _)| y as u16).unwrap_or_else(|| panic!("{path} not on screen"))
+        app.hit
+            .panel
+            .iter()
+            .find(|&&(_, n)| app.panel.nodes[n].path == path)
+            .map(|&(y, _)| y as u16)
+            .unwrap_or_else(|| panic!("{path} not on screen"))
     }
 
     fn highlighted(app: &App) -> &str {
@@ -1141,10 +1561,22 @@ mod tests {
         // cpu's `▾`, on its header's lower line: folds it, and selects it
         click(&mut app, 0, 4, NONE, t0, 0);
         assert_eq!(app.ws.sel, 1);
-        assert!(matches!(app.ws.rows[1], rows::Row::Group { collapsed: true, .. }));
+        assert!(matches!(
+            app.ws.rows[1],
+            rows::Row::Group {
+                collapsed: true,
+                ..
+            }
+        ));
         screen(&mut app, 100, Some(22));
         click(&mut app, 0, 4, NONE, t0, 1000);
-        assert!(matches!(app.ws.rows[1], rows::Row::Group { collapsed: false, .. }));
+        assert!(matches!(
+            app.ws.rows[1],
+            rows::Row::Group {
+                collapsed: false,
+                ..
+            }
+        ));
         // data's name selects it; clicked again, opens its bits, and again folds them
         screen(&mut app, 100, Some(22));
         let lines = app.ws.lines().len();
@@ -1174,12 +1606,24 @@ mod tests {
         let mut app = open("vcd", Some(SESSION));
         let t0 = Instant::now();
         let shot = snapshot(&mut app, 100, Some(22));
-        assert!(shot.lines().last().unwrap().starts_with(" NORMAL   signals ▸  top.clk "), "{shot}");
+        assert!(
+            shot.lines()
+                .last()
+                .unwrap()
+                .starts_with(" NORMAL   signals ▸  top.clk "),
+            "{shot}"
+        );
         let b = app.hit.button.unwrap();
         click(&mut app, b.x + 2, b.y, NONE, t0, 0);
         assert!(app.panel_shown());
         let shot = snapshot(&mut app, 100, Some(22));
-        assert!(shot.lines().last().unwrap().starts_with(" SIGNALS  signals ◂ "), "{shot}");
+        assert!(
+            shot.lines()
+                .last()
+                .unwrap()
+                .starts_with(" SIGNALS  signals ◂ "),
+            "{shot}"
+        );
         click(&mut app, b.x + 2, b.y, NONE, t0, 1000);
         assert!(!app.panel_shown());
         assert_eq!(app.mode, app::Mode::Normal);
@@ -1217,7 +1661,14 @@ mod tests {
         assert_eq!(app.panel.anchor, Some(app.panel.sel));
         assert_eq!(app.panel.pattern, "state");
         assert_eq!(app.panel.matches.len(), 3);
-        assert!(app.panel.nodes.iter().find(|n| n.path == "top.cpu").unwrap().open);
+        assert!(
+            app.panel
+                .nodes
+                .iter()
+                .find(|n| n.path == "top.cpu")
+                .unwrap()
+                .open
+        );
         keys(&mut app, "/busy");
         app.ws.define("top.more.busy", "top.cpu.busy").unwrap();
         screen(&mut app, 100, Some(22));
@@ -1301,14 +1752,21 @@ mod tests {
         let t0 = Instant::now();
         let ms = |t| t0 + Duration::from_millis(t);
         let ev = |app: &mut App, kind, x, y, t| app.mouse_at(at(kind, x, y, NONE), ms(t));
-        let (down, drag, up) = (MouseEventKind::Down(MouseButton::Left), MouseEventKind::Drag(MouseButton::Left), MouseEventKind::Up(MouseButton::Left));
+        let (down, drag, up) = (
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Drag(MouseButton::Left),
+            MouseEventKind::Up(MouseButton::Left),
+        );
         let rst = app.ws.trace.by_path["top.rst"];
         let y = line(&app, "top.rst");
         // straight out onto dma.state's row (lines 12 and 13): rst below it
         ev(&mut app, down, 6, y, 0);
         ev(&mut app, drag, 50, 13, 10);
         assert_eq!(app.ws.sel, 5);
-        assert_eq!(app.msg.as_ref().unwrap().0, "drop to add rst below dma.state · Esc cancels");
+        assert_eq!(
+            app.msg.as_ref().unwrap().0,
+            "drop to add rst below dma.state · Esc cancels"
+        );
         insta::assert_snapshot!("mouse_drag_out", snapshot(&mut app, 100, Some(22)));
         ev(&mut app, up, 50, 13, 20);
         assert!(app.ws.shown(rst));
@@ -1349,7 +1807,9 @@ mod tests {
         let ly = line(&app, "top.cpu");
         click(&mut app, 5, ly, NONE, t0, 400);
         screen(&mut app, 100, Some(22));
-        app.ws.rows.retain(|r| r.sig().is_none_or(|s| s.var != busy));
+        app.ws
+            .rows
+            .retain(|r| r.sig().is_none_or(|s| s.var != busy));
         app.ws.fix_sel();
         screen(&mut app, 100, Some(22));
         let ly = line(&app, "top.cpu.busy");
@@ -1370,14 +1830,23 @@ mod tests {
         // 1, two lines each, the name on the lower; a drag by the name moves, live
         let mut app = open("vcd", Some(SESSION));
         let t0 = Instant::now();
-        let ev = |app: &mut App, kind, x, y, t| app.mouse_at(at(kind, x, y, NONE), t0 + Duration::from_millis(t));
-        let (down, drag, up) = (MouseEventKind::Down(MouseButton::Left), MouseEventKind::Drag(MouseButton::Left), MouseEventKind::Up(MouseButton::Left));
+        let ev = |app: &mut App, kind, x, y, t| {
+            app.mouse_at(at(kind, x, y, NONE), t0 + Duration::from_millis(t))
+        };
+        let (down, drag, up) = (
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Drag(MouseButton::Left),
+            MouseEventKind::Up(MouseButton::Left),
+        );
         let start = names(&app);
         screen(&mut app, 100, Some(22));
         // clk onto busy's lower line: below busy, in cpu; one undo step
         ev(&mut app, down, 3, 2, 0);
         ev(&mut app, drag, 3, 10, 10);
-        assert_eq!(names(&app), "▾ cpu,  cpu.state,  data,  busy,  clk,dma.state");
+        assert_eq!(
+            names(&app),
+            "▾ cpu,  cpu.state,  data,  busy,  clk,dma.state"
+        );
         assert_eq!(app.msg.as_ref().unwrap().0, "moving clk · Esc cancels");
         // drawn lifted: the name in the accent, the waveform tinted; clk is now on lines 9 and 10
         let buf = screen(&mut app, 100, Some(22));
@@ -1385,16 +1854,25 @@ mod tests {
         assert!(buf[(2, 8)].bg != draw::pal().cursor, "busy isn't");
         ev(&mut app, drag, 3, 10, 20);
         ev(&mut app, up, 3, 10, 30);
-        assert_eq!((names(&app).as_str(), app.msg.is_none(), app.ws.sel), ("▾ cpu,  cpu.state,  data,  busy,  clk,dma.state", true, 4));
+        assert_eq!(
+            (names(&app).as_str(), app.msg.is_none(), app.ws.sel),
+            ("▾ cpu,  cpu.state,  data,  busy,  clk,dma.state", true, 4)
+        );
         keys(&mut app, "u");
         assert_eq!(names(&app), start);
         // on a row's upper line: above it, and in its group; Esc puts it back
         screen(&mut app, 100, Some(22));
         ev(&mut app, down, 3, 2, 100);
         ev(&mut app, drag, 3, 5, 110);
-        assert_eq!(names(&app), "▾ cpu,  clk,  cpu.state,  data,  busy,dma.state");
+        assert_eq!(
+            names(&app),
+            "▾ cpu,  clk,  cpu.state,  data,  busy,dma.state"
+        );
         keys(&mut app, "<Esc>");
-        assert_eq!((names(&app), app.held.is_none(), app.ws.sel), (start.clone(), true, 0));
+        assert_eq!(
+            (names(&app), app.held.is_none(), app.ws.sel),
+            (start.clone(), true, 0)
+        );
         ev(&mut app, up, 3, 5, 120);
         assert_eq!(names(&app), start);
         // a header moves its group whole, and never into one
@@ -1409,9 +1887,21 @@ mod tests {
         click(&mut app, 3, 2, NONE, t0, 250);
         click(&mut app, 3, 4, NONE, t0, 300);
         ev(&mut app, down, 3, 4, 1000);
-        assert!(matches!(app.ws.rows[1], rows::Row::Group { collapsed: false, .. }));
+        assert!(matches!(
+            app.ws.rows[1],
+            rows::Row::Group {
+                collapsed: false,
+                ..
+            }
+        ));
         ev(&mut app, up, 3, 4, 1000);
-        assert!(matches!(app.ws.rows[1], rows::Row::Group { collapsed: true, .. }));
+        assert!(matches!(
+            app.ws.rows[1],
+            rows::Row::Group {
+                collapsed: true,
+                ..
+            }
+        ));
         click(&mut app, 3, 4, NONE, t0, 2000);
         // Ctrl + click: a range from the selected row
         screen(&mut app, 100, Some(22));
@@ -1425,9 +1915,16 @@ mod tests {
         ev(&mut app, down, 3, 8, 4300);
         ev(&mut app, drag, 3, 1, 4310);
         assert_eq!(names(&app), "data,busy,clk,▾ cpu,  cpu.state,dma.state");
-        assert_eq!((app.ws.selection(), app.msg.as_ref().unwrap().0.as_str()), (0..2, "moving 2 rows · Esc cancels"));
+        assert_eq!(
+            (app.ws.selection(), app.msg.as_ref().unwrap().0.as_str()),
+            (0..2, "moving 2 rows · Esc cancels")
+        );
         let buf = screen(&mut app, 100, Some(22));
-        assert!(buf[(2, 2)].bg == draw::pal().cursor && buf[(2, 4)].bg == draw::pal().cursor && buf[(2, 6)].bg != draw::pal().cursor);
+        assert!(
+            buf[(2, 2)].bg == draw::pal().cursor
+                && buf[(2, 4)].bg == draw::pal().cursor
+                && buf[(2, 6)].bg != draw::pal().cursor
+        );
         ev(&mut app, up, 3, 1, 4320);
         keys(&mut app, "u");
         assert_eq!(names(&app), start);
@@ -1454,8 +1951,14 @@ mod tests {
     fn mouse_zoom_and_marks() {
         let mut app = open("vcd", Some(SESSION));
         let t0 = Instant::now();
-        let ev = |app: &mut App, kind, x, y, t| app.mouse_at(at(kind, x, y, NONE), t0 + Duration::from_millis(t));
-        let (down, drag, up) = (MouseEventKind::Down(MouseButton::Left), MouseEventKind::Drag(MouseButton::Left), MouseEventKind::Up(MouseButton::Left));
+        let ev = |app: &mut App, kind, x, y, t| {
+            app.mouse_at(at(kind, x, y, NONE), t0 + Duration::from_millis(t))
+        };
+        let (down, drag, up) = (
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Drag(MouseButton::Left),
+            MouseEventKind::Up(MouseButton::Left),
+        );
         screen(&mut app, 100, Some(22));
         // a drag across the time axis zooms to it, the columns tinted meanwhile
         let wx = app.wave_x as u64;
@@ -1463,34 +1966,68 @@ mod tests {
         let (a, b) = (v.col_start(30 - wx), v.col_start(50 + 1 - wx));
         ev(&mut app, down, 30, 0, 0);
         ev(&mut app, drag, 50, 0, 10);
-        assert!(app.msg.as_ref().unwrap().0.starts_with("zoom to "), "{:?}", app.msg);
+        assert!(
+            app.msg.as_ref().unwrap().0.starts_with("zoom to "),
+            "{:?}",
+            app.msg
+        );
         let buf = screen(&mut app, 100, Some(22));
-        assert!(buf[(40, 6)].bg == draw::pal().cursor_dim && buf[(60, 6)].bg != draw::pal().cursor_dim);
+        assert!(
+            buf[(40, 6)].bg == draw::pal().cursor_dim && buf[(60, 6)].bg != draw::pal().cursor_dim
+        );
         ev(&mut app, up, 50, 0, 20);
-        assert!(app.ws.view.start == a && app.ws.view.last_visible() + 1 >= b && app.ws.view.cursor == a);
-        assert!(app.ws.view.ticks * app.ws.view.width / app.ws.view.cols < v.ticks * v.width / v.cols, "zoomed in");
+        assert!(
+            app.ws.view.start == a
+                && app.ws.view.last_visible() + 1 >= b
+                && app.ws.view.cursor == a
+        );
+        assert!(
+            app.ws.view.ticks * app.ws.view.width / app.ws.view.cols < v.ticks * v.width / v.cols,
+            "zoomed in"
+        );
         // Esc puts the view back, the cursor too
         screen(&mut app, 100, Some(22));
         let v = app.ws.view.clone();
         ev(&mut app, down, 30, 8, 100);
         ev(&mut app, drag, 60, 8, 110);
         keys(&mut app, "<Esc>");
-        assert!((app.ws.view.start, app.ws.view.cursor, app.ws.view.ticks, app.ws.view.cols) == (v.start, v.cursor, v.ticks, v.cols) && app.msg.is_none());
+        assert!(
+            (
+                app.ws.view.start,
+                app.ws.view.cursor,
+                app.ws.view.ticks,
+                app.ws.view.cols
+            ) == (v.start, v.cursor, v.ticks, v.cols)
+                && app.msg.is_none()
+        );
         ev(&mut app, up, 60, 8, 120);
         // the time axis' menu
         app.run("fit").unwrap();
         screen(&mut app, 100, Some(22));
         let v = app.ws.view.clone();
         right(&mut app, 50, 0);
-        let labels = |app: &App| app.menu.as_ref().unwrap().items.iter().map(|i| i.label.clone()).collect::<Vec<_>>();
+        let labels = |app: &App| {
+            app.menu
+                .as_ref()
+                .unwrap()
+                .items
+                .iter()
+                .map(|i| i.label.clone())
+                .collect::<Vec<_>>()
+        };
         assert_eq!(labels(&app), ["Zoom to fit", "Zoom in", "Zoom out"]);
         keys(&mut app, "jj<CR>");
-        assert!(app.ws.view.ticks < v.ticks || app.ws.view.cols > 1, "zoomed in");
+        assert!(
+            app.ws.view.ticks < v.ticks || app.ws.view.cols > 1,
+            "zoomed in"
+        );
         app.run("fit").unwrap();
         // the ruler: a click on a mark's number jumps to it, a drag moves it, its menu removes it
         keys(&mut app, "m:30ns<CR>");
         screen(&mut app, 100, Some(22));
-        let x = |app: &App| (app.wave_x as u64 + app.ws.view.col_of(app.ws.marks[1].unwrap()).unwrap()) as u16;
+        let x = |app: &App| {
+            (app.wave_x as u64 + app.ws.view.col_of(app.ws.marks[1].unwrap()).unwrap()) as u16
+        };
         let x1 = x(&app);
         let m2 = app.ws.marks[1].unwrap();
         click(&mut app, x1, 1, NONE, t0, 200);
@@ -1501,7 +2038,13 @@ mod tests {
         ev(&mut app, drag, x2 + 5, 1, 305);
         ev(&mut app, drag, x2 + 10, 1, 310);
         let t = app.ws.view.col_start(x2 as u64 + 10 - app.wave_x as u64);
-        assert_eq!((app.ws.marks[1], app.msg.as_ref().unwrap().0.starts_with("mark 2 at ")), (Some(t), true));
+        assert_eq!(
+            (
+                app.ws.marks[1],
+                app.msg.as_ref().unwrap().0.starts_with("mark 2 at ")
+            ),
+            (Some(t), true)
+        );
         ev(&mut app, up, x2 + 10, 1, 320);
         assert_eq!((app.ws.marks[1], app.ws.view.cursor), (Some(t), m2));
         // the drag is one undo step (spec §5 "Undo")
@@ -1525,7 +2068,10 @@ mod tests {
         screen(&mut app, 100, Some(22));
         app.ws.view.cursor = 10;
         right(&mut app, 60, 8);
-        let k = labels(&app).iter().position(|l| l == "Next change").unwrap();
+        let k = labels(&app)
+            .iter()
+            .position(|l| l == "Next change")
+            .unwrap();
         keys(&mut app, &format!("{}<CR>", "j".repeat(k + 1)));
         assert_eq!(app.ws.view.cursor, 20, "data changes at 20");
     }
@@ -1540,9 +2086,19 @@ mod tests {
         screen(&mut app, 100, Some(14));
         let t0 = Instant::now();
         let ms = |t| t0 + Duration::from_millis(t);
-        let pos = |app: &App| app.ws.lines().iter().position(|&l| l == (app.ws.sel, app.ws.bit)).unwrap();
+        let pos = |app: &App| {
+            app.ws
+                .lines()
+                .iter()
+                .position(|&l| l == (app.ws.sel, app.ws.bit))
+                .unwrap()
+        };
         let ev = |app: &mut App, kind, x, y, t| app.mouse_at(at(kind, x, y, NONE), ms(t));
-        let (down, drag, up) = (MouseEventKind::Down(MouseButton::Left), MouseEventKind::Drag(MouseButton::Left), MouseEventKind::Up(MouseButton::Left));
+        let (down, drag, up) = (
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Drag(MouseButton::Left),
+            MouseEventKind::Up(MouseButton::Left),
+        );
         let last = app.hit.lines.last().unwrap().0 as u16;
         let top = app.top;
         let ly = line(&app, "top.rst");
@@ -1586,7 +2142,16 @@ mod tests {
         let zoom = (app.ws.view.ticks, app.ws.view.cols);
         keys(&mut app, ":fi");
         screen(&mut app, 100, Some(22));
-        let &(y, _) = app.hit.completions.iter().find(|&&(_, k)| commands::complete("fi", &app).items[k].label.starts_with(":fit")).unwrap();
+        let &(y, _) = app
+            .hit
+            .completions
+            .iter()
+            .find(|&&(_, k)| {
+                commands::complete("fi", &app).items[k]
+                    .label
+                    .starts_with(":fit")
+            })
+            .unwrap();
         click(&mut app, 5, y as u16, NONE, t0, 2000);
         assert_eq!(app.line, "fit ");
         click(&mut app, 5, y as u16, NONE, t0, 2100);
@@ -1605,21 +2170,35 @@ mod tests {
         // while the cursor is on it
         let mut app = open("vcd", None);
         app.run("add top.clk").unwrap();
-        app.run("cursor 2 30ns name=first bad write note=AW came before W").unwrap();
+        app.run("cursor 2 30ns name=first bad write note=AW came before W")
+            .unwrap();
         app.run("cursor 3 60ns").unwrap();
         let s = snapshot(&mut app, 100, Some(8));
-        assert!(s.contains("2 first bad write ───") && !s.contains("2 first bad write:"), "{s}");
+        assert!(
+            s.contains("2 first bad write ───") && !s.contains("2 first bad write:"),
+            "{s}"
+        );
         keys(&mut app, "'2");
         let s = snapshot(&mut app, 100, Some(8));
-        assert!(s.lines().last().unwrap().contains("2 first bad write: AW came before W"), "{s}");
+        assert!(
+            s.lines()
+                .last()
+                .unwrap()
+                .contains("2 first bad write: AW came before W"),
+            "{s}"
+        );
         // a name too long for the gap is cut before the next mark
-        app.run("cursor 2 name=a name much too long to fit between the two marks here").unwrap();
+        app.run("cursor 2 name=a name much too long to fit between the two marks here")
+            .unwrap();
         let s = snapshot(&mut app, 100, Some(8));
         assert!(s.contains("fi… 3"), "{s}");
         // a mark right after it leaves no room: no name
         app.run("cursor 3 31ns").unwrap();
         let s = snapshot(&mut app, 100, Some(8));
-        assert!(!s.lines().nth(1).unwrap().contains("a name"), "the ruler: {s}");
+        assert!(
+            !s.lines().nth(1).unwrap().contains("a name"),
+            "the ruler: {s}"
+        );
     }
 
     #[test]
@@ -1632,15 +2211,27 @@ mod tests {
         keys(&mut app, "'2");
         let buf = screen(&mut app, 100, Some(8));
         let ruler: String = (0..100).map(|x| buf[(x, 1)].symbol().to_string()).collect();
-        assert!(ruler.contains("2 first bad write ───") && !ruler.contains('1'), "{ruler}");
+        assert!(
+            ruler.contains("2 first bad write ───") && !ruler.contains('1'),
+            "{ruler}"
+        );
         let x = ruler.chars().position(|c| c == '2').unwrap() as u16;
-        assert_eq!((buf[(x, 1)].bg, buf[(x + 2, 1)].fg, buf[(x + 2, 1)].bg), (draw::pal().cursor, draw::pal().cursor, draw::pal().column));
+        assert_eq!(
+            (buf[(x, 1)].bg, buf[(x + 2, 1)].fg, buf[(x + 2, 1)].bg),
+            (draw::pal().cursor, draw::pal().cursor, draw::pal().column)
+        );
         // off it, the mark's tab is back on its tint and the cursor's 1 is drawn
         app.run("cursor 1 55ns").unwrap();
         let buf = screen(&mut app, 100, Some(8));
-        assert_eq!((buf[(x, 1)].bg, buf[(x + 2, 1)].bg), (draw::pal().mark, draw::pal().mark));
+        assert_eq!(
+            (buf[(x, 1)].bg, buf[(x + 2, 1)].bg),
+            (draw::pal().mark, draw::pal().mark)
+        );
         let ruler: String = (0..100).map(|x| buf[(x, 1)].symbol().to_string()).collect();
-        assert!(ruler.contains("2 first bad write ─") && ruler.contains("─1─"), "{ruler}");
+        assert!(
+            ruler.contains("2 first bad write ─") && ruler.contains("─1─"),
+            "{ruler}"
+        );
     }
 
     #[test]
@@ -1655,18 +2246,29 @@ mod tests {
         app.run("fit 10ns 20ns").unwrap();
         let s = snapshot(&mut app, 100, Some(8));
         let ruler = s.lines().nth(1).unwrap();
-        assert!(ruler.contains("◂2 first bad write ─") && ruler.ends_with("─ retry 3▸") && !ruler.contains("farther"), "{s}");
+        assert!(
+            ruler.contains("◂2 first bad write ─")
+                && ruler.ends_with("─ retry 3▸")
+                && !ruler.contains("farther"),
+            "{s}"
+        );
         insta::assert_snapshot!(s);
         // the cursor off the same edge: the mark there takes the accent, not ◂1
         app.run("cursor 1 7ns").unwrap();
         app.run("fit 10ns 20ns").unwrap();
         let s = snapshot(&mut app, 100, Some(8));
-        assert!(s.lines().nth(1).unwrap().contains("◂2 first bad write ─") && !s.contains("◂1"), "{s}");
+        assert!(
+            s.lines().nth(1).unwrap().contains("◂2 first bad write ─") && !s.contains("◂1"),
+            "{s}"
+        );
         // two marks past the right edge: the nearer one shows, the other is not drawn
         app.run("cursor 5 60ns name=later").unwrap();
         let s = snapshot(&mut app, 100, Some(8));
         let ruler = s.lines().nth(1).unwrap();
-        assert!(ruler.ends_with("─ retry 3▸") && !ruler.contains("later"), "{s}");
+        assert!(
+            ruler.ends_with("─ retry 3▸") && !ruler.contains("later"),
+            "{s}"
+        );
     }
 
     #[test]
@@ -1677,7 +2279,15 @@ mod tests {
         let mut app = App::new(workspace::Workspace::new(t, "top".into()));
         app.run("add top.cpu.data").unwrap();
         app.run("radix bin").unwrap();
-        let row = |app: &mut App| draw::waveform(&mut app.ws, 100).lines().find(|l| l.starts_with("data ")).unwrap().split_inclusive('│').take(2).collect::<String>();
+        let row = |app: &mut App| {
+            draw::waveform(&mut app.ws, 100)
+                .lines()
+                .find(|l| l.starts_with("data "))
+                .unwrap()
+                .split_inclusive('│')
+                .take(2)
+                .collect::<String>()
+        };
         app.run("0ns").unwrap();
         let at0 = row(&mut app);
         app.run("50ns").unwrap();
@@ -1693,8 +2303,10 @@ mod tests {
     fn field_all_z() {
         // a record whose field is all z draws it (0xZZ, 45ns - 55ns); before the first record, a gap
         let mut app = open("vcd", None);
-        app.run("protocol t roles=rst,data when=!rst d=data").unwrap();
-        app.run("decode p t clock=top.clk rst=top.rst data=top.cpu.data").unwrap();
+        app.run("protocol t roles=rst,data when=!rst d=data")
+            .unwrap();
+        app.run("decode p t clock=top.clk rst=top.rst data=top.cpu.data")
+            .unwrap();
         app.run("add p.d").unwrap();
         app.run("50ns").unwrap();
         let w = draw::waveform(&mut app.ws, 100);
@@ -1703,7 +2315,11 @@ mod tests {
         app.run("0ns").unwrap();
         let w = draw::waveform(&mut app.ws, 100);
         let row = w.lines().find(|l| l.starts_with("p.d ")).unwrap();
-        assert_eq!(row.split('┃').next().unwrap().replace('│', "").trim(), "p.d", "the value column is blank: {w}");
+        assert_eq!(
+            row.split('┃').next().unwrap().replace('│', "").trim(),
+            "p.d",
+            "the value column is blank: {w}"
+        );
     }
 
     #[test]
@@ -1711,7 +2327,8 @@ mod tests {
         let mut app = open("vcd", Some(SESSION));
         let t0 = Instant::now();
         app.run("protocol b roles=busy when=busy").unwrap();
-        app.run("decode beat b clock=top.clk busy=top.cpu.busy").unwrap();
+        app.run("decode beat b clock=top.clk busy=top.cpu.busy")
+            .unwrap();
         app.run("add beat").unwrap();
         app.run("records beat").unwrap();
         screen(&mut app, 100, Some(22));
@@ -1722,7 +2339,14 @@ mod tests {
         assert_eq!(app.browser.as_ref().unwrap().hl, k - 1);
         // a double click jumps to the record's start
         let b = app.browser.as_ref().unwrap();
-        let start = app.ws.streams.iter().find(|s| s.name == "beat").unwrap().records[b.rows[k].1].start;
+        let start = app
+            .ws
+            .streams
+            .iter()
+            .find(|s| s.name == "beat")
+            .unwrap()
+            .records[b.rows[k].1]
+            .start;
         click(&mut app, 40, y as u16, NONE, t0, 1000);
         click(&mut app, 40, y as u16, NONE, t0, 1100);
         assert!(app.browser.is_none());
@@ -1735,7 +2359,14 @@ mod tests {
 
     /// Run the open menu's item `label`: `j` down to it, then `Enter`.
     fn pick(app: &mut App, label: &str) {
-        let k = app.menu.as_ref().unwrap().items.iter().position(|i| i.label == label).unwrap_or_else(|| panic!("no {label} in the menu"));
+        let k = app
+            .menu
+            .as_ref()
+            .unwrap()
+            .items
+            .iter()
+            .position(|i| i.label == label)
+            .unwrap_or_else(|| panic!("no {label} in the menu"));
         keys(app, &format!("{}<CR>", "j".repeat(k + 1)));
     }
 
@@ -1765,9 +2396,21 @@ mod tests {
         // fixed point opens the command line to type its bits
         right(&mut app, 60, 8);
         pick(&mut app, "Radix");
-        let sub = app.menu.as_ref().unwrap().sub.as_ref().unwrap().1.items.len();
+        let sub = app
+            .menu
+            .as_ref()
+            .unwrap()
+            .sub
+            .as_ref()
+            .unwrap()
+            .1
+            .items
+            .len();
         keys(&mut app, &format!("{}<CR>", "j".repeat(sub)));
-        assert_eq!((app.mode, app.line.as_str()), (app::Mode::Command, "radix q"));
+        assert_eq!(
+            (app.mode, app.line.as_str()),
+            (app::Mode::Command, "radix q")
+        );
         keys(&mut app, "<Esc>");
         // the time keys, and with a search its matches
         let cursor = app.ws.view.cursor;
@@ -1780,7 +2423,10 @@ mod tests {
         pick(&mut app, "Previous match");
         right(&mut app, 60, 8);
         pick(&mut app, "Next match");
-        assert_eq!(app.ws.view.cursor, found, "back where the search found 0x40");
+        assert_eq!(
+            app.ws.view.cursor, found,
+            "back where the search found 0x40"
+        );
         // a `V` range: Group groups it, its name typed in place, as `>`
         click(&mut app, 3, 6, NONE, t0, 0);
         click(&mut app, 3, 8, KeyModifiers::CONTROL, t0, 1000);
@@ -1795,7 +2441,13 @@ mod tests {
         keys(&mut app, "<Esc>");
         right(&mut app, 3, 4);
         pick(&mut app, "Fold");
-        assert!(matches!(app.ws.rows[1], rows::Row::Group { collapsed: true, .. }));
+        assert!(matches!(
+            app.ws.rows[1],
+            rows::Row::Group {
+                collapsed: true,
+                ..
+            }
+        ));
         // below the rows: Redo after an undo, Add signals… opens the panel
         keys(&mut app, "ddu");
         screen(&mut app, 100, Some(22));
@@ -1819,7 +2471,11 @@ mod tests {
         keys(&mut app, "jjk");
         assert_eq!(app.menu.as_ref().unwrap().hl, Some(0));
         right(&mut app, 5, y + 1);
-        assert!(app.menu.as_ref().is_some_and(|m| m.at == (5, y as usize + 1)));
+        assert!(
+            app.menu
+                .as_ref()
+                .is_some_and(|m| m.at == (5, y as usize + 1))
+        );
     }
 
     #[test]
@@ -1847,13 +2503,19 @@ mod tests {
         // a press on the time axis let go in place puts the cursor there, no zoom
         let v = app.ws.view.clone();
         click(&mut app, 40, 0, NONE, t0, 0);
-        assert_eq!((app.ws.view.cursor, app.ws.view.ticks, app.ws.view.start), (v.col_start(40 - app.wave_x as u64), v.ticks, v.start));
+        assert_eq!(
+            (app.ws.view.cursor, app.ws.view.ticks, app.ws.view.start),
+            (v.col_start(40 - app.wave_x as u64), v.ticks, v.start)
+        );
         // marks off screen sit at the ruler's edges, where a click jumps to them
         keys(&mut app, ":0<CR>m:80ns<CR>");
         app.run("zoom 1ns").unwrap();
         app.ws.view.center(60);
         screen(&mut app, 100, Some(22));
-        assert!(app.ws.view.col_of(0).is_none(), "mark 2 is off screen, left");
+        assert!(
+            app.ws.view.col_of(0).is_none(),
+            "mark 2 is off screen, left"
+        );
         let wx = app.wave_x as u16;
         click(&mut app, wx + 1, 1, NONE, t0, 1000);
         assert_eq!(app.ws.view.cursor, 0);
@@ -1881,8 +2543,33 @@ mod tests {
         right(&mut app, 60, 8);
         assert_eq!(app.ws.sel, 3);
         insta::assert_snapshot!("mouse_menu", snapshot(&mut app, 100, Some(22)));
-        let labels = |app: &App| app.menu.as_ref().unwrap().items.iter().map(|i| i.label.clone()).collect::<Vec<_>>();
-        assert_eq!(labels(&app), ["Open", "Examine", "Radix", "Colour", "Copy value", "Out of the group", "Rename the group", "Remove", "Mark here", "Copy time", "Next change", "Previous change", "Search value…"]);
+        let labels = |app: &App| {
+            app.menu
+                .as_ref()
+                .unwrap()
+                .items
+                .iter()
+                .map(|i| i.label.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            labels(&app),
+            [
+                "Open",
+                "Examine",
+                "Radix",
+                "Colour",
+                "Copy value",
+                "Out of the group",
+                "Rename the group",
+                "Remove",
+                "Mark here",
+                "Copy time",
+                "Next change",
+                "Previous change",
+                "Search value…"
+            ]
+        );
         // the pointer highlights; Radix opens its second menu; dec sets it
         let r = app.hit.menus[0];
         app.mouse(at(MouseEventKind::Moved, r.x + 2, r.y + 3, NONE));
@@ -1892,7 +2579,9 @@ mod tests {
         let s = app.hit.menus[1];
         click(&mut app, s.x + 2, s.y + 3, NONE, Instant::now(), 1000);
         assert!(app.menu.is_none());
-        assert!(matches!(&app.ws.rows[3], rows::Row::Signal(s) if radix::RADIXES[s.look.radix].name == "dec"));
+        assert!(
+            matches!(&app.ws.rows[3], rows::Row::Signal(s) if radix::RADIXES[s.look.radix].name == "dec")
+        );
         // the keys: j k move, l opens the second menu, h closes it, Enter runs, Esc closes
         screen(&mut app, 100, Some(22));
         right(&mut app, 60, 8);
@@ -1906,9 +2595,15 @@ mod tests {
         right(&mut app, 60, 8);
         keys(&mut app, "x<Esc>");
         assert!(app.menu.is_none());
-        assert_eq!(app.ws.view.cols, app.ws.view.cols, "x went to the menu, not zoom");
+        assert_eq!(
+            app.ws.view.cols, app.ws.view.cols,
+            "x went to the menu, not zoom"
+        );
         // Mark here puts a mark at the column clicked, the cursor staying
-        let (cursor, t) = (app.ws.view.cursor, app.ws.view.col_start(60 - app.wave_x as u64));
+        let (cursor, t) = (
+            app.ws.view.cursor,
+            app.ws.view.col_start(60 - app.wave_x as u64),
+        );
         right(&mut app, 60, 8);
         pick(&mut app, "Mark here");
         assert_eq!((app.ws.marks[1], app.ws.view.cursor), (Some(t), cursor));
@@ -1916,12 +2611,26 @@ mod tests {
         keys(&mut app, "/@clk busy<CR>");
         right(&mut app, 60, 8);
         pick(&mut app, "Records of the matches");
-        assert!(app.form.as_ref().is_some_and(|f| f.protocol), "{:?}", app.msg);
+        assert!(
+            app.form.as_ref().is_some_and(|f| f.protocol),
+            "{:?}",
+            app.msg
+        );
         keys(&mut app, "<Esc>");
         app.ws.view.cursor = cursor;
         // a group header; below the rows: add signals, undo
         right(&mut app, 3, 4);
-        assert_eq!(labels(&app), ["Fold", "Radix", "Colour", "Rename", "Ungroup", "Remove with its rows"]);
+        assert_eq!(
+            labels(&app),
+            [
+                "Fold",
+                "Radix",
+                "Colour",
+                "Rename",
+                "Ungroup",
+                "Remove with its rows"
+            ]
+        );
         keys(&mut app, "jjjjjj<CR>");
         assert_eq!(app.ws.rows.len(), 2, "the group and its signals");
         screen(&mut app, 100, Some(22));
@@ -1932,10 +2641,16 @@ mod tests {
         screen(&mut app, 100, Some(22));
         right(&mut app, 50, 15);
         click(&mut app, 50, 0, NONE, Instant::now(), 2000);
-        assert!(app.menu.is_none() && app.ws.view.cursor == cursor, "a click outside only closes");
+        assert!(
+            app.menu.is_none() && app.ws.view.cursor == cursor,
+            "a click outside only closes"
+        );
         right(&mut app, 50, 15);
         keys(&mut app, "<CR>");
-        assert!(app.menu.is_some() && app.ws.rows.len() == 6, "nothing highlighted yet");
+        assert!(
+            app.menu.is_some() && app.ws.rows.len() == 6,
+            "nothing highlighted yet"
+        );
         keys(&mut app, "q");
         assert!(app.menu.is_none());
         // the panel's lines: their keys
@@ -1956,7 +2671,10 @@ mod tests {
     #[test]
     fn mouse_menu_field() {
         // a struct's field has a radix and colour of its own (spec §6): its line's menu has them
-        let ws = workspace::Workspace::open(std::path::Path::new("tests/data/types-verilator-structs.fst")).unwrap();
+        let ws = workspace::Workspace::open(std::path::Path::new(
+            "tests/data/types-verilator-structs.fst",
+        ))
+        .unwrap();
         let mut app = App::new(ws);
         app.run("add types.pkt").unwrap();
         keys(&mut app, "<CR>jjj<CR>j");
@@ -1964,16 +2682,45 @@ mod tests {
         let hi = app.ws.trace.by_path["types.pkt.pair.hi"];
         assert_eq!(app.ws.probe(&s, app.ws.bit).0, hi);
         screen(&mut app, 100, Some(22));
-        let &(y, ..) = app.hit.lines.iter().find(|l| l.1 == (app.ws.sel, app.ws.bit)).unwrap();
+        let &(y, ..) = app
+            .hit
+            .lines
+            .iter()
+            .find(|l| l.1 == (app.ws.sel, app.ws.bit))
+            .unwrap();
         right(&mut app, 2, y as u16);
-        let labels: Vec<String> = app.menu.as_ref().unwrap().items.iter().map(|i| i.label.clone()).collect();
-        assert_eq!(labels, ["Open", "Examine", "Radix", "Colour", "Copy value", "Group", "Remove"]);
+        let labels: Vec<String> = app
+            .menu
+            .as_ref()
+            .unwrap()
+            .items
+            .iter()
+            .map(|i| i.label.clone())
+            .collect();
+        assert_eq!(
+            labels,
+            [
+                "Open",
+                "Examine",
+                "Radix",
+                "Colour",
+                "Copy value",
+                "Group",
+                "Remove"
+            ]
+        );
         keys(&mut app, "jjjljjj<CR>");
         let s = app.ws.rows[0].sig().unwrap();
-        assert_eq!((radix::RADIXES[app.ws.look(s, hi).radix].name, s.look.radix), ("dec", radix::DEFAULT));
+        assert_eq!(
+            (radix::RADIXES[app.ws.look(s, hi).radix].name, s.look.radix),
+            ("dec", radix::DEFAULT)
+        );
         // `r` on the field cycles the field's
         keys(&mut app, "r");
-        assert_eq!(radix::RADIXES[app.ws.look(app.ws.rows[0].sig().unwrap(), hi).radix].name, "sdec");
+        assert_eq!(
+            radix::RADIXES[app.ws.look(app.ws.rows[0].sig().unwrap(), hi).radix].name,
+            "sdec"
+        );
     }
 
     #[test]
@@ -1983,23 +2730,50 @@ mod tests {
         let mut app = open("vcd", Some(SESSION));
         keys(&mut app, ":zoom nope\n");
         let screen = snapshot(&mut app, 80, Some(14));
-        assert!(screen.contains("─ error ─") && screen.contains("│ bad time: nope"), "{screen}");
+        assert!(
+            screen.contains("─ error ─") && screen.contains("│ bad time: nope"),
+            "{screen}"
+        );
         keys(&mut app, "yt");
         snapshot(&mut app, 80, Some(14));
         snapshot(&mut app, 80, Some(14));
-        let said: Vec<_> = app.notes.iter().map(|n| (n.text.as_str(), n.err, n.who.clone())).collect();
-        assert_eq!(said, [("bad time: nope (a number and a unit, 20ns or 1.5us; a plain number is file ticks)", true, None), ("copied: 12ns", false, None)]);
+        let said: Vec<_> = app
+            .notes
+            .iter()
+            .map(|n| (n.text.as_str(), n.err, n.who.clone()))
+            .collect();
+        assert_eq!(
+            said,
+            [
+                (
+                    "bad time: nope (a number and a unit, 20ns or 1.5us; a plain number is file ticks)",
+                    true,
+                    None
+                ),
+                ("copied: 12ns", false, None)
+            ]
+        );
         let now = Instant::now();
         assert_eq!(app.shown_notes(now).len(), 2);
         assert_eq!(app.shown_notes(now + Duration::from_secs(5)).len(), 1); // the error stays longer
         assert!(app.shown_notes(now + Duration::from_secs(9)).is_empty());
-        assert!(app.note_tick(now) && !app.note_tick(now + Duration::from_millis(100)) && app.note_tick(now + Duration::from_millis(300)));
+        assert!(
+            app.note_tick(now)
+                && !app.note_tick(now + Duration::from_millis(100))
+                && app.note_tick(now + Duration::from_millis(300))
+        );
         // fading: drawn more often, the colours going into the card's background
         let fading = now + Duration::from_millis(7500);
         assert!(app.note_tick(fading) && app.note_tick(fading + Duration::from_millis(50)));
         let err = app.notes.iter().find(|n| n.err).unwrap();
-        let (a, b) = (app::note_fade(err, now + Duration::from_millis(7200)), app::note_fade(err, now + Duration::from_millis(7800)));
-        assert!(app::note_fade(err, now) == 0.0 && 0.0 < a && a < b && b < 1.0, "{a} {b}");
+        let (a, b) = (
+            app::note_fade(err, now + Duration::from_millis(7200)),
+            app::note_fade(err, now + Duration::from_millis(7800)),
+        );
+        assert!(
+            app::note_fade(err, now) == 0.0 && 0.0 < a && a < b && b < 1.0,
+            "{a} {b}"
+        );
         // the pointer over its card holds it at full colour; it fades a second after it leaves
         let err_at = err.at;
         let (r, _) = *app.hit.notes.iter().find(|(_, at)| *at == err_at).unwrap();
@@ -2013,22 +2787,63 @@ mod tests {
         keys(&mut app, "<Esc>");
         assert!(app.shown_notes(now).is_empty());
         // agents: every one said, with its id, though the status line shows only the last
-        app.agents_now(vec![("41-1".into(), String::new()), ("41-2".into(), String::new())]);
+        app.agents_now(vec![
+            ("41-1".into(), String::new()),
+            ("41-2".into(), String::new()),
+        ]);
         snapshot(&mut app, 80, Some(14));
-        let who: Vec<_> = app.notes.iter().skip(2).map(|n| (n.text.clone(), n.who.clone())).collect();
-        assert_eq!(who, [("agent 41-1 joined (:follow shows its workspace)".to_string(), Some("41-1".to_string())), ("agent 41-2 joined (:follow shows its workspace)".into(), Some("41-2".into()))], "{:?}", app.notes);
+        let who: Vec<_> = app
+            .notes
+            .iter()
+            .skip(2)
+            .map(|n| (n.text.clone(), n.who.clone()))
+            .collect();
+        assert_eq!(
+            who,
+            [
+                (
+                    "agent 41-1 joined (:follow shows its workspace)".to_string(),
+                    Some("41-1".to_string())
+                ),
+                (
+                    "agent 41-2 joined (:follow shows its workspace)".into(),
+                    Some("41-2".into())
+                )
+            ],
+            "{:?}",
+            app.notes
+        );
         assert_eq!(app.notes.len(), 4);
         // no room for a card: the status line says it
         keys(&mut app, ":zoom nope\n");
         let screen = snapshot(&mut app, 80, Some(4));
-        assert!(screen.lines().last().unwrap().contains("bad time: nope"), "{screen}");
-        assert!(!snapshot(&mut app, 80, Some(14)).lines().last().unwrap().contains("bad time"));
+        assert!(
+            screen.lines().last().unwrap().contains("bad time: nope"),
+            "{screen}"
+        );
+        assert!(
+            !snapshot(&mut app, 80, Some(14))
+                .lines()
+                .last()
+                .unwrap()
+                .contains("bad time")
+        );
         keys(&mut app, ":messages\n");
         assert_eq!(app.messages, Some(4));
         keys(&mut app, "ky");
-        assert_eq!(app.yank.as_deref(), Some("agent 41-2 joined (:follow shows its workspace)"));
+        assert_eq!(
+            app.yank.as_deref(),
+            Some("agent 41-2 joined (:follow shows its workspace)")
+        );
         let screen = snapshot(&mut app, 100, Some(14));
-        assert!(screen.contains("you       bad time: nope") && screen.lines().any(|l| l.starts_with("▌ ") && l.contains("agent 41-2 joined")) && screen.contains("41-1      agent 41-1 joined"), "{screen}");
+        assert!(
+            screen.contains("you       bad time: nope")
+                && screen
+                    .lines()
+                    .any(|l| l.starts_with("▌ ") && l.contains("agent 41-2 joined"))
+                && screen.contains("41-1      agent 41-1 joined"),
+            "{screen}"
+        );
         keys(&mut app, "q");
         assert!(app.messages.is_none());
     }
@@ -2041,7 +2856,11 @@ mod tests {
         app.run("cursor 2 30ns name=first bad write").unwrap();
         let t0 = Instant::now();
         keys(&mut app, "'");
-        assert!(!app.which_key && !app.which_tick(t0) && app.which_tick(t0 + Duration::from_millis(400)));
+        assert!(
+            !app.which_key
+                && !app.which_tick(t0)
+                && app.which_tick(t0 + Duration::from_millis(400))
+        );
         insta::assert_snapshot!(snapshot(&mut app, 80, Some(14)));
         keys(&mut app, "2");
         assert!(!app.which_key && app.ws.view.cursor == 30);
@@ -2049,7 +2868,10 @@ mod tests {
         app.which_delay = Duration::ZERO;
         keys(&mut app, "3");
         let screen = snapshot(&mut app, 80, Some(30));
-        assert!(screen.contains(" 3  ") && screen.contains("put mark N") && screen.contains("zoom in"), "{screen}");
+        assert!(
+            screen.contains(" 3  ") && screen.contains("put mark N") && screen.contains("zoom in"),
+            "{screen}"
+        );
         keys(&mut app, "<Esc>g");
         assert!(snapshot(&mut app, 80, Some(14)).contains("g → start of the trace"));
         keys(&mut app, "g");
@@ -2079,8 +2901,18 @@ mod tests {
         assert!(app.leader.is_none() && app.mode == app::Mode::Normal);
         keys(&mut app, "<Space>");
         snapshot(&mut app, 100, Some(16));
-        let (r, _) = *app.hit.leader.iter().find(|(_, k)| k.show() == "q").unwrap();
-        app.mouse(at(MouseEventKind::Down(MouseButton::Left), r.x + 1, r.y, NONE));
+        let (r, _) = *app
+            .hit
+            .leader
+            .iter()
+            .find(|(_, k)| k.show() == "q")
+            .unwrap();
+        app.mouse(at(
+            MouseEventKind::Down(MouseButton::Left),
+            r.x + 1,
+            r.y,
+            NONE,
+        ));
         assert!(snapshot(&mut app, 100, Some(16)).contains("Space q  session"));
         app.mouse(at(MouseEventKind::Down(MouseButton::Left), 5, 0, NONE));
         assert!(app.leader.is_none());
@@ -2092,7 +2924,12 @@ mod tests {
         // the menus name the new one (spec §19 "Keys")
         let mut app = open("vcd", Some(SESSION));
         let mut warnings = Vec::new();
-        app.keymap = tui::keys::Keymap::from_table(&"zoom_in = \"i\"\nstart = \"<C-g>\"\nfold = \"o\"".parse().unwrap(), &mut warnings);
+        app.keymap = tui::keys::Keymap::from_table(
+            &"zoom_in = \"i\"\nstart = \"<C-g>\"\nfold = \"o\""
+                .parse()
+                .unwrap(),
+            &mut warnings,
+        );
         assert!(warnings.is_empty(), "{warnings:?}");
         snapshot(&mut app, 100, Some(20));
         let cols = app.ws.view.cols;
@@ -2104,7 +2941,12 @@ mod tests {
         assert_eq!(app.ws.view.cursor, app.ws.trace.start());
         keys(&mut app, "?");
         let screen = snapshot(&mut app, 100, Some(20));
-        assert!(screen.contains("i x       zoom in / out") && screen.contains("Ctrl-g G  start / end") && screen.contains("o         fold"), "{screen}");
+        assert!(
+            screen.contains("i x       zoom in / out")
+                && screen.contains("Ctrl-g G  start / end")
+                && screen.contains("o         fold"),
+            "{screen}"
+        );
     }
 
     #[test]
@@ -2121,27 +2963,44 @@ mod tests {
         assert!(snapshot(&mut app, 60, Some(20)).contains(" 1–17 of "));
         keys(&mut app, "G");
         let screen = snapshot(&mut app, 60, Some(20));
-        assert!(screen.contains("sampled at clk") && !screen.contains("cursor left / right"), "{screen}");
+        assert!(
+            screen.contains("sampled at clk") && !screen.contains("cursor left / right"),
+            "{screen}"
+        );
         keys(&mut app, "q?");
         assert_eq!(app.scroll, 0);
         keys(&mut app, "q");
         keys(&mut app, "\x1ba?");
         assert!(snapshot(&mut app, 100, Some(20)).contains("help · signal panel"));
         keys(&mut app, "?\x1b:help\n");
-        assert!(app.help && app.mode == app::Mode::Normal && snapshot(&mut app, 100, Some(20)).contains("help · keys"));
+        assert!(
+            app.help
+                && app.mode == app::Mode::Normal
+                && snapshot(&mut app, 100, Some(20)).contains("help · keys")
+        );
         // a topic: the agents' reference, scrolled by the line
         keys(&mut app, "?\x1b:help Decode\n");
         let screen = snapshot(&mut app, 100, Some(12));
-        assert!(screen.contains("help · decode") && screen.contains("Decode first: records are exact"), "{screen}");
+        assert!(
+            screen.contains("help · decode") && screen.contains("Decode first: records are exact"),
+            "{screen}"
+        );
         // Enter on a text jumps nowhere
         let cursor = app.ws.view.cursor;
         keys(&mut app, "\n");
         assert!(app.records.is_some() && app.ws.view.cursor == cursor);
         keys(&mut app, "G");
         let screen = snapshot(&mut app, 100, Some(12));
-        assert!(!screen.contains("Decode first: records are exact") && screen.contains("j k scroll  Esc close"), "{screen}");
+        assert!(
+            !screen.contains("Decode first: records are exact")
+                && screen.contains("j k scroll  Esc close"),
+            "{screen}"
+        );
         keys(&mut app, "\x1b:help nope\n");
-        assert_eq!(app.msg.as_ref().unwrap().0, "no help topic nope; topics: names patterns times radix expressions decode records workspace commands");
+        assert_eq!(
+            app.msg.as_ref().unwrap().0,
+            "no help topic nope; topics: names patterns times radix expressions decode records workspace commands"
+        );
     }
 
     #[test]
@@ -2159,8 +3018,15 @@ mod tests {
         let r = app.hit.completion_card.unwrap();
         assert_eq!((r.y, r.height), (17, 12));
         for y in r.y + 1..r.y + 11 {
-            let bg = if y == r.y + 1 { draw::pal().selected } else { draw::pal().panel };
-            assert!((r.x + 1..r.right() - 1).all(|x| buf[(x, y)].bg == bg), "line {y}");
+            let bg = if y == r.y + 1 {
+                draw::pal().selected
+            } else {
+                draw::pal().panel
+            };
+            assert!(
+                (r.x + 1..r.right() - 1).all(|x| buf[(x, y)].bg == bg),
+                "line {y}"
+            );
         }
         // Ctrl-n (Down) goes to the next, Ctrl-p (Up) back (on an empty line, the history)
         keys(&mut app, "e<C-n><C-n><C-p>");
@@ -2177,39 +3043,74 @@ mod tests {
         keys(&mut app, "jjjmw3mwa");
         let t = trace::Trace::open("tests/data/axis.vcd".as_ref()).unwrap();
         let mut axis = App::new(workspace::Workspace::new(t, "axis".into()));
-        keys(&mut axis, ":decode rx axis clock=clk tvalid=tvalid tready=tready tdata=tdata tlast=tlast tkeep=tkeep\n:add rx.frame\n:fit\n");
+        keys(
+            &mut axis,
+            ":decode rx axis clock=clk tvalid=tvalid tready=tready tdata=tdata tlast=tlast tkeep=tkeep\n:add rx.frame\n:fit\n",
+        );
         for (name, g) in [("box", &draw::BOX), ("ascii", &draw::ASCII)] {
             draw::set_glyphs(g);
-            let text = format!("{}{}", snapshot(&mut app, 80, Some(16)), snapshot(&mut axis, 100, None));
+            let text = format!(
+                "{}{}",
+                snapshot(&mut app, 80, Some(16)),
+                snapshot(&mut axis, 100, None)
+            );
             if name == "ascii" {
                 assert!(text.is_ascii(), "{text}");
             }
             insta::assert_snapshot!(name, text);
         }
         // icons only with nerd: the leader's groups and the status line's clock (spec §14)
-        let icons = |t: &str| t.chars().filter(|c| ('\u{e000}'..='\u{f8ff}').contains(c)).count();
+        let icons = |t: &str| {
+            t.chars()
+                .filter(|c| ('\u{e000}'..='\u{f8ff}').contains(c))
+                .count()
+        };
         draw::set_glyphs(&draw::NERD);
         keys(&mut app, "a<Space>");
         let text = snapshot(&mut app, 120, Some(20));
-        assert!(text.contains('\u{eb31}') && text.contains('\u{eb7c}') && icons(&text) > 10, "{text}");
+        assert!(
+            text.contains('\u{eb31}') && text.contains('\u{eb7c}') && icons(&text) > 10,
+            "{text}"
+        );
         // every kind of var has an icon of its own (spec §14)
         let mut kinds = std::collections::BTreeSet::new();
-        for (file, lines) in [("simple.vcd", ":decode c check clock=clk busy=cpu.busy\n:add cpu.data[7:4]\n"), ("axis.vcd", ""), ("types-verilator-structs.fst", ""), ("enum.fst", ""), ("types-nvc.vcd", "")] {
+        for (file, lines) in [
+            (
+                "simple.vcd",
+                ":decode c check clock=clk busy=cpu.busy\n:add cpu.data[7:4]\n",
+            ),
+            ("axis.vcd", ""),
+            ("types-verilator-structs.fst", ""),
+            ("enum.fst", ""),
+            ("types-nvc.vcd", ""),
+        ] {
             let t = trace::Trace::open(format!("tests/data/{file}").as_ref()).unwrap();
             let mut a = App::new(workspace::Workspace::new(t, file.into()));
             keys(&mut a, lines);
-            kinds.extend((0..a.ws.trace.vars.len()).filter_map(|v| draw::kind(&a.ws, v, None).map(|k| k.0)));
+            kinds.extend(
+                (0..a.ws.trace.vars.len()).filter_map(|v| draw::kind(&a.ws, v, None).map(|k| k.0)),
+            );
         }
         // no fixture has a real: say one is
         let mut t = trace::Trace::open("tests/data/simple.vcd".as_ref()).unwrap();
         t.vars[0].real = true;
-        kinds.extend(draw::kind(&workspace::Workspace::new(t, "real".into()), 0, None).map(|k| k.0));
-        kinds.extend((0..axis.ws.trace.vars.len()).filter_map(|v| draw::kind(&axis.ws, v, None).map(|k| k.0)));
+        kinds
+            .extend(draw::kind(&workspace::Workspace::new(t, "real".into()), 0, None).map(|k| k.0));
+        kinds.extend(
+            (0..axis.ws.trace.vars.len())
+                .filter_map(|v| draw::kind(&axis.ws, v, None).map(|k| k.0)),
+        );
         assert_eq!(kinds.len(), 12, "{kinds:?}");
         draw::set_glyphs(&draw::UNICODE);
         assert_eq!(icons(&snapshot(&mut app, 120, Some(20))), 0);
         keys(&mut app, "<Esc>");
-        assert!(Args::try_parse_from(["wtf", "--glyphs", "utf8", "x.vcd"]).err().unwrap().to_string().contains("unknown glyphs: utf8 (unicode, box, ascii, nerd)"));
+        assert!(
+            Args::try_parse_from(["wtf", "--glyphs", "utf8", "x.vcd"])
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("unknown glyphs: utf8 (unicode, box, ascii, nerd)")
+        );
     }
 
     #[test]
@@ -2218,10 +3119,24 @@ mod tests {
         keys(&mut app, ":select data\n:color blue\n");
         assert!(app.msg.is_none(), "{:?}", app.msg);
         let row = app.ws.rows[app.ws.sel].sig().unwrap().clone();
-        let cells = draw::wave(&app.ws.trace, &app.ws.view, &row, None, None, None, None, 60);
+        let cells = draw::wave(
+            &app.ws.trace,
+            &app.ws.view,
+            &row,
+            None,
+            None,
+            None,
+            None,
+            60,
+        );
         let fgs: Vec<_> = cells.iter().map(|c| c[0].1.fg).collect();
         // its values in its colour; X and Z keep theirs
-        assert!(fgs.contains(&Some(draw::pal().hues[5])) && fgs.contains(&Some(draw::pal().unknown)) && fgs.contains(&Some(draw::pal().highz)), "{fgs:?}");
+        assert!(
+            fgs.contains(&Some(draw::pal().hues[5]))
+                && fgs.contains(&Some(draw::pal().unknown))
+                && fgs.contains(&Some(draw::pal().highz)),
+            "{fgs:?}"
+        );
         assert!(!fgs.contains(&Some(draw::pal().line)));
     }
 
@@ -2229,7 +3144,10 @@ mod tests {
     fn palettes() {
         let t = trace::Trace::open("tests/data/axilite.vcd".as_ref()).unwrap();
         let mut app = App::new(workspace::Workspace::new(t, "axilite".into()));
-        keys(&mut app, ":decode bus axilite clock=aclk prefix=s_axi_\n:add bus.wr bus.rd aclk s_axi_awaddr\n:fit\n");
+        keys(
+            &mut app,
+            ":decode bus axilite clock=aclk prefix=s_axi_\n:add bus.wr bus.rd aclk s_axi_awaddr\n:fit\n",
+        );
         assert!(app.msg.is_none(), "{:?}", app.msg);
         let screen = |app: &mut App, w: u16| {
             let area = Rect::new(0, 0, w, 14);
@@ -2241,15 +3159,28 @@ mod tests {
         // reversed only in its time on the axis
         draw::set_palette(draw::Palette::mono());
         let buf = screen(&mut open("vcd", Some(SESSION)), 100);
-        let x = (0..100).find(|&x| buf[(x, 0)].modifier.contains(Modifier::REVERSED)).unwrap();
+        let x = (0..100)
+            .find(|&x| buf[(x, 0)].modifier.contains(Modifier::REVERSED))
+            .unwrap();
         let column: Vec<_> = (1..13).map(|y| &buf[(x, y)]).collect();
-        assert!(column.iter().all(|c| !c.modifier.contains(Modifier::REVERSED)));
-        assert!(column.iter().any(|c| c.symbol() == "┃") && column.iter().any(|c| !" ┃".contains(c.symbol())));
+        assert!(
+            column
+                .iter()
+                .all(|c| !c.modifier.contains(Modifier::REVERSED))
+        );
+        assert!(
+            column.iter().any(|c| c.symbol() == "┃")
+                && column.iter().any(|c| !" ┃".contains(c.symbol()))
+        );
         // light paints the whole screen over the terminal's colours
         draw::set_palette(theme::builtin("light", true).unwrap());
         keys(&mut app, ":");
         let buf = screen(&mut app, 100);
-        assert!(buf.content.iter().all(|c| c.bg != Color::Reset && c.fg != Color::Reset));
+        assert!(
+            buf.content
+                .iter()
+                .all(|c| c.bg != Color::Reset && c.fg != Color::Reset)
+        );
         draw::set_palette(theme::builtin("dark", true).unwrap());
     }
 
@@ -2258,10 +3189,22 @@ mod tests {
         // a field holding a time (a read's delay) shows it as a time in the value column too
         let t = trace::Trace::open("tests/data/axilite.vcd".as_ref()).unwrap();
         let mut app = App::new(workspace::Workspace::new(t, "axilite".into()));
-        keys(&mut app, ":decode bus axilite clock=aclk prefix=s_axi_\n:add bus.rd\n:fit\nw<CR>");
+        keys(
+            &mut app,
+            ":decode bus axilite clock=aclk prefix=s_axi_\n:add bus.rd\n:fit\nw<CR>",
+        );
         let screen = snapshot(&mut app, 100, Some(14));
-        let delay = screen.lines().find(|l| l.trim_start().starts_with("delay")).unwrap_or_else(|| panic!("{screen}"));
-        assert!(delay.split_whitespace().nth(2).is_some_and(|v| v.ends_with("ns")), "{screen}");
+        let delay = screen
+            .lines()
+            .find(|l| l.trim_start().starts_with("delay"))
+            .unwrap_or_else(|| panic!("{screen}"));
+        assert!(
+            delay
+                .split_whitespace()
+                .nth(2)
+                .is_some_and(|v| v.ends_with("ns")),
+            "{screen}"
+        );
     }
 
     /// The site's keys and commands page is written from the tables the window reads; a change
@@ -2274,17 +3217,40 @@ mod tests {
             std::fs::write(&path, &page).unwrap();
         }
         let have = std::fs::read_to_string(&path).unwrap_or_default();
-        assert!(have == page, "site/content/keys.md is out of date: UPDATE_SITE=1 cargo test site_keys");
+        assert!(
+            have == page,
+            "site/content/keys.md is out of date: UPDATE_SITE=1 cargo test site_keys"
+        );
     }
 
     #[test]
     fn records_named_as_decode() {
         // spec §5 "Records": a pair's stream has the decode's name, so `all` names its sets one by one
-        let mut app = App::new(workspace::Workspace::new(trace::Trace::open("tests/data/reqresp.vcd".as_ref()).unwrap(), "rr".into()));
-        keys(&mut app, ":protocol hs roles=valid,id when=valid id=id\n:decode req hs clock=clk valid=req_valid id=req_id\n");
-        keys(&mut app, ":decode resp hs clock=clk valid=resp_valid id=resp_id\n:decode lat pair request=req response=resp id=id\n:records lat\n");
+        let mut app = App::new(workspace::Workspace::new(
+            trace::Trace::open("tests/data/reqresp.vcd".as_ref()).unwrap(),
+            "rr".into(),
+        ));
+        keys(
+            &mut app,
+            ":protocol hs roles=valid,id when=valid id=id\n:decode req hs clock=clk valid=req_valid id=req_id\n",
+        );
+        keys(
+            &mut app,
+            ":decode resp hs clock=clk valid=resp_valid id=resp_id\n:decode lat pair request=req response=resp id=id\n:records lat\n",
+        );
         let b = app.browser.as_ref().unwrap();
-        assert_eq!((b.tabs.clone(), b.tab, b.all.clone()), (vec!["lat lat.unmatched".into(), "lat".into(), "lat.unmatched".into()], 1, Some("lat lat.unmatched".into())));
+        assert_eq!(
+            (b.tabs.clone(), b.tab, b.all.clone()),
+            (
+                vec![
+                    "lat lat.unmatched".into(),
+                    "lat".into(),
+                    "lat.unmatched".into()
+                ],
+                1,
+                Some("lat lat.unmatched".into())
+            )
+        );
         keys(&mut app, "<Esc>:records lat lat.unmatched\n");
         assert_eq!(app.browser.as_ref().unwrap().tab, 0);
     }
@@ -2297,13 +3263,27 @@ mod tests {
         let msg = |app: &App| app.msg.as_ref().map_or(String::new(), |m| m.0.clone());
         let line = ":decode s_axi axilite clock=top.aclk prefix=top.s_axi_";
         keys(&mut app, ":records s_axi.wr\n");
-        assert_eq!(msg(&app), format!("unknown stream: s_axi.wr: its interface isn't decoded yet; `{line}` makes s_axi.wr"));
+        assert_eq!(
+            msg(&app),
+            format!(
+                "unknown stream: s_axi.wr: its interface isn't decoded yet; `{line}` makes s_axi.wr"
+            )
+        );
         keys(&mut app, ":pick records s_axi\n");
-        assert_eq!(msg(&app), format!("unknown stream: s_axi: its interface isn't decoded yet; `{line}` makes its streams"));
+        assert_eq!(
+            msg(&app),
+            format!(
+                "unknown stream: s_axi: its interface isn't decoded yet; `{line}` makes its streams"
+            )
+        );
         keys(&mut app, &format!("{line}\n"));
         keys(&mut app, ":pick records s_axi\n");
         let p = app.picker.as_ref().unwrap();
-        assert!(p.entries.iter().any(|e| e.text.starts_with("s_axi.wr #0")), "{:?}", p.entries.first().map(|e| &e.text));
+        assert!(
+            p.entries.iter().any(|e| e.text.starts_with("s_axi.wr #0")),
+            "{:?}",
+            p.entries.first().map(|e| &e.text)
+        );
     }
 
     #[test]
@@ -2313,15 +3293,27 @@ mod tests {
         let mut app = App::new(workspace::Workspace::new(t, "axis".into()));
         let msg = |app: &App| app.msg.as_ref().map_or(String::new(), |m| m.0.clone());
         keys(&mut app, ":records rx.frame\n");
-        assert_eq!(msg(&app), "no streams yet: make one with :decode or :protocol");
-        keys(&mut app, ":decode rx axis clock=clk tvalid=tvalid tready=tready tdata=tdata tlast=tlast tkeep=tkeep\n");
+        assert_eq!(
+            msg(&app),
+            "no streams yet: make one with :decode or :protocol"
+        );
+        keys(
+            &mut app,
+            ":decode rx axis clock=clk tvalid=tvalid tready=tready tdata=tdata tlast=tlast tkeep=tkeep\n",
+        );
         keys(&mut app, ":records rx.fram\n");
-        assert_eq!(msg(&app), "unknown stream: rx.fram (streams: rx.beat, rx.errors, rx.frame; or a decode's name for its results)");
+        assert_eq!(
+            msg(&app),
+            "unknown stream: rx.fram (streams: rx.beat, rx.errors, rx.frame; or a decode's name for its results)"
+        );
         keys(&mut app, ":records rx.frame where len ==\n");
         assert!(app.browser.is_none() && !msg(&app).is_empty());
         keys(&mut app, ":records rx.frame where len == 99\n");
         assert!(snapshot(&mut app, 100, Some(16)).contains("no records match"));
-        keys(&mut app, "\x1b:add rx.frame rx.errors\n:fit\n:select rx.errors\n");
+        keys(
+            &mut app,
+            "\x1b:add rx.frame rx.errors\n:fit\n:select rx.errors\n",
+        );
         keys(&mut app, ":records rx.frame where len >= 8\nj");
         insta::assert_snapshot!(snapshot(&mut app, 100, Some(16)));
         // typing filters at once; a filter that does not parse keeps the rows it had (all, once
@@ -2336,22 +3328,44 @@ mod tests {
         keys(&mut app, "/<C-u><CR>sS");
         let b = app.browser.as_ref().unwrap();
         assert_eq!(b.sort, (2, true));
-        let st = app.ws.streams.iter().find(|s| s.name == "rx.frame").unwrap();
-        let lens: Vec<_> = b.rows.iter().map(|&(_, i)| st.records[i].end - st.records[i].start).collect();
+        let st = app
+            .ws
+            .streams
+            .iter()
+            .find(|s| s.name == "rx.frame")
+            .unwrap();
+        let lens: Vec<_> = b
+            .rows
+            .iter()
+            .map(|&(_, i)| st.records[i].end - st.records[i].start)
+            .collect();
         assert!(lens.windows(2).all(|w| w[0] >= w[1]), "{lens:?}");
         // = groups by a field; Enter keeps a group's records
         keys(&mut app, "=");
-        assert_eq!(msg(&app), "= groups by the sorted column, a field: s sorts by one");
+        assert_eq!(
+            msg(&app),
+            "= groups by the sorted column, a field: s sorts by one"
+        );
         keys(&mut app, "s=");
         let b = app.browser.as_ref().unwrap();
         assert!(b.group && !b.groups.is_empty());
         let count = b.groups[0].count;
         keys(&mut app, "<CR>");
         let b = app.browser.as_ref().unwrap();
-        assert!(!b.group && b.rows.len() == count && b.filter.contains("=="), "{}", b.filter);
+        assert!(
+            !b.group && b.rows.len() == count && b.filter.contains("=="),
+            "{}",
+            b.filter
+        );
         // Tab goes through the decode's sets: all its results, then each stream
         let b = app.browser.as_ref().unwrap();
-        assert_eq!((&b.tabs[..], b.tab), (&["rx", "rx.frame", "rx.errors", "rx.beat"].map(String::from)[..], 1));
+        assert_eq!(
+            (&b.tabs[..], b.tab),
+            (
+                &["rx", "rx.frame", "rx.errors", "rx.beat"].map(String::from)[..],
+                1
+            )
+        );
         keys(&mut app, "<Tab><Tab><Tab>");
         let b = app.browser.as_ref().unwrap();
         assert_eq!((b.tab, b.streams.len()), (0, 2));
@@ -2373,15 +3387,24 @@ mod tests {
         // spec §5 "Picker": fuzzy over full paths, a waveform preview at the cursor, Tab marks,
         // Enter adds below the selected row, one undo step
         let mut app = open("vcd", None);
-        keys(&mut app, ":add top.clk top.cpu.data\n:select top.clk\n:30ns\n:pick signals\ncpust");
+        keys(
+            &mut app,
+            ":add top.clk top.cpu.data\n:select top.clk\n:30ns\n:pick signals\ncpust",
+        );
         // a signal not read yet: what it is at once, its values once the highlight rests
         let first = snapshot(&mut app, 100, Some(20));
-        assert!(first.contains("│ 3 bits") && first.contains("│ … ") && !first.contains("at 30ns"), "{first}");
+        assert!(
+            first.contains("│ 3 bits") && first.contains("│ … ") && !first.contains("at 30ns"),
+            "{first}"
+        );
         let now = Instant::now();
         assert!(!app.picker_tick(now) && app.picker_tick(now + tui::picker::PREVIEW_WAIT));
         app.preview_wait = Duration::ZERO;
         insta::assert_snapshot!(snapshot(&mut app, 100, Some(20)));
-        assert!(!app.picker_tick(now + tui::picker::PREVIEW_WAIT), "drawn whole: no more ticks");
+        assert!(
+            !app.picker_tick(now + tui::picker::PREVIEW_WAIT),
+            "drawn whole: no more ticks"
+        );
         let rows = app.ws.rows.len();
         keys(&mut app, "<BS><BS><BS><BS><BS>state<Tab><Tab><CR>");
         assert!(app.picker.is_none());
@@ -2390,8 +3413,15 @@ mod tests {
         assert_eq!(app.ws.rows.len(), rows);
         // a shown signal is not added twice
         keys(&mut app, ":pick signals\ntop.clk<CR>");
-        assert_eq!((app.ws.rows.len(), app.msg.as_ref().unwrap().0.as_str()), (rows, "nothing to add: already shown"));
-        assert!(app.run("pick nope").unwrap_err().starts_with("no picker source nope"));
+        assert_eq!(
+            (app.ws.rows.len(), app.msg.as_ref().unwrap().0.as_str()),
+            (rows, "nothing to add: already shown")
+        );
+        assert!(
+            app.run("pick nope")
+                .unwrap_err()
+                .starts_with("no picker source nope")
+        );
         // without colour the matched characters are still told apart
         draw::set_palette(draw::Palette::mono());
         keys(&mut app, ":pick signals\nzzz<BS><BS><BS>state");
@@ -2410,38 +3440,104 @@ mod tests {
         assert!(snapshot(&mut app, 100, None).contains("Decode an interface 1 found"));
         keys(&mut app, "<Space>dd");
         let p = app.picker.as_ref().unwrap();
-        assert_eq!(p.entries.iter().map(|e| e.text.as_str()).collect::<Vec<_>>(), ["s_axi top.s_axi_"]);
-        assert!(p.entries[0].preview.iter().any(|l| l == "decode s_axi axilite clock=top.aclk prefix=top.s_axi_"));
+        assert_eq!(
+            p.entries
+                .iter()
+                .map(|e| e.text.as_str())
+                .collect::<Vec<_>>(),
+            ["s_axi top.s_axi_"]
+        );
+        assert!(
+            p.entries[0]
+                .preview
+                .iter()
+                .any(|l| l == "decode s_axi axilite clock=top.aclk prefix=top.s_axi_")
+        );
         keys(&mut app, "<CR>");
-        assert!(app.picker.is_none() && app.ws.decodes.iter().any(|d| d.name == "s_axi"), "{:?}", app.msg);
-        assert!(matches!(&app.ws.rows[app.ws.sel], wtf_core::rows::Row::Group { name, .. } if name == "s_axi"));
-        assert!(app.ws.rows.iter().filter_map(|r| r.sig()).any(|s| app.ws.trace.vars[s.var].path == "s_axi.rd"));
+        assert!(
+            app.picker.is_none() && app.ws.decodes.iter().any(|d| d.name == "s_axi"),
+            "{:?}",
+            app.msg
+        );
+        assert!(
+            matches!(&app.ws.rows[app.ws.sel], wtf_core::rows::Row::Group { name, .. } if name == "s_axi")
+        );
+        assert!(
+            app.ws
+                .rows
+                .iter()
+                .filter_map(|r| r.sig())
+                .any(|s| app.ws.trace.vars[s.var].path == "s_axi.rd")
+        );
         keys(&mut app, "<Space>dd");
-        assert!(app.picker.as_ref().unwrap().entries[0].preview.iter().any(|l| l.starts_with("decoded already as s_axi")));
+        assert!(
+            app.picker.as_ref().unwrap().entries[0]
+                .preview
+                .iter()
+                .any(|l| l.starts_with("decoded already as s_axi"))
+        );
         keys(&mut app, "<CR>");
         // decoded already: the records browser on all its results, a column per field
         let b = app.browser.as_ref().unwrap();
-        assert_eq!((b.tabs[b.tab].as_str(), b.streams.len()), ("s_axi", 5), "{:?}", app.msg);
+        assert_eq!(
+            (b.tabs[b.tab].as_str(), b.streams.len()),
+            ("s_axi", 5),
+            "{:?}",
+            app.msg
+        );
         insta::assert_snapshot!(snapshot(&mut app, 110, Some(16)));
         // l scrolls the columns after stream and n, which stay
         keys(&mut app, "ll");
         let screen = snapshot(&mut app, 110, Some(16));
-        assert!(screen.contains("stream        n    delay") && app.browser.as_ref().unwrap().left == 2, "{screen}");
+        assert!(
+            screen.contains("stream        n    delay") && app.browser.as_ref().unwrap().left == 2,
+            "{screen}"
+        );
         keys(&mut app, "h\x1b");
         // only results and violations were added: no s_axi.aw row
-        assert!(!app.ws.rows.iter().filter_map(|r| r.sig()).any(|s| app.ws.trace.vars[s.var].path == "s_axi.aw"));
+        assert!(
+            !app.ws
+                .rows
+                .iter()
+                .filter_map(|r| r.sig())
+                .any(|s| app.ws.trace.vars[s.var].path == "s_axi.aw")
+        );
     }
 
     #[test]
     fn picker_sources() {
         let mut app = open("vcd", Some(SESSION));
         let msg = |app: &App| app.msg.as_ref().map_or(String::new(), |m| m.0.clone());
-        let step = |tool: &str, ask: &str, answer: &str, time| wtf_core::workspace::Step { tool: tool.into(), ask: ask.into(), answer: answer.into(), time };
-        assert!(app.run("pick trail").unwrap_err().starts_with("no trail yet"));
+        let step = |tool: &str, ask: &str, answer: &str, time| wtf_core::workspace::Step {
+            tool: tool.into(),
+            ask: ask.into(),
+            answer: answer.into(),
+            time,
+        };
+        assert!(
+            app.run("pick trail")
+                .unwrap_err()
+                .starts_with("no trail yet")
+        );
         app.ws.trail = vec![
-            step("command", "decode bus axilite clock=clk", "decoded 2 streams", None),
-            step("find", "@clk top.cpu.busy", "1 matches, first 20ns, last 20ns", Some(20)),
-            step("values", "top.cpu.data at 40ns", "top.cpu.data: 40ns 0x2A", Some(40)),
+            step(
+                "command",
+                "decode bus axilite clock=clk",
+                "decoded 2 streams",
+                None,
+            ),
+            step(
+                "find",
+                "@clk top.cpu.busy",
+                "1 matches, first 20ns, last 20ns",
+                Some(20),
+            ),
+            step(
+                "values",
+                "top.cpu.data at 40ns",
+                "top.cpu.data: 40ns 0x2A",
+                Some(40),
+            ),
         ];
         // the trail opens on the newest step; Enter jumps to its time
         keys(&mut app, ":pick trail\n");
@@ -2455,10 +3551,16 @@ mod tests {
         assert_eq!(app.ws.view.cursor, 60);
         keys(&mut app, ":pick marks\n<C-s>");
         let p = app.picker.as_ref().unwrap();
-        assert_eq!((p.source, p.shown.len(), p.empty.as_str()), (2, 0, "no streams yet: make one with :decode or :protocol"));
+        assert_eq!(
+            (p.source, p.shown.len(), p.empty.as_str()),
+            (2, 0, "no streams yet: make one with :decode or :protocol")
+        );
         // commands: Enter puts it on the command line
         keys(&mut app, "<C-s>zoo<CR>");
-        assert_eq!((app.mode, app.line.as_str()), (tui::app::Mode::Command, "zoom "));
+        assert_eq!(
+            (app.mode, app.line.as_str()),
+            (tui::app::Mode::Command, "zoom ")
+        );
         keys(&mut app, "<Esc>:pick commands\n<Esc>");
         assert!(app.picker.is_none() && msg(&app).is_empty());
     }
@@ -2468,15 +3570,26 @@ mod tests {
         // without a stream named: every stream's records in time order, or the selected stream's
         let t = trace::Trace::open("tests/data/axilite.vcd".as_ref()).unwrap();
         let mut app = App::new(workspace::Workspace::new(t, "axilite".into()));
-        app.run("decode bus axilite clock=aclk prefix=s_axi_").unwrap();
+        app.run("decode bus axilite clock=aclk prefix=s_axi_")
+            .unwrap();
         app.run("add bus.rd").unwrap();
         app.run("add top.aclk").unwrap();
         app.run("select aclk").unwrap();
         app.open_picker("records").unwrap();
         let p = app.picker.as_ref().unwrap();
         assert!(p.stream.is_none());
-        assert!(p.entries.iter().any(|e| e.text.starts_with("bus.aw #0")) && p.entries.iter().any(|e| e.text.starts_with("bus.rd #0")));
-        let times: Vec<u64> = p.entries.iter().filter_map(|e| match e.act { tui::picker::Act::Record(t) => Some(t), _ => None }).collect();
+        assert!(
+            p.entries.iter().any(|e| e.text.starts_with("bus.aw #0"))
+                && p.entries.iter().any(|e| e.text.starts_with("bus.rd #0"))
+        );
+        let times: Vec<u64> = p
+            .entries
+            .iter()
+            .filter_map(|e| match e.act {
+                tui::picker::Act::Record(t) => Some(t),
+                _ => None,
+            })
+            .collect();
         assert!(times.windows(2).all(|w| w[0] <= w[1]));
         app.picker = None;
         keys(&mut app, ":select bus.rd\n");
@@ -2510,9 +3623,18 @@ mod tests {
     fn stream_rows() {
         let t = trace::Trace::open("tests/data/axis.vcd".as_ref()).unwrap();
         let mut app = App::new(workspace::Workspace::new(t, "axis".into()));
-        keys(&mut app, ":decode rx axis clock=clk tvalid=tvalid tready=tready tdata=tdata tlast=tlast tkeep=tkeep\n");
+        keys(
+            &mut app,
+            ":decode rx axis clock=clk tvalid=tvalid tready=tready tdata=tdata tlast=tlast tkeep=tkeep\n",
+        );
         // what it made, violations apart
-        assert_eq!(app.msg, Some(("rx: records rx.frame 4; violations rx.errors 2; made from rx.beat 7".into(), false)));
+        assert_eq!(
+            app.msg,
+            Some((
+                "rx: records rx.frame 4; violations rx.errors 2; made from rx.beat 7".into(),
+                false
+            ))
+        );
         keys(&mut app, ":add rx.frame rx.errors\n:fit\n");
         insta::assert_snapshot!(snapshot(&mut app, 100, None));
         // Space shows a row per field under the stream, as a bus's bits
@@ -2520,16 +3642,30 @@ mod tests {
         let area = Rect::new(0, 0, 100, draw::height(&app.ws) + 1);
         let mut buf = Buffer::empty(area);
         render::draw(&mut app, area, &mut buf);
-        let fg = |y: u16, ch: &str| (0..100).map(|x| &buf[(x, y)]).find(|c| c.symbol() == ch).map(|c| c.fg);
+        let fg = |y: u16, ch: &str| {
+            (0..100)
+                .map(|x| &buf[(x, y)])
+                .find(|c| c.symbol() == ch)
+                .map(|c| c.fg)
+        };
         assert_eq!(fg(4, "🮡"), Some(draw::red().fg.unwrap()));
         assert_eq!(fg(2, "🮡"), Some(draw::pal().bus));
         keys(&mut app, ":select rx.frame\n<CR>");
         insta::assert_snapshot!(snapshot(&mut app, 100, None));
         // the instance and the expanded row come back from the session
         let text = session::to_toml(&app.ws);
-        let mut back = App::new(workspace::Workspace::new(trace::Trace::open("tests/data/axis.vcd".as_ref()).unwrap(), "axis".into()));
-        assert!(session::apply(&mut back.ws, &text).unwrap().is_empty(), "{text}");
-        assert_eq!(draw::waveform(&mut back.ws, 100), draw::waveform(&mut app.ws, 100));
+        let mut back = App::new(workspace::Workspace::new(
+            trace::Trace::open("tests/data/axis.vcd".as_ref()).unwrap(),
+            "axis".into(),
+        ));
+        assert!(
+            session::apply(&mut back.ws, &text).unwrap().is_empty(),
+            "{text}"
+        );
+        assert_eq!(
+            draw::waveform(&mut back.ws, 100),
+            draw::waveform(&mut app.ws, 100)
+        );
         keys(&mut app, "jj");
         assert!(snapshot(&mut app, 100, None).contains("rx.frame.len"));
         keys(&mut app, "w/8\n");
@@ -2544,16 +3680,38 @@ mod tests {
         assert!(app.examine.is_none() && app.ws.view.cursor == 65); // the box takes no other keys
         // any other signal: its value in the row's radix
         keys(&mut app, ":add top.tdata\ne");
-        assert_eq!(app.examine.clone().map(|e| (e.title, e.at, e.lines)), Some(("top.tdata".to_string(), "65ns".to_string(), vec![(String::new(), "0xC0".to_string())])));
+        assert_eq!(
+            app.examine.clone().map(|e| (e.title, e.at, e.lines)),
+            Some((
+                "top.tdata".to_string(),
+                "65ns".to_string(),
+                vec![(String::new(), "0xC0".to_string())]
+            ))
+        );
         keys(&mut app, "e:rm top.tdata\n:select rx.frame\n");
         keys(&mut app, "<CR>");
-        assert!(matches!(&app.ws.rows[0], rows::Row::Signal(s) if s.open.is_empty()) && app.ws.bit.is_none());
+        assert!(
+            matches!(&app.ws.rows[0], rows::Row::Signal(s) if s.open.is_empty())
+                && app.ws.bit.is_none()
+        );
         // a rule's value runs to the next key, spaces and all
-        keys(&mut app, ":decode stall check clock=clk bad=tvalid && !tready\n");
+        keys(
+            &mut app,
+            ":decode stall check clock=clk bad=tvalid && !tready\n",
+        );
         assert_eq!(app.msg, Some(("stall: violations stall 4".into(), false)));
-        assert_eq!(app.ws.decodes.last().unwrap().params, [("bad".to_string(), "tvalid && !tready".to_string())]);
+        assert_eq!(
+            app.ws.decodes.last().unwrap().params,
+            [("bad".to_string(), "tvalid && !tready".to_string())]
+        );
         keys(&mut app, ":decode x axis tvalid=nope\n");
-        assert!(app.msg.as_ref().is_some_and(|(m, err)| *err && m.contains("no signal for tready")), "{:?}", app.msg);
+        assert!(
+            app.msg
+                .as_ref()
+                .is_some_and(|(m, err)| *err && m.contains("no signal for tready")),
+            "{:?}",
+            app.msg
+        );
     }
 
     /// `e` works on any stream: a protocol of the session's, a frame of it, a check.
@@ -2595,21 +3753,54 @@ signal = "burst"
 [[rows]]
 signal = "stall"
 "#;
-        assert_eq!(session::apply(&mut app.ws, text).unwrap(), Vec::<String>::new());
+        assert_eq!(
+            session::apply(&mut app.ws, text).unwrap(),
+            Vec::<String>::new()
+        );
         let examine = |app: &mut App, row: &str, at: &str| {
             keys(app, &format!(":select {row}\n:{at}\ne"));
-            let seen = app.examine.clone().unwrap_or_else(|| panic!("no box: {:?}", app.msg));
+            let seen = app
+                .examine
+                .clone()
+                .unwrap_or_else(|| panic!("no box: {:?}", app.msg));
             keys(app, "\x1b");
             seen
         };
         let c0 = examine(&mut app, "c0", "35ns");
-        assert_eq!((c0.title.as_str(), &c0.lines[..]), ("c0 #0", &[("op".to_string(), "0x1".to_string()), ("arg".to_string(), "0x1".to_string())][..]));
+        assert_eq!(
+            (c0.title.as_str(), &c0.lines[..]),
+            (
+                "c0 #0",
+                &[
+                    ("op".to_string(), "0x1".to_string()),
+                    ("arg".to_string(), "0x1".to_string())
+                ][..]
+            )
+        );
         let burst = examine(&mut app, "burst", "35ns");
         assert_eq!(burst.title, "burst #0"); // `data` stays out of the label
-        assert!(burst.lines.contains(&("data".to_string(), "01 03".to_string())), "{burst:?}");
-        let first = app.ws.streams.iter().find(|s| s.name == "stall").unwrap().records[0].start;
+        assert!(
+            burst
+                .lines
+                .contains(&("data".to_string(), "01 03".to_string())),
+            "{burst:?}"
+        );
+        let first = app
+            .ws
+            .streams
+            .iter()
+            .find(|s| s.name == "stall")
+            .unwrap()
+            .records[0]
+            .start;
         let stall = examine(&mut app, "stall", &format!("{first}ns"));
-        assert!(stall.title.starts_with("stall #0 waiting") && stall.lines.contains(&("rule".to_string(), "waiting".to_string())), "{stall:?}");
+        assert!(
+            stall.title.starts_with("stall #0 waiting")
+                && stall
+                    .lines
+                    .contains(&("rule".to_string(), "waiting".to_string())),
+            "{stall:?}"
+        );
     }
 
     #[test]
@@ -2625,8 +3816,8 @@ signal = "stall"
 mod fuzz {
     use super::*;
     use crate::tui::app;
-    use wtf_core::{rows, trace};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use wtf_core::{rows, trace};
 
     #[test]
     fn undo_fuzz() {
@@ -2642,22 +3833,40 @@ mod fuzz {
         for round in 0..500 {
             let t = trace::Trace::open("tests/data/simple.vcd".as_ref()).unwrap();
             let mut app = App::new(workspace::Workspace::new(t, "s".into()));
-            session::apply(&mut app.ws, &std::fs::read_to_string("tests/data/simple.session.toml").unwrap()).unwrap();
+            session::apply(
+                &mut app.ws,
+                &std::fs::read_to_string("tests/data/simple.session.toml").unwrap(),
+            )
+            .unwrap();
             let start = app.ws.rows.clone();
             let mut log = String::new();
             for _ in 0..30 {
-                seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                seed = seed
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
                 let k = set[(seed >> 33) as usize % set.len()];
-                log.push_str(&format!("{:?}{} ", k.code, if k.modifiers.is_empty() { "" } else { "^" }));
+                log.push_str(&format!(
+                    "{:?}{} ",
+                    k.code,
+                    if k.modifiers.is_empty() { "" } else { "^" }
+                ));
                 app.mode = app::Mode::Normal;
                 app.adding = false;
                 app.key(k);
-                assert!(app.ws.rows.is_empty() || rows::visible(&app.ws.rows).contains(&app.ws.sel), "round {round}: sel hidden after {log}");
+                assert!(
+                    app.ws.rows.is_empty() || rows::visible(&app.ws.rows).contains(&app.ws.sel),
+                    "round {round}: sel hidden after {log}"
+                );
             }
             for _ in 0..100 {
                 let _ = app.ws.undo();
             }
-            assert!(rows::same_layout(&start, &app.ws.rows), "round {round}: undo all != start after {log}\n{:?}\n{:?}", start, app.ws.rows);
+            assert!(
+                rows::same_layout(&start, &app.ws.rows),
+                "round {round}: undo all != start after {log}\n{:?}\n{:?}",
+                start,
+                app.ws.rows
+            );
         }
     }
 }

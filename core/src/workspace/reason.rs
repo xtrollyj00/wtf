@@ -22,11 +22,18 @@ pub struct Reason {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Why {
     /// Required roles without a signal (`on`), and the decode lines the file has for the protocol.
-    NoSignal { found: Vec<String> },
+    NoSignal {
+        found: Vec<String>,
+    },
     /// A signal given for a role the protocol hasn't (`on[0]`).
-    NoRole { protocol: String },
+    NoRole {
+        protocol: String,
+    },
     /// A param the protocol hasn't (`on[0]`), and the ones it has.
-    NoParam { protocol: String, params: Vec<String> },
+    NoParam {
+        protocol: String,
+        params: Vec<String>,
+    },
     NoClock,
     /// What is wrong in the field: its signal or expression's error.
     In(String),
@@ -52,7 +59,15 @@ impl fmt::Display for Reasons {
         if let Some(name) = &self.name {
             write!(f, "{name}: ")?;
         }
-        write!(f, "{}", self.list.iter().map(ToString::to_string).collect::<Vec<_>>().join("; "))
+        write!(
+            f,
+            "{}",
+            self.list
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("; ")
+        )
     }
 }
 
@@ -68,7 +83,12 @@ impl fmt::Display for Reason {
                 }
             }
             Why::NoRole { protocol } => write!(f, "{protocol} has no role {}", on(0)),
-            Why::NoParam { protocol, params } => write!(f, "{protocol} has no param {} (params: {})", on(0), params.join(", ")),
+            Why::NoParam { protocol, params } => write!(
+                f,
+                "{protocol} has no param {} (params: {})",
+                on(0),
+                params.join(", ")
+            ),
             Why::NoClock => write!(f, "no clock"),
             Why::In(e) => write!(f, "{}: {e}", on(0)),
             Why::Said(text) => write!(f, "{text}"),

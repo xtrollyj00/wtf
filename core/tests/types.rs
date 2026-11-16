@@ -22,7 +22,11 @@ use wtf_core::trace::Val;
 use wtf_core::workspace::Workspace;
 
 fn fixture(name: &str) -> Workspace {
-    Workspace::open(&PathBuf::from(format!("{}/../tests/data/{name}", env!("CARGO_MANIFEST_DIR")))).unwrap()
+    Workspace::open(&PathBuf::from(format!(
+        "{}/../tests/data/{name}",
+        env!("CARGO_MANIFEST_DIR")
+    )))
+    .unwrap()
 }
 
 /// What a name resolves to and its value at `t`, as `path = value` (an enum value by its name),
@@ -35,7 +39,11 @@ fn at(ws: &mut Workspace, name: &str, t: Tick) -> String {
     };
     ws.trace.load(&[v]);
     let var = &ws.trace.vars[v];
-    let path = format!("{}{}", var.path, bit.map(|b| format!("[{b}]")).unwrap_or_default());
+    let path = format!(
+        "{}{}",
+        var.path,
+        bit.map(|b| format!("[{b}]")).unwrap_or_default()
+    );
     let value = match ws.trace.value_of(v, bit, t) {
         Some(Val::Bits(b)) => var.name_of(&b).map_or(b.clone(), str::to_string),
         Some(Val::Text(s)) => s,
@@ -79,7 +87,10 @@ const VERILATOR_PLAIN: &[(&str, &str)] = &[
 #[test]
 fn verilator() {
     check("types-verilator.vcd", VERILATOR_PLAIN);
-    check("types-verilator.vcd", &[("grid[1][1]", "types.grid[1][1] = 0100")]);
+    check(
+        "types-verilator.vcd",
+        &[("grid[1][1]", "types.grid[1][1] = 0100")],
+    );
     check("types-verilator.fst", VERILATOR_PLAIN);
 }
 
@@ -139,15 +150,29 @@ fn verilator_structs() {
         ],
     );
     // the VCD writes a struct as a module scope, so it is none (spec §18)
-    check("types-verilator-structs.vcd", &[("pkt", "unknown"), ("pkt.pair", "unknown"), ("pkts[1]", "unknown"), ("gen(1).p", "unknown")]);
+    check(
+        "types-verilator-structs.vcd",
+        &[
+            ("pkt", "unknown"),
+            ("pkt.pair", "unknown"),
+            ("pkts[1]", "unknown"),
+            ("gen(1).p", "unknown"),
+        ],
+    );
     // the VCD writes an array of structs' scopes pkts[1], the FST pkts / [1]
     check(
         "types-verilator-structs.vcd",
-        &[("pkt.state", "types.pkt.state = 01"), ("pkts(1).pair.lo", "types.pkts[1].pair.lo = 0111")],
+        &[
+            ("pkt.state", "types.pkt.state = 01"),
+            ("pkts(1).pair.lo", "types.pkts[1].pair.lo = 0111"),
+        ],
     );
     check(
         "types-verilator-structs.fst",
-        &[("pkt.state", "types.pkt.state = BUSY"), ("pkts(1).pair.lo", "types.pkts[1].pair.lo = 0111")],
+        &[
+            ("pkt.state", "types.pkt.state = BUSY"),
+            ("pkts(1).pair.lo", "types.pkts[1].pair.lo = 0111"),
+        ],
     );
 }
 
@@ -157,8 +182,18 @@ fn verilator_fst_grid() {
     // grid[1][1] and grid[0][0] don't resolve (the VCD is right), fixed by a later piece
     for file in ["types-verilator.fst", "types-verilator-structs.fst"] {
         let mut ws = fixture(file);
-        assert!(ws.trace.by_path.contains_key("types.grid[1].grid[1]."), "{file}");
-        check(file, &[("grid[1][1]", "unknown"), ("grid[0][0]", "unknown"), ("grid[1][0]", "types.grid[1][0] = 0011")]);
+        assert!(
+            ws.trace.by_path.contains_key("types.grid[1].grid[1]."),
+            "{file}"
+        );
+        check(
+            file,
+            &[
+                ("grid[1][1]", "unknown"),
+                ("grid[0][0]", "unknown"),
+                ("grid[1][0]", "types.grid[1][0] = 0011"),
+            ],
+        );
         assert!(ws.resolve("grid(0)(1)").is_ok());
     }
 }
@@ -166,7 +201,10 @@ fn verilator_fst_grid() {
 /// nvc writes records as scopes of their fields, an enum as its names (a string var).
 const NVC_COMMON: &[(&str, &str)] = &[
     // an enum is text, so the record's value is text
-    ("pkt", "types.pkt = '{valid:1, state:busy, pair:'{hi:A, lo:5}}"),
+    (
+        "pkt",
+        "types.pkt = '{valid:1, state:busy, pair:'{hi:A, lo:5}}",
+    ),
     ("pkt.valid", "types.pkt.valid = 1"),
     ("pkt.state", "types.pkt.state = busy"),
     ("PKT.PAIR.HI", "types.pkt.pair.hi = 1010"),
@@ -183,7 +221,10 @@ fn nvc() {
     let arrays: &[(&str, &str)] = &[
         ("pkts(1).pair.lo", "types.pkts[1].pair.lo = 0111"),
         ("pkts[1].pair.lo", "types.pkts[1].pair.lo = 0111"),
-        ("pkts(1)", "types.pkts[1] = '{valid:0, state:idle, pair:'{hi:0, lo:7}}"),
+        (
+            "pkts(1)",
+            "types.pkts[1] = '{valid:0, state:idle, pair:'{hi:0, lo:7}}",
+        ),
         ("rows(1)(2)", "types.rows[1][2] = 0101"),
         ("rows[1][2]", "types.rows[1][2] = 0101"),
         ("rows(1)", "types.rows[1] = 001101000101"),
@@ -192,11 +233,25 @@ fn nvc() {
     for file in ["types-nvc.fst", "types-nvc.vcd"] {
         check(file, NVC_COMMON);
         check(file, arrays);
-        assert!(!fixture(file).trace.vars.iter().any(|v| v.path.contains("grid")), "{file}");
+        assert!(
+            !fixture(file)
+                .trace
+                .vars
+                .iter()
+                .any(|v| v.path.contains("grid")),
+            "{file}"
+        );
     }
     // without --dump-arrays nvc drops every array, records' array fields too
     check("types-nvc-noarrays.fst", NVC_COMMON);
-    check("types-nvc-noarrays.fst", &[("pkts(1).pair.lo", "unknown"), ("rows(1)(2)", "unknown"), ("link.data(1)", "unknown")]);
+    check(
+        "types-nvc-noarrays.fst",
+        &[
+            ("pkts(1).pair.lo", "unknown"),
+            ("rows(1)(2)", "unknown"),
+            ("link.data(1)", "unknown"),
+        ],
+    );
 }
 
 /// The rows `:add types.**` makes, as wtf names them: each keeps its composite's name.
@@ -215,15 +270,24 @@ fn row_names_keep_the_composite() {
     let generate = "gen[0].p.hi gen[0].p.lo gen[1].p.hi gen[1].p.lo";
     assert_eq!(
         row_names("types-verilator-structs.fst"),
-        format!("clk pkt.valid pkt.state pkt.pair.hi pkt.pair.lo loose.a loose.b packed2[3] packed2[2] packed2[1] packed2[0] mem[0] mem[1] mem[2] mem[3] {fst_grid} {pkts} word.byte_ word.pair.hi word.pair.lo {generate}")
+        format!(
+            "clk pkt.valid pkt.state pkt.pair.hi pkt.pair.lo loose.a loose.b packed2[3] packed2[2] packed2[1] packed2[0] mem[0] mem[1] mem[2] mem[3] {fst_grid} {pkts} word.byte_ word.pair.hi word.pair.lo {generate}"
+        )
     );
     // a Verilator VCD writes struct scopes as modules, so a one-deep field shows bare
     // (a, byte_ for loose.a, word.byte_), fixed by a later piece
     assert_eq!(
         row_names("types-verilator-structs.vcd"),
-        format!("clk pkt.valid pkt.state pkt.pair.hi pkt.pair.lo a b packed2[3] packed2[2] packed2[1] packed2[0] mem[0] mem[1] mem[2] mem[3] {grid} {pkts} byte_ word.pair.hi word.pair.lo {generate}")
+        format!(
+            "clk pkt.valid pkt.state pkt.pair.hi pkt.pair.lo a b packed2[3] packed2[2] packed2[1] packed2[0] mem[0] mem[1] mem[2] mem[3] {grid} {pkts} byte_ word.pair.hi word.pair.lo {generate}"
+        )
     );
-    assert_eq!(row_names("types-verilator.vcd"), format!("clk pkt a b packed2 mem[0] mem[1] mem[2] mem[3] {grid} pkts[0] pkts[1] word gen[0].p gen[1].p"));
+    assert_eq!(
+        row_names("types-verilator.vcd"),
+        format!(
+            "clk pkt a b packed2 mem[0] mem[1] mem[2] mem[3] {grid} pkts[0] pkts[1] word gen[0].p gen[1].p"
+        )
+    );
     // Icarus's foreach loop variables and genvars are in the file, so they are rows too (spec §18)
     assert_eq!(
         row_names("types-icarus.fst"),
@@ -232,7 +296,9 @@ fn row_names_keep_the_composite() {
     for file in ["types-nvc.fst", "types-nvc.vcd"] {
         assert_eq!(
             row_names(file),
-            format!("clk pkt.valid pkt.state pkt.pair.hi pkt.pair.lo {pkts} rows[0][0] rows[0][1] rows[0][2] rows[1][0] rows[1][1] rows[1][2] link.addr link.data[0] link.data[1] link.data[2] gen[0].p.hi gen[0].p.lo gen[1].p.hi gen[1].p.lo"),
+            format!(
+                "clk pkt.valid pkt.state pkt.pair.hi pkt.pair.lo {pkts} rows[0][0] rows[0][1] rows[0][2] rows[1][0] rows[1][1] rows[1][2] link.addr link.data[0] link.data[1] link.data[2] gen[0].p.hi gen[0].p.lo gen[1].p.hi gen[1].p.lo"
+            ),
             "{file}"
         );
     }
@@ -242,7 +308,11 @@ fn row_names_keep_the_composite() {
 fn added(file: &str, cmd: &str) -> String {
     let mut ws = fixture(file);
     match wtf_core::command::run(&mut ws, cmd) {
-        Ok(_) => wtf_core::rows::display_names(&ws.trace, &ws.rows).iter().map(|n| n.trim()).collect::<Vec<_>>().join(" "),
+        Ok(_) => wtf_core::rows::display_names(&ws.trace, &ws.rows)
+            .iter()
+            .map(|n| n.trim())
+            .collect::<Vec<_>>()
+            .join(" "),
         Err(e) => e,
     }
 }
@@ -264,7 +334,10 @@ fn add_a_composite() {
         }
     }
     let structs = "types-verilator-structs.fst";
-    assert_eq!(added(structs, "add types.mem types.grid[1] word"), "mem grid[1] word");
+    assert_eq!(
+        added(structs, "add types.mem types.grid[1] word"),
+        "mem grid[1] word"
+    );
     // a module's direct signals: its composites are signals in it
     assert_eq!(added(structs, "add types.gen[1]"), "▾ gen[1] p");
     assert_eq!(
@@ -286,7 +359,10 @@ fn add_a_composite() {
     assert_eq!(added(vcd, "add types.grid[1]"), "grid[1]");
     let mut ws = fixture(vcd);
     let e = ws.resolve("pkt").unwrap_err();
-    assert!(e.starts_with("unknown signal: pkt is a scope of 4 signals (types.pkt.valid"), "{e}");
+    assert!(
+        e.starts_with("unknown signal: pkt is a scope of 4 signals (types.pkt.valid"),
+        "{e}"
+    );
     // and an FST record tree: the same, its pair's fields counted once each, not the pair too
     // (`pkt` resolves to the record itself there, so the count is asked apart from a name)
     let ws = fixture("types-nvc.fst");
@@ -298,8 +374,20 @@ fn add_a_composite() {
 
 /// The lines under a composite row as the window lists them, each a level deeper indented.
 fn lines(ws: &Workspace) -> Vec<String> {
-    let Some(wtf_core::rows::Row::Signal(s)) = ws.rows.first() else { return Vec::new() };
-    ws.subs(s).iter().map(|l| format!("{}{}", "  ".repeat(l.depth), wtf_core::rows::child_name(&ws.trace.vars[l.var].path) + &l.bit.map(|b| format!("[{b}]")).unwrap_or_default())).collect()
+    let Some(wtf_core::rows::Row::Signal(s)) = ws.rows.first() else {
+        return Vec::new();
+    };
+    ws.subs(s)
+        .iter()
+        .map(|l| {
+            format!(
+                "{}{}",
+                "  ".repeat(l.depth),
+                wtf_core::rows::child_name(&ws.trace.vars[l.var].path)
+                    + &l.bit.map(|b| format!("[{b}]")).unwrap_or_default()
+            )
+        })
+        .collect()
 }
 
 /// Space on line `sub` of the first row (counted from the bottom, as `Workspace::bit`), or on the
@@ -313,17 +401,28 @@ fn space(ws: &mut Workspace, sub: Option<u32>) {
 fn open_a_composite() {
     for file in ["types-verilator-structs.fst", "types-nvc.fst"] {
         let mut ws = fixture(file);
-        ws.undoable(|ws| wtf_core::command::run(ws, "add types.pkts")).unwrap();
+        ws.undoable(|ws| wtf_core::command::run(ws, "add types.pkts"))
+            .unwrap();
         assert_eq!(ws.rows.len(), 1, "{file}");
         space(&mut ws, None);
         assert_eq!(lines(&ws), ["pkts[0]", "pkts[1]"], "{file}");
         // pkts[0], two lines up from the bottom, opens one level; the selection stays on it
         space(&mut ws, Some(1));
-        assert_eq!(lines(&ws), ["pkts[0]", "  valid", "  state", "  pair", "pkts[1]"], "{file}");
+        assert_eq!(
+            lines(&ws),
+            ["pkts[0]", "  valid", "  state", "  pair", "pkts[1]"],
+            "{file}"
+        );
         assert_eq!(ws.bit, Some(4));
         // pair opens into its fields; valid, a 1-bit field, folds the level it is in
         space(&mut ws, Some(1));
-        assert_eq!(lines(&ws), ["pkts[0]", "  valid", "  state", "  pair", "    hi", "    lo", "pkts[1]"], "{file}");
+        assert_eq!(
+            lines(&ws),
+            [
+                "pkts[0]", "  valid", "  state", "  pair", "    hi", "    lo", "pkts[1]"
+            ],
+            "{file}"
+        );
         space(&mut ws, Some(5));
         assert_eq!(lines(&ws), ["pkts[0]", "pkts[1]"], "{file}");
         assert_eq!(ws.bit, Some(1));
@@ -336,7 +435,11 @@ fn open_a_composite() {
         // the values of a level are there once the row is shown
         let t = (10_000_000 / ws.trace.fs_per_tick.unwrap()) as Tick;
         let lo = ws.trace.by_path["types.pkts[1].pair.lo"];
-        assert_eq!(ws.trace.value_at(lo, t), Some(Val::Bits("0111".into())), "{file}");
+        assert_eq!(
+            ws.trace.value_at(lo, t),
+            Some(Val::Bits("0111".into())),
+            "{file}"
+        );
         // opening and folding are no undo steps; dd on a line removes its row
         wtf_core::command::run(&mut ws, "undo").unwrap();
         assert!(ws.rows.is_empty(), "{file}");
@@ -360,7 +463,20 @@ fn open_a_composite() {
     space(&mut ws, None);
     space(&mut ws, Some(0));
     space(&mut ws, Some(0));
-    assert_eq!(lines(&ws), ["grid[0]", "grid[1]", "  grid[1][0]", "  grid[1][1]", "  grid[1][2]", "    grid[1][2][3]", "    grid[1][2][2]", "    grid[1][2][1]", "    grid[1][2][0]"]);
+    assert_eq!(
+        lines(&ws),
+        [
+            "grid[0]",
+            "grid[1]",
+            "  grid[1][0]",
+            "  grid[1][1]",
+            "  grid[1][2]",
+            "    grid[1][2][3]",
+            "    grid[1][2][2]",
+            "    grid[1][2][1]",
+            "    grid[1][2][0]"
+        ]
+    );
 }
 
 /// GHDL's VCD has only scalars and vectors (records and arrays are comments); its FST keeps the 2-D
@@ -383,8 +499,18 @@ fn ghdl() {
         "clk pkt.valid pkt.state pkt.pair.hi pkt.pair.lo pkts[0].valid pkts[0].state pkts[0].pair.hi pkts[0].pair.lo pkts[1].valid pkts[1].state pkts[1].pair.hi pkts[1].pair.lo rows[0][0] rows[0][1] rows[0][2] rows[1][0] rows[1][1] rows[1][2] link.addr link.data[0] link.data[1] link.data[2] gen[0].p.hi gen[0].p.lo gen[1].p.hi gen[1].p.lo"
     );
     // shortcut: wellen can't read a GHW with a 2-D array (grid): an error, not a crash; upstream
-    let err = Workspace::open(&PathBuf::from(format!("{}/../tests/data/types-ghdl.ghw", env!("CARGO_MANIFEST_DIR")))).err().unwrap();
-    assert!(err.ends_with("wellen can't read it: not yet implemented: support multi-dimensional arrays!"), "{err}");
+    let err = Workspace::open(&PathBuf::from(format!(
+        "{}/../tests/data/types-ghdl.ghw",
+        env!("CARGO_MANIFEST_DIR")
+    )))
+    .err()
+    .unwrap();
+    assert!(
+        err.ends_with(
+            "wellen can't read it: not yet implemented: support multi-dimensional arrays!"
+        ),
+        "{err}"
+    );
 
     // GHDL's FST has every signal, the 2-D grid too; the enum is 8 bits with its names
     check(
@@ -411,21 +537,39 @@ fn ghdl() {
 
 /// What is in a composite, as `e` lists it (spec §6 "Composite rows"): `name|depth|rel`.
 fn fields_of(ws: &Workspace, path: &str) -> Vec<String> {
-    ws.trace.fields(ws.trace.by_path[path]).into_iter().map(|f| format!("{}|{}|{}", f.name, f.depth, f.rel)).collect()
+    ws.trace
+        .fields(ws.trace.by_path[path])
+        .into_iter()
+        .map(|f| format!("{}|{}|{}", f.name, f.depth, f.rel))
+        .collect()
 }
 
 #[test]
 fn a_composites_fields() {
     let ws = fixture("types-verilator-structs.fst");
     // a struct's fields in order, a nested struct's a level deeper
-    assert_eq!(fields_of(&ws, "types.pkt"), ["valid|0|valid", "state|0|state", "pair|0|pair", "hi|1|pair.hi", "lo|1|pair.lo"]);
+    assert_eq!(
+        fields_of(&ws, "types.pkt"),
+        [
+            "valid|0|valid",
+            "state|0|state",
+            "pair|0|pair",
+            "hi|1|pair.hi",
+            "lo|1|pair.lo"
+        ]
+    );
     // an array's elements come first, their fields under them
     let pkts = fields_of(&ws, "types.pkts");
     assert_eq!(&pkts[..2], ["[0]|0|[0]", "valid|1|[0].valid"]);
     // a signal has nothing in it
     assert_eq!(fields_of(&ws, "types.pkt.valid"), Vec::<String>::new());
     // a field's name under the composite as it is spelled
-    let f = ws.trace.fields(ws.trace.by_path["types.pkts"]).into_iter().find(|f| f.rel == "[1].pair.lo").unwrap();
+    let f = ws
+        .trace
+        .fields(ws.trace.by_path["types.pkts"])
+        .into_iter()
+        .find(|f| f.rel == "[1].pair.lo")
+        .unwrap();
     assert_eq!(f.under("pkts"), "pkts[1].pair.lo");
     assert_eq!(f.under("types.pkts"), "types.pkts[1].pair.lo");
 }

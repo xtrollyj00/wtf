@@ -5,7 +5,10 @@
 //! row, spec §6). The same arguments write the same trace. It runs until the file reaches the size
 //! asked for.
 
-use fst_writer::{FstBodyWriter, FstFileType, FstInfo, FstScopeType, FstSignalId, FstSignalType, FstVarDirection, FstVarType};
+use fst_writer::{
+    FstBodyWriter, FstFileType, FstInfo, FstScopeType, FstSignalId, FstSignalType, FstVarDirection,
+    FstVarType,
+};
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -16,12 +19,25 @@ const RESET_CYCLES: u64 = 4;
 
 /// Each module's signals, in this order.
 const PORT: [(&str, u32); 19] = [
-    ("s_axi_awvalid", 1), ("s_axi_awready", 1), ("s_axi_awaddr", 32),
-    ("s_axi_wvalid", 1), ("s_axi_wready", 1), ("s_axi_wdata", 32), ("s_axi_wstrb", 4),
-    ("s_axi_bvalid", 1), ("s_axi_bready", 1), ("s_axi_bresp", 2),
-    ("s_axi_arvalid", 1), ("s_axi_arready", 1), ("s_axi_araddr", 32),
-    ("s_axi_rvalid", 1), ("s_axi_rready", 1), ("s_axi_rdata", 32), ("s_axi_rresp", 2),
-    ("count", 16), ("state", 3),
+    ("s_axi_awvalid", 1),
+    ("s_axi_awready", 1),
+    ("s_axi_awaddr", 32),
+    ("s_axi_wvalid", 1),
+    ("s_axi_wready", 1),
+    ("s_axi_wdata", 32),
+    ("s_axi_wstrb", 4),
+    ("s_axi_bvalid", 1),
+    ("s_axi_bready", 1),
+    ("s_axi_bresp", 2),
+    ("s_axi_arvalid", 1),
+    ("s_axi_arready", 1),
+    ("s_axi_araddr", 32),
+    ("s_axi_rvalid", 1),
+    ("s_axi_rready", 1),
+    ("s_axi_rdata", 32),
+    ("s_axi_rresp", 2),
+    ("count", 16),
+    ("state", 3),
 ];
 const AWVALID: usize = 0;
 const AWREADY: usize = 1;
@@ -47,13 +63,18 @@ const TOP: [(&str, u32); 3] = [("clk", 1), ("rst_n", 1), ("hot", 32)];
 
 pub fn main(args: &[String]) -> Result<(), String> {
     let (opts, dir) = super::options(args, &["size", "format", "modules", "mem"])?;
-    let (mut size, mut format, mut modules, mut mem) = (1u64 << 30, "fst".to_string(), 200usize, 0usize);
+    let (mut size, mut format, mut modules, mut mem) =
+        (1u64 << 30, "fst".to_string(), 200usize, 0usize);
     for (n, v) in opts {
         match n.as_str() {
             "size" => size = parse_size(&v)?,
             "format" => format = v,
             "mem" => mem = v.parse().map_err(|_| format!("--mem {v}: not a number"))?,
-            _ => modules = v.parse().map_err(|_| format!("--modules {v}: not a number"))?,
+            _ => {
+                modules = v
+                    .parse()
+                    .map_err(|_| format!("--modules {v}: not a number"))?
+            }
         }
     }
     let path = PathBuf::from(dir).join(format!("bench.{format}"));
@@ -64,8 +85,10 @@ pub fn main(args: &[String]) -> Result<(), String> {
         _ => return Err(format!("--format {format}: vcd or fst")),
     };
     let start = std::time::Instant::now();
-    let cycles = simulate(sink.as_mut(), &widths, modules, mem, size).map_err(|e| format!("{}: {e}", path.display()))?;
-    sink.finish().map_err(|e| format!("{}: {e}", path.display()))?;
+    let cycles = simulate(sink.as_mut(), &widths, modules, mem, size)
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    sink.finish()
+        .map_err(|e| format!("{}: {e}", path.display()))?;
     let bytes = std::fs::metadata(&path).map_err(|e| e.to_string())?.len();
     println!(
         "{}: {} signals, {cycles} cycles (top.hot: {cycles} transitions), {:.2} GiB in {:.0?}",
@@ -86,7 +109,9 @@ fn parse_size(s: &str) -> Result<u64, String> {
         "G" => 30,
         _ => return Err(format!("--size {s}: a number with K, M or G")),
     };
-    Ok(n.parse::<u64>().map_err(|_| format!("--size {s}: a number with K, M or G"))? << shift)
+    Ok(n.parse::<u64>()
+        .map_err(|_| format!("--size {s}: a number with K, M or G"))?
+        << shift)
 }
 
 /// A trace being written: changes at a time, signals by index (TOP, then each module's PORT).
@@ -99,20 +124,34 @@ trait Sink {
 }
 
 /// Runs the design until the sink holds `size` bytes; returns the cycles written.
-fn simulate(sink: &mut dyn Sink, widths: &[u32], modules: usize, mem: usize, size: u64) -> std::io::Result<u64> {
+fn simulate(
+    sink: &mut dyn Sink,
+    widths: &[u32],
+    modules: usize,
+    mem: usize,
+    size: u64,
+) -> std::io::Result<u64> {
     let mut values: Vec<u64> = vec![0; widths.len()];
-    let mut ms: Vec<Module> = (0..modules).map(|i| Module { phase: 0, wait: 0, count: 0, rng: 0x9E37_79B9_7F4A_7C15 ^ (i as u64 + 1) }).collect();
+    let mut ms: Vec<Module> = (0..modules)
+        .map(|i| Module {
+            phase: 0,
+            wait: 0,
+            count: 0,
+            rng: 0x9E37_79B9_7F4A_7C15 ^ (i as u64 + 1),
+        })
+        .collect();
     sink.time(0)?;
     for (i, &w) in widths.iter().enumerate() {
         sink.change(i, w, 0)?;
     }
-    let set = |sink: &mut dyn Sink, values: &mut Vec<u64>, i: usize, v: u64| -> std::io::Result<()> {
-        if values[i] != v {
-            values[i] = v;
-            sink.change(i, widths[i], v)?;
-        }
-        Ok(())
-    };
+    let set =
+        |sink: &mut dyn Sink, values: &mut Vec<u64>, i: usize, v: u64| -> std::io::Result<()> {
+            if values[i] != v {
+                values[i] = v;
+                sink.change(i, widths[i], v)?;
+            }
+            Ok(())
+        };
     let mut cycle = 0u64;
     // checking the size costs a syscall for FST, so not every cycle
     while !cycle.is_multiple_of(1024) || sink.size() < size {
@@ -126,7 +165,12 @@ fn simulate(sink: &mut dyn Sink, widths: &[u32], modules: usize, mem: usize, siz
         if mem > 0 {
             // one element a cycle, in an order that visits them all
             let base = TOP.len() + modules * PORT.len();
-            set(sink, &mut values, base + (cycle as usize * 7919) % mem, cycle & 0xFFFF_FFFF)?;
+            set(
+                sink,
+                &mut values,
+                base + (cycle as usize * 7919) % mem,
+                cycle & 0xFFFF_FFFF,
+            )?;
         }
         if cycle >= RESET_CYCLES {
             for (m, module) in ms.iter_mut().enumerate() {
@@ -174,7 +218,13 @@ impl Module {
             0 if !r.is_multiple_of(64) => vec![],
             0 if r & 64 != 0 => {
                 (self.phase, self.wait) = (1, r >> 8 & 3);
-                vec![(AWVALID, 1), (AWADDR, r >> 16 & 0xFFC), (WVALID, 1), (WDATA, r >> 32), (WSTRB, 0xF)]
+                vec![
+                    (AWVALID, 1),
+                    (AWADDR, r >> 16 & 0xFFC),
+                    (WVALID, 1),
+                    (WDATA, r >> 32),
+                    (WSTRB, 0xF),
+                ]
             }
             0 => {
                 (self.phase, self.wait) = (3, r >> 8 & 3);
@@ -190,7 +240,14 @@ impl Module {
             }
             2 => {
                 self.phase = 5;
-                vec![(AWVALID, 0), (AWREADY, 0), (WVALID, 0), (WREADY, 0), (BVALID, 1), (BRESP, 0)]
+                vec![
+                    (AWVALID, 0),
+                    (AWREADY, 0),
+                    (WVALID, 0),
+                    (WREADY, 0),
+                    (BVALID, 1),
+                    (BRESP, 0),
+                ]
             }
             3 => {
                 self.phase = 4;
@@ -198,7 +255,13 @@ impl Module {
             }
             4 => {
                 self.phase = 5;
-                vec![(ARVALID, 0), (ARREADY, 0), (RVALID, 1), (RDATA, r >> 32), (RRESP, if r >> 8 & 31 == 0 { 2 } else { 0 })]
+                vec![
+                    (ARVALID, 0),
+                    (ARREADY, 0),
+                    (RVALID, 1),
+                    (RDATA, r >> 32),
+                    (RRESP, if r >> 8 & 31 == 0 { 2 } else { 0 }),
+                ]
             }
             _ => {
                 self.phase = 0;
@@ -215,8 +278,10 @@ impl Module {
 /// `top.mem[i]`.
 fn hierarchy(modules: usize, mem: usize) -> impl Iterator<Item = (Option<usize>, String, u32)> {
     let top = TOP.iter().map(|&(n, w)| (None, n.to_string(), w));
-    let ports = (0..modules).flat_map(|m| PORT.iter().map(move |&(n, w)| (Some(m), n.to_string(), w)));
-    top.chain(ports).chain((0..mem).map(|i| (None, format!("mem[{i}]"), 32)))
+    let ports =
+        (0..modules).flat_map(|m| PORT.iter().map(move |&(n, w)| (Some(m), n.to_string(), w)));
+    top.chain(ports)
+        .chain((0..mem).map(|i| (None, format!("mem[{i}]"), 32)))
 }
 
 struct Vcd {
@@ -229,7 +294,12 @@ struct Vcd {
 impl Vcd {
     fn create(path: &Path, modules: usize, mem: usize) -> Result<Self, String> {
         let file = File::create(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let mut v = Vcd { out: BufWriter::with_capacity(1 << 20, file), written: 0, ids: vec![], line: vec![] };
+        let mut v = Vcd {
+            out: BufWriter::with_capacity(1 << 20, file),
+            written: 0,
+            ids: vec![],
+            line: vec![],
+        };
         let mut head = String::from("$timescale 1ns $end\n$scope module top $end\n");
         let mut scope = None;
         for (i, (m, name, w)) in hierarchy(modules, mem).enumerate() {
@@ -254,9 +324,14 @@ impl Vcd {
             head += &format!("$var wire {w} {id} {name} $end\n");
             v.ids.push(id);
         }
-        head += if scope.is_some() { "$upscope $end\n$upscope $end\n" } else { "$upscope $end\n" };
+        head += if scope.is_some() {
+            "$upscope $end\n$upscope $end\n"
+        } else {
+            "$upscope $end\n"
+        };
         head += "$enddefinitions $end\n";
-        v.write(head.as_bytes()).map_err(|e| format!("{}: {e}", path.display()))?;
+        v.write(head.as_bytes())
+            .map_err(|e| format!("{}: {e}", path.display()))?;
         Ok(v)
     }
 
@@ -312,7 +387,13 @@ fn fst_err(e: fst_writer::FstWriteError) -> std::io::Error {
 impl Fst {
     fn create(path: &Path, modules: usize, mem: usize) -> Result<Self, String> {
         let err = |e: fst_writer::FstWriteError| format!("{}: {e}", path.display());
-        let info = FstInfo { start_time: 0, timescale_exponent: -9, version: "wtf-bench".into(), date: String::new(), file_type: FstFileType::Verilog };
+        let info = FstInfo {
+            start_time: 0,
+            timescale_exponent: -9,
+            version: "wtf-bench".into(),
+            date: String::new(),
+            file_type: FstFileType::Verilog,
+        };
         let mut h = fst_writer::open_fst(path, &info).map_err(err)?;
         h.scope("top", "", FstScopeType::Module).map_err(err)?;
         let (mut ids, mut scope) = (vec![], None);
@@ -322,17 +403,32 @@ impl Fst {
                     h.up_scope().map_err(err)?;
                 }
                 if let Some(m) = m {
-                    h.scope(format!("u{m}"), "", FstScopeType::Module).map_err(err)?;
+                    h.scope(format!("u{m}"), "", FstScopeType::Module)
+                        .map_err(err)?;
                 }
                 scope = m;
             }
-            ids.push(h.var(name, FstSignalType::bit_vec(w), FstVarType::Wire, FstVarDirection::Implicit, None).map_err(err)?);
+            ids.push(
+                h.var(
+                    name,
+                    FstSignalType::bit_vec(w),
+                    FstVarType::Wire,
+                    FstVarDirection::Implicit,
+                    None,
+                )
+                .map_err(err)?,
+            );
         }
         if scope.is_some() {
             h.up_scope().map_err(err)?;
         }
         h.up_scope().map_err(err)?;
-        Ok(Fst { out: h.finish().map_err(err)?, path: path.to_path_buf(), ids, bits: vec![] })
+        Ok(Fst {
+            out: h.finish().map_err(err)?,
+            path: path.to_path_buf(),
+            ids,
+            bits: vec![],
+        })
     }
 }
 
@@ -347,8 +443,11 @@ impl Sink for Fst {
 
     fn change(&mut self, sig: usize, width: u32, v: u64) -> std::io::Result<()> {
         self.bits.clear();
-        self.bits.extend((0..width).rev().map(|b| b'0' + (v >> b & 1) as u8));
-        self.out.signal_change(self.ids[sig], &self.bits).map_err(fst_err)
+        self.bits
+            .extend((0..width).rev().map(|b| b'0' + (v >> b & 1) as u8));
+        self.out
+            .signal_change(self.ids[sig], &self.bits)
+            .map_err(fst_err)
     }
 
     fn size(&self) -> u64 {

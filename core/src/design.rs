@@ -61,7 +61,18 @@ impl Design {
                     Some(&s) => s,
                     None => {
                         let name = p[k - 1].to_string();
-                        nodes.push(Node { name, canon: canon(&path), path: path.clone(), var: None, parent, depth: k, signals: 0, first: v, children: Vec::new(), file: false });
+                        nodes.push(Node {
+                            name,
+                            canon: canon(&path),
+                            path: path.clone(),
+                            var: None,
+                            parent,
+                            depth: k,
+                            signals: 0,
+                            first: v,
+                            children: Vec::new(),
+                            file: false,
+                        });
                         scopes.insert(path, nodes.len() - 1);
                         nodes.len() - 1
                     }
@@ -69,7 +80,18 @@ impl Design {
                 nodes[parent.unwrap()].file |= v < fixed;
             }
             let name = p.last().copied().unwrap_or_default().to_string();
-            nodes.push(Node { name, path: var.path.clone(), canon: canon(&var.path), var: Some(v), parent, depth: n, signals: 0, first: v, children: Vec::new(), file: v < fixed });
+            nodes.push(Node {
+                name,
+                path: var.path.clone(),
+                canon: canon(&var.path),
+                var: Some(v),
+                parent,
+                depth: n,
+                signals: 0,
+                first: v,
+                children: Vec::new(),
+                file: v < fixed,
+            });
             of_var.push(nodes.len() - 1);
         }
         // a struct's or array's fields are in it rather than in its scope
@@ -106,7 +128,9 @@ impl Design {
                 nodes[i].children = vars[v].children.iter().map(|&c| of_var[c]).collect();
             }
         }
-        let mut roots: Vec<usize> = (0..nodes.len()).filter(|&i| nodes[i].parent.is_none()).collect();
+        let mut roots: Vec<usize> = (0..nodes.len())
+            .filter(|&i| nodes[i].parent.is_none())
+            .collect();
         roots.sort_by_key(|&i| (!nodes[i].children.is_empty(), nodes[i].first));
         Design { nodes, roots }
     }
@@ -117,7 +141,11 @@ impl Design {
         // shortcut (#10): scans every node; index the nodes by their last part if `:add` of a name gets slow on huge designs.
         let name = canon(name);
         let key = parts(&name);
-        (0..self.nodes.len()).filter(|&i| !self.nodes[i].children.is_empty() && parts(&self.nodes[i].canon).ends_with(&key)).collect()
+        (0..self.nodes.len())
+            .filter(|&i| {
+                !self.nodes[i].children.is_empty() && parts(&self.nodes[i].canon).ends_with(&key)
+            })
+            .collect()
     }
 
     /// The leaf vars under `nodes` and the nodes themselves, each once, in var order.
@@ -140,7 +168,9 @@ impl Design {
 
     /// The nodes whose canonical path `hit` takes, in no order.
     pub fn matching(&self, hit: impl Fn(&str) -> bool) -> Vec<usize> {
-        (0..self.nodes.len()).filter(|&i| hit(&self.nodes[i].canon)).collect()
+        (0..self.nodes.len())
+            .filter(|&i| hit(&self.nodes[i].canon))
+            .collect()
     }
 
     /// The last part of a node's canonical path, without its index (`gen` for `top.gen[3]`).
@@ -159,24 +189,58 @@ impl Design {
     /// guess (spec §15).
     pub fn nearest(&self, name: &str, n: usize) -> Vec<&str> {
         let name = canon(name);
-        let words: Vec<&str> = name.split(|c: char| !(c.is_alphanumeric() || c == '_')).filter(|w| !w.is_empty() && !w.chars().all(|c| c.is_ascii_digit())).collect();
-        let Some((&last, others)) = words.split_last() else { return Vec::new() };
+        let words: Vec<&str> = name
+            .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+            .filter(|w| !w.is_empty() && !w.chars().all(|c| c.is_ascii_digit()))
+            .collect();
+        let Some((&last, others)) = words.split_last() else {
+            return Vec::new();
+        };
         // an element of an array is the array's name again: the array stands for them
-        let named = (0..self.nodes.len()).filter(|&i| self.nodes[i].file && !self.nodes[i].canon.ends_with(']'));
+        let named = (0..self.nodes.len())
+            .filter(|&i| self.nodes[i].file && !self.nodes[i].canon.ends_with(']'));
         let tiers: [&dyn Fn(&str) -> bool; 3] = [
             &|end| last.len() >= 2 && end.contains(last),
             &|end| {
-                let (short, long) = if last.len() <= end.len() { (last, end) } else { (end, last) };
+                let (short, long) = if last.len() <= end.len() {
+                    (last, end)
+                } else {
+                    (end, last)
+                };
                 short.len() >= 3 && 2 * short.len() >= long.len() && subsequence(short, long)
             },
             &|end| last.len() >= 4 && distance(last, end) <= last.len() / 5 + 1,
         ];
-        let Some(mut found) = tiers.iter().map(|hit| named.clone().filter(|&i| hit(self.end(i))).collect::<Vec<_>>()).find(|f| !f.is_empty()) else {
+        let Some(mut found) = tiers
+            .iter()
+            .map(|hit| {
+                named
+                    .clone()
+                    .filter(|&i| hit(self.end(i)))
+                    .collect::<Vec<_>>()
+            })
+            .find(|f| !f.is_empty())
+        else {
             return Vec::new();
         };
         let node = &self.nodes;
-        found.sort_by_key(|&i| (std::cmp::Reverse(others.iter().filter(|w| node[i].canon.contains(**w)).count()), self.end(i).len().abs_diff(last.len()), node[i].path.len()));
-        found.into_iter().take(n).map(|i| node[i].path.as_str()).collect()
+        found.sort_by_key(|&i| {
+            (
+                std::cmp::Reverse(
+                    others
+                        .iter()
+                        .filter(|w| node[i].canon.contains(**w))
+                        .count(),
+                ),
+                self.end(i).len().abs_diff(last.len()),
+                node[i].path.len(),
+            )
+        });
+        found
+            .into_iter()
+            .take(n)
+            .map(|i| node[i].path.as_str())
+            .collect()
     }
 }
 
@@ -194,7 +258,9 @@ fn distance(a: &str, b: &str) -> usize {
         let mut prev = row[0];
         row[0] = i + 1;
         for (j, &cb) in b.iter().enumerate() {
-            let next = (prev + usize::from(ca != cb)).min(row[j] + 1).min(row[j + 1] + 1);
+            let next = (prev + usize::from(ca != cb))
+                .min(row[j] + 1)
+                .min(row[j + 1] + 1);
             prev = row[j + 1];
             row[j + 1] = next;
         }

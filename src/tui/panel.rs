@@ -47,20 +47,44 @@ impl Panel {
         for &root in &d.roots {
             walk(d, trace, root, 0, &mut nodes);
         }
-        Panel { nodes, sel: 0, query: None, pattern: String::new(), matches: Vec::new(), origin: 0, top: 0, version: trace.version, marked: Vec::new(), anchor: None }
+        Panel {
+            nodes,
+            sel: 0,
+            query: None,
+            pattern: String::new(),
+            matches: Vec::new(),
+            origin: 0,
+            top: 0,
+            version: trace.version,
+            marked: Vec::new(),
+            anchor: None,
+        }
     }
 
     /// Refresh after computed signals are appended, keeping the panel's state by path.
     pub fn refresh(&mut self, trace: &Trace) {
         let mut next = Self::new(trace);
-        let positions: HashMap<_, _> = next.nodes.iter().enumerate().map(|(i, n)| ((n.path.as_str(), n.var.is_some()), i)).collect();
-        let remap = |i: usize| self.nodes.get(i).and_then(|n| positions.get(&(n.path.as_str(), n.var.is_some())).copied());
+        let positions: HashMap<_, _> = next
+            .nodes
+            .iter()
+            .enumerate()
+            .map(|(i, n)| ((n.path.as_str(), n.var.is_some()), i))
+            .collect();
+        let remap = |i: usize| {
+            self.nodes
+                .get(i)
+                .and_then(|n| positions.get(&(n.path.as_str(), n.var.is_some())).copied())
+        };
         let sel = remap(self.sel).unwrap_or(0);
         let origin = remap(self.origin).unwrap_or(sel);
         let anchor = self.anchor.and_then(remap);
         let top = self.visible().get(self.top).and_then(|&i| remap(i));
         drop(positions);
-        let old: HashMap<_, _> = self.nodes.iter().map(|n| ((n.path.as_str(), n.var.is_some()), n.open)).collect();
+        let old: HashMap<_, _> = self
+            .nodes
+            .iter()
+            .map(|n| ((n.path.as_str(), n.var.is_some()), n.open))
+            .collect();
         for node in &mut next.nodes {
             if let Some(&open) = old.get(&(node.path.as_str(), node.var.is_some())) {
                 node.open = open;
@@ -68,16 +92,30 @@ impl Panel {
         }
         drop(old);
         // marks by path: a computed var dropped (spec §16) moves those after it
-        let path_of: HashMap<usize, &str> = self.nodes.iter().filter_map(|n| Some((n.var?, n.path.as_str()))).collect();
-        let var_of: HashMap<&str, usize> = next.nodes.iter().filter_map(|n| Some((n.path.as_str(), n.var?))).collect();
-        self.marked = self.marked.iter().filter_map(|v| var_of.get(path_of.get(v)?).copied()).collect();
+        let path_of: HashMap<usize, &str> = self
+            .nodes
+            .iter()
+            .filter_map(|n| Some((n.var?, n.path.as_str())))
+            .collect();
+        let var_of: HashMap<&str, usize> = next
+            .nodes
+            .iter()
+            .filter_map(|n| Some((n.path.as_str(), n.var?)))
+            .collect();
+        self.marked = self
+            .marked
+            .iter()
+            .filter_map(|v| var_of.get(path_of.get(v)?).copied())
+            .collect();
         drop((path_of, var_of));
         self.nodes = next.nodes;
         self.version = next.version;
         self.sel = sel;
         self.origin = origin;
         self.anchor = anchor;
-        self.top = top.and_then(|i| self.visible().iter().position(|&n| n == i)).unwrap_or(0);
+        self.top = top
+            .and_then(|i| self.visible().iter().position(|&n| n == i))
+            .unwrap_or(0);
         self.matches = self.find(self.query.as_deref().unwrap_or(&self.pattern));
     }
 
@@ -87,7 +125,11 @@ impl Panel {
         let mut i = 0;
         while i < self.nodes.len() {
             out.push(i);
-            i = if self.nodes[i].open || self.nodes[i].var.is_some() { i + 1 } else { self.nodes[i].end };
+            i = if self.nodes[i].open || self.nodes[i].var.is_some() {
+                i + 1
+            } else {
+                self.nodes[i].end
+            };
         }
         out
     }
@@ -101,7 +143,9 @@ impl Panel {
 
     /// `l`: open a scope. `h`: close it, or go to the parent scope.
     pub fn open(&mut self, open: bool) {
-        let Some(n) = self.nodes.get_mut(self.sel) else { return };
+        let Some(n) = self.nodes.get_mut(self.sel) else {
+            return;
+        };
         if n.var.is_none() && n.open != open {
             n.open = open;
         } else if !open {
@@ -146,7 +190,12 @@ impl Panel {
             return Vec::new();
         }
         let q = q.to_lowercase();
-        self.nodes.iter().enumerate().filter(|(_, n)| n.path.to_lowercase().contains(&q)).map(|(i, _)| i).collect()
+        self.nodes
+            .iter()
+            .enumerate()
+            .filter(|(_, n)| n.path.to_lowercase().contains(&q))
+            .map(|(i, _)| i)
+            .collect()
     }
 
     /// `n` / `N`: the `count`-th next / previous match in tree order, wrapping around.
@@ -177,9 +226,14 @@ impl Panel {
     /// Tree nodes in the `V` range, in tree order. A range whose start was hidden by closing
     /// its scope is dropped.
     pub fn range(&mut self) -> Vec<usize> {
-        let Some(a) = self.anchor else { return Vec::new() };
+        let Some(a) = self.anchor else {
+            return Vec::new();
+        };
         let vis = self.visible();
-        let (Some(pa), Some(ps)) = (vis.iter().position(|&i| i == a), vis.iter().position(|&i| i == self.sel)) else {
+        let (Some(pa), Some(ps)) = (
+            vis.iter().position(|&i| i == a),
+            vis.iter().position(|&i| i == self.sel),
+        ) else {
             self.anchor = None;
             return Vec::new();
         };
@@ -191,14 +245,21 @@ impl Panel {
         let n = &self.nodes[i];
         match n.var.or(n.whole) {
             Some(v) => vec![v],
-            None => self.nodes[i + 1..n.end].iter().filter(|c| c.depth == n.depth + 1).filter_map(|c| c.var.or(c.whole)).collect(),
+            None => self.nodes[i + 1..n.end]
+                .iter()
+                .filter(|c| c.depth == n.depth + 1)
+                .filter_map(|c| c.var.or(c.whole))
+                .collect(),
         }
     }
 
     /// The signals in the `V` range; a closed scope in it brings the signals directly in it.
     pub fn range_vars(&mut self) -> Vec<usize> {
         let r = self.range();
-        r.iter().filter(|&&i| self.nodes[i].var.is_some() || !self.nodes[i].open).flat_map(|&i| self.vars_of(i)).collect()
+        r.iter()
+            .filter(|&&i| self.nodes[i].var.is_some() || !self.nodes[i].open)
+            .flat_map(|&i| self.vars_of(i))
+            .collect()
     }
 
     /// The signals of the highlighted node: itself, or those directly in a scope.
@@ -223,7 +284,15 @@ fn walk(d: &Design, trace: &Trace, i: usize, depth: usize, out: &mut Vec<Node>) 
     // a struct, record or array is its scope's line here, added as one row
     let whole = n.var.filter(|&v| trace.is_composite(v));
     // top-level scopes start open, so the panel doesn't open on a single closed line
-    out.push(Node { name: n.name.clone(), path: n.path.clone(), depth, var: if scope { None } else { n.var }, end: 0, open: depth == 0, whole: if scope { whole } else { None } });
+    out.push(Node {
+        name: n.name.clone(),
+        path: n.path.clone(),
+        depth,
+        var: if scope { None } else { n.var },
+        end: 0,
+        open: depth == 0,
+        whole: if scope { whole } else { None },
+    });
     for &c in &n.children {
         walk(d, trace, c, depth + 1, out);
     }
@@ -239,7 +308,10 @@ mod tests {
     }
 
     fn tree(p: &Panel) -> Vec<String> {
-        p.visible().iter().map(|&i| format!("{}{}", "  ".repeat(p.nodes[i].depth), p.nodes[i].name)).collect()
+        p.visible()
+            .iter()
+            .map(|&i| format!("{}{}", "  ".repeat(p.nodes[i].depth), p.nodes[i].name))
+            .collect()
     }
 
     /// An array's elements nest under it, element by element (`grid` > `[1]` > `[2]`); fields
@@ -276,7 +348,19 @@ mod tests {
         assert_eq!(tree(&p), ["top", "  cpu", "  dma", "  clk", "  rst"]);
         p.step(1);
         p.open(true);
-        assert_eq!(tree(&p), ["top", "  cpu", "    state", "    data", "    busy", "  dma", "  clk", "  rst"]);
+        assert_eq!(
+            tree(&p),
+            [
+                "top",
+                "  cpu",
+                "    state",
+                "    data",
+                "    busy",
+                "  dma",
+                "  clk",
+                "  rst"
+            ]
+        );
         p.step(2);
         p.open(false);
         assert_eq!(p.nodes[p.sel].path, "top.cpu");

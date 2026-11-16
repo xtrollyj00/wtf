@@ -23,7 +23,16 @@ pub struct View {
 
 impl View {
     pub fn new(end: Tick, width: u64) -> Self {
-        let mut v = View { ticks: 1, cols: 1, start: 0, cursor: 0, width: width.max(1), end, pending_fit: true, pending_to: None };
+        let mut v = View {
+            ticks: 1,
+            cols: 1,
+            start: 0,
+            cursor: 0,
+            width: width.max(1),
+            end,
+            pending_fit: true,
+            pending_to: None,
+        };
         v.fit();
         v
     }
@@ -83,7 +92,11 @@ impl View {
         self.pending_fit = false;
         self.pending_to = None;
         let d = cols.unsigned_abs().saturating_mul(self.ticks) / self.cols;
-        self.start = if cols < 0 { self.start.saturating_sub(d) } else { self.start.saturating_add(d).min(self.end.max(self.start)) };
+        self.start = if cols < 0 {
+            self.start.saturating_sub(d)
+        } else {
+            self.start.saturating_add(d).min(self.end.max(self.start))
+        };
     }
 
     /// Keep the cursor on its time and on its screen column; near 0 it moves on screen instead.
@@ -107,7 +120,11 @@ impl View {
     /// Stops once the whole simulation fits the width (or, before the width is known, once one
     /// column spans it).
     pub fn zoom_out(&mut self) {
-        let shown = if self.cols > 1 { self.width / self.cols } else { self.ticks.saturating_mul(self.width) };
+        let shown = if self.cols > 1 {
+            self.width / self.cols
+        } else {
+            self.ticks.saturating_mul(self.width)
+        };
         // as `fit` has it
         if shown >= self.end {
             return;
@@ -181,10 +198,17 @@ mod tests {
                 v.start = start;
                 v.show_until(to);
                 assert_eq!(v.start, start, "width {width}, {start}..{to}");
-                assert!(v.last_visible() + 1 >= to, "width {width}, {start}..{to}: shows to {}", v.last_visible());
+                assert!(
+                    v.last_visible() + 1 >= to,
+                    "width {width}, {start}..{to}: shows to {}",
+                    v.last_visible()
+                );
                 // and keeps doing so when the width changes
                 v.set_width(width + 7);
-                assert!(v.start == start && v.last_visible() + 1 >= to, "width {width} + 7, {start}..{to}");
+                assert!(
+                    v.start == start && v.last_visible() + 1 >= to,
+                    "width {width} + 7, {start}..{to}"
+                );
             }
         }
     }

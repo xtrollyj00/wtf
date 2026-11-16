@@ -8,7 +8,10 @@ use wtf_core::workspace::Workspace;
 /// `tests/data/simple.<ext>`: clk (period 10ns, rising at 5, 15 ...), rst, cpu.state, cpu.data,
 /// cpu.busy (high 20ns - 40ns), dma.state; 0 - 80ns at 1ns ticks.
 pub fn fixture(ext: &str) -> PathBuf {
-    PathBuf::from(format!("{}/../tests/data/simple.{ext}", env!("CARGO_MANIFEST_DIR")))
+    PathBuf::from(format!(
+        "{}/../tests/data/simple.{ext}",
+        env!("CARGO_MANIFEST_DIR")
+    ))
 }
 
 pub fn open() -> Workspace {

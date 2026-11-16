@@ -15,7 +15,11 @@ use wtf_core::workspace::Workspace;
 mod common;
 
 fn fixture(name: &str) -> Workspace {
-    Workspace::open(&PathBuf::from(format!("{}/../tests/data/{name}", env!("CARGO_MANIFEST_DIR")))).unwrap()
+    Workspace::open(&PathBuf::from(format!(
+        "{}/../tests/data/{name}",
+        env!("CARGO_MANIFEST_DIR")
+    )))
+    .unwrap()
 }
 
 fn open() -> Workspace {
@@ -24,7 +28,11 @@ fn open() -> Workspace {
 
 fn path(ws: &mut Workspace, name: &str) -> String {
     let (v, bit) = ws.resolve(name).unwrap_or_else(|e| panic!("{name}: {e}"));
-    format!("{}{}", ws.trace.vars[v].path, bit.map(|b| format!("[{b}]")).unwrap_or_default())
+    format!(
+        "{}{}",
+        ws.trace.vars[v].path,
+        bit.map(|b| format!("[{b}]")).unwrap_or_default()
+    )
 }
 
 #[test]
@@ -32,7 +40,11 @@ fn either_case() {
     let mut ws = open();
     assert_eq!(path(&mut ws, "dut.HEADERS_VLD"), "dut.headers_vld");
     assert_eq!(path(&mut ws, "Headers_Vld"), "dut.headers_vld");
-    assert!(ws.resolve("headers_valid").unwrap_err().starts_with("unknown signal"));
+    assert!(
+        ws.resolve("headers_valid")
+            .unwrap_err()
+            .starts_with("unknown signal")
+    );
 }
 
 #[test]
@@ -46,8 +58,14 @@ fn either_indexing() {
     assert_eq!(path(&mut ws, "data(7)"), "dut.data[7]");
     assert_eq!(path(&mut ws, "data[7]"), "dut.data[7]");
     let (v, _) = ws.resolve("DATA(7 downto 4)").unwrap();
-    assert_eq!(ws.trace.value_of(v, None, 10), Some(Val::Bits("1010".into())));
-    assert_eq!(ws.resolve("data(3 DOWNTO 0)").unwrap().0, ws.resolve("data[3:0]").unwrap().0);
+    assert_eq!(
+        ws.trace.value_of(v, None, 10),
+        Some(Val::Bits("1010".into()))
+    );
+    assert_eq!(
+        ws.resolve("data(3 DOWNTO 0)").unwrap().0,
+        ws.resolve("data[3:0]").unwrap().0
+    );
     assert_eq!(ws.resolve("data(8)").unwrap_err(), "data has no bit 8");
 }
 
@@ -66,26 +84,64 @@ fn nvc_names() {
     wtf_core::command::run(&mut ws, "add arr[1:1]").unwrap();
     let v = *ws.trace.by_path.get("vhdl.arr[1:1]").unwrap();
     assert_eq!(ws.trace.vars[v].width, Some(1));
-    let q = ws.query("@clk gen(1).x && arr(1) == 0xC && arr(0)(1)").unwrap();
-    let s = Search { from: 0, to: None, forward: true, merge: true, runs: usize::MAX, matches: u64::MAX };
+    let q = ws
+        .query("@clk gen(1).x && arr(1) == 0xC && arr(0)(1)")
+        .unwrap();
+    let s = Search {
+        from: 0,
+        to: None,
+        forward: true,
+        merge: true,
+        runs: usize::MAX,
+        matches: u64::MAX,
+    };
     assert_eq!(query::find(&ws.trace, &q, &s).runs.len(), 1);
 }
 
 #[test]
 fn in_expressions() {
     let mut ws = open();
-    let s = Search { from: 0, to: None, forward: true, merge: false, runs: usize::MAX, matches: u64::MAX };
-    let q = ws.query("@CLK gen_stages(1).x && !gen_stages[0].x && DATA(7 downto 4) == 0xA").unwrap();
-    assert_eq!(query::find(&ws.trace, &q, &s).runs.iter().map(|r| r.first).collect::<Vec<_>>(), [5]);
+    let s = Search {
+        from: 0,
+        to: None,
+        forward: true,
+        merge: false,
+        runs: usize::MAX,
+        matches: u64::MAX,
+    };
+    let q = ws
+        .query("@CLK gen_stages(1).x && !gen_stages[0].x && DATA(7 downto 4) == 0xA")
+        .unwrap();
+    assert_eq!(
+        query::find(&ws.trace, &q, &s)
+            .runs
+            .iter()
+            .map(|r| r.first)
+            .collect::<Vec<_>>(),
+        [5]
+    );
     // a function's parenthesis is the call's
-    let q = ws.query("@clk rose(HEADERS_VLD) || fell(gen_stages(1).x)").unwrap();
-    assert_eq!(query::find(&ws.trace, &q, &s).runs.iter().map(|r| r.first).collect::<Vec<_>>(), [5]);
+    let q = ws
+        .query("@clk rose(HEADERS_VLD) || fell(gen_stages(1).x)")
+        .unwrap();
+    assert_eq!(
+        query::find(&ws.trace, &q, &s)
+            .runs
+            .iter()
+            .map(|r| r.first)
+            .collect::<Vec<_>>(),
+        [5]
+    );
 }
 
 #[test]
 fn add_either_form() {
     let mut ws = open();
-    wtf_core::command::run(&mut ws, "add dut.GEN_STAGES[0] dut.HEADERS_VLD dut.blk(2).y").unwrap();
+    wtf_core::command::run(
+        &mut ws,
+        "add dut.GEN_STAGES[0] dut.HEADERS_VLD dut.blk(2).y",
+    )
+    .unwrap();
     let names = wtf_core::rows::display_names(&ws.trace, &ws.rows);
     let names: Vec<&str> = names.iter().map(|n| n.trim()).collect();
     // a scope is a group, a signal a row of its own
@@ -97,18 +153,37 @@ fn scope_group_names() {
     let ws = open();
     let x = ws.trace.by_path["dut.gen_stages[0].x"];
     // a scope's tail, from its last part that isn't an index, indices kept, in either form
-    assert_eq!(wtf_core::command::group_name(&ws, "dut.gen_stages[0]", x), "gen_stages[0]");
-    assert_eq!(wtf_core::command::group_name(&ws, "dut.GEN_STAGES(1)", ws.trace.by_path["dut.gen_stages[1].x"]), "gen_stages[1]");
+    assert_eq!(
+        wtf_core::command::group_name(&ws, "dut.gen_stages[0]", x),
+        "gen_stages[0]"
+    );
+    assert_eq!(
+        wtf_core::command::group_name(
+            &ws,
+            "dut.GEN_STAGES(1)",
+            ws.trace.by_path["dut.gen_stages[1].x"]
+        ),
+        "gen_stages[1]"
+    );
     // no scope shares a name: `group`
     assert_eq!(wtf_core::command::group_name(&ws, "", x), "group");
     let simple = common::open();
-    assert_eq!(wtf_core::command::group_name(&simple, "top.cpu", simple.trace.by_path["top.cpu.state"]), "cpu");
+    assert_eq!(
+        wtf_core::command::group_name(&simple, "top.cpu", simple.trace.by_path["top.cpu.state"]),
+        "cpu"
+    );
 }
 
 #[test]
 fn shared_scope() {
-    assert_eq!(wtf_core::command::common_scope(&["top.cpu.a", "top.cpu.sub.b"]), "top.cpu");
-    assert_eq!(wtf_core::command::common_scope(&["top.cpu.a", "top.dma.b"]), "top");
+    assert_eq!(
+        wtf_core::command::common_scope(&["top.cpu.a", "top.cpu.sub.b"]),
+        "top.cpu"
+    );
+    assert_eq!(
+        wtf_core::command::common_scope(&["top.cpu.a", "top.dma.b"]),
+        "top"
+    );
     assert_eq!(wtf_core::command::common_scope(&["a", "top.b"]), "");
 }
 
