@@ -280,11 +280,6 @@ impl Def {
             .filter(|r| !gone.iter().any(|s| s.contains(r)))
             .collect()
     }
-
-    /// Its streams, worked out with every role given.
-    pub fn streams(&self) -> Vec<About<String>> {
-        made_streams(self, self.make)
-    }
 }
 
 /// A protocol loaded from a file (spec §16): its card, which `Sources::get` answers for, and its
