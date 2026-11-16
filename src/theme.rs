@@ -26,7 +26,13 @@ pub fn builtin_on(name: &str, rgb: bool, bg: Option<Rgb>) -> Option<Palette> {
 }
 
 /// A theme by name: the user's file in `dir` (`<name>.toml`), else a built-in one.
-pub fn find(name: &str, dir: &Path, rgb: bool, bg: Option<Rgb>, warnings: &mut Vec<String>) -> Option<Palette> {
+pub fn find(
+    name: &str,
+    dir: &Path,
+    rgb: bool,
+    bg: Option<Rgb>,
+    warnings: &mut Vec<String>,
+) -> Option<Palette> {
     match std::fs::read_to_string(dir.join(format!("{name}.toml"))) {
         Ok(text) => Some(parse(name, &text, rgb, bg, warnings)),
         Err(_) => builtin_on(name, rgb, bg),
@@ -38,15 +44,27 @@ pub fn find(name: &str, dir: &Path, rgb: bool, bg: Option<Rgb>, warnings: &mut V
 pub fn terminal_colors() -> (Option<Rgb>, Option<Rgb>) {
     let q = terminal_colorsaurus::QueryOptions::default;
     match terminal_colorsaurus::color_palette(q()) {
-        Ok(p) => (Some(p.background.scale_to_8bit()), Some(p.foreground.scale_to_8bit())),
-        Err(_) => (terminal_colorsaurus::background_color(q()).ok().map(|c| c.scale_to_8bit()), None),
+        Ok(p) => (
+            Some(p.background.scale_to_8bit()),
+            Some(p.foreground.scale_to_8bit()),
+        ),
+        Err(_) => (
+            terminal_colorsaurus::background_color(q())
+                .ok()
+                .map(|c| c.scale_to_8bit()),
+            None,
+        ),
     }
 }
 
 /// `a` blended towards `b` by `t` (0 `a`, 1 `b`) in OKLab, so equal steps of `t` look equal.
 pub fn blend(a: Rgb, b: Rgb, t: f64) -> Rgb {
     let (x, y) = (oklab(a), oklab(b));
-    srgb((x.0 + (y.0 - x.0) * t, x.1 + (y.1 - x.1) * t, x.2 + (y.2 - x.2) * t))
+    srgb((
+        x.0 + (y.0 - x.0) * t,
+        x.1 + (y.1 - x.1) * t,
+        x.2 + (y.2 - x.2) * t,
+    ))
 }
 
 /// A light background: the light theme suits it.
@@ -59,10 +77,26 @@ pub fn is_light((r, g, b): Rgb) -> bool {
 /// lightness from the terminal's background `bg`, lighter on a dark one and darker on a light one,
 /// so they stand out by the same amount on any background (spec §19).
 fn fit(p: &mut Palette, bg: Rgb, rgb: bool) {
-    let colour = |(r, g, b): Rgb| if rgb { Color::Rgb(r, g, b) } else { Color::Indexed(nearest_256(r, g, b)) };
+    let colour = |(r, g, b): Rgb| {
+        if rgb {
+            Color::Rgb(r, g, b)
+        } else {
+            Color::Indexed(nearest_256(r, g, b))
+        }
+    };
     let (l, a, b) = oklab(bg);
     // near black a step this small can't be seen: at least three of them from black
-    let step = |d: f64| colour(srgb((if is_light(bg) { l - d } else { (l + d).max(3.0 * d) }, a, b)));
+    let step = |d: f64| {
+        colour(srgb((
+            if is_light(bg) {
+                l - d
+            } else {
+                (l + d).max(3.0 * d)
+            },
+            a,
+            b,
+        )))
+    };
     p.panel = step(0.07);
     p.selected = step(0.10);
     p.cursor_dim = step(0.14);
@@ -76,13 +110,21 @@ fn fit(p: &mut Palette, bg: Rgb, rgb: bool) {
 fn oklab((r, g, b): Rgb) -> (f64, f64, f64) {
     let lin = |c: u8| {
         let c = c as f64 / 255.0;
-        if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+        if c <= 0.04045 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
     };
     let (r, g, b) = (lin(r), lin(g), lin(b));
     let l = (0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b).cbrt();
     let m = (0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b).cbrt();
     let s = (0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b).cbrt();
-    (0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s, 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s, 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s)
+    (
+        0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
+        1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
+        0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s,
+    )
 }
 
 /// OKLab to sRGB, clipped to it.
@@ -91,7 +133,11 @@ fn srgb((l, a, b): (f64, f64, f64)) -> Rgb {
     let m_ = (l - 0.1055613458 * a - 0.0638541728 * b).powi(3);
     let s_ = (l - 0.0894841775 * a - 1.2914855480 * b).powi(3);
     let out = |c: f64| {
-        let c = if c <= 0.0031308 { 12.92 * c } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 };
+        let c = if c <= 0.0031308 {
+            12.92 * c
+        } else {
+            1.055 * c.powf(1.0 / 2.4) - 0.055
+        };
         (c.clamp(0.0, 1.0) * 255.0).round() as u8
     };
     (
@@ -104,8 +150,16 @@ fn srgb((l, a, b): (f64, f64, f64)) -> Rgb {
 /// The themes there are: built in, and the user's in `dir`.
 pub fn names(dir: &Path) -> Vec<String> {
     let mut names: Vec<String> = BUILTIN.iter().map(|(n, _)| n.to_string()).collect();
-    let files = std::fs::read_dir(dir).into_iter().flatten().flatten().map(|e| e.path());
-    names.extend(files.filter(|p| p.extension().is_some_and(|e| e == "toml")).filter_map(|p| Some(p.file_stem()?.to_str()?.to_string())));
+    let files = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path());
+    names.extend(
+        files
+            .filter(|p| p.extension().is_some_and(|e| e == "toml"))
+            .filter_map(|p| Some(p.file_stem()?.to_str()?.to_string())),
+    );
     names.sort();
     names.dedup();
     names
@@ -113,10 +167,26 @@ pub fn names(dir: &Path) -> Vec<String> {
 
 /// A theme file's text over dark, which gives the keys it leaves out (dark itself starts from
 /// the terminal's colours, its surfaces fitted to the background `bg` if known).
-pub fn parse(name: &str, text: &str, rgb: bool, bg: Option<Rgb>, warnings: &mut Vec<String>) -> Palette {
+pub fn parse(
+    name: &str,
+    text: &str,
+    rgb: bool,
+    bg: Option<Rgb>,
+    warnings: &mut Vec<String>,
+) -> Palette {
     let dark = BUILTIN[0].1;
-    let mut p = Palette { mono: false, ..Palette::mono() };
-    apply(&mut p, &dark.parse().expect("dark parses"), rgb, "", "", &mut Vec::new());
+    let mut p = Palette {
+        mono: false,
+        ..Palette::mono()
+    };
+    apply(
+        &mut p,
+        &dark.parse().expect("dark parses"),
+        rgb,
+        "",
+        "",
+        &mut Vec::new(),
+    );
     if let Some(bg) = bg {
         fit(&mut p, bg, rgb);
     }
@@ -132,7 +202,14 @@ pub fn parse(name: &str, text: &str, rgb: bool, bg: Option<Rgb>, warnings: &mut 
 
 /// Set the palette's colours from a table of them: a theme file, or the config's `[colors]`.
 /// `who` starts each warning, `path` comes before each key in them (`colors.`).
-pub fn apply(p: &mut Palette, colors: &toml::Table, rgb: bool, who: &str, path: &str, warnings: &mut Vec<String>) {
+pub fn apply(
+    p: &mut Palette,
+    colors: &toml::Table,
+    rgb: bool,
+    who: &str,
+    path: &str,
+    warnings: &mut Vec<String>,
+) {
     for (key, value) in colors {
         match slot(p, key) {
             None => warnings.push(format!("{who}unknown key {path}{key} (keys: {})", keys())),
@@ -146,7 +223,9 @@ pub fn apply(p: &mut Palette, colors: &toml::Table, rgb: bool, who: &str, path: 
 
 /// A TOML error on one line, with the line it is on.
 pub fn toml_error(e: &toml::de::Error, text: &str) -> String {
-    let line = e.span().map_or(1, |s| text[..s.start].matches('\n').count() + 1);
+    let line = e
+        .span()
+        .map_or(1, |s| text[..s.start].matches('\n').count() + 1);
     format!("{} (line {line})", e.message().replace('\n', " "))
 }
 
@@ -166,6 +245,7 @@ fn slot<'a>(p: &'a mut Palette, key: &str) -> Option<&'a mut Color> {
         "fill" => &mut p.fill,
         "unknown" => &mut p.unknown,
         "highz" => &mut p.highz,
+        "warning" => &mut p.warning,
         "cursor" => &mut p.cursor,
         "cursor_text" => &mut p.cursor_text,
         "column" => &mut p.column,
@@ -182,15 +262,40 @@ fn slot<'a>(p: &'a mut Palette, key: &str) -> Option<&'a mut Color> {
 }
 
 fn keys() -> String {
-    const FIELDS: [&str; 16] = ["line", "bus", "fill", "unknown", "highz", "cursor", "cursor_text", "column", "cursor_dim", "mark", "selected", "panel", "hatch", "dim", "background", "text"];
-    FIELDS.iter().chain(COLORS.iter()).copied().collect::<Vec<_>>().join(", ")
+    const FIELDS: [&str; 17] = [
+        "line",
+        "bus",
+        "fill",
+        "unknown",
+        "highz",
+        "warning",
+        "cursor",
+        "cursor_text",
+        "column",
+        "cursor_dim",
+        "mark",
+        "selected",
+        "panel",
+        "hatch",
+        "dim",
+        "background",
+        "text",
+    ];
+    FIELDS
+        .iter()
+        .chain(COLORS.iter())
+        .copied()
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// `"#rrggbb"` (the nearest 256-colour shade without truecolor), an index 0..=255,
 /// `["#rrggbb", index]` (the index without truecolor), or `"default"`, the terminal's.
 fn colour(v: &toml::Value, rgb: bool) -> Option<Color> {
     let hex = |s: &str| {
-        let h = s.strip_prefix('#').filter(|h| h.len() == 6 && h.bytes().all(|b| b.is_ascii_hexdigit()))?;
+        let h = s
+            .strip_prefix('#')
+            .filter(|h| h.len() == 6 && h.bytes().all(|b| b.is_ascii_hexdigit()))?;
         let n = u32::from_str_radix(h, 16).ok()?;
         Some(((n >> 16) as u8, (n >> 8) as u8, n as u8))
     };
@@ -199,13 +304,21 @@ fn colour(v: &toml::Value, rgb: bool) -> Option<Color> {
         toml::Value::String(s) if s == "default" => Some(Color::Reset),
         toml::Value::String(s) => {
             let (r, g, b) = hex(s)?;
-            Some(if rgb { Color::Rgb(r, g, b) } else { Color::Indexed(nearest_256(r, g, b)) })
+            Some(if rgb {
+                Color::Rgb(r, g, b)
+            } else {
+                Color::Indexed(nearest_256(r, g, b))
+            })
         }
         toml::Value::Integer(_) => index(v).map(Color::Indexed),
         toml::Value::Array(a) if a.len() == 2 => {
             let (r, g, b) = hex(a[0].as_str()?)?;
             let i = index(&a[1])?;
-            Some(if rgb { Color::Rgb(r, g, b) } else { Color::Indexed(i) })
+            Some(if rgb {
+                Color::Rgb(r, g, b)
+            } else {
+                Color::Indexed(i)
+            })
         }
         _ => None,
     }
@@ -251,9 +364,18 @@ mod tests {
             assert!(warnings.is_empty(), "{name}: {warnings:?}");
         }
         let dark: toml::Table = BUILTIN[0].1.parse().unwrap();
-        assert_eq!(dark.keys().map(String::as_str).collect::<Vec<_>>().join(", "), keys());
+        assert_eq!(
+            dark.keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+                .join(", "),
+            keys()
+        );
         let p = builtin("dark", false).unwrap();
-        assert_eq!((p.line, p.background, p.hues[3]), (Color::Indexed(73), Color::Reset, Color::Indexed(114)));
+        assert_eq!(
+            (p.line, p.background, p.hues[3]),
+            (Color::Indexed(73), Color::Reset, Color::Indexed(114))
+        );
     }
 
     #[test]
@@ -261,28 +383,64 @@ mod tests {
         // dark's surfaces step away from the terminal's background, toward white or black
         let on = |bg| builtin_on("dark", true, Some(bg)).unwrap();
         let p = on((0x2e, 0x34, 0x40));
-        assert_eq!((p.panel, p.selected), (Color::Rgb(64, 70, 83), Color::Rgb(72, 78, 91)));
+        assert_eq!(
+            (p.panel, p.selected),
+            (Color::Rgb(64, 70, 83), Color::Rgb(72, 78, 91))
+        );
         let p = on((0xff, 0xff, 0xff));
-        assert_eq!((p.panel, p.cursor_dim, p.line), (Color::Rgb(232, 232, 232), Color::Rgb(209, 209, 209), Color::Rgb(0x56, 0xb6, 0xc2)));
+        assert_eq!(
+            (p.panel, p.cursor_dim, p.line),
+            (
+                Color::Rgb(232, 232, 232),
+                Color::Rgb(209, 209, 209),
+                Color::Rgb(0x56, 0xb6, 0xc2)
+            )
+        );
         // light sets its own background and surfaces; a background unknown keeps dark's shades
-        assert_eq!(builtin_on("light", true, Some((0, 0, 0))).unwrap().panel, builtin("light", true).unwrap().panel);
-        assert_eq!(builtin_on("dark", true, None).unwrap().panel, Color::Rgb(0x28, 0x2c, 0x34));
+        assert_eq!(
+            builtin_on("light", true, Some((0, 0, 0))).unwrap().panel,
+            builtin("light", true).unwrap().panel
+        );
+        assert_eq!(
+            builtin_on("dark", true, None).unwrap().panel,
+            Color::Rgb(0x28, 0x2c, 0x34)
+        );
         assert!(is_light((0xfd, 0xf6, 0xe3)) && !is_light((0x2e, 0x34, 0x40)));
-        for c in [(0, 0, 0), (0x2e, 0x34, 0x40), (0xfd, 0xf6, 0xe3), (255, 255, 255)] {
+        for c in [
+            (0, 0, 0),
+            (0x2e, 0x34, 0x40),
+            (0xfd, 0xf6, 0xe3),
+            (255, 255, 255),
+        ] {
             assert_eq!(srgb(oklab(c)), c);
         }
     }
 
     #[test]
     fn colours() {
-        let c = |s: &str, rgb| colour(&format!("v = {s}").parse::<toml::Table>().unwrap()["v"], rgb);
+        let c = |s: &str, rgb| {
+            colour(
+                &format!("v = {s}").parse::<toml::Table>().unwrap()["v"],
+                rgb,
+            )
+        };
         assert_eq!(c("\"#5f87af\"", true), Some(Color::Rgb(0x5f, 0x87, 0xaf)));
         assert_eq!(c("\"#5f87af\"", false), Some(Color::Indexed(67)));
         assert_eq!(c("[\"#2e7d32\", 28]", false), Some(Color::Indexed(28)));
-        assert_eq!(c("[\"#2e7d32\", 28]", true), Some(Color::Rgb(0x2e, 0x7d, 0x32)));
+        assert_eq!(
+            c("[\"#2e7d32\", 28]", true),
+            Some(Color::Rgb(0x2e, 0x7d, 0x32))
+        );
         assert_eq!(c("17", true), Some(Color::Indexed(17)));
         assert_eq!(c("\"default\"", true), Some(Color::Reset));
-        for bad in ["256", "-1", "\"#12345\"", "\"blue\"", "[\"#2e7d32\"]", "[\"#2e7d32\", 300]"] {
+        for bad in [
+            "256",
+            "-1",
+            "\"#12345\"",
+            "\"blue\"",
+            "[\"#2e7d32\"]",
+            "[\"#2e7d32\", 300]",
+        ] {
             assert_eq!(c(bad, true), None, "{bad}");
         }
     }

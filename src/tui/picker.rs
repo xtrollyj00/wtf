@@ -16,7 +16,15 @@ use wtf_core::time::{self, Tick};
 use wtf_core::workspace::unknown::NoStream;
 
 /// The sources, in the order `Ctrl-s` goes through them.
-pub const SOURCES: [&str; 7] = ["signals", "marks", "records", "commands", "sessions", "trail", "interfaces"];
+pub const SOURCES: [&str; 7] = [
+    "signals",
+    "marks",
+    "records",
+    "commands",
+    "sessions",
+    "trail",
+    "interfaces",
+];
 
 /// What `Enter` does with an entry.
 #[derive(Clone)]
@@ -35,7 +43,12 @@ pub enum Act {
     Step(Option<Tick>),
     /// Run the decode line and add the instance's streams as a group; with the clock still to
     /// name, put the line on the command line. A decode already made opens its records.
-    Decode { line: String, name: String, ready: bool, done: Option<String> },
+    Decode {
+        line: String,
+        name: String,
+        ready: bool,
+        done: Option<String>,
+    },
 }
 
 pub struct Entry {
@@ -83,7 +96,15 @@ impl Picker {
     fn filter(&mut self) {
         let pat = Pattern::parse(&self.query, CaseMatching::Ignore, Normalization::Smart);
         let (mut m, mut buf) = (Matcher::new(Config::DEFAULT.match_paths()), Vec::new());
-        let mut scored: Vec<(u32, usize)> = self.entries.iter().enumerate().filter_map(|(i, e)| pat.score(Utf32Str::new(&e.text, &mut buf), &mut m).map(|s| (s, i))).collect();
+        let mut scored: Vec<(u32, usize)> = self
+            .entries
+            .iter()
+            .enumerate()
+            .filter_map(|(i, e)| {
+                pat.score(Utf32Str::new(&e.text, &mut buf), &mut m)
+                    .map(|s| (s, i))
+            })
+            .collect();
         if !self.query.is_empty() {
             scored.sort_by_key(|&(s, i)| (std::cmp::Reverse(s), self.entries[i].text.len()));
         }
@@ -102,14 +123,21 @@ impl Picker {
     }
 
     fn step(&mut self, d: isize) {
-        self.hl = self.hl.saturating_add_signed(d).min(self.shown.len().saturating_sub(1));
+        self.hl = self
+            .hl
+            .saturating_add_signed(d)
+            .min(self.shown.len().saturating_sub(1));
     }
 }
 
 /// The characters of `text` the query matches, for the highlight.
 fn matched(query: &str, text: &str) -> Vec<u32> {
     let pat = Pattern::parse(query, CaseMatching::Ignore, Normalization::Smart);
-    let (mut m, mut buf, mut idx) = (Matcher::new(Config::DEFAULT.match_paths()), Vec::new(), Vec::new());
+    let (mut m, mut buf, mut idx) = (
+        Matcher::new(Config::DEFAULT.match_paths()),
+        Vec::new(),
+        Vec::new(),
+    );
     pat.indices(Utf32Str::new(text, &mut buf), &mut m, &mut idx);
     idx.sort_unstable();
     idx.dedup();
@@ -152,9 +180,25 @@ impl App {
     pub fn open_picker(&mut self, arg: &str) -> Result<(), String> {
         let (name, rest) = arg.split_once(char::is_whitespace).unwrap_or((arg, ""));
         let name = if name.is_empty() { "signals" } else { name };
-        let source = SOURCES.iter().position(|s| *s == name).ok_or_else(|| format!("no picker source {name} ({})", SOURCES.join(", ")))?;
+        let source = SOURCES
+            .iter()
+            .position(|s| *s == name)
+            .ok_or_else(|| format!("no picker source {name} ({})", SOURCES.join(", ")))?;
         let stream = Some(rest.trim().to_string()).filter(|s| !s.is_empty());
-        let mut p = Picker { source, stream, query: String::new(), entries: Vec::new(), shown: Vec::new(), empty: String::new(), hl: 0, top: 0, page: 1, marked: Vec::new(), rest: None, fill: None };
+        let mut p = Picker {
+            source,
+            stream,
+            query: String::new(),
+            entries: Vec::new(),
+            shown: Vec::new(),
+            empty: String::new(),
+            hl: 0,
+            top: 0,
+            page: 1,
+            marked: Vec::new(),
+            rest: None,
+            fill: None,
+        };
         p.entries = self.entries(&mut p)?;
         p.filter();
         // the trail opens on its newest step, as `:trail`
@@ -177,24 +221,65 @@ impl App {
                 .iter()
                 .enumerate()
                 .map(|(i, v)| {
-                    let head = v.path.rfind('.').map_or(0, |k| v.path[..=k].chars().count());
+                    let head = v
+                        .path
+                        .rfind('.')
+                        .map_or(0, |k| v.path[..=k].chars().count());
                     let right = match v.width {
                         Some(w) if w > 1 => format!("[{}:0]", w - 1),
                         _ => String::new(),
                     };
-                    Entry { text: v.path.clone(), head, right, act: Act::Var(i), preview: Vec::new() }
+                    Entry {
+                        text: v.path.clone(),
+                        head,
+                        right,
+                        act: Act::Var(i),
+                        preview: Vec::new(),
+                    }
                 })
                 .collect(),
             1 => {
-                let mut out = vec![Entry { text: "1 cursor".into(), head: 2, right: fmt(self.ws.view.cursor), act: Act::Mark(0), preview: vec!["cursor 1".into(), format!("at {}", fmt(self.ws.view.cursor))] }];
-                for (n, t) in self.ws.marks.iter().enumerate().filter_map(|(n, t)| t.map(|t| (n, t))) {
+                let mut out = vec![Entry {
+                    text: "1 cursor".into(),
+                    head: 2,
+                    right: fmt(self.ws.view.cursor),
+                    act: Act::Mark(0),
+                    preview: vec![
+                        "cursor 1".into(),
+                        format!("at {}", fmt(self.ws.view.cursor)),
+                    ],
+                }];
+                for (n, t) in self
+                    .ws
+                    .marks
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(n, t)| t.map(|t| (n, t)))
+                {
                     let l = &self.ws.labels[n];
-                    let mut preview = vec![format!("mark {}{}", n + 1, if l.name.is_empty() { String::new() } else { format!(": {}", l.name) }), format!("at {}", fmt(t))];
+                    let mut preview = vec![
+                        format!(
+                            "mark {}{}",
+                            n + 1,
+                            if l.name.is_empty() {
+                                String::new()
+                            } else {
+                                format!(": {}", l.name)
+                            }
+                        ),
+                        format!("at {}", fmt(t)),
+                    ];
                     if !l.note.is_empty() {
                         preview.push(String::new());
                         preview.extend(wrap(&l.note, 40));
                     }
-                    out.push(Entry { text: format!("{} {}", n + 1, l.name), head: 2, right: fmt(t), act: Act::Mark(n), preview });
+                    out.push(Entry {
+                        text: format!("{} {}", n + 1, l.name),
+                        head: 2,
+                        right: fmt(t),
+                        act: Act::Mark(n),
+                        preview,
+                    });
                 }
                 out
             }
@@ -205,11 +290,22 @@ impl App {
                     && let Some(rows::Row::Signal(r)) = self.ws.rows.get(self.ws.sel)
                 {
                     let path = &self.ws.trace.vars[r.var].path;
-                    p.stream = names.iter().filter(|n| path == *n || path.strip_prefix(**n).is_some_and(|f| f.starts_with('.'))).max_by_key(|n| n.len()).map(|n| n.to_string());
+                    p.stream = names
+                        .iter()
+                        .filter(|n| {
+                            path == *n || path.strip_prefix(**n).is_some_and(|f| f.starts_with('.'))
+                        })
+                        .max_by_key(|n| n.len())
+                        .map(|n| n.to_string());
                 }
                 let streams = match &p.stream {
-                    Some(name) => self.ws.stream_set(name).map_err(|e| super::browser::no_stream(&self.ws, &e))?,
-                    None if names.is_empty() => return Err(super::browser::no_stream(&self.ws, &NoStream::Empty)),
+                    Some(name) => self
+                        .ws
+                        .stream_set(name)
+                        .map_err(|e| super::browser::no_stream(&self.ws, &e))?,
+                    None if names.is_empty() => {
+                        return Err(super::browser::no_stream(&self.ws, &NoStream::Empty));
+                    }
                     None => (0..self.ws.streams.len()).collect(),
                 };
                 let all = streams.len() > 1;
@@ -220,11 +316,35 @@ impl App {
                         let r = &st.records[i];
                         let fields = st.fields_text(i, fpt);
                         // with every stream listed, each record says whose it is
-                        let n = if all { format!("{} #{i} ", st.name) } else { format!("#{i} ") };
-                        let text = format!("{n}{}", fields.iter().map(|(n, v)| format!("{n}={v}")).collect::<Vec<_>>().join(" "));
-                        let mut preview = vec![format!("{} #{i}", st.name), format!("{}{}{}", fmt(r.start), gl().dash, fmt(r.end)), String::new()];
+                        let n = if all {
+                            format!("{} #{i} ", st.name)
+                        } else {
+                            format!("#{i} ")
+                        };
+                        let text = format!(
+                            "{n}{}",
+                            fields
+                                .iter()
+                                .map(|(n, v)| format!("{n}={v}"))
+                                .collect::<Vec<_>>()
+                                .join(" ")
+                        );
+                        let mut preview = vec![
+                            format!("{} #{i}", st.name),
+                            format!("{}{}{}", fmt(r.start), gl().dash, fmt(r.end)),
+                            String::new(),
+                        ];
                         preview.extend(fields.iter().map(|(n, v)| format!("{n} = {v}")));
-                        (r.start, Entry { head: n.chars().count(), text, right: fmt(r.start), act: Act::Record(r.start), preview })
+                        (
+                            r.start,
+                            Entry {
+                                head: n.chars().count(),
+                                text,
+                                right: fmt(r.start),
+                                act: Act::Record(r.start),
+                                preview,
+                            },
+                        )
                     }));
                 }
                 // in time order, as they happened across the streams
@@ -234,10 +354,22 @@ impl App {
             3 => crate::tui::commands::COMMANDS
                 .iter()
                 .map(|c| {
-                    let line = if c.name.starts_with('<') { String::new() } else if c.args { format!("{} ", c.name) } else { c.name.to_string() };
+                    let line = if c.name.starts_with('<') {
+                        String::new()
+                    } else if c.args {
+                        format!("{} ", c.name)
+                    } else {
+                        c.name.to_string()
+                    };
                     let mut preview = vec![c.usage.to_string(), String::new()];
                     preview.extend(wrap(c.desc, 40));
-                    Entry { text: c.name.to_string(), head: 0, right: c.usage.to_string(), act: Act::Command(line), preview }
+                    Entry {
+                        text: c.name.to_string(),
+                        head: 0,
+                        right: c.usage.to_string(),
+                        act: Act::Command(line),
+                        preview,
+                    }
                 })
                 .collect(),
             4 => {
@@ -247,10 +379,35 @@ impl App {
                     .filter(|s| s.kind == "agent")
                     .map(|s| {
                         let on = here.contains(&s.id);
-                        let file = s.trace.file_name().map_or(String::new(), |f| f.to_string_lossy().into_owned());
-                        let what = if on { "on this trace: Enter follows it".to_string() } else { format!("on another trace: open it to follow ({})", s.trace.display()) };
-                        let preview = vec![format!("agent {}", s.id), s.trace.display().to_string(), String::new(), what];
-                        Entry { text: format!("{} {file}", s.id), head: 0, right: if on { "this trace".into() } else { String::new() }, act: Act::Agent(s.id, on), preview }
+                        let file = s
+                            .trace
+                            .file_name()
+                            .map_or(String::new(), |f| f.to_string_lossy().into_owned());
+                        let what = if on {
+                            "on this trace: Enter follows it".to_string()
+                        } else {
+                            format!(
+                                "on another trace: open it to follow ({})",
+                                s.trace.display()
+                            )
+                        };
+                        let preview = vec![
+                            format!("agent {}", s.id),
+                            s.trace.display().to_string(),
+                            String::new(),
+                            what,
+                        ];
+                        Entry {
+                            text: format!("{} {file}", s.id),
+                            head: 0,
+                            right: if on {
+                                "this trace".into()
+                            } else {
+                                String::new()
+                            },
+                            act: Act::Agent(s.id, on),
+                            preview,
+                        }
                     })
                     .collect()
             }
@@ -265,7 +422,13 @@ impl App {
                     if let Some(t) = s.time {
                         preview.extend([String::new(), format!("Enter jumps to {}", fmt(t))]);
                     }
-                    Entry { text: format!("{} {}", s.tool, s.ask), head: 0, right: s.time.map_or(String::new(), fmt), act: Act::Step(s.time), preview }
+                    Entry {
+                        text: format!("{} {}", s.tool, s.ask),
+                        head: 0,
+                        right: s.time.map_or(String::new(), fmt),
+                        act: Act::Step(s.time),
+                        preview,
+                    }
                 })
                 .collect(),
         };
@@ -288,27 +451,77 @@ impl App {
         wtf_core::protocol::detect(t)
             .into_iter()
             .map(|f| {
-                let done = self.ws.decodes.iter().find(|d| d.protocol == f.protocol && d.params.iter().any(|p| p.0 == "prefix" && p.1 == f.prefix)).map(|d| d.name.clone());
+                let done = self
+                    .ws
+                    .decodes
+                    .iter()
+                    .find(|d| {
+                        d.protocol == f.protocol
+                            && d.params.iter().any(|p| p.0 == "prefix" && p.1 == f.prefix)
+                    })
+                    .map(|d| d.name.clone());
                 // a name not taken by another decode
                 let base = f.name().to_string();
-                let name = (1..).map(|k| if k == 1 { base.clone() } else { format!("{base}{k}") }).find(|n| !self.ws.decodes.iter().any(|d| d.name == *n)).expect("a free name");
-                let line = f.decode_line().replacen(&format!("decode {base} "), &format!("decode {name} "), 1);
-                let b = wtf_core::protocol::builtin(f.protocol).expect("detect finds built-ins");
-                let ready = f.clock.is_some() || !b.clocked;
-                let mut preview = vec![format!("{} at {}", f.protocol, f.prefix), line.clone(), String::new()];
-                let roles: Vec<&&str> = b.required.iter().chain(b.optional).filter(|r| t.by_path.contains_key(&format!("{}{r}", f.prefix))).collect();
+                let name = (1..)
+                    .map(|k| {
+                        if k == 1 {
+                            base.clone()
+                        } else {
+                            format!("{base}{k}")
+                        }
+                    })
+                    .find(|n| !self.ws.decodes.iter().any(|d| d.name == *n))
+                    .expect("a free name");
+                let line = f.decode_line().replacen(
+                    &format!("decode {base} "),
+                    &format!("decode {name} "),
+                    1,
+                );
+                let p = wtf_core::protocol::get(f.protocol).expect("detect finds built-ins");
+                let ready = f.clock.is_some() || !p.clocked();
+                let mut preview = vec![
+                    format!("{} at {}", f.protocol, f.prefix),
+                    line.clone(),
+                    String::new(),
+                ];
+                let (required, optional) = p.roles();
+                let roles: Vec<&&str> = required
+                    .iter()
+                    .chain(optional.iter())
+                    .filter(|r| t.by_path.contains_key(&format!("{}{r}", f.prefix)))
+                    .collect();
                 let rw = roles.iter().map(|r| r.len()).max().unwrap_or(0).max(5);
                 preview.extend(roles.iter().map(|r| format!("{r:<rw$}  {}{r}", f.prefix)));
-                if b.clocked {
-                    preview.push(format!("{:<rw$}  {}", "clock", f.clock.clone().unwrap_or_else(|| "none found: Enter puts the line on the command line to name it".into())));
+                if p.clocked() {
+                    preview.push(format!(
+                        "{:<rw$}  {}",
+                        "clock",
+                        f.clock.clone().unwrap_or_else(|| {
+                            "none found: Enter puts the line on the command line to name it".into()
+                        })
+                    ));
                 }
                 preview.push(String::new());
                 preview.push(match &done {
                     Some(d) => format!("decoded already as {d}: Enter shows its records"),
                     None => "Enter decodes it and adds its streams as a group".into(),
                 });
-                let right = done.as_ref().map_or_else(|| f.protocol.to_string(), |d| format!("{} {} {d}", f.protocol, gl().arrow));
-                Entry { text: format!("{name} {}", f.prefix), head: 0, right, act: Act::Decode { line, name, ready, done }, preview }
+                let right = done.as_ref().map_or_else(
+                    || f.protocol.to_string(),
+                    |d| format!("{} {} {d}", f.protocol, gl().arrow),
+                );
+                Entry {
+                    text: format!("{name} {}", f.prefix),
+                    head: 0,
+                    right,
+                    act: Act::Decode {
+                        line,
+                        name,
+                        ready,
+                        done,
+                    },
+                    preview,
+                }
             })
             .collect()
     }
@@ -323,10 +536,21 @@ impl App {
     /// Decode `name`'s results and violations not shown yet, added below the selected row as a
     /// group of its name; false when all are shown already.
     pub(crate) fn show_decode(&mut self, name: &str) -> Result<bool, String> {
-        let vars: Vec<usize> = self.ws.results(name).into_iter().filter_map(|i| self.ws.trace.by_path.get(&self.ws.streams[i].name).copied()).filter(|&v| !self.ws.shown(v)).collect();
-        let (Some(&first), Some(&last)) = (vars.first(), vars.last()) else { return Ok(false) };
+        let vars: Vec<usize> = self
+            .ws
+            .results(name)
+            .into_iter()
+            .filter_map(|i| self.ws.trace.by_path.get(&self.ws.streams[i].name).copied())
+            .filter(|&v| !self.ws.shown(v))
+            .collect();
+        let (Some(&first), Some(&last)) = (vars.first(), vars.last()) else {
+            return Ok(false);
+        };
         self.ws.add_rows(&vars);
-        let (a, b) = (self.ws.trace.vars[first].path.clone(), self.ws.trace.vars[last].path.clone());
+        let (a, b) = (
+            self.ws.trace.vars[first].path.clone(),
+            self.ws.trace.vars[last].path.clone(),
+        );
         wtf_core::command::run(&mut self.ws, &format!("select {a} {b}"))?;
         wtf_core::command::run(&mut self.ws, &format!("group {name}"))?;
         Ok(true)
@@ -334,12 +558,35 @@ impl App {
 
     /// The picker's keys (spec §5 "Picker"): `picker_key` and the keys page both read them.
     pub const PICKER_KEYS: &Fixed<Pick> = &[
-        (&[(Key::ctrl('n'), Pick::Down), (Key::ctrl('p'), Pick::Up), (Key::code(KeyCode::Down), Pick::Down), (Key::code(KeyCode::Up), Pick::Up)], "move"),
-        (&[(Key::code(KeyCode::PageDown), Pick::PageDown), (Key::code(KeyCode::PageUp), Pick::PageUp)], "a box of entries"),
-        (&[(Key::code(KeyCode::Backspace), Pick::Delete)], "delete a character of the query"),
-        (&[(Key::code(KeyCode::Tab), Pick::Mark)], "mark the signal and move on"),
+        (
+            &[
+                (Key::ctrl('n'), Pick::Down),
+                (Key::ctrl('p'), Pick::Up),
+                (Key::code(KeyCode::Down), Pick::Down),
+                (Key::code(KeyCode::Up), Pick::Up),
+            ],
+            "move",
+        ),
+        (
+            &[
+                (Key::code(KeyCode::PageDown), Pick::PageDown),
+                (Key::code(KeyCode::PageUp), Pick::PageUp),
+            ],
+            "a box of entries",
+        ),
+        (
+            &[(Key::code(KeyCode::Backspace), Pick::Delete)],
+            "delete a character of the query",
+        ),
+        (
+            &[(Key::code(KeyCode::Tab), Pick::Mark)],
+            "mark the signal and move on",
+        ),
         (&[(Key::ctrl('s'), Pick::Source)], "next source"),
-        (&[(Key::code(KeyCode::Enter), Pick::Choose)], "pick and close"),
+        (
+            &[(Key::code(KeyCode::Enter), Pick::Choose)],
+            "pick and close",
+        ),
         (&[(Key::code(KeyCode::Esc), Pick::Close)], "close"),
     ];
 
@@ -378,7 +625,12 @@ impl App {
             }
             Pick::Mark => {
                 // signals only: mark or unmark the highlighted one, then the next
-                let Some(&Entry { act: Act::Var(v), .. }) = p.current() else { return };
+                let Some(&Entry {
+                    act: Act::Var(v), ..
+                }) = p.current()
+                else {
+                    return;
+                };
                 if self.ws.shown(v) {
                     self.msg = Some(("nothing to mark: already shown".into(), true));
                 } else if let Some(i) = p.marked.iter().position(|&m| m == v) {
@@ -398,7 +650,9 @@ impl App {
     /// `Enter`: do what the highlighted entry is for, and close the picker.
     fn pick(&mut self) {
         let Some(p) = self.picker.take() else { return };
-        let Some(e) = p.current() else { return self.picker = Some(p) };
+        let Some(e) = p.current() else {
+            return self.picker = Some(p);
+        };
         if let (Some(i), Act::Var(v)) = (p.fill, &e.act) {
             let path = self.ws.trace.vars[*v].path.clone();
             return self.form_fill(i, path);
@@ -406,7 +660,11 @@ impl App {
         let r = match e.act.clone() {
             Act::Var(v) => {
                 // the marked, or the highlighted; below the selected row, as the signal panel adds
-                let mut vars = if p.marked.is_empty() { vec![v] } else { p.marked.clone() };
+                let mut vars = if p.marked.is_empty() {
+                    vec![v]
+                } else {
+                    p.marked.clone()
+                };
                 vars.retain(|&v| !self.ws.shown(v));
                 if vars.is_empty() {
                     Err("nothing to add: already shown".into())
@@ -418,7 +676,9 @@ impl App {
             Act::Mark(n) => self.ws.goto_mark(n),
             Act::Record(t) => {
                 let name = p.stream.clone().unwrap_or_default();
-                if let Some(i) = self.ws.rows.iter().position(|row| matches!(row, Row::Signal(s) if self.ws.trace.vars[s.var].path == name)) {
+                if let Some(i) = self.ws.rows.iter().position(
+                    |row| matches!(row, Row::Signal(s) if self.ws.trace.vars[s.var].path == name),
+                ) {
                     (self.ws.sel, self.ws.bit) = (i, None);
                 }
                 self.ws.jump(t, false);
@@ -429,7 +689,9 @@ impl App {
                 Ok(())
             }
             Act::Agent(id, true) => self.run(&format!("follow {id}")),
-            Act::Agent(id, false) => Err(format!("agent {id} works on another trace: open that trace to follow it")),
+            Act::Agent(id, false) => Err(format!(
+                "agent {id} works on another trace: open that trace to follow it"
+            )),
             Act::Step(Some(t)) => {
                 self.ws.jump(t, false);
                 Ok(())
@@ -437,7 +699,9 @@ impl App {
             Act::Step(None) => Err("this step is about no time".into()),
             Act::Decode { done: Some(d), .. } => self.open_browser(&d),
             // the clock left to name: the form, with the rest filled in
-            Act::Decode { line, ready: false, .. } => self.open_form(line.strip_prefix("decode ").unwrap_or(&line)),
+            Act::Decode {
+                line, ready: false, ..
+            } => self.open_form(line.strip_prefix("decode ").unwrap_or(&line)),
             Act::Decode { line, name, .. } => self.decode_and_show(&line, &name),
         };
         if let Err(e) = r {
@@ -448,14 +712,19 @@ impl App {
     /// The mouse over the picker: a click highlights, a double click picks, the wheel moves, a
     /// click outside closes it (spec §2 "Over the rows").
     pub fn picker_mouse(&mut self, m: MouseEvent, (x, y): (usize, usize), now: Instant) {
-        let inside = self.hit.boxed.is_some_and(|r| r.contains((x as u16, y as u16).into()));
+        let inside = self
+            .hit
+            .boxed
+            .is_some_and(|r| r.contains((x as u16, y as u16).into()));
         let Some(p) = &mut self.picker else { return };
         match m.kind {
             MouseEventKind::ScrollDown => p.step(1),
             MouseEventKind::ScrollUp => p.step(-1),
             MouseEventKind::Down(_) if !inside => self.picker = None,
             MouseEventKind::Down(MouseButton::Left) => {
-                let Some(&(_, k)) = self.hit.records.iter().find(|(ly, _)| *ly == y) else { return };
+                let Some(&(_, k)) = self.hit.records.iter().find(|(ly, _)| *ly == y) else {
+                    return;
+                };
                 p.hl = k;
                 if self.double(Target::Record(k), now) {
                     self.pick();
@@ -485,23 +754,47 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
     }
     let st = Style::new().bg(pal().panel).fg(pal().text);
     let dim = st.fg(pal().dim);
-    let accent = if mono { Style::new().add_modifier(Modifier::BOLD | Modifier::UNDERLINED) } else { st.fg(pal().cursor).add_modifier(Modifier::BOLD) };
-    let border = if p.source == 5 && !mono { st.fg(pal().hues[4]) } else { dim };
+    let accent = if mono {
+        Style::new().add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+    } else {
+        st.fg(pal().cursor).add_modifier(Modifier::BOLD)
+    };
+    let border = if p.source == 5 && !mono {
+        st.fg(pal().hues[4])
+    } else {
+        dim
+    };
     // the list and the preview side by side; on a narrow screen, the list alone
     let lw = if bw >= 70 { bw * 9 / 20 } else { bw - 1 };
     let b = gl().card;
-    let (tj, bj) = if b[4] == '-' { ('+', '+') } else { ('┬', '┴') };
+    let (tj, bj) = if b[4] == '-' {
+        ('+', '+')
+    } else {
+        ('┬', '┴')
+    };
     for y in 0..bh {
         let (l, r, fill) = match y {
             0 => (b[0], b[1], b[4]),
             _ if y == bh - 1 => (b[2], b[3], b[4]),
             _ => (b[5], b[5], ' '),
         };
-        put(buf, x0, y0 + y, &format!("{l}{}{r}", fill.to_string().repeat(bw - 2)), st);
+        put(
+            buf,
+            x0,
+            y0 + y,
+            &format!("{l}{}{r}", fill.to_string().repeat(bw - 2)),
+            st,
+        );
         put(buf, x0, y0 + y, &l.to_string(), border);
         put(buf, x0 + bw - 1, y0 + y, &r.to_string(), border);
         if fill != ' ' {
-            put(buf, x0 + 1, y0 + y, &fill.to_string().repeat(bw - 2), border);
+            put(
+                buf,
+                x0 + 1,
+                y0 + y,
+                &fill.to_string().repeat(bw - 2),
+                border,
+            );
         }
         if lw < bw - 1 {
             let c = match y {
@@ -515,9 +808,19 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
     // the sources in the top border, the current one in the accent
     let mut x = x0 + 2;
     for (i, s) in SOURCES.iter().enumerate() {
-        let s = if i == 2 && p.source == 2 { format!("records {}", p.stream.as_deref().unwrap_or("")).trim_end().to_string() } else { s.to_string() };
+        let s = if i == 2 && p.source == 2 {
+            format!("records {}", p.stream.as_deref().unwrap_or(""))
+                .trim_end()
+                .to_string()
+        } else {
+            s.to_string()
+        };
         // the current one with its icon (spec §14 `nerd`)
-        let ic = if i == p.source { draw::icon(source_icon(i)).map_or(String::new(), |c| format!("{c} ")) } else { String::new() };
+        let ic = if i == p.source {
+            draw::icon(source_icon(i)).map_or(String::new(), |c| format!("{c} "))
+        } else {
+            String::new()
+        };
         let s = format!(" {ic}{s} ");
         if x + s.chars().count() < x0 + bw - 1 {
             put(buf, x, y0, &s, if i == p.source { accent } else { dim });
@@ -526,7 +829,10 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
     }
     let keys = match p.source {
         _ if p.fill.is_some() => " Enter fill it in  Esc back ".into(),
-        0 if !p.marked.is_empty() => format!(" {} marked  Enter add  Tab mark  C-s source  Esc close ", p.marked.len()),
+        0 if !p.marked.is_empty() => format!(
+            " {} marked  Enter add  Tab mark  C-s source  Esc close ",
+            p.marked.len()
+        ),
         0 => " Enter add  Tab mark  C-s source  Esc close ".into(),
         3 => " Enter type it  C-s source  Esc close ".into(),
         4 => " Enter follow  C-s source  Esc close ".into(),
@@ -534,16 +840,42 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
         _ => " Enter jump  C-s source  Esc close ".into(),
     };
     if keys.chars().count() + 4 < bw {
-        put(buf, x0 + bw - 2 - keys.chars().count(), y0 + bh - 1, &keys, dim);
+        put(
+            buf,
+            x0 + bw - 2 - keys.chars().count(),
+            y0 + bh - 1,
+            &keys,
+            dim,
+        );
     }
     // the query, how many match, and a rule under them
     let iw = lw - 2;
     let count = format!("{}/{}", p.shown.len(), p.entries.len());
-    put(buf, x0 + 2, y0 + 1, &format!("{} ", draw::icon(draw::icon::SEARCH).unwrap_or(gl().insert)), accent);
-    let q: String = p.query.chars().rev().take(iw.saturating_sub(count.len() + 4)).collect::<Vec<_>>().into_iter().rev().collect();
+    put(
+        buf,
+        x0 + 2,
+        y0 + 1,
+        &format!("{} ", draw::icon(draw::icon::SEARCH).unwrap_or(gl().insert)),
+        accent,
+    );
+    let q: String = p
+        .query
+        .chars()
+        .rev()
+        .take(iw.saturating_sub(count.len() + 4))
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
     put(buf, x0 + 4, y0 + 1, &q, st.add_modifier(Modifier::BOLD));
     put(buf, x0 + lw - 1 - count.len(), y0 + 1, &count, dim);
-    put(buf, x0 + 1, y0 + 2, &b[4].to_string().repeat(lw - 1), border);
+    put(
+        buf,
+        x0 + 1,
+        y0 + 2,
+        &b[4].to_string().repeat(lw - 1),
+        border,
+    );
     // the list, scrolled to show the highlight
     p.page = bh - 4;
     if p.hl < p.top {
@@ -552,8 +884,18 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
         p.top = p.hl + 1 - p.page;
     }
     if p.shown.is_empty() {
-        let why = if p.empty.is_empty() { "nothing matches" } else { &p.empty };
-        put(buf, x0 + 3, y0 + 3, &why.chars().take(iw - 2).collect::<String>(), dim);
+        let why = if p.empty.is_empty() {
+            "nothing matches"
+        } else {
+            &p.empty
+        };
+        put(
+            buf,
+            x0 + 3,
+            y0 + 3,
+            &why.chars().take(iw - 2).collect::<String>(),
+            dim,
+        );
     }
     let mut lines = Vec::new();
     for (k, &i) in p.shown.iter().enumerate().skip(p.top).take(p.page) {
@@ -562,7 +904,13 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
         let row = if on { st.bg(pal().selected) } else { st };
         put(buf, x0 + 1, y, &" ".repeat(lw - 1), row);
         if on {
-            put(buf, x0 + 1, y, &gl().hl.to_string(), if mono { accent } else { row.fg(pal().cursor) });
+            put(
+                buf,
+                x0 + 1,
+                y,
+                &gl().hl.to_string(),
+                if mono { accent } else { row.fg(pal().cursor) },
+            );
         }
         // shown already, or marked
         let tag = match e.act {
@@ -576,7 +924,11 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
         if let Some((c, col)) = kind_icon(&app.ws, &e.act) {
             put(buf, x0 + 4, y, &c.to_string(), row.fg(col));
         }
-        let rw = if e.right.is_empty() { 0 } else { e.right.chars().count() + 1 };
+        let rw = if e.right.is_empty() {
+            0
+        } else {
+            e.right.chars().count() + 1
+        };
         let tw = iw.saturating_sub(2 + ix + rw);
         let hits = matched(&p.query, &e.text);
         for (c, ch) in e.text.chars().enumerate().take(tw) {
@@ -587,7 +939,17 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
             } else {
                 row
             };
-            put(buf, x0 + 4 + ix + c, y, &ch.to_string(), if on { s.add_modifier(Modifier::BOLD) } else { s });
+            put(
+                buf,
+                x0 + 4 + ix + c,
+                y,
+                &ch.to_string(),
+                if on {
+                    s.add_modifier(Modifier::BOLD)
+                } else {
+                    s
+                },
+            );
         }
         if rw > 0 && e.text.chars().count() + ix + rw + 1 < iw {
             put(buf, x0 + lw - rw, y, &e.right, row.fg(pal().dim));
@@ -616,7 +978,16 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
     };
     let Act::Var(v) = e.act else {
         for (i, l) in e.preview.iter().enumerate() {
-            line(buf, &mut y, l, if i == 0 { st.add_modifier(Modifier::BOLD) } else { st });
+            line(
+                buf,
+                &mut y,
+                l,
+                if i == 0 {
+                    st.add_modifier(Modifier::BOLD)
+                } else {
+                    st
+                },
+            );
         }
         return;
     };
@@ -644,16 +1015,44 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
     line(buf, &mut y, &what, dim);
     // already decoded: its records may be what is wanted rather than the signal (spec §5); a
     // table of decode, protocol and role under a dim heading
-    let decodes: Vec<(&str, &str, String)> = ws.decodes_of(v).into_iter().map(|(d, role)| (d, ws.decodes.iter().find(|x| x.name == d).map_or("", |x| x.protocol.as_str()), role)).collect();
+    let decodes: Vec<(&str, &str, String)> = ws
+        .decodes_of(v)
+        .into_iter()
+        .map(|(d, role)| {
+            (
+                d,
+                ws.decodes
+                    .iter()
+                    .find(|x| x.name == d)
+                    .map_or("", |x| x.protocol.as_str()),
+                role,
+            )
+        })
+        .collect();
     if !decodes.is_empty() {
         y += 1;
         line(buf, &mut y, "decodes", dim);
-        let (dw, pw2) = (decodes.iter().map(|d| d.0.chars().count()).max().unwrap_or(0), decodes.iter().map(|d| d.1.chars().count()).max().unwrap_or(0));
+        let (dw, pw2) = (
+            decodes
+                .iter()
+                .map(|d| d.0.chars().count())
+                .max()
+                .unwrap_or(0),
+            decodes
+                .iter()
+                .map(|d| d.1.chars().count())
+                .max()
+                .unwrap_or(0),
+        );
         for (d, proto, role) in &decodes {
             if y >= y0 + bh - 1 {
                 break;
             }
-            let cells = [(format!("  {d:<dw$}  "), st.fg(pal().hues[5])), (format!("{proto:<pw2$}  "), dim), (role.clone(), st)];
+            let cells = [
+                (format!("  {d:<dw$}  "), st.fg(pal().hues[5])),
+                (format!("{proto:<pw2$}  "), dim),
+                (role.clone(), st),
+            ];
             let mut x = px;
             for (t, style) in cells {
                 let t: String = t.chars().take((px + pw).saturating_sub(x)).collect();
@@ -668,13 +1067,29 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
         line(buf, &mut y, gl().cut.to_string().as_str(), dim);
         return;
     }
-    let value = ws.trace.value_at(v, t).map_or("none".to_string(), |val| rows::label(var, &Look::of(var), &val));
-    line(buf, &mut y, &format!("at {}  {value}", time::format(t, fpt)), st);
+    let value = ws.trace.value_at(v, t).map_or("none".to_string(), |val| {
+        rows::label(var, &Look::of(var), &val)
+    });
+    line(
+        buf,
+        &mut y,
+        &format!("at {}  {value}", time::format(t, fpt)),
+        st,
+    );
     y += 1;
     let mut view = ws.view.clone();
     view.set_width(pw as u64);
     view.center(t);
-    let cells = draw::wave(&ws.trace, &view, &sig, None, None, ws.stream_of(v), None, pw);
+    let cells = draw::wave(
+        &ws.trace,
+        &view,
+        &sig,
+        None,
+        None,
+        ws.stream_of(v),
+        None,
+        pw,
+    );
     let cur = view.col_of(t);
     for half in 0..2 {
         if y + half >= y0 + bh - 1 {
@@ -683,14 +1098,30 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
         for (c, cell) in cells.iter().enumerate() {
             let mut s = st.patch(cell[half].1);
             if Some(c as u64) == cur {
-                s = if mono { s.add_modifier(Modifier::REVERSED) } else { s.bg(pal().column) };
+                s = if mono {
+                    s.add_modifier(Modifier::REVERSED)
+                } else {
+                    s.bg(pal().column)
+                };
             }
             put(buf, px + c, y + half, &cell[half].0.to_string(), s);
         }
     }
     y += 2;
-    let (from, to) = (time::format(view.start, fpt), time::format(view.last_visible(), fpt));
-    line(buf, &mut y, &format!("{from}{}{to:>w$}", "", w = pw.saturating_sub(from.chars().count())), dim);
+    let (from, to) = (
+        time::format(view.start, fpt),
+        time::format(view.last_visible(), fpt),
+    );
+    line(
+        buf,
+        &mut y,
+        &format!(
+            "{from}{}{to:>w$}",
+            "",
+            w = pw.saturating_sub(from.chars().count())
+        ),
+        dim,
+    );
     y += 1;
     let r#where = match ws.rows.get(ws.sel) {
         _ if ws.shown(v) => "shown already".to_string(),
@@ -706,12 +1137,26 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
 /// A source's icon, in the top border beside its name.
 fn source_icon(i: usize) -> char {
     use crate::draw::icon;
-    [icon::WIRE, icon::MARK, icon::RECORD, icon::CMD, icon::EYE, icon::TRAIL, icon::PLUG].get(i).copied().unwrap_or(icon::SEARCH)
+    [
+        icon::WIRE,
+        icon::MARK,
+        icon::RECORD,
+        icon::CMD,
+        icon::EYE,
+        icon::TRAIL,
+        icon::PLUG,
+    ]
+    .get(i)
+    .copied()
+    .unwrap_or(icon::SEARCH)
 }
 
 /// An entry's icon and its colour by what it is: a signal's kind (`draw::kind`), a mark, a record, a
 /// command, an agent, a step. None without the `nerd` glyphs.
-fn kind_icon(ws: &wtf_core::workspace::Workspace, act: &Act) -> Option<(char, ratatui::style::Color)> {
+fn kind_icon(
+    ws: &wtf_core::workspace::Workspace,
+    act: &Act,
+) -> Option<(char, ratatui::style::Color)> {
     use crate::draw::icon;
     let p = pal();
     let (c, col) = match act {
@@ -734,9 +1179,37 @@ mod tests {
 
     #[test]
     fn ranks() {
-        let paths = ["top.s_axi_rdata", "top.s_axi_rready", "top.bus.rd", "top.cpu.state"];
-        let mut p = Picker { source: 0, stream: None, query: "rd".into(), entries: Vec::new(), shown: Vec::new(), empty: String::new(), hl: 0, top: 0, page: 1, marked: Vec::new(), rest: None, fill: None };
-        p.entries = paths.iter().enumerate().map(|(i, s)| Entry { text: s.to_string(), head: 0, right: String::new(), act: Act::Var(i), preview: Vec::new() }).collect();
+        let paths = [
+            "top.s_axi_rdata",
+            "top.s_axi_rready",
+            "top.bus.rd",
+            "top.cpu.state",
+        ];
+        let mut p = Picker {
+            source: 0,
+            stream: None,
+            query: "rd".into(),
+            entries: Vec::new(),
+            shown: Vec::new(),
+            empty: String::new(),
+            hl: 0,
+            top: 0,
+            page: 1,
+            marked: Vec::new(),
+            rest: None,
+            fill: None,
+        };
+        p.entries = paths
+            .iter()
+            .enumerate()
+            .map(|(i, s)| Entry {
+                text: s.to_string(),
+                head: 0,
+                right: String::new(),
+                act: Act::Var(i),
+                preview: Vec::new(),
+            })
+            .collect();
         p.filter();
         // a word boundary first; state has no r then d
         assert_eq!(p.shown.first().map(|&i| paths[i]), Some("top.bus.rd"));
@@ -803,7 +1276,10 @@ mod tests {
             key(&mut app, KeyCode::Char(c), none);
         }
         key(&mut app, KeyCode::Tab, none);
-        assert_eq!(app.msg.as_ref().unwrap().0, "nothing to mark: already shown");
+        assert_eq!(
+            app.msg.as_ref().unwrap().0,
+            "nothing to mark: already shown"
+        );
         key(&mut app, KeyCode::Esc, none);
         assert!(app.picker.is_none());
         // Tab on other sources, and a picker already closed, are ignored
@@ -818,7 +1294,12 @@ mod tests {
         let mut app = app("simple.vcd");
         app.open_picker("signals").unwrap();
         crate::snapshot(&mut app, 100, Some(20));
-        let ev = |kind, x, y| MouseEvent { kind, column: x, row: y, modifiers: KeyModifiers::NONE };
+        let ev = |kind, x, y| MouseEvent {
+            kind,
+            column: x,
+            row: y,
+            modifiers: KeyModifiers::NONE,
+        };
         let now = Instant::now();
         app.picker_mouse(ev(MouseEventKind::ScrollDown, 20, 5), (20, 5), now);
         assert_eq!(hl(&app), 1);
@@ -827,7 +1308,11 @@ mod tests {
         // inside the box but on no entry (the query line): nothing
         let b = app.hit.boxed.unwrap();
         let (x, y) = (b.x + 3, b.y + 1);
-        app.picker_mouse(ev(MouseEventKind::Down(MouseButton::Left), x, y), (x as usize, y as usize), now);
+        app.picker_mouse(
+            ev(MouseEventKind::Down(MouseButton::Left), x, y),
+            (x as usize, y as usize),
+            now,
+        );
         assert!(app.picker.is_some());
     }
 
@@ -835,16 +1320,27 @@ mod tests {
     fn picker_previews() {
         let mut app = app("axilite.vcd");
         app.preview_wait = std::time::Duration::ZERO;
-        app.run("decode bus axilite clock=aclk prefix=s_axi_").unwrap();
-        app.run("decode bus2 axilite clock=aclk prefix=s_axi_").unwrap();
+        app.run("decode bus axilite clock=aclk prefix=s_axi_")
+            .unwrap();
+        app.run("decode bus2 axilite clock=aclk prefix=s_axi_")
+            .unwrap();
         app.keys(":pick signals\ns_axi_arvalid").unwrap();
         let s = crate::snapshot(&mut app, 120, Some(30));
-        assert!(s.contains("1 bit") && s.contains("decodes") && s.contains("bus") && s.contains("Enter adds it"), "{s}");
+        assert!(
+            s.contains("1 bit")
+                && s.contains("decodes")
+                && s.contains("bus")
+                && s.contains("Enter adds it"),
+            "{s}"
+        );
         // a stream: how many records; below a group, Enter adds below the group
         app.run("add top.aclk").unwrap();
         app.run("group g").unwrap();
         let s = crate::snapshot(&mut app, 120, Some(30));
-        assert!(s.contains("Enter adds it below the group g") || s.contains("Enter adds it below"), "{s}");
+        assert!(
+            s.contains("Enter adds it below the group g") || s.contains("Enter adds it below"),
+            "{s}"
+        );
         app.picker = None;
         app.keys(":pick signals\nbus.rd").unwrap();
         let s = crate::snapshot(&mut app, 120, Some(30));
@@ -858,31 +1354,50 @@ mod tests {
     fn picker_sources_nerd_and_picks() {
         // every source drawn with the icons; Enter on a record selects its stream and jumps
         let mut app = app("axilite.vcd");
-        app.run("decode bus axilite clock=aclk prefix=s_axi_").unwrap();
+        app.run("decode bus axilite clock=aclk prefix=s_axi_")
+            .unwrap();
         app.run("add bus.rd").unwrap();
-        app.run("cursor 2 60ns name=late note=the read came after the write was accepted").unwrap();
-        app.ws.trail = vec![wtf_core::workspace::Step { tool: "find".into(), ask: "x".into(), answer: "no time".into(), time: None }];
+        app.run("cursor 2 60ns name=late note=the read came after the write was accepted")
+            .unwrap();
+        app.ws.trail = vec![wtf_core::workspace::Step {
+            tool: "find".into(),
+            ask: "x".into(),
+            answer: "no time".into(),
+            time: None,
+        }];
         crate::draw::set_glyphs(&crate::draw::NERD);
         // an agent on this trace and one on another
         app.ws.trace_path = "tests/data/axilite.vcd".into();
-        let (here, there) = (app.ws.trace_path.clone(), std::path::PathBuf::from("tests/data/simple.vcd"));
+        let (here, there) = (
+            app.ws.trace_path.clone(),
+            std::path::PathBuf::from("tests/data/simple.vcd"),
+        );
         let id = std::process::id();
-        let mine = crate::live::listen(&format!("pk{id}a"), "agent", &here, |_| Err("busy".into())).unwrap();
-        let other = crate::live::listen(&format!("pk{id}b"), "agent", &there, |_| Ok(String::new())).unwrap();
+        let mine = crate::live::listen(&format!("pk{id}a"), "agent", &here, |_| Err("busy".into()))
+            .unwrap();
+        let other =
+            crate::live::listen(&format!("pk{id}b"), "agent", &there, |_| Ok(String::new()))
+                .unwrap();
         app.open_picker("signals").unwrap();
         for _ in 0..SOURCES.len() {
             let s = crate::snapshot(&mut app, 120, Some(24));
             let p = app.picker.as_ref().unwrap();
             assert!(s.contains(SOURCES[p.source]), "{s}");
             if p.source == 4 {
-                assert!(s.contains(&format!("pk{id}a")) && s.contains("this trace"), "{s}");
+                assert!(
+                    s.contains(&format!("pk{id}a")) && s.contains("this trace"),
+                    "{s}"
+                );
             }
             key(&mut app, KeyCode::Char('s'), KeyModifiers::CONTROL);
         }
         app.open_picker("marks").unwrap();
         key(&mut app, KeyCode::Down, KeyModifiers::NONE);
         let s = crate::snapshot(&mut app, 120, Some(24));
-        assert!(s.contains("the read came after") && s.contains("mark 2: late"), "{s}");
+        assert!(
+            s.contains("the read came after") && s.contains("mark 2: late"),
+            "{s}"
+        );
         // the agent here is followed; its refusal is shown, the picker closed
         app.open_picker("sessions").unwrap();
         for c in format!("pk{id}a").chars() {
@@ -896,7 +1411,15 @@ mod tests {
             key(&mut app, KeyCode::Char(c), KeyModifiers::NONE);
         }
         key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
-        assert!(app.msg.as_ref().unwrap().0.contains("works on another trace"), "{:?}", app.msg);
+        assert!(
+            app.msg
+                .as_ref()
+                .unwrap()
+                .0
+                .contains("works on another trace"),
+            "{:?}",
+            app.msg
+        );
         drop((mine, other));
         // a step about no time
         app.open_picker("trail").unwrap();
@@ -906,11 +1429,23 @@ mod tests {
         app.run("add top.aclk").unwrap();
         app.run("select top.aclk").unwrap();
         app.open_picker("records bus.rd").unwrap();
-        let t = match app.picker.as_ref().unwrap().entries[0].act { Act::Record(t) => t, _ => panic!() };
+        let t = match app.picker.as_ref().unwrap().entries[0].act {
+            Act::Record(t) => t,
+            _ => panic!(),
+        };
         key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
-        let Row::Signal(sel) = &app.ws.rows[app.ws.sel] else { panic!() };
-        assert_eq!((app.ws.trace.vars[sel.var].path.as_str(), app.ws.view.cursor), ("bus.rd", t));
-        assert!(app.open_picker("records nope").unwrap_err().starts_with("unknown stream: nope"));
+        let Row::Signal(sel) = &app.ws.rows[app.ws.sel] else {
+            panic!()
+        };
+        assert_eq!(
+            (app.ws.trace.vars[sel.var].path.as_str(), app.ws.view.cursor),
+            ("bus.rd", t)
+        );
+        assert!(
+            app.open_picker("records nope")
+                .unwrap_err()
+                .starts_with("unknown stream: nope")
+        );
         crate::draw::set_glyphs(&crate::draw::UNICODE);
     }
 
@@ -920,10 +1455,18 @@ mod tests {
         let mut a = app("axilite.vcd");
         a.open_picker("commands").unwrap();
         let line = "decode bus axilite clock=<clk> prefix=top.s_axi_".to_string();
-        a.picker.as_mut().unwrap().entries[0].act = Act::Decode { line, name: "bus".into(), ready: false, done: None };
+        a.picker.as_mut().unwrap().entries[0].act = Act::Decode {
+            line,
+            name: "bus".into(),
+            ready: false,
+            done: None,
+        };
         key(&mut a, KeyCode::Enter, KeyModifiers::NONE);
         let f = a.form.as_ref().expect("the form");
-        assert_eq!((f.fields[f.at].key.as_str(), f.line()), ("clock", "decode bus axilite prefix=top.s_axi_".into()));
+        assert_eq!(
+            (f.fields[f.at].key.as_str(), f.line()),
+            ("clock", "decode bus axilite prefix=top.s_axi_".into())
+        );
     }
 
     #[test]
@@ -941,6 +1484,9 @@ mod tests {
         a.open_picker("interfaces").unwrap();
         let s = crate::snapshot(&mut a, 100, Some(20));
         crate::draw::set_glyphs(&crate::draw::UNICODE);
-        assert!(s.contains("axilite at top.s_axi_") && !s.contains("axilite \u{2192}"), "{s}");
+        assert!(
+            s.contains("axilite at top.s_axi_") && !s.contains("axilite \u{2192}"),
+            "{s}"
+        );
     }
 }

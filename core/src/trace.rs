@@ -32,7 +32,11 @@ impl Var {
     /// The name of a value, if the file gives it one.
     pub fn name_of(&self, bits: &str) -> Option<&str> {
         let key = names_key(bits);
-        self.names.as_ref()?.iter().find(|(b, _)| b == key).map(|(_, n)| n.as_str())
+        self.names
+            .as_ref()?
+            .iter()
+            .find(|(b, _)| b == key)
+            .map(|(_, n)| n.as_str())
     }
 }
 
@@ -188,7 +192,8 @@ impl Trace {
         // shortcut (#29): simple::read reads a VCD whole before the window opens; index in the background to open huge VCDs at once.
         // wellen panics on a missing file, so check first
         std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let wave = unpanic(|| simple::read(path)).map_err(|e| format!("{}: {e}", path.display()))?;
+        let wave =
+            unpanic(|| simple::read(path)).map_err(|e| format!("{}: {e}", path.display()))?;
         Ok(Self::of(wave))
     }
 
@@ -208,7 +213,11 @@ impl Trace {
                 path,
                 decl,
                 width: v.signal_encoding(h).length(),
-                names: v.enum_type(h).map(|(_, m)| m.iter().map(|(b, n)| (names_key(b).to_string(), n.to_string())).collect()),
+                names: v.enum_type(h).map(|(_, m)| {
+                    m.iter()
+                        .map(|(b, n)| (names_key(b).to_string(), n.to_string()))
+                        .collect()
+                }),
                 signed: false,
                 real: v.signal_encoding(h) == wellen::SignalEncoding::Real,
                 time: None,
@@ -216,9 +225,24 @@ impl Trace {
                 source: Source::File(v.signal_ref()),
             })
             .collect();
-        let mut by_path: HashMap<String, usize> = vars.iter().enumerate().map(|(i, v)| (v.path.clone(), i)).collect();
+        let mut by_path: HashMap<String, usize> = vars
+            .iter()
+            .enumerate()
+            .map(|(i, v)| (v.path.clone(), i))
+            .collect();
         composites(&mut vars, &mut by_path);
-        Trace { wave, fs_per_tick, fixed: vars.len(), vars, by_path, version: 0, edges: Default::default(), found: Default::default(), canon: Default::default(), design: Default::default() }
+        Trace {
+            wave,
+            fs_per_tick,
+            fixed: vars.len(),
+            vars,
+            by_path,
+            version: 0,
+            edges: Default::default(),
+            found: Default::default(),
+            canon: Default::default(),
+            design: Default::default(),
+        }
     }
 
     pub fn end(&self) -> Tick {
@@ -292,7 +316,14 @@ impl Trace {
     fn aggregate(&self, var: usize, bits: &str) -> String {
         let v = &self.vars[var];
         if v.children.is_empty() {
-            return v.name_of(bits).map_or_else(|| (crate::radix::RADIXES[0].format)(bits, 0).trim_start_matches("0x").to_string(), str::to_string);
+            return v.name_of(bits).map_or_else(
+                || {
+                    (crate::radix::RADIXES[0].format)(bits, 0)
+                        .trim_start_matches("0x")
+                        .to_string()
+                },
+                str::to_string,
+            );
         }
         let mut at = 0;
         let items = v.children.iter().map(|&c| {
@@ -306,7 +337,12 @@ impl Trace {
 
     /// `'{a:1, b:2}`, an array's elements without names: `'{8, 7}`.
     fn braced(&self, var: usize, items: impl Iterator<Item = String>) -> String {
-        let named = self.vars[var].children.iter().map(|&c| parts(&self.vars[c].path).last().and_then(|p| (!p.starts_with('[')).then(|| format!("{p}:"))).unwrap_or_default());
+        let named = self.vars[var].children.iter().map(|&c| {
+            parts(&self.vars[c].path)
+                .last()
+                .and_then(|p| (!p.starts_with('[')).then(|| format!("{p}:")))
+                .unwrap_or_default()
+        });
         let all: Vec<String> = named.zip(items).map(|(n, i)| n + &i).collect();
         format!("'{{{}}}", all.join(", "))
     }
@@ -318,7 +354,10 @@ impl Trace {
 
     /// An array, its children indexed (`mem[0]`), rather than a struct.
     pub fn is_array(&self, var: usize) -> bool {
-        self.vars[var].children.iter().any(|&c| self.vars[c].path.ends_with(']'))
+        self.vars[var]
+            .children
+            .iter()
+            .any(|&c| self.vars[c].path.ends_with(']'))
     }
 
     /// What is in a struct, record or array (spec §6 "Composite rows"): its fields or elements
@@ -330,7 +369,12 @@ impl Trace {
         while let Some((c, depth)) = stack.pop() {
             let path = parts(&self.vars[c].path);
             let rel = &path[base..];
-            out.push(Field { var: c, depth, name: rel.last().copied().unwrap_or_default().to_string(), rel: join(rel.iter().copied()) });
+            out.push(Field {
+                var: c,
+                depth,
+                name: rel.last().copied().unwrap_or_default().to_string(),
+                rel: join(rel.iter().copied()),
+            });
             if self.is_composite(c) {
                 stack.extend(self.vars[c].children.iter().rev().map(|&g| (g, depth + 1)));
             }
@@ -341,7 +385,8 @@ impl Trace {
     /// The file's design, its scopes and signals: the file's, and the computed ones it holds,
     /// worked out the first time it is asked for and again when the computed vars change.
     pub fn design(&self) -> &crate::design::Design {
-        self.design.get_or_init(|| crate::design::Design::of(&self.vars, self.fixed))
+        self.design
+            .get_or_init(|| crate::design::Design::of(&self.vars, self.fixed))
     }
 
     /// The computed vars were added, replaced or dropped: what was worked out from them is stale.
@@ -352,7 +397,11 @@ impl Trace {
 
     /// The scopes and signals nearest to a name that matched nothing (`Design::nearest`).
     pub fn nearest(&self, name: &str, n: usize) -> Vec<String> {
-        self.design().nearest(name, n).into_iter().map(str::to_string).collect()
+        self.design()
+            .nearest(name, n)
+            .into_iter()
+            .map(str::to_string)
+            .collect()
     }
 
     /// Every var's path in canonical form, by var (`canon`).
@@ -367,12 +416,19 @@ impl Trace {
 
     /// Add a computed signal from its values in time order (`changes`, times may repeat: the last
     /// value at a time counts), or replace the one with that path. Returns its var.
-    pub fn add_computed(&mut self, path: &str, width: Option<u32>, changes: Vec<(Tick, Val)>) -> Result<usize, String> {
+    pub fn add_computed(
+        &mut self,
+        path: &str,
+        width: Option<u32>,
+        changes: Vec<(Tick, Val)>,
+    ) -> Result<usize, String> {
         let mut list: Vec<(Tick, Val)> = Vec::with_capacity(changes.len());
         for (t, v) in changes {
             match list.last_mut() {
                 Some(last) if last.0 == t => last.1 = v,
-                Some(last) if last.0 > t => return Err(format!("{path}: values out of time order")),
+                Some(last) if last.0 > t => {
+                    return Err(format!("{path}: values out of time order"));
+                }
                 _ => list.push((t, v)),
             }
             // an equal value is no change; done after a same-time replace, which can make one
@@ -380,9 +436,21 @@ impl Trace {
                 list.pop();
             }
         }
-        let var = Var { path: path.to_string(), width, names: None, signed: false, real: false, time: None, decl: 1, children: Vec::new(), source: Source::Computed(list) };
+        let var = Var {
+            path: path.to_string(),
+            width,
+            names: None,
+            signed: false,
+            real: false,
+            time: None,
+            decl: 1,
+            children: Vec::new(),
+            source: Source::Computed(list),
+        };
         match self.by_path.get(path) {
-            Some(&i) if matches!(self.vars[i].source, Source::Computed(_)) && !self.is_composite(i) => {
+            Some(&i)
+                if matches!(self.vars[i].source, Source::Computed(_)) && !self.is_composite(i) =>
+            {
                 self.vars[i] = var;
                 // new values: what was worked out from the old ones is stale
                 self.changed();
@@ -402,13 +470,18 @@ impl Trace {
 
     /// Drop the computed vars not in `keep`. Returns where each var went (None: dropped), or None
     /// when all are kept and nothing moved.
-    pub fn retain_computed(&mut self, keep: &std::collections::HashSet<usize>) -> Option<Vec<Option<usize>>> {
+    pub fn retain_computed(
+        &mut self,
+        keep: &std::collections::HashSet<usize>,
+    ) -> Option<Vec<Option<usize>>> {
         if (self.fixed..self.vars.len()).all(|v| keep.contains(&v)) {
             return None;
         }
         // the computed vars move: their canonical paths are worked out again
         self.canon.get_mut().truncate(self.fixed);
-        let mut to: Vec<Option<usize>> = (0..self.vars.len()).map(|v| (v < self.fixed).then_some(v)).collect();
+        let mut to: Vec<Option<usize>> = (0..self.vars.len())
+            .map(|v| (v < self.fixed).then_some(v))
+            .collect();
         for (k, var) in self.vars.split_off(self.fixed).into_iter().enumerate() {
             self.by_path.remove(&var.path);
             if keep.contains(&(self.fixed + k)) {
@@ -418,7 +491,10 @@ impl Trace {
             }
         }
         let edges = std::mem::take(self.edges.get_mut());
-        *self.edges.get_mut() = edges.into_iter().filter_map(|((v, b), e)| Some(((to[v]?, b), e))).collect();
+        *self.edges.get_mut() = edges
+            .into_iter()
+            .filter_map(|((v, b), e)| Some(((to[v]?, b), e)))
+            .collect();
         self.changed();
         Some(to)
     }
@@ -427,8 +503,17 @@ impl Trace {
     pub fn first_time(&self, var: usize) -> Option<Tick> {
         match &self.vars[var].source {
             Source::Computed(list) => list.first().map(|x| x.0),
-            Source::Composite => self.vars[var].children.iter().filter_map(|&c| self.first_time(c)).min(),
-            Source::File(s) => self.wave.get_signal(*s)?.time_indices().first().map(|&i| self.wave.time_table()[i as usize]),
+            Source::Composite => self.vars[var]
+                .children
+                .iter()
+                .filter_map(|&c| self.first_time(c))
+                .min(),
+            Source::File(s) => self
+                .wave
+                .get_signal(*s)?
+                .time_indices()
+                .first()
+                .map(|&i| self.wave.time_table()[i as usize]),
         }
     }
 
@@ -450,7 +535,10 @@ impl Trace {
     /// given a value later changes then, from none).
     fn indices(&self, var: usize) -> (&[u32], usize) {
         let ti = match self.vars[var].source {
-            Source::File(s) => self.wave.get_signal(s).map_or(&[][..], |s| s.time_indices()),
+            Source::File(s) => self
+                .wave
+                .get_signal(s)
+                .map_or(&[][..], |s| s.time_indices()),
             _ => &[],
         };
         (ti, ti.partition_point(|&x| x == 0))
@@ -458,20 +546,33 @@ impl Trace {
 
     fn tt_pos(&self, t: Tick, inclusive: bool) -> u32 {
         let tt = self.wave.time_table();
-        (if inclusive { tt.partition_point(|&x| x <= t) } else { tt.partition_point(|&x| x < t) }) as u32
+        (if inclusive {
+            tt.partition_point(|&x| x <= t)
+        } else {
+            tt.partition_point(|&x| x < t)
+        }) as u32
     }
 
     pub fn value_at(&self, var: usize, t: Tick) -> Option<Val> {
         // shortcut (#7): a composite's value is joined from its signals' at each lookup; keep its change list if wide structs draw slowly.
         if self.is_composite(var) {
-            let vals: Vec<Option<Val>> = self.vars[var].children.iter().map(|&c| self.value_at(c, t)).collect();
-            return vals.iter().any(Option::is_some).then(|| self.join_values(var, &vals));
+            let vals: Vec<Option<Val>> = self.vars[var]
+                .children
+                .iter()
+                .map(|&c| self.value_at(c, t))
+                .collect();
+            return vals
+                .iter()
+                .any(Option::is_some)
+                .then(|| self.join_values(var, &vals));
         }
         if let Some(list) = self.computed(var) {
             let i = list.partition_point(|x| x.0 <= t);
             return i.checked_sub(1).map(|i| list[i].1.clone());
         }
-        let Source::File(s) = self.vars[var].source else { return None };
+        let Source::File(s) = self.vars[var].source else {
+            return None;
+        };
         let sig = self.wave.get_signal(s)?;
         let idx = self.tt_pos(t, true).checked_sub(1)?;
         let off = sig.get_offset(idx)?;
@@ -495,7 +596,10 @@ impl Trace {
         }
         if let Some(list) = self.computed(var) {
             let changes = list.get(1..).unwrap_or(&[]);
-            let (a, b) = (changes.partition_point(|x| x.0 < t0), changes.partition_point(|x| x.0 < t1));
+            let (a, b) = (
+                changes.partition_point(|x| x.0 < t0),
+                changes.partition_point(|x| x.0 < t1),
+            );
             return match b.saturating_sub(a) {
                 0 => Changes::None,
                 1 => Changes::One,
@@ -517,11 +621,17 @@ impl Trace {
 
     pub fn next_change(&self, var: usize, t: Tick) -> Option<Tick> {
         if self.is_composite(var) {
-            return self.vars[var].children.iter().filter_map(|&c| self.next_change(c, t)).min();
+            return self.vars[var]
+                .children
+                .iter()
+                .filter_map(|&c| self.next_change(c, t))
+                .min();
         }
         if let Some(list) = self.computed(var) {
             let changes = list.get(1..).unwrap_or(&[]);
-            return changes.get(changes.partition_point(|x| x.0 <= t)).map(|x| x.0);
+            return changes
+                .get(changes.partition_point(|x| x.0 <= t))
+                .map(|x| x.0);
         }
         let (ti, first) = self.indices(var);
         let i = self.tt_pos(t, true);
@@ -531,11 +641,18 @@ impl Trace {
 
     pub fn prev_change(&self, var: usize, t: Tick) -> Option<Tick> {
         if self.is_composite(var) {
-            return self.vars[var].children.iter().filter_map(|&c| self.prev_change(c, t)).max();
+            return self.vars[var]
+                .children
+                .iter()
+                .filter_map(|&c| self.prev_change(c, t))
+                .max();
         }
         if let Some(list) = self.computed(var) {
             let changes = list.get(1..).unwrap_or(&[]);
-            return changes.partition_point(|x| x.0 < t).checked_sub(1).map(|i| changes[i].0);
+            return changes
+                .partition_point(|x| x.0 < t)
+                .checked_sub(1)
+                .map(|i| changes[i].0);
         }
         let (ti, first) = self.indices(var);
         let i = self.tt_pos(t, false);
@@ -546,20 +663,38 @@ impl Trace {
     /// The var's changes after `t` (backward: before it), nearest first, each with its value: one
     /// search to start, then a step per change, where `next_change` and `value_at` search each
     /// time. For whatever walks a signal (searches, clock edges, decoders).
-    fn walk_var(&self, var: usize, t: Tick, forward: bool) -> Box<dyn Iterator<Item = (Tick, Val)> + '_> {
+    fn walk_var(
+        &self,
+        var: usize,
+        t: Tick,
+        forward: bool,
+    ) -> Box<dyn Iterator<Item = (Tick, Val)> + '_> {
         if self.is_composite(var) {
             let mut at = t;
             return Box::new(std::iter::from_fn(move || {
-                at = if forward { self.next_change(var, at)? } else { self.prev_change(var, at)? };
+                at = if forward {
+                    self.next_change(var, at)?
+                } else {
+                    self.prev_change(var, at)?
+                };
                 Some((at, self.value_at(var, at)?))
             }));
         }
         if let Some(list) = self.computed(var) {
             let changes = list.get(1..).unwrap_or(&[]);
             return if forward {
-                Box::new(changes[changes.partition_point(|x| x.0 <= t)..].iter().cloned())
+                Box::new(
+                    changes[changes.partition_point(|x| x.0 <= t)..]
+                        .iter()
+                        .cloned(),
+                )
             } else {
-                Box::new(changes[..changes.partition_point(|x| x.0 < t)].iter().rev().cloned())
+                Box::new(
+                    changes[..changes.partition_point(|x| x.0 < t)]
+                        .iter()
+                        .rev()
+                        .cloned(),
+                )
             };
         }
         let (ti, first) = self.indices(var);
@@ -605,14 +740,37 @@ fn index_form(name: &str) -> String {
 /// FST's `mem.[0]`, GHDL's `mem.0`; `gen[0]`, not `gen(0)`), and how many of its parts are its HDL name: those under the innermost scope
 /// that isn't a struct, record, array or index.
 fn paths(h: &wellen::Hierarchy) -> HashMap<wellen::VarRef, (String, usize)> {
-    fn walk<'a>(h: &'a wellen::Hierarchy, s: wellen::ScopeRef, chain: &mut Vec<&'a wellen::Scope>, out: &mut HashMap<wellen::VarRef, (String, usize)>) {
+    fn walk<'a>(
+        h: &'a wellen::Hierarchy,
+        s: wellen::ScopeRef,
+        chain: &mut Vec<&'a wellen::Scope>,
+        out: &mut HashMap<wellen::VarRef, (String, usize)>,
+    ) {
         use wellen::ScopeType::*;
         chain.push(&h[s]);
         // how many scopes, from the innermost, are part of the HDL name
-        let inside = chain.iter().rev().take_while(|c| index_form(c.name(h)).starts_with('[') || matches!(c.scope_type(), Struct | Union | VhdlRecord | VhdlArray | SvArray)).count();
+        let inside = chain
+            .iter()
+            .rev()
+            .take_while(|c| {
+                index_form(c.name(h)).starts_with('[')
+                    || matches!(
+                        c.scope_type(),
+                        Struct | Union | VhdlRecord | VhdlArray | SvArray
+                    )
+            })
+            .count();
         for v in h[s].vars(h) {
-            let names: Vec<String> = chain.iter().map(|c| c.name(h)).chain([h[v].name(h)]).map(index_form).collect();
-            let decl = parts(&join(names[names.len() - 1 - inside..].iter().map(String::as_str))).len();
+            let names: Vec<String> = chain
+                .iter()
+                .map(|c| c.name(h))
+                .chain([h[v].name(h)])
+                .map(index_form)
+                .collect();
+            let decl = parts(&join(
+                names[names.len() - 1 - inside..].iter().map(String::as_str),
+            ))
+            .len();
             out.insert(v, (join(names.iter().map(String::as_str)), decl));
         }
         for sub in h[s].scopes(h) {
@@ -620,7 +778,10 @@ fn paths(h: &wellen::Hierarchy) -> HashMap<wellen::VarRef, (String, usize)> {
         }
         chain.pop();
     }
-    let mut out: HashMap<_, _> = h.vars().map(|v| (v, (index_form(h[v].name(h)), 1))).collect();
+    let mut out: HashMap<_, _> = h
+        .vars()
+        .map(|v| (v, (index_form(h[v].name(h)), 1)))
+        .collect();
     for s in h.scopes() {
         walk(h, s, &mut Vec::new(), &mut out);
     }
@@ -644,7 +805,17 @@ fn composites(vars: &mut Vec<Var>, by_path: &mut HashMap<String, usize>) {
                 // a signal of the file with that path: no composite there
                 Some(_) => break,
                 None => {
-                    vars.push(Var { path: scope.clone(), width: None, names: None, signed: false, real: false, time: None, decl: k - start, children: Vec::new(), source: Source::Composite });
+                    vars.push(Var {
+                        path: scope.clone(),
+                        width: None,
+                        names: None,
+                        signed: false,
+                        real: false,
+                        time: None,
+                        decl: k - start,
+                        children: Vec::new(),
+                        source: Source::Composite,
+                    });
                     by_path.insert(scope, vars.len() - 1);
                     (vars.len() - 1, true)
                 }
@@ -669,11 +840,17 @@ fn composites(vars: &mut Vec<Var>, by_path: &mut HashMap<String, usize>) {
 
 /// wellen's reading, with its panics (`not yet implemented: support multi-dimensional arrays!` in
 /// a GHW file) as errors: a file wtf can't read is no reason to crash.
-fn unpanic(read: impl FnOnce() -> wellen::Result<simple::Waveform>) -> Result<simple::Waveform, String> {
+fn unpanic(
+    read: impl FnOnce() -> wellen::Result<simple::Waveform>,
+) -> Result<simple::Waveform, String> {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(read)) {
         Ok(r) => r.map_err(|e| e.to_string()),
         Err(p) => {
-            let msg = p.downcast_ref::<String>().map(String::as_str).or(p.downcast_ref::<&str>().copied()).unwrap_or("unknown error");
+            let msg = p
+                .downcast_ref::<String>()
+                .map(String::as_str)
+                .or(p.downcast_ref::<&str>().copied())
+                .unwrap_or("unknown error");
             Err(format!("wellen can't read it: {msg}"))
         }
     }
@@ -694,7 +871,11 @@ fn val(v: SignalValueRef) -> Val {
 fn bit_of(v: Val, bit: Option<u32>) -> Option<Val> {
     match (bit, v) {
         (None, v) => Some(v),
-        (Some(b), Val::Bits(s)) => s.chars().rev().nth(b as usize).map(|c| Val::Bits(c.to_string())),
+        (Some(b), Val::Bits(s)) => s
+            .chars()
+            .rev()
+            .nth(b as usize)
+            .map(|c| Val::Bits(c.to_string())),
         (Some(_), Val::Text(_)) => None,
     }
 }
@@ -705,7 +886,11 @@ fn bit_of(v: Val, bit: Option<u32>) -> Option<Val> {
 impl Trace {
     /// A signal's width, 1 for a bit of it.
     pub fn probe_width(&self, (var, bit): (usize, Option<u32>)) -> Option<u32> {
-        if bit.is_some() { Some(1) } else { self.vars[var].width }
+        if bit.is_some() {
+            Some(1)
+        } else {
+            self.vars[var].width
+        }
     }
 
     /// A signal's full path, a bit of a bus as `data[3]`.
@@ -720,8 +905,16 @@ impl Trace {
 
     /// The changes of a var or one of its bits after `t` (backward: before it), nearest first,
     /// each with the value it changes to; a bit's are the bus changes that change it.
-    pub fn walk(&self, var: usize, bit: Option<u32>, t: Tick, forward: bool) -> Box<dyn Iterator<Item = (Tick, Option<Val>)> + '_> {
-        let changes = self.walk_var(var, t, forward).map(move |(x, v)| (x, bit_of(v, bit)));
+    pub fn walk(
+        &self,
+        var: usize,
+        bit: Option<u32>,
+        t: Tick,
+        forward: bool,
+    ) -> Box<dyn Iterator<Item = (Tick, Option<Val>)> + '_> {
+        let changes = self
+            .walk_var(var, t, forward)
+            .map(move |(x, v)| (x, bit_of(v, bit)));
         if bit.is_none() {
             return Box::new(changes);
         }
@@ -792,11 +985,19 @@ impl Trace {
 
     // a whole var's change needs no value, which a walk makes
     pub fn next_change_of(&self, var: usize, bit: Option<u32>, t: Tick) -> Option<Tick> {
-        if bit.is_none() { self.next_change(var, t) } else { self.walk(var, bit, t, true).next().map(|c| c.0) }
+        if bit.is_none() {
+            self.next_change(var, t)
+        } else {
+            self.walk(var, bit, t, true).next().map(|c| c.0)
+        }
     }
 
     pub fn prev_change_of(&self, var: usize, bit: Option<u32>, t: Tick) -> Option<Tick> {
-        if bit.is_none() { self.prev_change(var, t) } else { self.walk(var, bit, t, false).next().map(|c| c.0) }
+        if bit.is_none() {
+            self.prev_change(var, t)
+        } else {
+            self.walk(var, bit, t, false).next().map(|c| c.0)
+        }
     }
 }
 
@@ -805,7 +1006,10 @@ mod tests {
     use super::*;
 
     fn open(ext: &str) -> Trace {
-        let mut t = Trace::open(format!("{}/../tests/data/simple.{ext}", env!("CARGO_MANIFEST_DIR")).as_ref()).unwrap();
+        let mut t = Trace::open(
+            format!("{}/../tests/data/simple.{ext}", env!("CARGO_MANIFEST_DIR")).as_ref(),
+        )
+        .unwrap();
         let all: Vec<usize> = (0..t.vars.len()).collect();
         t.load(&all);
         t
@@ -823,24 +1027,76 @@ mod tests {
         let mut t = open("vcd");
         let b = |s: &str| Val::Bits(s.into());
         // repeats and same-time values fold away; the first value is not a change
-        let v = t.add_computed("calc.x", Some(2), vec![(0, b("00")), (10, b("01")), (10, b("10")), (20, b("10")), (30, b("11"))]).unwrap();
+        let v = t
+            .add_computed(
+                "calc.x",
+                Some(2),
+                vec![
+                    (0, b("00")),
+                    (10, b("01")),
+                    (10, b("10")),
+                    (20, b("10")),
+                    (30, b("11")),
+                ],
+            )
+            .unwrap();
         assert_eq!(v, t.vars.len() - 1);
         assert_eq!(t.by_path["calc.x"], v);
-        assert_eq!((t.value_at(v, 0), t.value_at(v, 9), t.value_at(v, 10), t.value_at(v, 99)), (Some(b("00")), Some(b("00")), Some(b("10")), Some(b("11"))));
-        assert_eq!((t.next_change(v, 0), t.next_change(v, 10), t.next_change(v, 30)), (Some(10), Some(30), None));
-        assert_eq!((t.prev_change(v, 30), t.prev_change(v, 11), t.prev_change(v, 10)), (Some(10), Some(10), None));
-        assert_eq!((t.changes_in(v, 0, 10), t.changes_in(v, 0, 11), t.changes_in(v, 5, 31)), (Changes::None, Changes::One, Changes::Many));
+        assert_eq!(
+            (
+                t.value_at(v, 0),
+                t.value_at(v, 9),
+                t.value_at(v, 10),
+                t.value_at(v, 99)
+            ),
+            (Some(b("00")), Some(b("00")), Some(b("10")), Some(b("11")))
+        );
+        assert_eq!(
+            (
+                t.next_change(v, 0),
+                t.next_change(v, 10),
+                t.next_change(v, 30)
+            ),
+            (Some(10), Some(30), None)
+        );
+        assert_eq!(
+            (
+                t.prev_change(v, 30),
+                t.prev_change(v, 11),
+                t.prev_change(v, 10)
+            ),
+            (Some(10), Some(10), None)
+        );
+        assert_eq!(
+            (
+                t.changes_in(v, 0, 10),
+                t.changes_in(v, 0, 11),
+                t.changes_in(v, 5, 31)
+            ),
+            (Changes::None, Changes::One, Changes::Many)
+        );
         // bits of it, as of any bus
         assert_eq!(t.next_change_of(v, Some(0), 0), Some(30));
-        assert_eq!(t.bit_changes(v, &[(0, 15), (15, 40)]), [[Changes::None, Changes::One], [Changes::One, Changes::None]]);
+        assert_eq!(
+            t.bit_changes(v, &[(0, 15), (15, 40)]),
+            [[Changes::None, Changes::One], [Changes::One, Changes::None]]
+        );
         // values before the first: none
-        let late = t.add_computed("calc.late", Some(1), vec![(40, b("1"))]).unwrap();
+        let late = t
+            .add_computed("calc.late", Some(1), vec![(40, b("1"))])
+            .unwrap();
         assert_eq!((t.value_at(late, 39), t.next_change(late, 0)), (None, None));
         // the same path replaces it in place; a file signal's path can't be taken
         assert_eq!(t.add_computed("calc.x", Some(1), vec![(0, b("1"))]), Ok(v));
         assert_eq!(t.value_at(v, 50), Some(b("1")));
-        assert_eq!(t.add_computed("top.clk", Some(1), vec![]), Err("top.clk is a signal of the file".into()));
-        assert_eq!(t.add_computed("calc.y", Some(1), vec![(5, b("1")), (2, b("0"))]), Err("calc.y: values out of time order".into()));
+        assert_eq!(
+            t.add_computed("top.clk", Some(1), vec![]),
+            Err("top.clk is a signal of the file".into())
+        );
+        assert_eq!(
+            t.add_computed("calc.y", Some(1), vec![(5, b("1")), (2, b("0"))]),
+            Err("calc.y: values out of time order".into())
+        );
         t.load(&[v, late]);
     }
 
@@ -856,7 +1112,11 @@ mod tests {
             let p = &var.path;
             for t in 0..=v.end() + 1 {
                 assert_eq!(bits(&v, p, t), bits(&f, p, t), "{p} @ {t}");
-                assert_eq!(v.next_change(v.by_path[p], t), f.next_change(f.by_path[p], t), "{p} @ {t}");
+                assert_eq!(
+                    v.next_change(v.by_path[p], t),
+                    f.next_change(f.by_path[p], t),
+                    "{p} @ {t}"
+                );
             }
         }
     }
@@ -867,19 +1127,40 @@ mod tests {
         for ext in ["vcd", "fst"] {
             let mut t = open(ext);
             let b = |s: &str| Val::Bits(s.into());
-            t.add_computed("calc.x", Some(2), vec![(0, b("00")), (10, b("01")), (30, b("11"))]).unwrap();
+            t.add_computed(
+                "calc.x",
+                Some(2),
+                vec![(0, b("00")), (10, b("01")), (30, b("11"))],
+            )
+            .unwrap();
             let end = t.end() + 2;
             for var in 0..t.vars.len() {
                 let bits = (0..t.vars[var].width.filter(|&w| w > 1).unwrap_or(0)).map(Some);
                 for bit in std::iter::once(None).chain(bits) {
                     let v = |x: Tick| t.value_of(var, bit, x);
-                    let changes: Vec<(Tick, Option<Val>)> = (1..end).filter(|&x| v(x) != v(x - 1)).map(|x| (x, v(x))).collect();
+                    let changes: Vec<(Tick, Option<Val>)> = (1..end)
+                        .filter(|&x| v(x) != v(x - 1))
+                        .map(|x| (x, v(x)))
+                        .collect();
                     for from in 0..end {
                         let fwd: Vec<_> = changes.iter().filter(|c| c.0 > from).cloned().collect();
-                        let back: Vec<_> = changes.iter().rev().filter(|c| c.0 < from).cloned().collect();
+                        let back: Vec<_> = changes
+                            .iter()
+                            .rev()
+                            .filter(|c| c.0 < from)
+                            .cloned()
+                            .collect();
                         let at = format!("{ext} {} {bit:?} from {from}", t.vars[var].path);
-                        assert_eq!(t.walk(var, bit, from, true).collect::<Vec<_>>(), fwd, "{at}");
-                        assert_eq!(t.walk(var, bit, from, false).collect::<Vec<_>>(), back, "{at}");
+                        assert_eq!(
+                            t.walk(var, bit, from, true).collect::<Vec<_>>(),
+                            fwd,
+                            "{at}"
+                        );
+                        assert_eq!(
+                            t.walk(var, bit, from, false).collect::<Vec<_>>(),
+                            back,
+                            "{at}"
+                        );
                     }
                 }
             }
@@ -915,7 +1196,10 @@ mod tests {
         let c = t.bit_changes(d, &[(20, 21), (40, 45)]);
         assert_eq!((c[1][0], c[0][0]), (Changes::None, Changes::One));
         // 0xE1 -> 0x3A 0x3B 0x3C 0x3D 0x7F: bit 6 falls and rises, bit 7 only falls, bit 5 stays 1
-        assert_eq!((c[0][1], c[6][1], c[7][1], c[5][1]), (Changes::Many, Changes::Many, Changes::One, Changes::None));
+        assert_eq!(
+            (c[0][1], c[6][1], c[7][1], c[5][1]),
+            (Changes::Many, Changes::Many, Changes::One, Changes::None)
+        );
         assert!(t.next_change_of(d, Some(1), 10).is_none_or(|x| x > 20));
         assert_eq!(t.next_change_of(d, Some(0), 10), Some(20));
         assert_eq!(t.prev_change_of(d, Some(0), 20), Some(10));

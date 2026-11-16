@@ -1,7 +1,7 @@
 //! The first start (spec §19 "First start"): which glyph set the terminal's font draws, then dark
 //! or light, each picked from samples drawn as wtf draws a trace. The answers go to the config file.
 
-use crate::draw::{self, gl, pal, put, Glyphs, Palette};
+use crate::draw::{self, Glyphs, Palette, gl, pal, put};
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -13,7 +13,9 @@ use wtf_core::workspace::Workspace;
 /// A clock and a bus that starts unknown, for the samples: long enough to fill the widest card
 /// at the samples' zoom.
 fn sample() -> String {
-    let mut v = String::from("$timescale 1ns $end\n$scope module top $end\n$var wire 1 ! clk $end\n$var wire 8 # data $end\n$upscope $end\n$enddefinitions $end\n#0\n0!\nbxxxxxxxx #\n");
+    let mut v = String::from(
+        "$timescale 1ns $end\n$scope module top $end\n$var wire 1 ! clk $end\n$var wire 8 # data $end\n$upscope $end\n$enddefinitions $end\n#0\n0!\nbxxxxxxxx #\n",
+    );
     let data = ["10100101", "111100", "11110000", "1111", "10011001"];
     for t in (5..=400).step_by(5) {
         v.push_str(&format!("#{t}\n{}!\n", (t / 5) % 2));
@@ -52,28 +54,59 @@ impl Setup {
     /// `bg` is the terminal's background, if it answered: the theme that suits it comes first.
     pub fn new(mono: bool, rgb: bool, bg: Option<crate::theme::Rgb>) -> Setup {
         let leak = |p: Palette| -> &'static Palette { Box::leak(Box::new(p)) };
-        let themes = ["dark", "light"].map(|n| (n, leak(crate::theme::builtin_on(n, rgb, bg).expect("built in")))).to_vec();
+        let themes = ["dark", "light"]
+            .map(|n| {
+                (
+                    n,
+                    leak(crate::theme::builtin_on(n, rgb, bg).expect("built in")),
+                )
+            })
+            .to_vec();
         let suited = bg.is_some_and(crate::theme::is_light) as usize;
-        let base = if mono { leak(Palette::mono()) } else { themes[0].1 };
-        let mut ws = Workspace::new(Trace::from_bytes(sample().into_bytes()).expect("the sample is a VCD"), String::new());
+        let base = if mono {
+            leak(Palette::mono())
+        } else {
+            themes[0].1
+        };
+        let mut ws = Workspace::new(
+            Trace::from_bytes(sample().into_bytes()).expect("the sample is a VCD"),
+            String::new(),
+        );
         command::run(&mut ws, "add **").expect("the sample has signals");
         // two ticks a column: a clock period is five columns
         command::run(&mut ws, "zoom 2").expect("a zoom");
         ws.view.cursor = 20;
-        Setup { theme_step: false, sel: 0, glyph: 0, mono, themes, suited, base, ws }
+        Setup {
+            theme_step: false,
+            sel: 0,
+            glyph: 0,
+            mono,
+            themes,
+            suited,
+            base,
+            ws,
+        }
     }
 
     fn options(&self) -> usize {
-        if self.theme_step { self.themes.len() } else { draw::SETS.len() }
+        if self.theme_step {
+            self.themes.len()
+        } else {
+            draw::SETS.len()
+        }
     }
 
     /// Takes a key; `Some` when the setup is over.
     pub fn key(&mut self, k: KeyEvent) -> Option<Option<Answer>> {
-        let ctrl = k.modifiers.contains(crossterm::event::KeyModifiers::CONTROL);
+        let ctrl = k
+            .modifiers
+            .contains(crossterm::event::KeyModifiers::CONTROL);
         match k.code {
             KeyCode::Char('c') if ctrl => return Some(None),
             KeyCode::Char('j') | KeyCode::Down => self.sel = (self.sel + 1) % self.options(),
-            KeyCode::Char('k') | KeyCode::Up => self.sel = (self.sel + self.options() - 1) % self.options(),
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.sel = (self.sel + self.options() - 1) % self.options()
+            }
             KeyCode::Char(c @ '1'..='9') if (c as usize - '1' as usize) < self.options() => {
                 self.sel = c as usize - '1' as usize;
                 return self.choose();
@@ -104,7 +137,10 @@ impl Setup {
     }
 
     fn answer(&self) -> Answer {
-        Answer { glyphs: draw::SETS[self.glyph].0, theme: (!self.mono).then(|| self.themes[self.sel].0) }
+        Answer {
+            glyphs: draw::SETS[self.glyph].0,
+            theme: (!self.mono).then(|| self.themes[self.sel].0),
+        }
     }
 
     fn glyphs(&self) -> &'static Glyphs {
@@ -134,13 +170,31 @@ impl Setup {
         put(buf, x + 4, 1, &format!("{} first start", gl().dot), dim);
         if !self.mono {
             let step = format!("{} of 2", 1 + self.theme_step as usize);
-            put(buf, (x + total).saturating_sub(step.chars().count()), 1, &step, dim);
+            put(
+                buf,
+                (x + total).saturating_sub(step.chars().count()),
+                1,
+                &step,
+                dim,
+            );
         }
         let (question, hint) = match self.theme_step {
-            false => ("Which of these does your terminal draw cleanly?", "Lines should join up; no character should be a box or a question mark."),
-            true => ("Dark or light?", "Pick the one that suits your terminal's background."),
+            false => (
+                "Which of these does your terminal draw cleanly?",
+                "Lines should join up; no character should be a box or a question mark.",
+            ),
+            true => (
+                "Dark or light?",
+                "Pick the one that suits your terminal's background.",
+            ),
         };
-        put(buf, x, 3, question, Style::new().add_modifier(Modifier::BOLD));
+        put(
+            buf,
+            x,
+            3,
+            question,
+            Style::new().add_modifier(Modifier::BOLD),
+        );
         put(buf, x, 4, hint, dim);
         let ch = SAMPLE_LINES + 2;
         let rows = names.len().div_ceil(cols);
@@ -161,11 +215,33 @@ impl Setup {
             draw::set_glyphs(g);
             draw::set_palette_ref(p);
             // a set with icons shows one: a font without them draws a box
-            let icon = if !self.theme_step && g.icons { " \u{ea83}" } else { "" };
-            let mark = if on && pal().mono { format!("{} ", gl().hl) } else { String::new() };
-            let title = vec![(format!("{mark}{} {name}{icon}", i + 1), if on { accent } else { Style::new().add_modifier(Modifier::BOLD) })];
+            let icon = if !self.theme_step && g.icons {
+                " \u{ea83}"
+            } else {
+                ""
+            };
+            let mark = if on && pal().mono {
+                format!("{} ", gl().hl)
+            } else {
+                String::new()
+            };
+            let title = vec![(
+                format!("{mark}{} {name}{icon}", i + 1),
+                if on {
+                    accent
+                } else {
+                    Style::new().add_modifier(Modifier::BOLD)
+                },
+            )];
             let r = Rect::new(cx as u16, cy as u16, cw as u16, ch as u16);
-            super::render::card_frame(buf, r, if on { pal().cursor } else { pal().dim }, &title, "", "");
+            super::render::card_frame(
+                buf,
+                r,
+                if on { pal().cursor } else { pal().dim },
+                &title,
+                "",
+                "",
+            );
             let full = Rect::new(0, 0, sw as u16, 1 + SAMPLE_LINES as u16);
             let mut s = Buffer::empty(full);
             draw::rows(&mut self.ws, &mut 0, false, &mut s, sw, 1 + SAMPLE_LINES);
@@ -173,13 +249,20 @@ impl Setup {
             draw::set_glyphs(self.glyphs());
             draw::set_palette_ref(self.base);
             for (dy, dx) in (0..SAMPLE_LINES).flat_map(|dy| (0..sw).map(move |dx| (dy, dx))) {
-                if let Some(cell) = buf.cell_mut((area.x + (cx + 2 + dx) as u16, area.y + (cy + 1 + dy) as u16)) {
+                if let Some(cell) =
+                    buf.cell_mut((area.x + (cx + 2 + dx) as u16, area.y + (cy + 1 + dy) as u16))
+                {
                     *cell = s[(dx as u16, 1 + dy as u16)].clone();
                 }
             }
         }
         // the keys, in the accent, what they do dim
-        let keys = [(format!("1{}{}", gl().dash, names.len()), " pick   "), ("j k".into(), " move   "), ("Enter".into(), " pick   "), ("Esc".into(), " the defaults")];
+        let keys = [
+            (format!("1{}{}", gl().dash, names.len()), " pick   "),
+            ("j k".into(), " move   "),
+            ("Enter".into(), " pick   "),
+            ("Esc".into(), " the defaults"),
+        ];
         let mut kx = x;
         for (k, what) in keys {
             put(buf, kx, h.saturating_sub(2), &k, accent);
@@ -188,7 +271,13 @@ impl Setup {
         }
         let again = "wtf --setup asks again";
         if kx + 2 + again.len() <= x + total {
-            put(buf, x + total - again.len(), h.saturating_sub(2), again, dim);
+            put(
+                buf,
+                x + total - again.len(),
+                h.saturating_sub(2),
+                again,
+                dim,
+            );
         }
         draw::fill_screen(buf);
     }
@@ -208,7 +297,9 @@ pub fn run(mono: bool, bg: Option<crate::theme::Rgb>) -> Option<String> {
             break Err(e.to_string());
         }
         match crossterm::event::read() {
-            Ok(crossterm::event::Event::Key(k)) if k.kind == crossterm::event::KeyEventKind::Press => {
+            Ok(crossterm::event::Event::Key(k))
+                if k.kind == crossterm::event::KeyEventKind::Press =>
+            {
                 if let Some(a) = setup.key(k) {
                     break Ok(a);
                 }
@@ -226,7 +317,9 @@ pub fn run(mono: bool, bg: Option<crate::theme::Rgb>) -> Option<String> {
     let dir = crate::config::dir()?;
     let mut keys = vec![("glyphs", a.glyphs)];
     keys.extend(a.theme.map(|t| ("theme", t)));
-    crate::config::save(&dir, &keys).err().map(|e| format!("setup: {e}"))
+    crate::config::save(&dir, &keys)
+        .err()
+        .map(|e| format!("setup: {e}"))
 }
 
 #[cfg(test)]
@@ -261,22 +354,36 @@ mod tests {
         let a = press(&mut s, KeyCode::Char('2')).unwrap().unwrap();
         assert_eq!((a.glyphs, a.theme), ("box", Some("light")));
         // Esc: the defaults for what is left
-        let a = press(&mut Setup::new(false, true, None), KeyCode::Esc).unwrap().unwrap();
+        let a = press(&mut Setup::new(false, true, None), KeyCode::Esc)
+            .unwrap()
+            .unwrap();
         assert_eq!((a.glyphs, a.theme), ("unicode", Some("dark")));
         let mut s = Setup::new(false, true, None);
         press(&mut s, KeyCode::Char('3'));
         let a = press(&mut s, KeyCode::Esc).unwrap().unwrap();
         assert_eq!((a.glyphs, a.theme), ("ascii", Some("dark")));
         // without colour, no theme question
-        let a = press(&mut Setup::new(true, true, None), KeyCode::Char('3')).unwrap().unwrap();
+        let a = press(&mut Setup::new(true, true, None), KeyCode::Char('3'))
+            .unwrap()
+            .unwrap();
         assert_eq!((a.glyphs, a.theme), ("ascii", None));
         assert!(press(&mut Setup::new(false, true, None), KeyCode::Char('5')).is_none());
         // on a light terminal light is selected, and the default
         let mut s = Setup::new(false, true, Some((0xfa, 0xfa, 0xfa)));
         press(&mut s, KeyCode::Enter);
         assert_eq!(s.sel, 1);
-        let a = press(&mut Setup::new(false, true, Some((0xfa, 0xfa, 0xfa))), KeyCode::Esc).unwrap().unwrap();
+        let a = press(
+            &mut Setup::new(false, true, Some((0xfa, 0xfa, 0xfa))),
+            KeyCode::Esc,
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(a.theme, Some("light"));
-        assert!(Setup::new(false, true, None).key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)).unwrap().is_none());
+        assert!(
+            Setup::new(false, true, None)
+                .key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL))
+                .unwrap()
+                .is_none()
+        );
     }
 }

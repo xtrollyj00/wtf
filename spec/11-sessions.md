@@ -92,6 +92,10 @@ rows = [
   `select`, `bytes`), `pair` (`signals = { request = "req", response = "resp" }`, `params = { id =
   "id" }`) and `check` (no signals, a `clock`, `params = { stall = "valid && !ready" }`: a rule's
   name and the expression that is a violation).
+- A protocol from a file is its name and that file: `name = "probe"`, `wasm = "probe.wasm"`, and
+  no `roles`, `when` or `fields` (section 16). Reading a session does not load the file: one the
+  binary has not loaded warns `wasm <path> is not loaded` and the entry stays, so it can be tried
+  again once the file is there.
 - `[[names]]` entries give a signal's value names (`:names`, for the `enum` radix): `signal` and
   `values`, in the form `:names` takes (`values = "0=IDLE 1=BUSY"`), written before the rows.
 - `[[signal]]` entries name computed signals (`:signal`), made before the rows, which can show

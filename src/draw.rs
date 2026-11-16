@@ -2,15 +2,16 @@
 //! the rows with their waveforms. The terminal UI draws its screen around it; the MCP server and
 //! `--snapshot` turn it into text.
 
+use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
+use ratatui::style::{Color, Modifier, Style};
+use wtf_core::protocol::Severity;
 use wtf_core::rows::{self, Row, Sig};
 use wtf_core::stream::Stream;
 use wtf_core::time::{self, Tick};
 use wtf_core::trace::{Changes, Trace, Val};
 use wtf_core::view::View;
 use wtf_core::workspace::{Kind, Sub, Workspace};
-use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
 
 /// The name and value columns' widest, without `name_width` / `value_width` in the config file.
 pub const COLUMNS: (usize, usize) = (30, 20);
@@ -24,6 +25,8 @@ pub struct Palette {
     pub fill: Color,
     pub unknown: Color,
     pub highz: Color,
+    /// A violation the protocol's spec only advises against (spec §16 severity).
+    pub warning: Color,
     /// The accent: the cursor's head on the time axis, the selected name.
     pub cursor: Color,
     pub cursor_text: Color,
@@ -57,19 +60,45 @@ pub fn truecolor() -> bool {
     let term = env("TERM");
     matches!(env("COLORTERM").as_str(), "truecolor" | "24bit")
         || term.ends_with("-direct")
-        || ["ghostty", "kitty", "wezterm", "alacritty", "foot"].iter().any(|t| term.contains(t))
+        || ["ghostty", "kitty", "wezterm", "alacritty", "foot"]
+            .iter()
+            .any(|t| term.contains(t))
 }
 
 impl Palette {
     /// `NO_COLOR`: the terminal's own colours everywhere.
     pub fn mono() -> Palette {
         let r = Color::Reset;
-        Palette { line: r, bus: r, fill: r, unknown: r, highz: r, cursor: r, cursor_text: r, column: r, cursor_dim: r, mark: r, selected: r, panel: r, hatch: r, dim: r, hues: [r; 8], background: r, text: r, mono: true }
+        Palette {
+            line: r,
+            bus: r,
+            fill: r,
+            unknown: r,
+            highz: r,
+            warning: r,
+            cursor: r,
+            cursor_text: r,
+            column: r,
+            cursor_dim: r,
+            mark: r,
+            selected: r,
+            panel: r,
+            hatch: r,
+            dim: r,
+            hues: [r; 8],
+            background: r,
+            text: r,
+            mono: true,
+        }
     }
 
     /// Reversed where there is no colour: the cursor column, the selected name.
     pub fn accent(&self) -> Modifier {
-        if self.mono { Modifier::REVERSED } else { Modifier::empty() }
+        if self.mono {
+            Modifier::REVERSED
+        } else {
+            Modifier::empty()
+        }
     }
 }
 
@@ -109,7 +138,9 @@ pub fn rgb_of(c: Color, bg: bool) -> Option<Rgb> {
 
 pub fn pal() -> &'static Palette {
     static DARK: std::sync::OnceLock<Palette> = std::sync::OnceLock::new();
-    PALETTE.with(|c| c.get()).unwrap_or_else(|| DARK.get_or_init(|| crate::theme::builtin("dark", truecolor()).expect("dark is built in")))
+    PALETTE.with(|c| c.get()).unwrap_or_else(|| {
+        DARK.get_or_init(|| crate::theme::builtin("dark", truecolor()).expect("dark is built in"))
+    })
 }
 
 /// The theme's background and text wherever the screen was left at the terminal's.
@@ -203,7 +234,12 @@ pub const UNICODE: Glyphs = Glyphs {
 };
 
 /// Box drawing only: the legacy computing glyphs' pieces become corners.
-pub const BOX: Glyphs = Glyphs { crossing: ['┬', '┴'], open: ['┌', '└'], close: ['┐', '┘'], ..UNICODE };
+pub const BOX: Glyphs = Glyphs {
+    crossing: ['┬', '┴'],
+    open: ['┌', '└'],
+    close: ['┐', '┘'],
+    ..UNICODE
+};
 
 /// 7-bit only. An edge and a crossing are both `+`; a 1-bit signal has one line beside it, a bus two.
 pub const ASCII: Glyphs = Glyphs {
@@ -308,12 +344,23 @@ pub fn icon(c: char) -> Option<char> {
 }
 
 /// `unicode` with Nerd Font icons (the `nf-cod-*` codicons), for terminals set to a Nerd Font.
-pub const NERD: Glyphs = Glyphs { icons: true, ..UNICODE };
+pub const NERD: Glyphs = Glyphs {
+    icons: true,
+    ..UNICODE
+};
 
-pub const SETS: [(&str, &Glyphs); 4] = [("unicode", &UNICODE), ("box", &BOX), ("ascii", &ASCII), ("nerd", &NERD)];
+pub const SETS: [(&str, &Glyphs); 4] = [
+    ("unicode", &UNICODE),
+    ("box", &BOX),
+    ("ascii", &ASCII),
+    ("nerd", &NERD),
+];
 
 pub fn glyphs_named(name: &str) -> Result<&'static Glyphs, String> {
-    SETS.iter().find(|(n, _)| *n == name).map(|(_, g)| *g).ok_or_else(|| format!("unknown glyphs: {name} (unicode, box, ascii, nerd)"))
+    SETS.iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, g)| *g)
+        .ok_or_else(|| format!("unknown glyphs: {name} (unicode, box, ascii, nerd)"))
 }
 
 thread_local! {
@@ -353,16 +400,32 @@ fn widest(ws: &Workspace, var: usize, bit: Option<u32>, row: &Sig) -> usize {
         let w = w as usize;
         let bits = |b: String| label(t, None, row, &Val::Bits(b)).chars().count();
         // all ones the most digits, a one and zeros the most negative
-        let names = v.names.iter().flat_map(|n| n.iter()).map(|(_, n)| n.chars().count()).max().unwrap_or(0);
-        return bits("1".repeat(w)).max(bits(format!("1{}", "0".repeat(w - 1)))).max(names);
+        let names = v
+            .names
+            .iter()
+            .flat_map(|n| n.iter())
+            .map(|(_, n)| n.chars().count())
+            .max()
+            .unwrap_or(0);
+        return bits("1".repeat(w))
+            .max(bits(format!("1{}", "0".repeat(w - 1))))
+            .max(names);
     }
     let key = (t.version, var, row.look.radix, row.look.frac);
     if let Some(n) = WIDEST.with(|c| c.borrow().get(&key).copied()) {
         return n;
     }
     let n = match stream {
-        Some(s) => (0..s.records.len()).map(|i| s.label(i, t.fs_per_tick).chars().count()).max().unwrap_or(0),
-        None => std::iter::once(t.value_at(var, t.start())).chain(t.walk(var, None, t.start(), true).map(|(_, v)| v)).flatten().map(|v| label(t, None, row, &v).chars().count()).max().unwrap_or(0),
+        Some(s) => (0..s.records.len())
+            .map(|i| s.label(i, t.fs_per_tick).chars().count())
+            .max()
+            .unwrap_or(0),
+        None => std::iter::once(t.value_at(var, t.start()))
+            .chain(t.walk(var, None, t.start(), true).map(|(_, v)| v))
+            .flatten()
+            .map(|v| label(t, None, row, &v).chars().count())
+            .max()
+            .unwrap_or(0),
     };
     WIDEST.with(|c| c.borrow_mut().insert(key, n));
     n
@@ -370,6 +433,24 @@ fn widest(ws: &Workspace, var: usize, bit: Option<u32>, row: &Sig) -> usize {
 
 pub fn red() -> Style {
     Style::new().fg(pal().unknown)
+}
+
+/// A violation's colour by its severity: an error as X, a warning in the theme's `warning`.
+pub fn severity_color(sev: Severity) -> Color {
+    match sev {
+        Severity::Error => pal().unknown,
+        Severity::Warning => pal().warning,
+    }
+}
+
+/// How a violations stream's record at `t` draws: its severity's colour, red without one;
+/// `None` for any other stream.
+fn violation(stream: Option<&Stream>, t: Tick) -> Option<Style> {
+    let s = stream.filter(|s| s.violations)?;
+    Some(
+        s.severity_at(t)
+            .map_or_else(red, |sev| Style::new().fg(severity_color(sev))),
+    )
 }
 pub fn green() -> Style {
     Style::new().fg(pal().highz)
@@ -390,12 +471,31 @@ pub fn too_small(area: Rect, buf: &mut Buffer) -> bool {
     if w >= MIN_SIZE.0 && h >= MIN_SIZE.1 {
         return false;
     }
-    let short = |ok: bool| if ok { Style::new().add_modifier(Modifier::BOLD) } else { red().add_modifier(Modifier::BOLD) };
+    let short = |ok: bool| {
+        if ok {
+            Style::new().add_modifier(Modifier::BOLD)
+        } else {
+            red().add_modifier(Modifier::BOLD)
+        }
+    };
     let lines: [Vec<(String, Style)>; 4] = [
-        vec![("Terminal too small".into(), Style::new().add_modifier(Modifier::BOLD))],
-        vec![("width ".into(), Style::new()), (w.to_string(), short(w >= MIN_SIZE.0)), ("  height ".into(), Style::new()), (h.to_string(), short(h >= MIN_SIZE.1))],
+        vec![(
+            "Terminal too small".into(),
+            Style::new().add_modifier(Modifier::BOLD),
+        )],
+        vec![
+            ("width ".into(), Style::new()),
+            (w.to_string(), short(w >= MIN_SIZE.0)),
+            ("  height ".into(), Style::new()),
+            (h.to_string(), short(h >= MIN_SIZE.1)),
+        ],
         vec![("wtf needs".into(), Style::new().fg(pal().dim))],
-        vec![("width ".into(), Style::new()), (MIN_SIZE.0.to_string(), Style::new()), ("  height ".into(), Style::new()), (MIN_SIZE.1.to_string(), Style::new())],
+        vec![
+            ("width ".into(), Style::new()),
+            (MIN_SIZE.0.to_string(), Style::new()),
+            ("  height ".into(), Style::new()),
+            (MIN_SIZE.1.to_string(), Style::new()),
+        ],
     ];
     let y0 = (h as usize).saturating_sub(lines.len()) / 2;
     for (i, line) in lines.iter().enumerate() {
@@ -421,7 +521,11 @@ pub fn put(buf: &mut Buffer, x: usize, y: usize, s: &str, style: Style) {
 
 /// A line's signal: `var` in the look it has under row `s` (`Workspace::look`).
 pub fn line_sig(ws: &Workspace, s: &Sig, var: usize) -> Sig {
-    Sig { var, look: ws.look(s, var), ..s.clone() }
+    Sig {
+        var,
+        look: ws.look(s, var),
+        ..s.clone()
+    }
 }
 
 /// Lines a workspace's drawing takes: the time axis, the cursor ruler if there is one, and the
@@ -439,7 +543,13 @@ pub fn ansi(buf: &Buffer) -> String {
     use ratatui::backend::IntoCrossterm;
     let sgr = |c: &ratatui::buffer::Cell| {
         let mut s = String::from("\x1b[0");
-        for (m, code) in [(Modifier::BOLD, ";1"), (Modifier::DIM, ";2"), (Modifier::ITALIC, ";3"), (Modifier::UNDERLINED, ";4"), (Modifier::REVERSED, ";7")] {
+        for (m, code) in [
+            (Modifier::BOLD, ";1"),
+            (Modifier::DIM, ";2"),
+            (Modifier::ITALIC, ";3"),
+            (Modifier::UNDERLINED, ";4"),
+            (Modifier::REVERSED, ";7"),
+        ] {
             if c.modifier.contains(m) {
                 s += code;
             }
@@ -456,7 +566,10 @@ pub fn ansi(buf: &Buffer) -> String {
     for y in 0..buf.area.height {
         let row: Vec<_> = (0..buf.area.width).map(|x| &buf[(x, y)]).collect();
         // trailing blanks in the terminal's colours are trimmed, as `text` does
-        let end = row.iter().rposition(|c| c.symbol() != " " || c.bg != Color::Reset || !c.modifier.is_empty()).map_or(0, |i| i + 1);
+        let end = row
+            .iter()
+            .rposition(|c| c.symbol() != " " || c.bg != Color::Reset || !c.modifier.is_empty())
+            .map_or(0, |i| i + 1);
         let mut last = String::from("\x1b[0m");
         for c in &row[..end] {
             let code = sgr(c);
@@ -481,8 +594,15 @@ pub fn text(buf: &Buffer) -> String {
                 match cell.symbol() {
                     // the column, and its head on the time axis; bold is text on the accent (the
                     // time axis pill, a mark's tab under the cursor)
-                    s if (cell.bg == pal().column || cell.bg == pal().cursor) && !cell.modifier.contains(Modifier::BOLD) && !s.chars().all(char::is_alphanumeric) => cursor.as_str(),
-                    s if cell.bg == pal().cursor_dim && !s.chars().all(char::is_alphanumeric) => mark.as_str(),
+                    s if (cell.bg == pal().column || cell.bg == pal().cursor)
+                        && !cell.modifier.contains(Modifier::BOLD)
+                        && !s.chars().all(char::is_alphanumeric) =>
+                    {
+                        cursor.as_str()
+                    }
+                    s if cell.bg == pal().cursor_dim && !s.chars().all(char::is_alphanumeric) => {
+                        mark.as_str()
+                    }
                     s => s,
                 }
             })
@@ -553,7 +673,14 @@ pub type Marked = ((usize, Option<u32>), Option<usize>);
 /// `adding`, a line marks where new signals go and the selection isn't accented (the keys are
 /// elsewhere). Returns how many lines of rows fit, where the waveforms start and where each line
 /// was drawn, for the mouse.
-pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer, w: usize, body: usize) -> Drawn {
+pub fn rows(
+    ws: &mut Workspace,
+    top: &mut usize,
+    adding: bool,
+    buf: &mut Buffer,
+    w: usize,
+    body: usize,
+) -> Drawn {
     // line 0 is the time axis
     // while adding, one more line marks where new signals go
     // line 1 is the cursor ruler when there is more than one cursor
@@ -561,7 +688,10 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
     let head = 1 + (cursors.len() > 1) as usize;
     let fit = (body.saturating_sub(head + adding as usize) / ROW_LINES).max(1);
     let lines = ws.lines();
-    let p = lines.iter().position(|&l| l == (ws.sel, ws.bit)).unwrap_or(0);
+    let p = lines
+        .iter()
+        .position(|&l| l == (ws.sel, ws.bit))
+        .unwrap_or(0);
     if p < *top {
         *top = p;
     } else if p >= *top + fit {
@@ -571,7 +701,11 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
     // the core marks group headers `▾` / `▸`; drawn in the glyph set's
     for (n, r) in row_names.iter_mut().zip(&ws.rows) {
         if let Row::Group { collapsed, .. } = r {
-            let g = if *collapsed { gl().group_closed } else { gl().group_open };
+            let g = if *collapsed {
+                gl().group_closed
+            } else {
+                gl().group_open
+            };
             *n = format!("{g}{}", n.chars().skip(1).collect::<String>());
         }
     }
@@ -584,7 +718,13 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
         .iter()
         .map(|&(i, line)| {
             let s = ws.rows[i].sig()?;
-            let Some(b) = line else { return Some(Sub { var: s.var, bit: None, depth: 0 }) };
+            let Some(b) = line else {
+                return Some(Sub {
+                    var: s.var,
+                    bit: None,
+                    depth: 0,
+                });
+            };
             if subs.as_ref().is_none_or(|(r, _)| *r != i) {
                 subs = Some((i, ws.subs(s)));
             }
@@ -597,33 +737,55 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
         .iter()
         .zip(&shows)
         .map(|(&(i, line), l)| {
-            let (Some(s), Some(l)) = (ws.rows[i].sig(), l) else { return (row_names[i].clone(), ws.rows[i].is_group().then_some(0)) };
+            let (Some(s), Some(l)) = (ws.rows[i].sig(), l) else {
+                return (row_names[i].clone(), ws.rows[i].is_group().then_some(0));
+            };
             let n = &row_names[i];
             let indent = &n[..n.len() - n.trim_start().len()];
             let opens = |var: usize| ws.stream_of(var).is_some() || ws.trace.is_composite(var);
             let marked = |var: usize, name: &str| match opens(var) {
-                true => format!("{} {name}", if s.open.contains(&var) { gl().group_open } else { gl().group_closed }),
+                true => format!(
+                    "{} {name}",
+                    if s.open.contains(&var) {
+                        gl().group_open
+                    } else {
+                        gl().group_closed
+                    }
+                ),
                 false => name.to_string(),
             };
             let at = indent.chars().count();
             if line.is_none() {
-                return (format!("{indent}{}", marked(s.var, n.trim_start())), opens(s.var).then_some(at));
+                return (
+                    format!("{indent}{}", marked(s.var, n.trim_start())),
+                    opens(s.var).then_some(at),
+                );
             }
             let own = |v: usize| match v == s.var {
                 true => n.trim_start().to_string(),
-                false if ws.stream_of(s.var).is_some() => ws.trace.vars[v].path[ws.trace.vars[s.var].path.len() + 1..].to_string(),
+                false if ws.stream_of(s.var).is_some() => {
+                    ws.trace.vars[v].path[ws.trace.vars[s.var].path.len() + 1..].to_string()
+                }
                 false => rows::child_name(&ws.trace.vars[v].path),
             };
             let (name, opens) = match l.bit {
                 Some(bit) => (format!("{}[{bit}]", own(l.var)), false),
                 None => (marked(l.var, &own(l.var)), opens(l.var)),
             };
-            (format!("{indent}{}{name}", "  ".repeat(l.depth + 1)), opens.then_some(at + 2 * (l.depth + 1)))
+            (
+                format!("{indent}{}{name}", "  ".repeat(l.depth + 1)),
+                opens.then_some(at + 2 * (l.depth + 1)),
+            )
         })
         .unzip();
     // a stream's field, as the stream's own var: between records it has no value to show
     let field_of = |var: usize| {
-        let s = ws.streams.iter().find(|s| ws.trace.vars[var].path.strip_prefix(s.name.as_str()).is_some_and(|f| f.starts_with('.')))?;
+        let s = ws.streams.iter().find(|s| {
+            ws.trace.vars[var]
+                .path
+                .strip_prefix(s.name.as_str())
+                .is_some_and(|f| f.starts_with('.'))
+        })?;
         ws.trace.by_path.get(&s.name).copied()
     };
     let (values, value_styles): (Vec<String>, Vec<Style>) = lines
@@ -632,9 +794,12 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
         .map(|(&(i, _), l)| {
             let (s, l) = (ws.rows[i].sig()?, l.as_ref()?);
             let var = l.var;
-            let v = ws.trace.value_of(var, l.bit, ws.view.cursor).filter(|_| !gap(&ws.trace, field_of(var), ws.view.cursor))?;
+            let v = ws
+                .trace
+                .value_of(var, l.bit, ws.view.cursor)
+                .filter(|_| !gap(&ws.trace, field_of(var), ws.view.cursor))?;
             let stream = ws.stream_of(var);
-            let st = if stream.is_some_and(|s| s.violations) { red() } else { state_style(&v) };
+            let st = violation(stream, ws.view.cursor).unwrap_or_else(|| state_style(&v));
             Some((label(&ws.trace, stream, &line_sig(ws, s, var), &v), st))
         })
         .map(Option::unwrap_or_default)
@@ -646,29 +811,66 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
         .zip(names.iter().zip(&markers))
         .map(|((&(i, _), l), (n, m))| {
             let (c, col) = match (&ws.rows[i], l) {
-                (Row::Group { collapsed, .. }, _) => (if *collapsed { icon::GROUP } else { icon::GROUP_OPEN }, pal().cursor),
+                (Row::Group { collapsed, .. }, _) => (
+                    if *collapsed {
+                        icon::GROUP
+                    } else {
+                        icon::GROUP_OPEN
+                    },
+                    pal().cursor,
+                ),
                 (_, l) => kind(ws, l.as_ref()?.var, l.as_ref()?.bit)?,
             };
-            gl().icons.then_some((m.map_or(n.len() - n.trim_start().len(), |m| m + 2), c, col))
+            gl().icons
+                .then_some((m.map_or(n.len() - n.trim_start().len(), |m| m + 2), c, col))
         })
         .collect();
     let names: Vec<String> = names
         .into_iter()
         .zip(&icons)
         .map(|(n, ic)| match ic {
-            Some((at, ..)) => n.chars().take(*at).chain("  ".chars()).chain(n.chars().skip(*at)).collect(),
+            Some((at, ..)) => n
+                .chars()
+                .take(*at)
+                .chain("  ".chars())
+                .chain(n.chars().skip(*at))
+                .collect(),
             None => n,
         })
         .collect();
-    let width = |v: &[String], max| v.iter().map(|s| s.chars().count()).max().unwrap_or(0).min(max);
+    let width = |v: &[String], max| {
+        v.iter()
+            .map(|s| s.chars().count())
+            .max()
+            .unwrap_or(0)
+            .min(max)
+    };
     // the widest each line and row can show, hidden rows too, so neither the cursor moving nor a
     // group collapsing shifts the waveforms (spec §4 "Value column")
-    let lines_widest = lines.iter().zip(&shows).filter_map(|(&(i, _), l)| Some(widest(ws, l.as_ref()?.var, l.as_ref()?.bit, &line_sig(ws, ws.rows[i].sig()?, l.as_ref()?.var))));
-    let rows_widest = ws.rows.iter().filter_map(Row::sig).map(|s| widest(ws, s.var, None, s));
+    let lines_widest = lines.iter().zip(&shows).filter_map(|(&(i, _), l)| {
+        Some(widest(
+            ws,
+            l.as_ref()?.var,
+            l.as_ref()?.bit,
+            &line_sig(ws, ws.rows[i].sig()?, l.as_ref()?.var),
+        ))
+    });
+    let rows_widest = ws
+        .rows
+        .iter()
+        .filter_map(Row::sig)
+        .map(|s| widest(ws, s.var, None, s));
     let (max_name, max_value) = COLUMN_MAX.with(|c| c.get());
     // at least as wide as the headers on the time axis' line
-    let nw = width(&names, max_name).max(width(&row_names, max_name)).max(NAME_HEAD.len());
-    let vw = lines_widest.chain(rows_widest).max().unwrap_or(0).min(max_value).max(VALUE_HEAD.len());
+    let nw = width(&names, max_name)
+        .max(width(&row_names, max_name))
+        .max(NAME_HEAD.len());
+    let vw = lines_widest
+        .chain(rows_widest)
+        .max()
+        .unwrap_or(0)
+        .min(max_value)
+        .max(VALUE_HEAD.len());
     // name, value, wave, a dim line in the gap of three between them (spec §4)
     let (vx, wx) = (nw + 3, nw + 3 + vw + 3);
     ws.view.set_width(w.saturating_sub(wx) as u64);
@@ -684,7 +886,9 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
     let mut free = 0;
     for (c, t) in axis(&ws.view, ws.trace.fs_per_tick) {
         let len = t.chars().count();
-        let clear = pill.as_ref().is_none_or(|(x, p)| c + len + 1 < *x || c > x + p.chars().count());
+        let clear = pill
+            .as_ref()
+            .is_none_or(|(x, p)| c + len + 1 < *x || c > x + p.chars().count());
         if c >= free && c + len <= ww && clear {
             put(buf, wx + c, 0, &t, dim);
             free = c + len + 2;
@@ -695,31 +899,53 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
     put(buf, vx, 0, VALUE_HEAD, dim);
     for x in [nw + 1, vx + vw + 1] {
         for y in 0..body {
-            put(buf, x, y, &gl().border[5].to_string(), Style::new().fg(pal().hatch));
+            put(
+                buf,
+                x,
+                y,
+                &gl().border[5].to_string(),
+                Style::new().fg(pal().hatch),
+            );
         }
     }
 
     // bit lines of an expanded bus share one pass over the bus (var, [bit][column])
     let mut bit_changes: Option<(usize, Vec<Vec<Changes>>)> = None;
     let mut y = head;
-    let mut drawn = Drawn { fit, wave_x: wx, head, name_w: nw, lines: Vec::new() };
+    let mut drawn = Drawn {
+        fit,
+        wave_x: wx,
+        head,
+        name_w: nw,
+        lines: Vec::new(),
+    };
     for (l, &(i, bit)) in lines.iter().enumerate().skip(*top).take(fit) {
-        drawn.lines.push((y, (i, bit), markers[l].filter(|&m| m < nw)));
+        drawn
+            .lines
+            .push((y, (i, bit), markers[l].filter(|&m| m < nw)));
         // name and value sit on the bottom line, level with a low signal
         let yb = (y + 1).min(body - 1);
         let name: String = names[l].chars().take(nw).collect();
         let selected = (i, bit) == (ws.sel, ws.bit);
         if ws.anchor.is_some() && ws.selection().contains(&i) {
             let lines = ROW_LINES.min(body - y) as u16;
-            buf.set_style(Rect::new(0, y as u16, w as u16, lines), Style::new().bg(pal().selected));
+            buf.set_style(
+                Rect::new(0, y as u16, w as u16, lines),
+                Style::new().bg(pal().selected),
+            );
         }
         let sel = if selected {
             let lines = ROW_LINES.min(body - y) as u16;
-            buf.set_style(Rect::new(0, y as u16, w as u16, lines), Style::new().bg(pal().selected));
+            buf.set_style(
+                Rect::new(0, y as u16, w as u16, lines),
+                Style::new().bg(pal().selected),
+            );
             // the accent shows where the keys go: not here while the panel has them
             match adding {
                 true => Style::new().add_modifier(Modifier::BOLD),
-                false => Style::new().fg(pal().cursor).add_modifier(Modifier::BOLD | pal().accent()),
+                false => Style::new()
+                    .fg(pal().cursor)
+                    .add_modifier(Modifier::BOLD | pal().accent()),
             }
         } else {
             Style::new()
@@ -733,7 +959,13 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
             let leaf = name.rfind('.').map_or(0, |d| d + 1);
             put(buf, 0, yb, &name[..leaf], Style::new().fg(pal().dim));
             // a column, not a byte: a marker before the name (`▸`) is one column of three bytes
-            put(buf, name[..leaf].chars().count(), yb, &name[leaf..], Style::new());
+            put(
+                buf,
+                name[..leaf].chars().count(),
+                yb,
+                &name[leaf..],
+                Style::new(),
+            );
         }
         if let Some((at, c, col)) = icons[l].filter(|ic| ic.0 < nw) {
             put(buf, at, yb, &c.to_string(), Style::new().fg(col));
@@ -752,18 +984,37 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
                 let bits = l.bit.map(|b| {
                     if bit_changes.as_ref().is_none_or(|(v, _)| *v != l.var) {
                         let v = &ws.view;
-                        let ranges: Vec<_> = (0..ww as u64).map(|c| (v.col_start(c), v.col_start(c + 1))).collect();
+                        let ranges: Vec<_> = (0..ww as u64)
+                            .map(|c| (v.col_start(c), v.col_start(c + 1)))
+                            .collect();
                         bit_changes = Some((l.var, ws.trace.bit_changes(l.var, &ranges)));
                     }
-                    bit_changes.as_ref().map_or(&[][..], |(_, c)| &c[b as usize][..])
+                    bit_changes
+                        .as_ref()
+                        .map_or(&[][..], |(_, c)| &c[b as usize][..])
                 });
-                wave(&ws.trace, &ws.view, &line, l.bit, bits, ws.stream_of(l.var), field_of(l.var), ww)
+                wave(
+                    &ws.trace,
+                    &ws.view,
+                    &line,
+                    l.bit,
+                    bits,
+                    ws.stream_of(l.var),
+                    field_of(l.var),
+                    ww,
+                )
             }
-            Row::Group { collapsed: true, .. } => activity(&ws.trace, &ws.view, &rows::members(&ws.rows, i), ww),
+            Row::Group {
+                collapsed: true, ..
+            } => activity(&ws.trace, &ws.view, &rows::members(&ws.rows, i), ww),
             Row::Group { .. } => Vec::new(),
         };
         for (c, cells) in cells.into_iter().enumerate() {
-            for (dy, (ch, st)) in cells.into_iter().enumerate().filter(|(dy, (ch, st))| y + dy < body && (*ch, *st) != (' ', Style::new())) {
+            for (dy, (ch, st)) in cells
+                .into_iter()
+                .enumerate()
+                .filter(|(dy, (ch, st))| y + dy < body && (*ch, *st) != (' ', Style::new()))
+            {
                 put(buf, wx + c, y + dy, ch.encode_utf8(&mut [0; 4]), st);
             }
         }
@@ -771,19 +1022,40 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
         // under the selected row's last line (after its bits)
         let last = lines.get(l + 1).is_none_or(|n| n.0 != i);
         if adding && i == ws.sel && last && y < body {
-            let indent = if rows::header_of(&ws.rows, i).is_some() { "  " } else { "" };
+            let indent = if rows::header_of(&ws.rows, i).is_some() {
+                "  "
+            } else {
+                ""
+            };
             let text = format!("{indent}{} new signals go here ", gl().insert);
             let fill = w.saturating_sub(text.chars().count());
-            put(buf, 0, y, &format!("{text}{}", gl().line.to_string().repeat(fill)), Style::new().fg(pal().cursor));
+            put(
+                buf,
+                0,
+                y,
+                &format!("{text}{}", gl().line.to_string().repeat(fill)),
+                Style::new().fg(pal().cursor),
+            );
             y += 1;
         }
     }
     let end = y.min(body);
     // the marks first, so the cursor is on top where they share a column; down to the last row
-    for (i, t) in cursors.into_iter().filter(|&(i, _)| i != 0).chain([(0, ws.view.cursor)]) {
+    for (i, t) in cursors
+        .into_iter()
+        .filter(|&(i, _)| i != 0)
+        .chain([(0, ws.view.cursor)])
+    {
         if let Some(c) = ws.view.col_of(t) {
             let area = Rect::new((wx + c as usize) as u16, 0, 1, end as u16);
-            buf.set_style(area, Style::new().bg(if i == 0 { pal().column } else { pal().cursor_dim }));
+            buf.set_style(
+                area,
+                Style::new().bg(if i == 0 {
+                    pal().column
+                } else {
+                    pal().cursor_dim
+                }),
+            );
             // without colour, a glyph where the column is blank, the waveform kept where it isn't
             if pal().mono {
                 for y in area.top() + 1..area.bottom() {
@@ -800,7 +1072,16 @@ pub fn rows(ws: &mut Workspace, top: &mut usize, adding: bool, buf: &mut Buffer,
     }
     // bold: `text` shows it as it is, not as the cursor's column
     if let Some((x, t)) = pill {
-        put(buf, wx + x, 0, &t, Style::new().bg(pal().cursor).fg(pal().cursor_text).add_modifier(Modifier::BOLD | pal().accent()));
+        put(
+            buf,
+            wx + x,
+            0,
+            &t,
+            Style::new()
+                .bg(pal().cursor)
+                .fg(pal().cursor_text)
+                .add_modifier(Modifier::BOLD | pal().accent()),
+        );
     }
     drawn
 }
@@ -843,7 +1124,15 @@ fn ruler(ws: &Workspace, buf: &mut Buffer, wx: usize, ww: usize, y: usize) {
                 Slot::Left => (0, 1),
                 Slot::Right => (ww.saturating_sub(2), ww.saturating_sub(1)),
             };
-            groups.push(Group { slot, lo, hi, first: t, last: t, mark: None, cursor: false });
+            groups.push(Group {
+                slot,
+                lo,
+                hi,
+                first: t,
+                last: t,
+                mark: None,
+                cursor: false,
+            });
         }
         let g = groups.last_mut().unwrap();
         g.last = t;
@@ -856,8 +1145,23 @@ fn ruler(ws: &Workspace, buf: &mut Buffer, wx: usize, ww: usize, y: usize) {
     }
     // (number, name) styles of a mark, with the cursor on it or not
     let tint = |cursor: bool| match cursor {
-        true => (Style::new().bg(pal().cursor).fg(pal().cursor_text).add_modifier(Modifier::BOLD | pal().accent()), Style::new().fg(pal().cursor).bg(pal().column).add_modifier(Modifier::BOLD)),
-        false => (Style::new().fg(pal().text).bg(pal().mark).add_modifier(Modifier::BOLD), Style::new().fg(pal().text).bg(pal().mark)),
+        true => (
+            Style::new()
+                .bg(pal().cursor)
+                .fg(pal().cursor_text)
+                .add_modifier(Modifier::BOLD | pal().accent()),
+            Style::new()
+                .fg(pal().cursor)
+                .bg(pal().column)
+                .add_modifier(Modifier::BOLD),
+        ),
+        false => (
+            Style::new()
+                .fg(pal().text)
+                .bg(pal().mark)
+                .add_modifier(Modifier::BOLD),
+            Style::new().fg(pal().text).bg(pal().mark),
+        ),
     };
     // a mark's name: a tab after its number (before it at the right edge) with a space on each
     // side, up to the next cursor; cut with … there, and left out with room for under three columns
@@ -879,7 +1183,11 @@ fn ruler(ws: &Workspace, buf: &mut Buffer, wx: usize, ww: usize, y: usize) {
             if let Some(fit) = fit {
                 let text = format!(" {fit} ");
                 let len = text.chars().count();
-                let x = if g.slot == Slot::Right { to - len } else { from };
+                let x = if g.slot == Slot::Right {
+                    to - len
+                } else {
+                    from
+                };
                 free = x + len;
                 tabs.push((x, text, tint(g.cursor).1));
             }
@@ -891,7 +1199,10 @@ fn ruler(ws: &Workspace, buf: &mut Buffer, wx: usize, ww: usize, y: usize) {
         let span = b.saturating_sub(a);
         put(buf, wx + a, y, &gl().line.to_string().repeat(span), dim);
         // like bus labels: only if it fits with a spare column on each side, and no name is there
-        let label = format!(" {} ", time::format(pair[1].first - pair[0].last, ws.trace.fs_per_tick));
+        let label = format!(
+            " {} ",
+            time::format(pair[1].first - pair[0].last, ws.trace.fs_per_tick)
+        );
         let len = label.chars().count();
         if len + 2 <= span && !tabs.iter().any(|t| (a..b).contains(&t.0)) {
             put(buf, wx + a + (span - len) / 2, y, &label, dim);
@@ -903,9 +1214,16 @@ fn ruler(ws: &Workspace, buf: &mut Buffer, wx: usize, ww: usize, y: usize) {
     for g in groups {
         let (text, st) = match g.mark {
             Some(i) => ((i + 1).to_string(), tint(g.cursor).0),
-            None => ("1".to_string(), Style::new().fg(pal().cursor).add_modifier(Modifier::BOLD)),
+            None => (
+                "1".to_string(),
+                Style::new().fg(pal().cursor).add_modifier(Modifier::BOLD),
+            ),
         };
-        let arrow = if g.cursor { Style::new().fg(pal().cursor).add_modifier(Modifier::BOLD) } else { dim };
+        let arrow = if g.cursor {
+            Style::new().fg(pal().cursor).add_modifier(Modifier::BOLD)
+        } else {
+            dim
+        };
         match g.slot {
             Slot::At(c) => put(buf, wx + c, y, &text, st),
             Slot::Left => {
@@ -954,7 +1272,9 @@ fn edge(before: bool, after: bool) -> usize {
 
 /// Which of a signal's two lines a value draws: low, high, or both (buses, X, Z).
 fn lines_of(v: &Option<Val>, own: Style) -> (bool, bool, Style) {
-    let Some(v) = v else { return (false, false, Style::new()) };
+    let Some(v) = v else {
+        return (false, false, Style::new());
+    };
     let st = match state_style(v) {
         s if s == Style::new() => own,
         s => s,
@@ -972,10 +1292,20 @@ fn lines_of(v: &Option<Val>, own: Style) -> (bool, bool, Style) {
 /// One signal's waveform as (top, bottom) cells per column. Each column costs two binary
 /// searches, so drawing depends on the screen size, not on the number of transitions (spec §18).
 /// For a bit of a bus, `bits` holds its changes per column (`Trace::bit_changes`). A stream's own
-/// var draws its records' labels, red for violations, and nothing between records; so does a
+/// var draws its records' labels, violations in their severity's colour (red without one), and
+/// nothing between records; so does a
 /// stream's `field`, whose value there is all `z`.
 #[allow(clippy::too_many_arguments)]
-pub fn wave(trace: &Trace, view: &View, row: &Sig, bit: Option<u32>, bits: Option<&[Changes]>, stream: Option<&Stream>, field: Option<usize>, ww: usize) -> Vec<[(char, Style); 2]> {
+pub fn wave(
+    trace: &Trace,
+    view: &View,
+    row: &Sig,
+    bit: Option<u32>,
+    bits: Option<&[Changes]>,
+    stream: Option<&Stream>,
+    field: Option<usize>,
+    ww: usize,
+) -> Vec<[(char, Style); 2]> {
     let var = row.var;
     let end = trace.end();
     let bus = bit.is_none() && trace.vars[var].width != Some(1);
@@ -988,9 +1318,16 @@ pub fn wave(trace: &Trace, view: &View, row: &Sig, bit: Option<u32>, bits: Optio
     };
     let n: Vec<Changes> = match bits {
         Some(b) => b.to_vec(),
-        None => (0..ww).map(&range).map(|(a, b)| trace.changes_in(var, a, b)).collect(),
+        None => (0..ww)
+            .map(&range)
+            .map(|(a, b)| trace.changes_in(var, a, b))
+            .collect(),
     };
-    let value = |t: Tick| trace.value_of(var, bit, t).filter(|_| !gap(trace, field, t));
+    let value = |t: Tick| {
+        trace
+            .value_of(var, bit, t)
+            .filter(|_| !gap(trace, field, t))
+    };
     let val = |c: usize| value(range(c).1 - 1);
     let blank = (' ', Style::new());
     let mut out = vec![[blank; 2]; ww];
@@ -1032,14 +1369,19 @@ pub fn wave(trace: &Trace, view: &View, row: &Sig, bit: Option<u32>, bits: Optio
             let opens = n[c] == Changes::One;
             if let Some(v) = val(c).filter(|v| *v != Val::Text(String::new())) {
                 let text = label(trace, stream, row, &v);
-                let st = match stream.is_some_and(|s| s.violations) {
-                    true => red(),
-                    false => Some(state_style(&v)).filter(|s| *s != Style::new()).unwrap_or(own),
-                };
+                let st = violation(stream, range(c).1 - 1).unwrap_or_else(|| {
+                    Some(state_style(&v))
+                        .filter(|s| *s != Style::new())
+                        .unwrap_or(own)
+                });
                 out[c..e].iter_mut().for_each(|o| *o = [(rail(&v), st); 2]);
                 if opens {
                     let crossing = c > 0 && !busy[c - 1] && out[c - 1][0].0 != ' ';
-                    out[c] = if crossing { gl().crossing.map(|g| (g, st)) } else { gl().open.map(|g| (g, st)) };
+                    out[c] = if crossing {
+                        gl().crossing.map(|g| (g, st))
+                    } else {
+                        gl().open.map(|g| (g, st))
+                    };
                 }
                 // centred between the opening piece and the next crossing, with a gap on each side;
                 // cut with … if it doesn't fit, as long as three characters of it do (not just `0x`)
@@ -1051,7 +1393,11 @@ pub fn wave(trace: &Trace, view: &View, row: &Sig, bit: Option<u32>, bits: Optio
                     _ => String::new(),
                 };
                 let len = text.chars().count();
-                let text_st = if st == own && row.look.color.is_none() { Style::new() } else { st };
+                let text_st = if st == own && row.look.color.is_none() {
+                    Style::new()
+                } else {
+                    st
+                };
                 if len > 0 {
                     let start = a + (e - a - len) / 2;
                     for (k, ch) in text.chars().enumerate() {
@@ -1091,7 +1437,10 @@ pub fn wave(trace: &Trace, view: &View, row: &Sig, bit: Option<u32>, bits: Optio
             [(t, own), (b, own)]
         } else {
             let r = val(c).as_ref().map_or(gl().line, rail);
-            [if top { (r, st) } else { blank }, if bot { (r, st) } else { blank }]
+            [
+                if top { (r, st) } else { blank },
+                if bot { (r, st) } else { blank },
+            ]
         };
     }
     // X and Z draw both lines as a bus does, and get its label: colour isn't always there to
@@ -1126,7 +1475,11 @@ pub fn wave(trace: &Trace, view: &View, row: &Sig, bit: Option<u32>, bits: Optio
 /// A value as a row shows it; a stream's own var (`#3`) as its record's label (`#3 64B`).
 fn label(trace: &Trace, stream: Option<&Stream>, row: &Sig, v: &Val) -> String {
     match (stream, v) {
-        (Some(s), Val::Text(t)) => match t.strip_prefix('#').and_then(|n| n.parse::<usize>().ok()).filter(|&i| i < s.records.len()) {
+        (Some(s), Val::Text(t)) => match t
+            .strip_prefix('#')
+            .and_then(|n| n.parse::<usize>().ok())
+            .filter(|&i| i < s.records.len())
+        {
             Some(i) => s.label(i, trace.fs_per_tick),
             None => t.clone(),
         },
@@ -1141,9 +1494,14 @@ fn activity(trace: &Trace, view: &View, vars: &[usize], ww: usize) -> Vec<[(char
     (0..ww as u64)
         .map(|c| (view.col_start(c), view.col_start(c + 1)))
         .take_while(|&(a, b)| a <= end || (a == b && a - 1 <= end))
-        .map(|(a, b)| match vars.iter().any(|&v| trace.changes_in(v, a, b) != Changes::None) {
-            true => gl().fill.map(|g| (g, line())),
-            false => [blank, (gl().line, Style::new().fg(pal().dim))],
+        .map(|(a, b)| {
+            match vars
+                .iter()
+                .any(|&v| trace.changes_in(v, a, b) != Changes::None)
+            {
+                true => gl().fill.map(|g| (g, line())),
+                false => [blank, (gl().line, Style::new().fg(pal().dim))],
+            }
         })
         .collect()
 }
@@ -1159,7 +1517,20 @@ mod tests {
         let mut buf = Buffer::empty(Rect::new(0, 0, 30, 6));
         assert!(too_small(buf.area, &mut buf));
         let screen = text(&buf);
-        assert_eq!(screen.lines().map(str::trim).filter(|l| !l.is_empty()).collect::<Vec<_>>(), ["Terminal too small", "width 30  height 6", "wtf needs", "width 40  height 10"], "{screen}");
+        assert_eq!(
+            screen
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty())
+                .collect::<Vec<_>>(),
+            [
+                "Terminal too small",
+                "width 30  height 6",
+                "wtf needs",
+                "width 40  height 10"
+            ],
+            "{screen}"
+        );
         for (w, h) in [(1, 1), (12, 2), (39, 40)] {
             let mut buf = Buffer::empty(Rect::new(0, 0, w, h));
             assert!(too_small(buf.area, &mut buf));
@@ -1181,6 +1552,15 @@ mod tests {
 
     #[test]
     fn nice_steps() {
-        assert_eq!([0, 1, 3, 7, 10, 11, 4999].map(nice), [1, 1, 5, 10, 10, 20, 5000]);
+        assert_eq!(
+            [0, 1, 3, 7, 10, 11, 4999].map(nice),
+            [1, 1, 5, 10, 10, 20, 5000]
+        );
+    }
+
+    #[test]
+    fn severity_colour() {
+        assert_eq!(severity_color(Severity::Error), pal().unknown);
+        assert_eq!(severity_color(Severity::Warning), pal().warning);
     }
 }

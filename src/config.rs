@@ -34,7 +34,9 @@ pub fn load(bg: Option<theme::Rgb>) -> Config {
 
 pub fn dir() -> Option<PathBuf> {
     let xdg = std::env::var_os("XDG_CONFIG_HOME").filter(|v| !v.is_empty());
-    let base = xdg.map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")));
+    let base = xdg
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")));
     base.map(|b| b.join("wtf"))
 }
 
@@ -49,17 +51,24 @@ pub fn save(dir: &Path, keys: &[(&str, &str)]) -> Result<(), String> {
     let path = dir.join("config.toml");
     let old = match std::fs::read_to_string(&path) {
         Ok(t) => t,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => "# wtf's settings (glyphs, theme, colors); `wtf --setup` asks again\n".into(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            "# wtf's settings (glyphs, theme, colors); `wtf --setup` asks again\n".into()
+        }
         Err(e) => return Err(format!("{}: {e}", path.display())),
     };
-    std::fs::create_dir_all(dir).and_then(|_| std::fs::write(&path, set_keys(&old, keys))).map_err(|e| format!("{}: {e}", path.display()))
+    std::fs::create_dir_all(dir)
+        .and_then(|_| std::fs::write(&path, set_keys(&old, keys)))
+        .map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// `text` with each top-level `key = "value"` set: an existing line replaced, a missing one added
 /// before the first table.
 fn set_keys(text: &str, keys: &[(&str, &str)]) -> String {
     let mut lines: Vec<String> = text.lines().map(String::from).collect();
-    let top = lines.iter().position(|l| l.trim_start().starts_with('[')).unwrap_or(lines.len());
+    let top = lines
+        .iter()
+        .position(|l| l.trim_start().starts_with('['))
+        .unwrap_or(lines.len());
     let mut end = top;
     for (k, v) in keys {
         let line = format!("{k} = \"{v}\"");
@@ -68,7 +77,10 @@ fn set_keys(text: &str, keys: &[(&str, &str)]) -> String {
             Some(i) => lines[i] = line,
             None => {
                 // after the last top-level line that isn't blank, so a table keeps its blank line
-                let at = lines[..end].iter().rposition(|l| !l.trim().is_empty()).map_or(0, |i| i + 1);
+                let at = lines[..end]
+                    .iter()
+                    .rposition(|l| !l.trim().is_empty())
+                    .map_or(0, |i| i + 1);
                 lines.insert(at, line);
                 end += 1;
             }
@@ -78,11 +90,18 @@ fn set_keys(text: &str, keys: &[(&str, &str)]) -> String {
 }
 
 fn load_from(dir: &Path, bg: Option<theme::Rgb>) -> Config {
-    let (path, themes, rgb) = (dir.join("config.toml"), dir.join("themes"), draw::truecolor());
+    let (path, themes, rgb) = (
+        dir.join("config.toml"),
+        dir.join("themes"),
+        draw::truecolor(),
+    );
     match std::fs::read_to_string(&path) {
         Ok(text) => parse(&text, rgb, &themes, bg),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => parse("", rgb, &themes, bg),
-        Err(e) => Config { warnings: vec![format!("config: {}: {e}", path.display())], ..parse("", rgb, &themes, bg) },
+        Err(e) => Config {
+            warnings: vec![format!("config: {}: {e}", path.display())],
+            ..parse("", rgb, &themes, bg)
+        },
     }
 }
 
@@ -95,7 +114,15 @@ pub fn parse(text: &str, rgb: bool, themes: &Path, bg: Option<theme::Rgb>) -> Co
         Ok(t) => t,
         Err(e) => {
             warnings.push(format!("config: {}", theme::toml_error(&e, text)));
-            return Config { glyphs: &draw::UNICODE, palette: dark(), keys: Keymap::default(), which_key: WHICH_KEY, columns: draw::COLUMNS, hints: true, warnings };
+            return Config {
+                glyphs: &draw::UNICODE,
+                palette: dark(),
+                keys: Keymap::default(),
+                which_key: WHICH_KEY,
+                columns: draw::COLUMNS,
+                hints: true,
+                warnings,
+            };
         }
     };
     let mut glyphs = &draw::UNICODE;
@@ -131,36 +158,69 @@ pub fn parse(text: &str, rgb: bool, themes: &Path, bg: Option<theme::Rgb>) -> Co
     // the theme first, so the single colours override it whatever the order in the file
     let mut palette = match table.get("theme") {
         // none chosen: the one that suits the terminal's background
-        None if bg.is_some_and(theme::is_light) => theme::builtin("light", rgb).expect("light is built in"),
+        None if bg.is_some_and(theme::is_light) => {
+            theme::builtin("light", rgb).expect("light is built in")
+        }
         None => dark(),
-        Some(v) => match v.as_str().and_then(|n| theme::find(n, themes, rgb, bg, &mut warnings)) {
+        Some(v) => match v
+            .as_str()
+            .and_then(|n| theme::find(n, themes, rgb, bg, &mut warnings))
+        {
             Some(p) => p,
             None => {
-                warnings.push(format!("config: theme = {}? ({})", theme::show(v), theme::names(themes).join(", ")));
+                warnings.push(format!(
+                    "config: theme = {}? ({})",
+                    theme::show(v),
+                    theme::names(themes).join(", ")
+                ));
                 dark()
             }
         },
     };
     if let Some(v) = table.get("colors") {
         match v.as_table() {
-            Some(colors) => theme::apply(&mut palette, colors, rgb, "config: ", "colors.", &mut warnings),
-            None => warnings.push(format!("config: colors = {}? (a table of colours)", theme::show(v))),
+            Some(colors) => theme::apply(
+                &mut palette,
+                colors,
+                rgb,
+                "config: ",
+                "colors.",
+                &mut warnings,
+            ),
+            None => warnings.push(format!(
+                "config: colors = {}? (a table of colours)",
+                theme::show(v)
+            )),
         }
     }
     let mut keys = match table.get("keys") {
         None => Keymap::default(),
         Some(toml::Value::Table(t)) => Keymap::from_table(t, &mut warnings),
         Some(v) => {
-            warnings.push(format!("config: keys = {}? (a table of action = key)", theme::show(v)));
+            warnings.push(format!(
+                "config: keys = {}? (a table of action = key)",
+                theme::show(v)
+            ));
             Keymap::default()
         }
     };
     match table.get("leader") {
         None => {}
         Some(toml::Value::Table(t)) => keys.set_leader(t, &mut warnings),
-        Some(v) => warnings.push(format!("config: leader = {}? (a table of key = [\"what it does\", \":command\"])", theme::show(v))),
+        Some(v) => warnings.push(format!(
+            "config: leader = {}? (a table of key = [\"what it does\", \":command\"])",
+            theme::show(v)
+        )),
     }
-    Config { glyphs, palette, keys, which_key, columns, hints, warnings }
+    Config {
+        glyphs,
+        palette,
+        keys,
+        which_key,
+        columns,
+        hints,
+        warnings,
+    }
 }
 
 #[cfg(test)]
@@ -186,29 +246,68 @@ mod tests {
     #[test]
     fn setup_keeps_the_rest() {
         let text = "# mine\nglyphs = \"ascii\"\n\n[colors]\ncursor = 1\n";
-        assert_eq!(set_keys(text, &[("glyphs", "box"), ("theme", "light")]), "# mine\nglyphs = \"box\"\ntheme = \"light\"\n\n[colors]\ncursor = 1\n");
-        assert_eq!(set_keys("# new\n", &[("glyphs", "box")]), "# new\nglyphs = \"box\"\n");
+        assert_eq!(
+            set_keys(text, &[("glyphs", "box"), ("theme", "light")]),
+            "# mine\nglyphs = \"box\"\ntheme = \"light\"\n\n[colors]\ncursor = 1\n"
+        );
+        assert_eq!(
+            set_keys("# new\n", &[("glyphs", "box")]),
+            "# new\nglyphs = \"box\"\n"
+        );
         // a key of the same name in a table is not the top-level one
-        assert_eq!(set_keys("[colors]\ntheme = 1\n", &[("theme", "dark")]), "theme = \"dark\"\n[colors]\ntheme = 1\n");
+        assert_eq!(
+            set_keys("[colors]\ntheme = 1\n", &[("theme", "dark")]),
+            "theme = \"dark\"\n[colors]\ntheme = 1\n"
+        );
         let d = dir("save", &[]);
         save(&d, &[("glyphs", "box")]).unwrap();
-        assert_eq!(parse(&std::fs::read_to_string(d.join("config.toml")).unwrap(), true, Path::new(""), None).glyphs.crossing, draw::BOX.crossing);
+        assert_eq!(
+            parse(
+                &std::fs::read_to_string(d.join("config.toml")).unwrap(),
+                true,
+                Path::new(""),
+                None
+            )
+            .glyphs
+            .crossing,
+            draw::BOX.crossing
+        );
         std::fs::remove_dir_all(&d).unwrap();
     }
 
     #[test]
     fn valid_file_applies() {
-        let c = parse("glyphs = \"box\"\ntheme = \"light\"\n[colors]\ncursor = \"#ff0000\"\npanel = 17\nred = \"#5f87af\"\n", true, Path::new(""), None);
+        let c = parse(
+            "glyphs = \"box\"\ntheme = \"light\"\n[colors]\ncursor = \"#ff0000\"\npanel = 17\nred = \"#5f87af\"\n",
+            true,
+            Path::new(""),
+            None,
+        );
         assert!(c.warnings.is_empty(), "{:?}", c.warnings);
         assert_eq!(c.glyphs.crossing, draw::BOX.crossing);
         assert_eq!(c.palette.line, theme::builtin("light", true).unwrap().line);
         assert_eq!(c.palette.cursor, Color::Rgb(255, 0, 0));
         assert_eq!(c.palette.panel, Color::Indexed(17));
         assert_eq!(c.palette.hues[0], Color::Rgb(0x5f, 0x87, 0xaf));
-        assert_eq!(parse("name_width = 12\nvalue_width = 40\n", true, Path::new(""), None).columns, (12, 40));
+        assert_eq!(
+            parse(
+                "name_width = 12\nvalue_width = 40\n",
+                true,
+                Path::new(""),
+                None
+            )
+            .columns,
+            (12, 40)
+        );
         // narrower than its header
         let c = parse("value_width = 3\n", true, Path::new(""), None);
-        assert_eq!((c.columns, c.warnings), (draw::COLUMNS, vec!["config: value_width = 3? (columns, 5-200)".to_string()]));
+        assert_eq!(
+            (c.columns, c.warnings),
+            (
+                draw::COLUMNS,
+                vec!["config: value_width = 3? (columns, 5-200)".to_string()]
+            )
+        );
     }
 
     #[test]
@@ -221,7 +320,7 @@ mod tests {
                 "config: unknown key foo (keys: glyphs, theme, which_key, name_width, value_width, hints, colors, keys, leader)",
                 "config: glyphs = \"utf8\"? (unicode, box, ascii, nerd)",
                 "config: theme = 3? (dark, light)",
-                "config: unknown key colors.curser (keys: line, bus, fill, unknown, highz, cursor, cursor_text, column, cursor_dim, mark, selected, panel, hatch, dim, background, text, red, orange, yellow, green, cyan, blue, magenta, gray)",
+                "config: unknown key colors.curser (keys: line, bus, fill, unknown, highz, warning, cursor, cursor_text, column, cursor_dim, mark, selected, panel, hatch, dim, background, text, red, orange, yellow, green, cyan, blue, magenta, gray)",
                 "config: colors.cursor = \"blue\"? (\"#rrggbb\", 0-255, [\"#rrggbb\", 0-255] or \"default\")",
             ]
         );
@@ -233,13 +332,26 @@ mod tests {
 
     #[test]
     fn right_kinds_apply() {
-        let c = parse("which_key = 250\nhints = false\n[keys]\n[leader]\n", true, Path::new(""), None);
-        assert_eq!((c.warnings, c.which_key, c.hints), (vec![], std::time::Duration::from_millis(250), false));
+        let c = parse(
+            "which_key = 250\nhints = false\n[keys]\n[leader]\n",
+            true,
+            Path::new(""),
+            None,
+        );
+        assert_eq!(
+            (c.warnings, c.which_key, c.hints),
+            (vec![], std::time::Duration::from_millis(250), false)
+        );
     }
 
     #[test]
     fn wrong_kinds_warn() {
-        let c = parse("which_key = 99999\nhints = 1\ncolors = 1\nkeys = 2\nleader = 3\n", true, Path::new(""), None);
+        let c = parse(
+            "which_key = 99999\nhints = 1\ncolors = 1\nkeys = 2\nleader = 3\n",
+            true,
+            Path::new(""),
+            None,
+        );
         assert_eq!(
             c.warnings,
             [
@@ -256,7 +368,11 @@ mod tests {
     fn not_toml_gives_defaults() {
         let c = parse("glyphs = \"box\"\ntheme = \n", true, Path::new(""), None);
         assert_eq!(c.warnings.len(), 1, "{:?}", c.warnings);
-        assert!(c.warnings[0].starts_with("config: ") && c.warnings[0].ends_with("(line 2)"), "{:?}", c.warnings);
+        assert!(
+            c.warnings[0].starts_with("config: ") && c.warnings[0].ends_with("(line 2)"),
+            "{:?}",
+            c.warnings
+        );
         assert_eq!(c.glyphs.crossing, draw::UNICODE.crossing);
         assert_eq!(c.palette.line, dark().line);
     }
@@ -265,23 +381,62 @@ mod tests {
     fn theme_by_background() {
         // no theme chosen: light on a light terminal, dark fitted to a dark one; a chosen one stays
         let light = |text| parse(text, true, Path::new(""), Some((0xff, 0xff, 0xf0))).palette;
-        assert_eq!(light("").background, theme::builtin("light", true).unwrap().background);
+        assert_eq!(
+            light("").background,
+            theme::builtin("light", true).unwrap().background
+        );
         assert_eq!(light("theme = \"dark\"").panel, Color::Rgb(232, 232, 217));
-        assert_eq!(parse("", true, Path::new(""), Some((0, 0, 0))).palette.panel, Color::Rgb(24, 24, 24));
+        assert_eq!(
+            parse("", true, Path::new(""), Some((0, 0, 0)))
+                .palette
+                .panel,
+            Color::Rgb(24, 24, 24)
+        );
     }
 
     #[test]
     fn user_themes() {
         // a theme gives what it sets, dark the rest; one named as a built-in replaces it; a bad
         // entry in one is named with it; an unknown theme lists those there are
-        let d = dir("themes", &[("gruvbox", "background = \"#282828\"\nline = [\"#83a598\", 109]\n"), ("light", "line = 1\n"), ("broken", "lne = 1\n")]);
+        let d = dir(
+            "themes",
+            &[
+                (
+                    "gruvbox",
+                    "background = \"#282828\"\nline = [\"#83a598\", 109]\n",
+                ),
+                ("light", "line = 1\n"),
+                ("broken", "lne = 1\n"),
+            ],
+        );
         let themes = d.join("themes");
-        let c = parse("theme = \"gruvbox\"\n[colors]\nline = 2\n", true, &themes, None);
+        let c = parse(
+            "theme = \"gruvbox\"\n[colors]\nline = 2\n",
+            true,
+            &themes,
+            None,
+        );
         assert!(c.warnings.is_empty(), "{:?}", c.warnings);
-        assert_eq!((c.palette.background, c.palette.line, c.palette.panel), (Color::Rgb(0x28, 0x28, 0x28), Color::Indexed(2), dark().panel));
-        assert_eq!(parse("theme = \"light\"", true, &themes, None).palette.line, Color::Indexed(1));
-        assert!(parse("theme = \"broken\"", true, &themes, None).warnings[0].starts_with("config: theme broken: unknown key lne (keys: line, "));
-        assert_eq!(parse("theme = \"nord\"", true, &themes, None).warnings, ["config: theme = \"nord\"? (broken, dark, gruvbox, light)"]);
+        assert_eq!(
+            (c.palette.background, c.palette.line, c.palette.panel),
+            (
+                Color::Rgb(0x28, 0x28, 0x28),
+                Color::Indexed(2),
+                dark().panel
+            )
+        );
+        assert_eq!(
+            parse("theme = \"light\"", true, &themes, None).palette.line,
+            Color::Indexed(1)
+        );
+        assert!(
+            parse("theme = \"broken\"", true, &themes, None).warnings[0]
+                .starts_with("config: theme broken: unknown key lne (keys: line, ")
+        );
+        assert_eq!(
+            parse("theme = \"nord\"", true, &themes, None).warnings,
+            ["config: theme = \"nord\"? (broken, dark, gruvbox, light)"]
+        );
         std::fs::remove_dir_all(&d).unwrap();
     }
 
@@ -294,7 +449,10 @@ mod tests {
         std::fs::write(d.join("config.toml"), "theme = \"light\"\n").unwrap();
         let c = load_from(&d, None);
         assert!(c.warnings.is_empty(), "{:?}", c.warnings);
-        assert_eq!(c.palette.line, theme::builtin("light", draw::truecolor()).unwrap().line);
+        assert_eq!(
+            c.palette.line,
+            theme::builtin("light", draw::truecolor()).unwrap().line
+        );
         std::fs::remove_dir_all(&d).unwrap();
     }
 }

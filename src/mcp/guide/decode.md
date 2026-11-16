@@ -34,6 +34,13 @@ Details
   fields and `when` can name it (`f3=insn[14:12] ok=f3 == 0`).
 - `pair` matches by order, or by `id=` / `req_id=` and `resp_id=`. `check` gives each record a
   `rule` field.
+- `axis` reads a signal it isn't given as a default (`tready` 1, `tkeep` the bytes of `tdata`,
+  `tlast` 1), so `decode rx axis clock=clk tvalid=v tready=r tdata=d` makes `rx.beat`,
+  `rx.frame` and `rx.errors`; a violation carries the `rule`, what it saw (`detail`) and its
+  `severity` (error or warning), as `axilite`'s does. `records rx.errors where severity == warning`
+  keeps the warnings; the window draws them apart from the errors.
 - `decode <name> off` removes a decode, its streams and the rows showing them; one another decode
   reads stays, naming it. `decode` again under a name replaces it.
+- A protocol in the config dir's `protocols/` decodes as a built-in does (`protocols` lists them);
+  `help wasm` writes one.
 - Decoding doesn't touch the rows.

@@ -32,23 +32,39 @@ pub fn parse(text: &str, width: Option<u32>, names: Option<&Names>) -> Result<Ta
         "z" => return Ok(Target::HighZ),
         _ => {}
     }
-    let Some(w) = width else { return Ok(Target::Text(text.trim().into())) };
+    let Some(w) = width else {
+        return Ok(Target::Text(text.trim().into()));
+    };
     if let Some(sv) = sv_literal(text.trim()) {
         let bits = match sv? {
             Sv::Fill(c) => c.to_string().repeat(w as usize),
             Sv::Bits { bits, .. } => bits,
         };
-        let fill = if bits.starts_with(['x', 'z']) { &bits[..1] } else { "0" };
+        let fill = if bits.starts_with(['x', 'z']) {
+            &bits[..1]
+        } else {
+            "0"
+        };
         let bits = bits.trim_start_matches('0');
         if bits.len() > w as usize {
             return Err(format!("{} doesn't fit in {w} bits", text.trim()));
         }
-        return Ok(Target::Bits(format!("{}{bits}", fill.repeat(w as usize - bits.len()))));
+        return Ok(Target::Bits(format!(
+            "{}{bits}",
+            fill.repeat(w as usize - bits.len())
+        )));
     }
-    if let Some((bits, _)) = names.and_then(|n| n.iter().find(|(_, name)| name.eq_ignore_ascii_case(text.trim()))) {
+    if let Some((bits, _)) = names.and_then(|n| {
+        n.iter()
+            .find(|(_, name)| name.eq_ignore_ascii_case(text.trim()))
+    }) {
         return Ok(Target::Bits(format!("{bits:0>w$}", w = w as usize)));
     }
-    let bits = RADIXES.iter().filter_map(|r| r.parse).find_map(|p| p(&t, w)).ok_or(format!("not a value: {text}"))?;
+    let bits = RADIXES
+        .iter()
+        .filter_map(|r| r.parse)
+        .find_map(|p| p(&t, w))
+        .ok_or(format!("not a value: {text}"))?;
     let bits = bits.trim_start_matches('0');
     if bits.len() > w as usize {
         return Err(format!("{} doesn't fit in {w} bits", text.trim()));
@@ -66,17 +82,39 @@ pub enum Expr {
     Not(Box<Expr>),
     /// `sig == value`, `sig < value` (the other operators too), or a bare `sig` (true when it is
     /// 1 / nonzero, `op` Eq); its value `past` samples earlier (`past(sig)`).
-    Cmp { sig: Probe, past: u32, op: Op, target: Option<Target> },
+    Cmp {
+        sig: Probe,
+        past: u32,
+        op: Op,
+        target: Option<Target>,
+    },
     /// `stable(sig)`: the same value as one sample earlier.
-    Stable { sig: Probe, past: u32 },
+    Stable {
+        sig: Probe,
+        past: u32,
+    },
     /// `a != b`: two signals (a record's fields in `records` `where`), as unsigned numbers or text.
-    Signals { a: Probe, a_past: u32, op: Op, b: Probe, b_past: u32 },
+    Signals {
+        a: Probe,
+        a_past: u32,
+        op: Op,
+        b: Probe,
+        b_past: u32,
+    },
     /// `a + b == c`: numbers compared exactly; `b` None is `x`, an unknown result.
-    Arith { a: Term, op: Op, b: Option<Term> },
+    Arith {
+        a: Term,
+        op: Op,
+        b: Option<Term>,
+    },
     /// A bare `a & b`: true when it is known and nonzero.
     Truth(Term),
     /// `contains(sig, "text")`: sig's text holds `text`, case and spaces as written.
-    Contains { sig: Probe, past: u32, text: String },
+    Contains {
+        sig: Probe,
+        past: u32,
+        text: String,
+    },
 }
 
 /// How `Expr::Cmp` compares: `<` and the like as unsigned numbers, an unknown bit never.
@@ -91,7 +129,14 @@ pub enum Op {
 }
 
 /// The operators, longest first, as the parser tries them.
-const OPS: [(&str, Op); 6] = [("==", Op::Eq), ("!=", Op::Ne), ("<=", Op::Le), (">=", Op::Ge), ("<", Op::Lt), (">", Op::Gt)];
+const OPS: [(&str, Op); 6] = [
+    ("==", Op::Eq),
+    ("!=", Op::Ne),
+    ("<=", Op::Le),
+    (">=", Op::Ge),
+    ("<", Op::Lt),
+    (">", Op::Gt),
+];
 
 /// An arithmetic operator (spec §8).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -109,7 +154,18 @@ pub enum Bin {
 }
 
 /// The arithmetic operators, longest first; `&&` and `||` are tried before them.
-const BINS: [(&str, Bin); 10] = [("<<", Bin::Shl), (">>", Bin::Shr), ("+", Bin::Add), ("-", Bin::Sub), ("*", Bin::Mul), ("/", Bin::Div), ("%", Bin::Rem), ("&", Bin::And), ("|", Bin::Or), ("^", Bin::Xor)];
+const BINS: [(&str, Bin); 10] = [
+    ("<<", Bin::Shl),
+    (">>", Bin::Shr),
+    ("+", Bin::Add),
+    ("-", Bin::Sub),
+    ("*", Bin::Mul),
+    ("/", Bin::Div),
+    ("%", Bin::Rem),
+    ("&", Bin::And),
+    ("|", Bin::Or),
+    ("^", Bin::Xor),
+];
 
 impl Bin {
     fn sym(self) -> &'static str {
@@ -126,7 +182,12 @@ impl Bin {
 #[derive(Debug)]
 pub enum Term {
     /// A signal, `past` samples back; `signed` reads its bits as two's complement.
-    Sig { sig: Probe, past: u32, width: u32, signed: bool },
+    Sig {
+        sig: Probe,
+        past: u32,
+        width: u32,
+        signed: bool,
+    },
     Num(IBig),
     Bin(Bin, Box<Term>, Box<Term>),
     /// `~x`: x's bits inverted at its width.
@@ -163,52 +224,124 @@ impl Term {
     /// The values it can have, worked out before searching.
     pub fn shape(&self) -> Shape {
         match self {
-            Term::Sig { width, signed, .. } => Shape { bits: *width, signed: *signed },
-            Term::Num(n) if *n < IBig::ZERO => Shape { bits: (!n.clone()).bit_len() as u32 + 1, signed: true },
-            Term::Num(n) => Shape { bits: (n.bit_len() as u32).max(1), signed: false },
+            Term::Sig { width, signed, .. } => Shape {
+                bits: *width,
+                signed: *signed,
+            },
+            Term::Num(n) if *n < IBig::ZERO => Shape {
+                bits: (!n.clone()).bit_len() as u32 + 1,
+                signed: true,
+            },
+            Term::Num(n) => Shape {
+                bits: (n.bit_len() as u32).max(1),
+                signed: false,
+            },
             Term::Bin(op, l, r) => {
                 let (a, b) = (l.shape(), r.shape());
                 let signed = a.signed || b.signed;
-                let widest = if signed { a.sbits().max(b.sbits()) } else { a.bits.max(b.bits) };
+                let widest = if signed {
+                    a.sbits().max(b.sbits())
+                } else {
+                    a.bits.max(b.bits)
+                };
                 match op {
-                    Bin::Add => Shape { bits: widest + 1, signed },
-                    Bin::Sub => Shape { bits: a.sbits().max(b.sbits()) + 1, signed: true },
-                    Bin::Mul => Shape { bits: a.bits + b.bits, signed },
+                    Bin::Add => Shape {
+                        bits: widest + 1,
+                        signed,
+                    },
+                    Bin::Sub => Shape {
+                        bits: a.sbits().max(b.sbits()) + 1,
+                        signed: true,
+                    },
+                    Bin::Mul => Shape {
+                        bits: a.bits + b.bits,
+                        signed,
+                    },
                     // a signed quotient can be one bit wider: -8 / -1
-                    Bin::Div => Shape { bits: a.bits + u32::from(signed), signed },
+                    Bin::Div => Shape {
+                        bits: a.bits + u32::from(signed),
+                        signed,
+                    },
                     // smaller than the divisor, and no larger than the dividend
-                    Bin::Rem if signed => Shape { bits: a.sbits().min(b.sbits()), signed },
-                    Bin::Rem => Shape { bits: a.bits.min(b.bits), signed },
+                    Bin::Rem if signed => Shape {
+                        bits: a.sbits().min(b.sbits()),
+                        signed,
+                    },
+                    Bin::Rem => Shape {
+                        bits: a.bits.min(b.bits),
+                        signed,
+                    },
                     // `a & 31` is never wider than 31, and not negative if either side isn't
                     Bin::And => match (a.signed, b.signed) {
-                        (false, false) => Shape { bits: a.bits.min(b.bits), signed: false },
+                        (false, false) => Shape {
+                            bits: a.bits.min(b.bits),
+                            signed: false,
+                        },
                         (true, false) => b,
                         (false, true) => a,
-                        (true, true) => Shape { bits: widest, signed: true },
+                        (true, true) => Shape {
+                            bits: widest,
+                            signed: true,
+                        },
                     },
-                    Bin::Or | Bin::Xor => Shape { bits: widest, signed },
-                    Bin::Shl => Shape { bits: a.bits.saturating_add(shift_max(r)), signed: a.signed },
+                    Bin::Or | Bin::Xor => Shape {
+                        bits: widest,
+                        signed,
+                    },
+                    Bin::Shl => Shape {
+                        bits: a.bits.saturating_add(shift_max(r)),
+                        signed: a.signed,
+                    },
                     Bin::Shr => a,
                 }
             }
-            Term::Inv(_, w) => Shape { bits: *w, signed: false },
-            Term::Slice(_, hi, lo) => Shape { bits: hi - lo + 1, signed: false },
-            Term::Signed(_, w) => Shape { bits: *w, signed: true },
-            Term::Bool(_) => Shape { bits: 1, signed: false },
+            Term::Inv(_, w) => Shape {
+                bits: *w,
+                signed: false,
+            },
+            Term::Slice(_, hi, lo) => Shape {
+                bits: hi - lo + 1,
+                signed: false,
+            },
+            Term::Signed(_, w) => Shape {
+                bits: *w,
+                signed: true,
+            },
+            Term::Bool(_) => Shape {
+                bits: 1,
+                signed: false,
+            },
             Term::Cond(_, a, b) => {
                 let (a, b) = (a.shape(), b.shape());
                 let signed = a.signed || b.signed;
-                Shape { bits: if signed { a.sbits().max(b.sbits()) } else { a.bits.max(b.bits) }, signed }
+                Shape {
+                    bits: if signed {
+                        a.sbits().max(b.sbits())
+                    } else {
+                        a.bits.max(b.bits)
+                    },
+                    signed,
+                }
             }
         }
     }
 
     /// Its value, reading signals with `value` as `holds` does; None where unknown.
-    pub fn value<V: std::borrow::Borrow<Val>>(&self, value: &dyn Fn(Probe, u32) -> Option<Option<V>>) -> Option<IBig> {
+    pub fn value<V: std::borrow::Borrow<Val>>(
+        &self,
+        value: &dyn Fn(Probe, u32) -> Option<Option<V>>,
+    ) -> Option<IBig> {
         Some(match self {
-            Term::Sig { sig, past, width, signed } => {
+            Term::Sig {
+                sig,
+                past,
+                width,
+                signed,
+            } => {
                 let v = value(*sig, *past)??;
-                let Val::Bits(b) = v.borrow() else { return None };
+                let Val::Bits(b) = v.borrow() else {
+                    return None;
+                };
                 let n = number(b)?;
                 if *signed { to_signed(n, *width) } else { n }
             }
@@ -243,7 +376,9 @@ impl Term {
             Term::Cond(c, a, b) => match holds3(c, value) {
                 Some(true) => a.value(value)?,
                 Some(false) => b.value(value)?,
-                None => a.value(value).filter(|x| b.value(value).as_ref() == Some(x))?,
+                None => a
+                    .value(value)
+                    .filter(|x| b.value(value).as_ref() == Some(x))?,
             },
         })
     }
@@ -302,7 +437,11 @@ fn mask(w: u32) -> IBig {
 
 /// `n`, `w` bits wide, as two's complement.
 fn to_signed(n: IBig, w: u32) -> IBig {
-    if w > 0 && n.bit(w as usize - 1) { n - (IBig::ONE << w as usize) } else { n }
+    if w > 0 && n.bit(w as usize - 1) {
+        n - (IBig::ONE << w as usize)
+    } else {
+        n
+    }
 }
 
 /// Bits as an unsigned number; None with an unknown bit.
@@ -323,7 +462,9 @@ pub struct Query {
 
 /// Looks like an expression rather than a bare value for the selected signal.
 pub fn is_expr(text: &str) -> bool {
-    text.contains(['=', '!', '&', '|', '(', '@', '<', '>', '+', '*', '/', '%', '^', '~', '?']) || text.get(1..).is_some_and(|t| t.contains('-'))
+    text.contains([
+        '=', '!', '&', '|', '(', '@', '<', '>', '+', '*', '/', '%', '^', '~', '?',
+    ]) || text.get(1..).is_some_and(|t| t.contains('-'))
 }
 
 /// A parsed operand: its name, probe, width, value names, how many samples back, and whether it
@@ -333,7 +474,8 @@ type Operand = (String, Probe, Option<u32>, Option<Names>, u32, bool);
 /// What a name is: its probe, its width (None: real or string), the names the file gives its
 /// values, and whether its values are signed (a computed signal that can be negative). It may
 /// make computed signals for names like `data[7:4]`, so it is `FnMut`.
-pub type Resolve<'a> = dyn FnMut(&str) -> Result<(Probe, Option<u32>, Option<Names>, bool), String> + 'a;
+pub type Resolve<'a> =
+    dyn FnMut(&str) -> Result<(Probe, Option<u32>, Option<Names>, bool), String> + 'a;
 
 /// The operators, for the error on text that isn't one.
 const OPERATORS: &str = "== != < <= > >= && || ! + - * / % & | ^ ~ << >> ?: and parentheses";
@@ -344,7 +486,11 @@ const OPERATORS: &str = "== != < <= > >= && || ! + - * / % & | ^ ~ << >> ?: and 
 #[derive(Debug, PartialEq)]
 pub enum Borrowed {
     /// `rising`, `posedge`, `$rose(x)`: an edge, `rose(x)` or `fell(x)`; `arg` the signal if given.
-    Edge { word: String, func: &'static str, arg: Option<String> },
+    Edge {
+        word: String,
+        func: &'static str,
+        arg: Option<String>,
+    },
     /// `prev(x)`, `previous(x)`, `$past(x)`: `past(x)`.
     Past { word: String, arg: Option<String> },
     /// `$stable(x)`: `stable(x)`.
@@ -362,26 +508,46 @@ impl Borrowed {
     pub fn of(name: &str) -> Option<Borrowed> {
         let name = name.trim();
         let (head, arg) = match name.find(['(', '[']) {
-            Some(i) => (&name[..i], Some(name[i + 1..].trim_end_matches([')', ']']).trim().to_string())),
+            Some(i) => (
+                &name[..i],
+                Some(
+                    name[i + 1..]
+                        .trim_end_matches([')', ']'])
+                        .trim()
+                        .to_string(),
+                ),
+            ),
             None => (name, None),
         };
         let word = name.to_string();
-        Some(match head.trim_start_matches('$').to_ascii_lowercase().as_str() {
-            "rising" | "rise" | "posedge" | "rising_edge" | "rose" => Borrowed::Edge { word, func: "rose", arg },
-            "falling" | "fall" | "negedge" | "falling_edge" | "fell" => Borrowed::Edge { word, func: "fell", arg },
-            "prev" | "previous" | "past" => Borrowed::Past { word, arg },
-            "stable" => Borrowed::Stable { word, arg },
-            "changed" | "change" => Borrowed::Changed { word, arg },
-            "next" | "future" | "nexttime" => Borrowed::Ahead { word },
-            _ => return None,
-        })
+        Some(
+            match head.trim_start_matches('$').to_ascii_lowercase().as_str() {
+                "rising" | "rise" | "posedge" | "rising_edge" | "rose" => Borrowed::Edge {
+                    word,
+                    func: "rose",
+                    arg,
+                },
+                "falling" | "fall" | "negedge" | "falling_edge" | "fell" => Borrowed::Edge {
+                    word,
+                    func: "fell",
+                    arg,
+                },
+                "prev" | "previous" | "past" => Borrowed::Past { word, arg },
+                "stable" => Borrowed::Stable { word, arg },
+                "changed" | "change" => Borrowed::Changed { word, arg },
+                "next" | "future" | "nexttime" => Borrowed::Ahead { word },
+                _ => return None,
+            },
+        )
     }
 
     /// What text left after a whole expression (`=1 && b`, `falling`) meant.
     fn after(rest: &str) -> Option<Borrowed> {
         let rest = rest.trim();
         if rest.starts_with('=') && !rest.starts_with("==") {
-            return Some(Borrowed::Assign { rest: rest.to_string() });
+            return Some(Borrowed::Assign {
+                rest: rest.to_string(),
+            });
         }
         Borrowed::of(rest.split_whitespace().next().unwrap_or(""))
     }
@@ -391,15 +557,34 @@ impl std::fmt::Display for Borrowed {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         let x = |arg: &Option<String>| arg.clone().filter(|a| !a.is_empty()).unwrap_or("x".into());
         match self {
-            Borrowed::Edge { word, func, arg: None } => write!(
+            Borrowed::Edge {
+                word,
+                func,
+                arg: None,
+            } => write!(
                 f,
                 "{word}: `@clk` already samples at the clock's rising edges; an edge of a signal is {func}(x), SVA's ${func} without the $"
             ),
-            Borrowed::Edge { word, func, arg } => write!(f, "{word}: an edge is {func}({}), SVA's ${func} without the $", x(arg)),
-            Borrowed::Past { word, arg } => write!(f, "{word}: the value a cycle earlier is past({}), SVA's $past without the $", x(arg)),
-            Borrowed::Stable { word, arg } => write!(f, "{word}: stable({}), SVA's $stable without the $", x(arg)),
-            Borrowed::Changed { word, arg } => write!(f, "{word}: a change is {0} != past({0})", x(arg)),
-            Borrowed::Ahead { word } => write!(f, "{word}: an expression reads no later value; search on from a match instead (`find` `from`)"),
+            Borrowed::Edge { word, func, arg } => write!(
+                f,
+                "{word}: an edge is {func}({}), SVA's ${func} without the $",
+                x(arg)
+            ),
+            Borrowed::Past { word, arg } => write!(
+                f,
+                "{word}: the value a cycle earlier is past({}), SVA's $past without the $",
+                x(arg)
+            ),
+            Borrowed::Stable { word, arg } => {
+                write!(f, "{word}: stable({}), SVA's $stable without the $", x(arg))
+            }
+            Borrowed::Changed { word, arg } => {
+                write!(f, "{word}: a change is {0} != past({0})", x(arg))
+            }
+            Borrowed::Ahead { word } => write!(
+                f,
+                "{word}: an expression reads no later value; search on from a match instead (`find` `from`)"
+            ),
             Borrowed::Assign { rest } => write!(f, "{rest}: compare with ==, not ="),
         }
     }
@@ -408,14 +593,27 @@ impl std::fmt::Display for Borrowed {
 /// Parse `[@clk] expr`. A value with a time unit (`delay == 40ns`) is that many ticks, by the
 /// trace's femtoseconds per tick `fpt`.
 pub fn parse_query(text: &str, fpt: Option<u128>, resolve: &mut Resolve) -> Result<Query, String> {
-    let mut p = Parser { s: text.trim(), len: text.trim().len(), fpt, resolve, names: Vec::new() };
+    let mut p = Parser {
+        s: text.trim(),
+        len: text.trim().len(),
+        fpt,
+        resolve,
+        names: Vec::new(),
+    };
     let clock = if p.eat("@") {
         let w = p.word();
         match (p.resolve)(&w) {
             Ok(r) => Some(r.0),
             // `@rising(clk)`, `@rising_edge(clk)`: the clock inside, if it is one
-            Err(e) => match w.split_once('(').and_then(|(_, rest)| rest.strip_suffix(')')) {
-                Some(inner) if (p.resolve)(inner).is_ok() => return Err(format!("@ takes the clock signal itself, as its rising edges: @{inner}")),
+            Err(e) => match w
+                .split_once('(')
+                .and_then(|(_, rest)| rest.strip_suffix(')'))
+            {
+                Some(inner) if (p.resolve)(inner).is_ok() => {
+                    return Err(format!(
+                        "@ takes the clock signal itself, as its rising edges: @{inner}"
+                    ));
+                }
                 _ => return Err(e),
             },
         }
@@ -431,14 +629,27 @@ pub fn parse_query(text: &str, fpt: Option<u128>, resolve: &mut Resolve) -> Resu
 
 /// The error on text after a whole expression: the form meant, or the operators.
 fn unexpected(rest: &str) -> String {
-    Borrowed::after(rest).map_or_else(|| format!("unexpected: {} (operators: {OPERATORS})", rest.trim()), |b| b.to_string())
+    Borrowed::after(rest).map_or_else(
+        || format!("unexpected: {} (operators: {OPERATORS})", rest.trim()),
+        |b| b.to_string(),
+    )
 }
 
 /// A computed signal's expression (spec §16): a value at any time, so no `past`, `rose`, `fell`
 /// or `stable`; a comparison is a 1-bit value. Also returns where each name is in `text` (a byte
 /// range) and what it names, for the signal's path.
-pub fn parse_term(text: &str, fpt: Option<u128>, resolve: &mut Resolve) -> Result<(Term, Vec<Named>), String> {
-    let mut p = Parser { s: text, len: text.len(), fpt, resolve, names: Vec::new() };
+pub fn parse_term(
+    text: &str,
+    fpt: Option<u128>,
+    resolve: &mut Resolve,
+) -> Result<(Term, Vec<Named>), String> {
+    let mut p = Parser {
+        s: text,
+        len: text.len(),
+        fpt,
+        resolve,
+        names: Vec::new(),
+    };
     let e = p.cond()?;
     if !p.s.trim().is_empty() {
         return Err(unexpected(p.s));
@@ -446,7 +657,10 @@ pub fn parse_term(text: &str, fpt: Option<u128>, resolve: &mut Resolve) -> Resul
     let mut sigs = Vec::new();
     probes(&e, &mut sigs);
     if sigs.iter().any(|s| s.1 > 0) {
-        return Err(format!("{}: past, rose, fell and stable need a clock; use them in find with @clk", text.trim()));
+        return Err(format!(
+            "{}: past, rose, fell and stable need a clock; use them in find with @clk",
+            text.trim()
+        ));
     }
     let term = match e {
         Expr::Truth(t) => t,
@@ -511,7 +725,8 @@ impl Parser<'_> {
         let (mut braces, mut parens, mut brackets) = (0, 0, 0);
         let mut end = self.s.len();
         for (i, c) in self.s.char_indices() {
-            let name_before = i > 0 && !matches!(&self.s[..i], "rose" | "fell" | "stable" | "past" | "signed");
+            let name_before =
+                i > 0 && !matches!(&self.s[..i], "rose" | "fell" | "stable" | "past" | "signed");
             match c {
                 '{' => braces += 1,
                 '}' => braces -= 1,
@@ -519,7 +734,12 @@ impl Parser<'_> {
                 ')' if parens > 0 => parens -= 1,
                 '[' => brackets += 1,
                 ']' => brackets -= 1,
-                c if braces == 0 && parens == 0 && (c.is_whitespace() || "()&|!=<>+-*/%^~?".contains(c) || (matches!(c, ':' | ',') && brackets == 0)) => {
+                c if braces == 0
+                    && parens == 0
+                    && (c.is_whitespace()
+                        || "()&|!=<>+-*/%^~?".contains(c)
+                        || (matches!(c, ':' | ',') && brackets == 0)) =>
+                {
                     end = i;
                     break;
                 }
@@ -556,8 +776,13 @@ impl Parser<'_> {
         let a = self.value()?;
         let b = if self.eat(":") { self.value()? } else { None };
         match (a, b) {
-            (Some(a), Some(b)) if !self.s.trim_start().starts_with('?') => Ok(Expr::Truth(Term::Cond(Box::new(c), Box::new(a), Box::new(b)))),
-            _ => Err(format!("? is c ? a : b, with a nested ? in parentheses: c ? a : (d ? e : f); at: {}", self.s.trim())),
+            (Some(a), Some(b)) if !self.s.trim_start().starts_with('?') => Ok(Expr::Truth(
+                Term::Cond(Box::new(c), Box::new(a), Box::new(b)),
+            )),
+            _ => Err(format!(
+                "? is c ? a : b, with a nested ? in parentheses: c ? a : (d ? e : f); at: {}",
+                self.s.trim()
+            )),
         }
     }
 
@@ -609,21 +834,36 @@ impl Parser<'_> {
             }
             false
         };
-        if self.s.trim_start().strip_prefix("contains(").is_some_and(quoted) {
+        if self
+            .s
+            .trim_start()
+            .strip_prefix("contains(")
+            .is_some_and(quoted)
+        {
             self.eat("contains(");
             let (name, sig, width, _, past, _) = self.operand()?;
             if width.is_some() {
-                return Err(format!("contains({name}, ...): {name} is a bit signal; contains reads a string signal's text"));
+                return Err(format!(
+                    "contains({name}, ...): {name} is a bit signal; contains reads a string signal's text"
+                ));
             }
             if !self.eat(",") || !self.eat("\"") {
-                return Err(format!("contains({name}, ...): write the text in quotes, contains({name}, \"text\")"));
+                return Err(format!(
+                    "contains({name}, ...): write the text in quotes, contains({name}, \"text\")"
+                ));
             }
-            let Some((text, rest)) = self.s.split_once('"') else { return Err(format!("contains({name}, ...): missing closing \"")) };
+            let Some((text, rest)) = self.s.split_once('"') else {
+                return Err(format!("contains({name}, ...): missing closing \""));
+            };
             self.s = rest;
             if !self.eat(")") {
                 return Err("missing )".into());
             }
-            return Ok(Expr::Contains { sig, past, text: text.into() });
+            return Ok(Expr::Contains {
+                sig,
+                past,
+                text: text.into(),
+            });
         }
         // `rose(`, `fell(`, `stable(`; otherwise the word is read again as an operand
         let start = self.s;
@@ -633,9 +873,18 @@ impl Parser<'_> {
             if !self.eat(")") {
                 return Err("missing )".into());
             }
-            let cmp = |past, target| Expr::Cmp { sig, past, op: Op::Eq, target };
+            let cmp = |past, target| Expr::Cmp {
+                sig,
+                past,
+                op: Op::Eq,
+                target,
+            };
             // from a known value only: a valid going from U to 0 in reset didn't fall
-            let zero = || width.map(|w| Some(Target::Bits("0".repeat(w as usize)))).ok_or(format!("{f}({name}): not a bit signal"));
+            let zero = || {
+                width
+                    .map(|w| Some(Target::Bits("0".repeat(w as usize))))
+                    .ok_or(format!("{f}({name}): not a bit signal"))
+            };
             return Ok(match f.as_str() {
                 "rose" => Expr::And(Box::new(cmp(past, None)), Box::new(cmp(past + 1, zero()?))),
                 "fell" => Expr::And(Box::new(cmp(past, zero()?)), Box::new(cmp(past + 1, None))),
@@ -658,18 +907,30 @@ impl Parser<'_> {
         {
             let mut value = value.clone();
             if crate::time::has_unit(&value) {
-                value = (crate::time::parse(&value, self.fpt).map_err(|e| format!("{name}: {e}"))?.round() as u64).to_string();
+                value = (crate::time::parse(&value, self.fpt)
+                    .map_err(|e| format!("{name}: {e}"))?
+                    .round() as u64)
+                    .to_string();
             }
             match parse(&value, *width, names.as_ref()) {
                 Ok(target) => {
                     if !matches!(op, Op::Eq | Op::Ne) && !matches!(target, Target::Bits(_)) {
-                        return Err(format!("{name} {sym} {value}: {sym} compares numbers; x, z and text only with == or !="));
+                        return Err(format!(
+                            "{name} {sym} {value}: {sym} compares numbers; x, z and text only with == or !="
+                        ));
                     }
-                    return Ok(Expr::Cmp { sig: *sig, past: *past, op, target: Some(target) });
+                    return Ok(Expr::Cmp {
+                        sig: *sig,
+                        past: *past,
+                        op,
+                        target: Some(target),
+                    });
                 }
                 // not a value: a signal (`mi_addr != reg_waddr`, `data != past(data)`), or a field's
                 // slice (`rd == insn[11:7]`), which the chain reads
-                Err(e) if value.starts_with(|c: char| c.is_ascii_digit() || "'-".contains(c)) => return Err(format!("{name}: {e}")),
+                Err(e) if value.starts_with(|c: char| c.is_ascii_digit() || "'-".contains(c)) => {
+                    return Err(format!("{name}: {e}"));
+                }
                 Err(e) => not_value = Some(format!("{name}: {e}")),
             }
         }
@@ -677,8 +938,14 @@ impl Parser<'_> {
             let whole = format!("{} {sym} {value}", left.src);
             return match (value.to_lowercase().as_str(), op) {
                 ("z", _) => Err(format!("{whole}: an arithmetic result is a number or x")),
-                (_, Op::Eq | Op::Ne) => Ok(Expr::Arith { a: self.term(left.atom, &left.src)?, op, b: None }),
-                _ => Err(format!("{whole}: {sym} compares numbers; x only with == or !=")),
+                (_, Op::Eq | Op::Ne) => Ok(Expr::Arith {
+                    a: self.term(left.atom, &left.src)?,
+                    op,
+                    b: None,
+                }),
+                _ => Err(format!(
+                    "{whole}: {sym} compares numbers; x only with == or !="
+                )),
             };
         }
         self.s = right;
@@ -686,15 +953,39 @@ impl Parser<'_> {
         let whole = format!("{} {sym} {}", left.src, r.src);
         if let Some(b) = left.strict {
             let before = left.src[..left.src.len() - left.last.len()].trim_end();
-            return Err(format!("{whole}: {} and {sym} need parentheses: ({}) {sym} {} or {before} ({} {sym} {})", b.sym(), left.src, r.src, left.last, r.src));
+            return Err(format!(
+                "{whole}: {} and {sym} need parentheses: ({}) {sym} {} or {before} ({} {sym} {})",
+                b.sym(),
+                left.src,
+                r.src,
+                left.last,
+                r.src
+            ));
         }
         if let Some(b) = r.strict {
             let after = r.src[r.first.len()..].trim_start();
-            return Err(format!("{whole}: {sym} and {} need parentheses: {} {sym} ({}) or ({} {sym} {}) {after}", b.sym(), left.src, r.src, left.src, r.first));
+            return Err(format!(
+                "{whole}: {sym} and {} need parentheses: {} {sym} ({}) or ({} {sym} {}) {after}",
+                b.sym(),
+                left.src,
+                r.src,
+                left.src,
+                r.first
+            ));
         }
         Ok(match (left.atom, r.atom) {
-            (Atom::Signal(a), Atom::Signal(b)) if !a.5 && !b.5 => Expr::Signals { a: a.1, a_past: a.4, op, b: b.1, b_past: b.4 },
-            (a, b) => Expr::Arith { a: self.term(a, &left.src)?, op, b: Some(self.term(b, &r.src)?) },
+            (Atom::Signal(a), Atom::Signal(b)) if !a.5 && !b.5 => Expr::Signals {
+                a: a.1,
+                a_past: a.4,
+                op,
+                b: b.1,
+                b_past: b.4,
+            },
+            (a, b) => Expr::Arith {
+                a: self.term(a, &left.src)?,
+                op,
+                b: Some(self.term(b, &r.src)?),
+            },
         })
     }
 
@@ -716,11 +1007,27 @@ impl Parser<'_> {
         let (first, last) = (atoms[0].1.clone(), atoms[atoms.len() - 1].1.clone());
         if ops.is_empty() {
             let (atom, _) = atoms.pop().unwrap();
-            return Ok(Chain { atom, src, strict: None, first, last });
+            return Ok(Chain {
+                atom,
+                src,
+                strict: None,
+                first,
+                last,
+            });
         }
-        if let Some(i) = (0..ops.len() - 1).find(|&i| ops[i] != ops[i + 1] && (ops[i].strict() || ops[i + 1].strict())) {
-            let (a, b, c, x, y) = (&atoms[i].1, &atoms[i + 1].1, &atoms[i + 2].1, ops[i].sym(), ops[i + 1].sym());
-            return Err(format!("{src}: {x} and {y} need parentheses: ({a} {x} {b}) {y} {c} or {a} {x} ({b} {y} {c})"));
+        if let Some(i) = (0..ops.len() - 1)
+            .find(|&i| ops[i] != ops[i + 1] && (ops[i].strict() || ops[i + 1].strict()))
+        {
+            let (a, b, c, x, y) = (
+                &atoms[i].1,
+                &atoms[i + 1].1,
+                &atoms[i + 2].1,
+                ops[i].sym(),
+                ops[i + 1].sym(),
+            );
+            return Err(format!(
+                "{src}: {x} and {y} need parentheses: ({a} {x} {b}) {y} {c} or {a} {x} ({b} {y} {c})"
+            ));
         }
         let mut terms = Vec::new();
         let mut joins = Vec::new();
@@ -744,27 +1051,50 @@ impl Parser<'_> {
             t = self.bin(op, t, r)?;
         }
         // shifts bind tighter than comparisons, as everyone reads them; `&`, `|` and `^` don't
-        let bitwise = ops.iter().copied().find(|o| matches!(o, Bin::And | Bin::Or | Bin::Xor));
-        Ok(Chain { atom: Atom::Term(t.0), src, strict: bitwise, first, last })
+        let bitwise = ops
+            .iter()
+            .copied()
+            .find(|o| matches!(o, Bin::And | Bin::Or | Bin::Xor));
+        Ok(Chain {
+            atom: Atom::Term(t.0),
+            src,
+            strict: bitwise,
+            first,
+            last,
+        })
     }
 
     /// `a op b`, checked for size before searching.
-    fn bin(&mut self, op: Bin, (a, at): (Term, String), (b, bt): (Term, String)) -> Result<(Term, String), String> {
+    fn bin(
+        &mut self,
+        op: Bin,
+        (a, at): (Term, String),
+        (b, bt): (Term, String),
+    ) -> Result<(Term, String), String> {
         let src = format!("{at} {} {bt}", op.sym());
         if matches!(op, Bin::Shl | Bin::Shr) && b.shape().signed {
-            return Err(format!("{src}: {bt} can be negative; shift by an unsigned amount"));
+            return Err(format!(
+                "{src}: {bt} can be negative; shift by an unsigned amount"
+            ));
         }
         let t = Term::Bin(op, Box::new(a), Box::new(b));
         let bits = t.shape().bits;
         if bits > MAX_RESULT {
-            let Term::Bin(_, a, b) = &t else { unreachable!() };
+            let Term::Bin(_, a, b) = &t else {
+                unreachable!()
+            };
             if op == Bin::Shl && !matches!(**b, Term::Num(_)) && a.shape().bits < MAX_RESULT {
                 // the widest amount that fits: a.bits + 2^k - 1 <= MAX_RESULT
                 let k = (MAX_RESULT - a.shape().bits + 1).ilog2();
                 let w = b.shape().bits;
-                return Err(format!("{src}: {bt} is {w} bits, so the result could be 2^{w} bits; shift by a slice, {at} << {bt}[{}:0]", k - 1));
+                return Err(format!(
+                    "{src}: {bt} is {w} bits, so the result could be 2^{w} bits; shift by a slice, {at} << {bt}[{}:0]",
+                    k - 1
+                ));
             }
-            return Err(format!("{src}: the result could be {bits} bits, more than {MAX_RESULT}; slice an operand to fewer bits"));
+            return Err(format!(
+                "{src}: the result could be {bits} bits, more than {MAX_RESULT}; slice an operand to fewer bits"
+            ));
         }
         Ok((t, src))
     }
@@ -774,8 +1104,15 @@ impl Parser<'_> {
         match atom {
             Atom::Term(t) => Ok(t),
             Atom::Signal((name, sig, width, _, past, signed)) => match width {
-                None => Err(format!("{name} is a real or string signal; arithmetic takes numbers")),
-                Some(width) => Ok(Term::Sig { sig, past, width, signed }),
+                None => Err(format!(
+                    "{name} is a real or string signal; arithmetic takes numbers"
+                )),
+                Some(width) => Ok(Term::Sig {
+                    sig,
+                    past,
+                    width,
+                    signed,
+                }),
             },
         }
     }
@@ -787,7 +1124,9 @@ impl Parser<'_> {
         let at = self.s;
         if !self.s.starts_with("!=") && self.eat("!") {
             let a = self.atom()?;
-            return Ok(Atom::Term(Term::Bool(Box::new(Expr::Not(Box::new(truth(a)))))));
+            return Ok(Atom::Term(Term::Bool(Box::new(Expr::Not(Box::new(
+                truth(a),
+            ))))));
         }
         if self.eat("~") {
             let a = self.atom()?;
@@ -795,7 +1134,10 @@ impl Parser<'_> {
             let t = self.term(a, &src)?;
             let Some(w) = t.width() else {
                 let w = t.widest_signal().unwrap_or(32);
-                return Err(format!("{src}: ~ inverts bits at a width, so give one with a slice: {src}[{}:0]", w - 1));
+                return Err(format!(
+                    "{src}: ~ inverts bits at a width, so give one with a slice: {src}[{}:0]",
+                    w - 1
+                ));
             };
             return Ok(Atom::Term(Term::Inv(Box::new(t), w)));
         }
@@ -818,7 +1160,12 @@ impl Parser<'_> {
             };
             return self.slice(atom, at);
         }
-        if self.s.starts_with(|c: char| c.is_ascii_digit() || c == '\'') || (self.s.starts_with('-') && self.s[1..].starts_with(|c: char| c.is_ascii_digit() || c == '\'')) {
+        if self
+            .s
+            .starts_with(|c: char| c.is_ascii_digit() || c == '\'')
+            || (self.s.starts_with('-')
+                && self.s[1..].starts_with(|c: char| c.is_ascii_digit() || c == '\''))
+        {
             let w = self.value_word();
             return number_text(&w, self.fpt).map(|n| Atom::Term(Term::Num(n)));
         }
@@ -831,7 +1178,12 @@ impl Parser<'_> {
             let t = self.term(c.atom, &c.src)?;
             let Some(w) = t.width() else {
                 let w = t.widest_signal().unwrap_or(32);
-                return Err(format!("signed({}): signed reads bits at a width, so give one with a slice: signed(({})[{}:0])", c.src, c.src, w - 1));
+                return Err(format!(
+                    "signed({}): signed reads bits at a width, so give one with a slice: signed(({})[{}:0])",
+                    c.src,
+                    c.src,
+                    w - 1
+                ));
             };
             return self.slice(Atom::Term(Term::Signed(Box::new(t), w)), at);
         }
@@ -843,15 +1195,26 @@ impl Parser<'_> {
         // a slice or bit of a name that has none of its own: a record's field (`b[4:0]`)
         self.s = start;
         let name = self.word();
-        let Some((base, range)) = name.strip_suffix(']').and_then(|n| n.rsplit_once('[')) else { return Err(err) };
+        let Some((base, range)) = name.strip_suffix(']').and_then(|n| n.rsplit_once('[')) else {
+            return Err(err);
+        };
         let (hi, lo) = match range.split_once(':') {
             Some((h, l)) => (h.trim().parse::<u32>(), l.trim().parse::<u32>()),
             None => (range.trim().parse(), range.trim().parse()),
         };
-        let (Ok(hi), Ok(lo), Ok((sig, width, names, signed))) = (hi, lo, (self.resolve)(base)) else { return Err(err) };
-        let t = self.term(Atom::Signal((base.to_string(), sig, width, names, 0, signed)), base)?;
+        let (Ok(hi), Ok(lo), Ok((sig, width, names, signed))) = (hi, lo, (self.resolve)(base))
+        else {
+            return Err(err);
+        };
+        let t = self.term(
+            Atom::Signal((base.to_string(), sig, width, names, 0, signed)),
+            base,
+        )?;
         if hi < lo || hi >= t.width().unwrap_or(0) {
-            return Err(format!("{name}: {base} has no bits {hi}:{lo} ({} bits)", t.width().unwrap_or(0)));
+            return Err(format!(
+                "{name}: {base} has no bits {hi}:{lo} ({} bits)",
+                t.width().unwrap_or(0)
+            ));
         }
         Ok(Atom::Term(Term::Slice(Box::new(t), hi, lo)))
     }
@@ -874,7 +1237,10 @@ impl Parser<'_> {
         .ok_or(format!("{src}[{range}]: a slice is [hi:lo], a bit [i]"))?;
         self.s = &self.s[range.len() + 1..];
         if hi < lo || hi >= MAX_RESULT {
-            return Err(format!("{src}[{hi}:{lo}]: a slice is [hi:lo], hi from lo to {}", MAX_RESULT - 1));
+            return Err(format!(
+                "{src}[{hi}:{lo}]: a slice is [hi:lo], hi from lo to {}",
+                MAX_RESULT - 1
+            ));
         }
         Ok(Atom::Term(Term::Slice(Box::new(t), hi, lo)))
     }
@@ -887,12 +1253,17 @@ impl Parser<'_> {
         let name = self.word();
         if name == "past" && self.eat("(") {
             let (name, sig, width, names, past, signed) = self.operand()?;
-            return if self.eat(")") { Ok((format!("past({name})"), sig, width, names, past + 1, signed)) } else { Err("missing )".into()) };
+            return if self.eat(")") {
+                Ok((format!("past({name})"), sig, width, names, past + 1, signed))
+            } else {
+                Err("missing )".into())
+            };
         }
         if name.is_empty() {
             return Err(format!("expected a signal at: {}", self.s.trim()));
         }
-        let (sig, width, names, signed) = (self.resolve)(&name).map_err(|e| Borrowed::of(&name).map_or(e, |b| b.to_string()))?;
+        let (sig, width, names, signed) =
+            (self.resolve)(&name).map_err(|e| Borrowed::of(&name).map_or(e, |b| b.to_string()))?;
         self.names.push((at..at + name.len(), sig));
         Ok((name, sig, width, names, 0, signed))
     }
@@ -901,7 +1272,12 @@ impl Parser<'_> {
 /// An operand as a condition: a signal true when 1 / nonzero, a value when known and nonzero.
 fn truth(a: Atom) -> Expr {
     match a {
-        Atom::Signal((_, sig, _, _, past, _)) => Expr::Cmp { sig, past, op: Op::Eq, target: None },
+        Atom::Signal((_, sig, _, _, past, _)) => Expr::Cmp {
+            sig,
+            past,
+            op: Op::Eq,
+            target: None,
+        },
         Atom::Term(Term::Bool(e)) => *e,
         Atom::Term(t) => Expr::Truth(t),
     }
@@ -911,7 +1287,11 @@ fn truth(a: Atom) -> Expr {
 /// without leading zeros if unsized; or `'0`, `'1`, `'x`, `'z`, as wide as what it meets.
 #[derive(Debug, PartialEq)]
 pub enum Sv {
-    Bits { bits: String, signed: bool, sized: bool },
+    Bits {
+        bits: String,
+        signed: bool,
+        sized: bool,
+    },
     Fill(char),
 }
 
@@ -919,7 +1299,8 @@ pub enum Sv {
 /// doesn't fit its size is an error, not cut.
 pub fn sv_literal(text: &str) -> Option<Result<Sv, String>> {
     let (size, rest) = text.split_once('\'')?;
-    let form = || format!("{text}: an SV number is <size>'<b|o|d|h><digits>, e.g. 8'hFF, 'd12, 4'b10x0");
+    let form =
+        || format!("{text}: an SV number is <size>'<b|o|d|h><digits>, e.g. 8'hFF, 'd12, 4'b10x0");
     let size = match size.replace('_', "") {
         s if s.is_empty() => None,
         s => match s.parse::<u32>() {
@@ -931,8 +1312,12 @@ pub fn sv_literal(text: &str) -> Option<Result<Sv, String>> {
     if size.is_none() && matches!(rest.as_str(), "0" | "1" | "x" | "z") {
         return Some(Ok(Sv::Fill(rest.chars().next().unwrap())));
     }
-    let (signed, rest) = rest.strip_prefix('s').map_or((false, rest.as_str()), |r| (true, r));
-    let Some(base) = rest.chars().next() else { return Some(Err(form())) };
+    let (signed, rest) = rest
+        .strip_prefix('s')
+        .map_or((false, rest.as_str()), |r| (true, r));
+    let Some(base) = rest.chars().next() else {
+        return Some(Err(form()));
+    };
     let digits = rest[1..].replace('_', "").replace('?', "z");
     if digits.is_empty() {
         return Some(Err(form()));
@@ -962,31 +1347,64 @@ pub fn sv_literal(text: &str) -> Option<Result<Sv, String>> {
 /// SV bits brought to their size: leading zeros dropped, then padded (with an x or z if that
 /// leads, as SV does), or an error if the value is wider.
 fn sized(text: &str, bits: String, size: Option<u32>, signed: bool) -> Result<Sv, String> {
-    let fill = if bits.starts_with(['x', 'z']) { &bits[..1] } else { "0" };
+    let fill = if bits.starts_with(['x', 'z']) {
+        &bits[..1]
+    } else {
+        "0"
+    };
     let bits = match bits.trim_start_matches('0') {
         "" => "0",
         b => b,
     };
-    let Some(n) = size.map(|n| n as usize) else { return Ok(Sv::Bits { bits: bits.into(), signed, sized: false }) };
+    let Some(n) = size.map(|n| n as usize) else {
+        return Ok(Sv::Bits {
+            bits: bits.into(),
+            signed,
+            sized: false,
+        });
+    };
     if bits.len() > n {
         return Err(format!("{text}: the value doesn't fit in {n} bits"));
     }
-    Ok(Sv::Bits { bits: format!("{}{bits}", fill.repeat(n - bits.len())), signed, sized: true })
+    Ok(Sv::Bits {
+        bits: format!("{}{bits}", fill.repeat(n - bits.len())),
+        signed,
+        sized: true,
+    })
 }
 
 /// A number in an expression: decimal, `0x`, `0b` or `0o`, an SV number (`8'hFF`), maybe
 /// negative, or a time (ticks).
 fn number_text(text: &str, fpt: Option<u128>) -> Result<IBig, String> {
     if crate::time::has_unit(text) {
-        return crate::time::parse(text, fpt).map(|t| IBig::from(t.round() as i128)).map_err(String::from);
+        return crate::time::parse(text, fpt)
+            .map(|t| IBig::from(t.round() as i128))
+            .map_err(String::from);
     }
     if let Some(sv) = sv_literal(text.trim_start_matches('-')) {
         let n = match sv? {
-            Sv::Fill(c) => return Err(format!("{text}: '{c} has no width in arithmetic; write one, as 32'h{}", if c == '1' { "FFFFFFFF" } else { "0" })),
-            Sv::Bits { bits, .. } if bits.contains(['x', 'z']) => return Err(format!("{text}: arithmetic takes known numbers; compare with x instead (== x)")),
-            Sv::Bits { bits, signed, sized } => {
+            Sv::Fill(c) => {
+                return Err(format!(
+                    "{text}: '{c} has no width in arithmetic; write one, as 32'h{}",
+                    if c == '1' { "FFFFFFFF" } else { "0" }
+                ));
+            }
+            Sv::Bits { bits, .. } if bits.contains(['x', 'z']) => {
+                return Err(format!(
+                    "{text}: arithmetic takes known numbers; compare with x instead (== x)"
+                ));
+            }
+            Sv::Bits {
+                bits,
+                signed,
+                sized,
+            } => {
                 let n = number(&bits).ok_or(format!("not a number: {text}"))?;
-                if signed && sized { to_signed(n, bits.len() as u32) } else { n }
+                if signed && sized {
+                    to_signed(n, bits.len() as u32)
+                } else {
+                    n
+                }
             }
         };
         return Ok(if text.starts_with('-') { -n } else { n });
@@ -1012,20 +1430,28 @@ fn back(prev: Prev, t: Tick, n: u32) -> Option<Tick> {
 }
 
 fn eval(trace: &Trace, e: &Expr, t: Tick, prev: Prev) -> bool {
-    holds(e, &|sig, n| back(prev, t, n).map(|t| trace.value_of(sig.0, sig.1, t)))
+    holds(e, &|sig, n| {
+        back(prev, t, n).map(|t| trace.value_of(sig.0, sig.1, t))
+    })
 }
 
 /// Whether `e` holds, given `value(sig, n)`: sig's value `n` samples back, None where there is no
 /// such sample (and Some(None) where the signal has no value there). Searches sample a trace;
 /// `records` `where` samples a stream's records, a field per probe. Unknown is not a match.
-pub fn holds<V: std::borrow::Borrow<Val>>(e: &Expr, value: &dyn Fn(Probe, u32) -> Option<Option<V>>) -> bool {
+pub fn holds<V: std::borrow::Borrow<Val>>(
+    e: &Expr,
+    value: &dyn Fn(Probe, u32) -> Option<Option<V>>,
+) -> bool {
     holds3(e, value) == Some(true)
 }
 
 /// `holds`, three-valued as SV's conditions are (spec §8): None where an unknown decides it.
 /// `&&` and `||` know their answer when one known side decides it (`0 && x` is 0); a comparison
 /// with an unknown operand is unknown, except with `x` or `z`, which ask about unknown bits.
-fn holds3<V: std::borrow::Borrow<Val>>(e: &Expr, value: &dyn Fn(Probe, u32) -> Option<Option<V>>) -> Option<bool> {
+fn holds3<V: std::borrow::Borrow<Val>>(
+    e: &Expr,
+    value: &dyn Fn(Probe, u32) -> Option<Option<V>>,
+) -> Option<bool> {
     use std::cmp::Ordering::{self, *};
     let compare = |op: Op, order: Option<Ordering>| {
         order.map(|o| match op {
@@ -1053,39 +1479,64 @@ fn holds3<V: std::borrow::Borrow<Val>>(e: &Expr, value: &dyn Fn(Probe, u32) -> O
             (Some(a), Some(b)) => a.as_ref().map(|v| v.borrow()) == b.as_ref().map(|v| v.borrow()),
             _ => false,
         }),
-        Expr::Signals { a, a_past, op, b, b_past } => {
+        Expr::Signals {
+            a,
+            a_past,
+            op,
+            b,
+            b_past,
+        } => {
             let (x, y) = (value(*a, *a_past).flatten(), value(*b, *b_past).flatten());
-            let order = match (x.as_ref().map(|v| v.borrow()), y.as_ref().map(|v| v.borrow())) {
-                (Some(Val::Bits(x)), Some(Val::Bits(y))) => unsigned(x).zip(unsigned(y)).map(|(x, y)| x.cmp(&y)),
+            let order = match (
+                x.as_ref().map(|v| v.borrow()),
+                y.as_ref().map(|v| v.borrow()),
+            ) {
+                (Some(Val::Bits(x)), Some(Val::Bits(y))) => {
+                    unsigned(x).zip(unsigned(y)).map(|(x, y)| x.cmp(&y))
+                }
                 (Some(Val::Text(x)), Some(Val::Text(y))) => Some(x.cmp(y)),
                 _ => None,
             };
             compare(*op, order)
         }
         Expr::Truth(t) => t.value(value).map(|v| v != IBig::ZERO),
-        Expr::Contains { sig, past, text } => {
-            value(*sig, *past).flatten().map(|v| matches!(v.borrow(), Val::Text(t) if t.contains(text.as_str())))
-        }
+        Expr::Contains { sig, past, text } => value(*sig, *past)
+            .flatten()
+            .map(|v| matches!(v.borrow(), Val::Text(t) if t.contains(text.as_str()))),
         Expr::Arith { a, op, b } => {
             let x = a.value(value);
             // `== x`: whether the result is unknown, always known
-            let Some(b) = b else { return Some(x.is_none() == (*op == Op::Eq)) };
+            let Some(b) = b else {
+                return Some(x.is_none() == (*op == Op::Eq));
+            };
             compare(*op, x.zip(b.value(value)).map(|(x, y)| x.cmp(&y)))
         }
-        Expr::Cmp { sig, past, op, target } => {
+        Expr::Cmp {
+            sig,
+            past,
+            op,
+            target,
+        } => {
             let v = value(*sig, *past).flatten();
             let v = v.as_ref().map(|v| v.borrow());
             let unknown = |b: &str| b.contains(['x', 'u', 'w', '-', 'z']);
             match (target, v) {
                 // `== x`, `== z`: whether it has such a bit, always known
-                (Some(t @ (Target::Unknown | Target::HighZ)), _) => Some(matches(t, v) == (*op == Op::Eq)),
-                (Some(t @ Target::Bits(p)), Some(Val::Bits(b))) => match (unsigned(b), unsigned(p)) {
+                (Some(t @ (Target::Unknown | Target::HighZ)), _) => {
+                    Some(matches(t, v) == (*op == Op::Eq))
+                }
+                (Some(t @ Target::Bits(p)), Some(Val::Bits(b))) => match (unsigned(b), unsigned(p))
+                {
                     (Some(b), Some(p)) => compare(*op, Some(b.cmp(&p))),
                     // a value with x or z bits (`4'b1x01`) matches them exactly
-                    (_, None) if matches!(op, Op::Eq | Op::Ne) => Some(matches(t, v) == (*op == Op::Eq)),
+                    (_, None) if matches!(op, Op::Eq | Op::Ne) => {
+                        Some(matches(t, v) == (*op == Op::Eq))
+                    }
                     _ => None,
                 },
-                (Some(Target::Text(p)), Some(Val::Text(t))) => compare(*op, Some(t.as_str().cmp(p.as_str()))),
+                (Some(Target::Text(p)), Some(Val::Text(t))) => {
+                    compare(*op, Some(t.as_str().cmp(p.as_str())))
+                }
                 // as in an `if`: some bit is 1; unknown with an unknown bit
                 (None, Some(Val::Bits(b))) if unknown(b) => None,
                 (None, Some(Val::Bits(b))) => Some(b.contains(['1', 'h'])),
@@ -1107,7 +1558,13 @@ pub fn probes(e: &Expr, out: &mut Vec<(Probe, u32)>) {
         Expr::Not(a) => probes(a, out),
         Expr::Cmp { sig, past, .. } => out.push((*sig, *past)),
         Expr::Stable { sig, past } => out.extend([(*sig, *past), (*sig, past + 1)]),
-        Expr::Signals { a, a_past, b, b_past, .. } => out.extend([(*a, *a_past), (*b, *b_past)]),
+        Expr::Signals {
+            a,
+            a_past,
+            b,
+            b_past,
+            ..
+        } => out.extend([(*a, *a_past), (*b, *b_past)]),
         Expr::Contains { sig, past, .. } => out.push((*sig, *past)),
         Expr::Truth(t) => t.probes(out),
         Expr::Arith { a, b, .. } => {
@@ -1122,14 +1579,33 @@ pub fn probes(e: &Expr, out: &mut Vec<(Probe, u32)>) {
 /// flip-flop does just before the edge: the cursor lands where the transfer's cycle begins.
 pub fn find_query(trace: &Trace, q: &Query, from: Tick, forward: bool) -> Option<Tick> {
     if q.clock.is_some() {
-        let s = crate::query::Search { from, to: None, forward, merge: false, runs: 1, matches: 1 };
-        return crate::query::find(trace, q, &s).runs.first().map(|r| r.first);
+        let s = crate::query::Search {
+            from,
+            to: None,
+            forward,
+            merge: false,
+            runs: 1,
+            matches: 1,
+        };
+        return crate::query::find(trace, q, &s)
+            .runs
+            .first()
+            .map(|r| r.first);
     }
     let prev = |t: Tick| t.checked_sub(1);
-    let held = |t: Tick| t.checked_sub(1).is_some_and(|p| eval(trace, &q.expr, p, &prev));
+    let held = |t: Tick| {
+        t.checked_sub(1)
+            .is_some_and(|p| eval(trace, &q.expr, p, &prev))
+    };
     let mut t = from;
     // a value of one signal (`/0x40`): one walk over its changes
-    if let Expr::Cmp { sig, past: 0, op: Op::Eq, target: Some(target) } = &q.expr {
+    if let Expr::Cmp {
+        sig,
+        past: 0,
+        op: Op::Eq,
+        target: Some(target),
+    } = &q.expr
+    {
         return find(trace, sig.0, sig.1, target, from, forward);
     }
     let mut sigs = Vec::new();
@@ -1138,7 +1614,13 @@ pub fn find_query(trace: &Trace, q: &Query, from: Tick, forward: bool) -> Option
         // `past(x)` changes `n` ticks after x does
         let next = sigs.iter().filter_map(|&((v, b), n)| {
             let n = n as Tick;
-            if forward { trace.next_change_of(v, b, t.saturating_sub(n)).map(|c| c + n) } else { trace.prev_change_of(v, b, t.checked_sub(n)?).map(|c| c + n) }
+            if forward {
+                trace
+                    .next_change_of(v, b, t.saturating_sub(n))
+                    .map(|c| c + n)
+            } else {
+                trace.prev_change_of(v, b, t.checked_sub(n)?).map(|c| c + n)
+            }
         });
         t = if forward { next.min()? } else { next.max()? };
         if eval(trace, &q.expr, t, &prev) && !held(t) {
@@ -1150,12 +1632,15 @@ pub fn find_query(trace: &Trace, q: &Query, from: Tick, forward: bool) -> Option
 /// Bits as an unsigned number that orders as one: no leading zeros, compared by length, then
 /// digits; None with an unknown or high-impedance bit.
 fn unsigned(bits: &str) -> Option<(usize, String)> {
-    let b: String = bits.chars().map(|c| match c {
-        'h' => Some('1'),
-        'l' => Some('0'),
-        '0' | '1' => Some(c),
-        _ => None,
-    }).collect::<Option<_>>()?;
+    let b: String = bits
+        .chars()
+        .map(|c| match c {
+            'h' => Some('1'),
+            'l' => Some('0'),
+            '0' | '1' => Some(c),
+            _ => None,
+        })
+        .collect::<Option<_>>()?;
     let b = b.trim_start_matches('0').to_string();
     Some((b.len(), b))
 }
@@ -1164,14 +1649,14 @@ fn matches(target: &Target, v: Option<&Val>) -> bool {
     match (target, v) {
         (Target::Unknown, Some(Val::Bits(b))) => b.contains(['x', 'u', 'w', '-']),
         (Target::HighZ, Some(Val::Bits(b))) => b.contains('z'),
-        (Target::Bits(p), Some(Val::Bits(b))) => {
-            b.chars().map(|c| match c {
+        (Target::Bits(p), Some(Val::Bits(b))) => b
+            .chars()
+            .map(|c| match c {
                 'h' => '1',
                 'l' => '0',
                 c => c,
             })
-            .eq(p.chars())
-        }
+            .eq(p.chars()),
         (Target::Text(p), Some(Val::Text(t))) => p == t,
         _ => false,
     }
@@ -1179,13 +1664,27 @@ fn matches(target: &Target, v: Option<&Val>) -> bool {
 
 /// The next (or previous) time after (before) `from` where the signal changes to the target, so
 /// a match is the start of a matching segment.
-pub fn find(trace: &Trace, var: usize, bit: Option<u32>, target: &Target, from: Tick, forward: bool) -> Option<Tick> {
+pub fn find(
+    trace: &Trace,
+    var: usize,
+    bit: Option<u32>,
+    target: &Target,
+    from: Tick,
+    forward: bool,
+) -> Option<Tick> {
     find_all(trace, var, bit, target, from, forward).next()
 }
 
 /// Every such time, nearest first, from one walk over the signal's changes.
 // shortcut (#15): looks at every change; index values if searching huge traces is too slow.
-pub fn find_all<'a>(trace: &'a Trace, var: usize, bit: Option<u32>, target: &'a Target, from: Tick, forward: bool) -> impl Iterator<Item = Tick> + 'a {
+pub fn find_all<'a>(
+    trace: &'a Trace,
+    var: usize,
+    bit: Option<u32>,
+    target: &'a Target,
+    from: Tick,
+    forward: bool,
+) -> impl Iterator<Item = Tick> + 'a {
     let mut changes = trace.walk(var, bit, from, forward).peekable();
     // forward, whether the change before matched
     let mut last = None;
@@ -1195,7 +1694,9 @@ pub fn find_all<'a>(trace: &'a Trace, var: usize, bit: Option<u32>, target: &'a 
             let before = match (forward, last) {
                 (true, Some(m)) => m,
                 (false, _) if let Some(c) = changes.peek() => matches(target, c.1.as_ref()),
-                _ => x.checked_sub(1).is_some_and(|p| matches(target, trace.value_of(var, bit, p).as_ref())),
+                _ => x
+                    .checked_sub(1)
+                    .is_some_and(|p| matches(target, trace.value_of(var, bit, p).as_ref())),
             };
             let now = matches(target, v.as_ref());
             last = Some(now);
@@ -1220,17 +1721,34 @@ mod tests {
         assert_eq!(parse("-12", Some(8), None), bits("11110100"));
         assert_eq!(parse("1", Some(1), None), bits("1"));
         assert_eq!(parse("X", Some(8), None), Ok(Target::Unknown));
-        assert_eq!(parse("0x100", Some(8), None), Err("0x100 doesn't fit in 8 bits".into()));
-        assert_eq!(parse("-129", Some(8), None), Err("-129 doesn't fit in 8 bits".into()));
+        assert_eq!(
+            parse("0x100", Some(8), None),
+            Err("0x100 doesn't fit in 8 bits".into())
+        );
+        assert_eq!(
+            parse("-129", Some(8), None),
+            Err("-129 doesn't fit in 8 bits".into())
+        );
         assert_eq!(parse("abc", Some(8), None), Err("not a value: abc".into()));
     }
 
     #[test]
     fn finds() {
-        let mut t = Trace::open(concat!(env!("CARGO_MANIFEST_DIR"), "/../tests/data/simple.vcd").as_ref()).unwrap();
+        let mut t =
+            Trace::open(concat!(env!("CARGO_MANIFEST_DIR"), "/../tests/data/simple.vcd").as_ref())
+                .unwrap();
         let (d, clk) = (t.by_path["top.cpu.data"], t.by_path["top.clk"]);
         t.load(&[d, clk]);
-        let find = |var, target: &str, from, fwd| find(&t, var, None, &parse(target, t.vars[var].width, None).unwrap(), from, fwd);
+        let find = |var, target: &str, from, fwd| {
+            find(
+                &t,
+                var,
+                None,
+                &parse(target, t.vars[var].width, None).unwrap(),
+                from,
+                fwd,
+            )
+        };
         // data: x, 0x43 @10, 0x96 @20, 0xE1 @30, 0x3A @40 ..., 0x7F @44, z @50, 0x40 @60
         assert_eq!(find(d, "0x96", 0, true), Some(20));
         assert_eq!(find(d, "150", 25, true), None); // no wrap-around
@@ -1244,9 +1762,16 @@ mod tests {
 
     #[test]
     fn expressions() {
-        let mut t = Trace::open(concat!(env!("CARGO_MANIFEST_DIR"), "/../tests/data/simple.vcd").as_ref()).unwrap();
+        let mut t =
+            Trace::open(concat!(env!("CARGO_MANIFEST_DIR"), "/../tests/data/simple.vcd").as_ref())
+                .unwrap();
         t.load(&(0..t.vars.len()).collect::<Vec<_>>());
-        let resolve = |n: &str| t.by_path.get(&format!("top.{n}")).map(|&v| ((v, None), t.vars[v].width, None, false)).ok_or(format!("unknown signal: {n}"));
+        let resolve = |n: &str| {
+            t.by_path
+                .get(&format!("top.{n}"))
+                .map(|&v| ((v, None), t.vars[v].width, None, false))
+                .ok_or(format!("unknown signal: {n}"))
+        };
         let q = |s: &str| parse_query(s, None, &mut resolve.clone()).unwrap();
         let find = |s: &str, from, fwd| find_query(&t, &q(s), from, fwd);
         // busy is 1 from 20 to 40; data 0x96 @20, 0xE1 @30, z @50; clk rises at 5, 15, 25, 35, 45, ...
@@ -1254,7 +1779,10 @@ mod tests {
         assert_eq!(find("cpu.busy && !(cpu.data == z)", 0, true), Some(20));
         assert_eq!(find("cpu.busy && cpu.data != 0x96", 0, true), Some(30));
         // a match is where it becomes true: still true when 0x96 turns into 0xE1 at 30
-        assert_eq!(find("cpu.data == 0x96 || cpu.data == 0xe1", 0, true), Some(20));
+        assert_eq!(
+            find("cpu.data == 0x96 || cpu.data == 0xe1", 0, true),
+            Some(20)
+        );
         assert_eq!(find("cpu.data == 0x96 || cpu.data == 0xe1", 20, true), None);
         assert_eq!(find("cpu.busy", 70, false), Some(20));
         // unsigned order: 0x43 @10 is the first above 0x40, 0x3A @40 the first below; z never compares
@@ -1274,19 +1802,55 @@ mod tests {
         assert_eq!(err("nope && cpu.busy"), "unknown signal: nope");
         assert_eq!(err("cpu.busy && (cpu.data == 1"), "missing )");
         assert_eq!(err("!= 3"), "missing signal before !=");
-        assert_eq!(err("cpu.busy )"), format!("unexpected: ) (operators: {OPERATORS})"));
-        assert_eq!(err("cpu.data < z"), "cpu.data < z: < compares numbers; x, z and text only with == or !=");
-        assert_eq!(err("cpu.state == 0x10"), "cpu.state: 0x10 doesn't fit in 3 bits");
-        assert_eq!(err("cpu.data == 40ns"), "cpu.data: file has no timescale; use ticks");
-        assert_eq!(err("cpu.data + 40ns > 0"), "file has no timescale; use ticks");
+        assert_eq!(
+            err("cpu.busy )"),
+            format!("unexpected: ) (operators: {OPERATORS})")
+        );
+        assert_eq!(
+            err("cpu.data < z"),
+            "cpu.data < z: < compares numbers; x, z and text only with == or !="
+        );
+        assert_eq!(
+            err("cpu.state == 0x10"),
+            "cpu.state: 0x10 doesn't fit in 3 bits"
+        );
+        assert_eq!(
+            err("cpu.data == 40ns"),
+            "cpu.data: file has no timescale; use ticks"
+        );
+        assert_eq!(
+            err("cpu.data + 40ns > 0"),
+            "file has no timescale; use ticks"
+        );
         // words of other languages: the form meant
-        assert_eq!(err("@clk rising"), "rising: `@clk` already samples at the clock's rising edges; an edge of a signal is rose(x), SVA's $rose without the $");
-        assert_eq!(err("prev(cpu.busy) && cpu.busy"), "prev(cpu.busy): the value a cycle earlier is past(cpu.busy), SVA's $past without the $");
-        assert_eq!(err("$rose(cpu.busy)"), "$rose(cpu.busy): an edge is rose(cpu.busy), SVA's $rose without the $");
-        assert_eq!(err("@clk cpu.busy falling"), "falling: `@clk` already samples at the clock's rising edges; an edge of a signal is fell(x), SVA's $fell without the $");
-        assert_eq!(err("cpu.busy=1 && cpu.data == 0"), "=1 && cpu.data == 0: compare with ==, not =");
-        assert_eq!(err("@clk changed(cpu.data)"), "changed(cpu.data): a change is cpu.data != past(cpu.data)");
-        assert_eq!(err("next(cpu.data) == 0"), "next(cpu.data): an expression reads no later value; search on from a match instead (`find` `from`)");
+        assert_eq!(
+            err("@clk rising"),
+            "rising: `@clk` already samples at the clock's rising edges; an edge of a signal is rose(x), SVA's $rose without the $"
+        );
+        assert_eq!(
+            err("prev(cpu.busy) && cpu.busy"),
+            "prev(cpu.busy): the value a cycle earlier is past(cpu.busy), SVA's $past without the $"
+        );
+        assert_eq!(
+            err("$rose(cpu.busy)"),
+            "$rose(cpu.busy): an edge is rose(cpu.busy), SVA's $rose without the $"
+        );
+        assert_eq!(
+            err("@clk cpu.busy falling"),
+            "falling: `@clk` already samples at the clock's rising edges; an edge of a signal is fell(x), SVA's $fell without the $"
+        );
+        assert_eq!(
+            err("cpu.busy=1 && cpu.data == 0"),
+            "=1 && cpu.data == 0: compare with ==, not ="
+        );
+        assert_eq!(
+            err("@clk changed(cpu.data)"),
+            "changed(cpu.data): a change is cpu.data != past(cpu.data)"
+        );
+        assert_eq!(
+            err("next(cpu.data) == 0"),
+            "next(cpu.data): an expression reads no later value; search on from a match instead (`find` `from`)"
+        );
     }
     /// Signals for arithmetic: a, b 32 bits, m, n 4, s 8 (signed, as `x - y` makes), t text, w
     /// 128 bits all ones, u 8 bits unknown; each with one value.
@@ -1303,7 +1867,10 @@ mod tests {
             ("u", Some(8), false, "x"),
         ];
         let q = parse_query(text, None, &mut |n| {
-            let i = sigs.iter().position(|s| s.0 == n).ok_or(format!("unknown signal: {n}"))?;
+            let i = sigs
+                .iter()
+                .position(|s| s.0 == n)
+                .ok_or(format!("unknown signal: {n}"))?;
             Ok(((i, None), sigs[i].1, None, sigs[i].2))
         })?;
         Ok(holds(&q.expr, &|(i, _), _| {
@@ -1401,18 +1968,42 @@ mod tests {
         yes(r#"!contains(t, "x") && m == 4"#);
         yes(r#"(contains( t , "id") ? 1 : 0) == 1"#);
         yes(r#"contains(past(t), "dl") || m == 4"#);
-        assert_eq!(arith(r#"contains(m, "a")"#), Err(r#"contains(m, ...): m is a bit signal; contains reads a string signal's text"#.into()));
-        assert_eq!(arith(r#"contains(t, dl")"#), Err(r#"contains(t, ...): write the text in quotes, contains(t, "text")"#.into()));
-        assert_eq!(arith(r#"contains(t, "dl)"#), Err(r#"contains(t, ...): missing closing ""#.into()));
+        assert_eq!(
+            arith(r#"contains(m, "a")"#),
+            Err(
+                r#"contains(m, ...): m is a bit signal; contains reads a string signal's text"#
+                    .into()
+            )
+        );
+        assert_eq!(
+            arith(r#"contains(t, dl")"#),
+            Err(r#"contains(t, ...): write the text in quotes, contains(t, "text")"#.into())
+        );
+        assert_eq!(
+            arith(r#"contains(t, "dl)"#),
+            Err(r#"contains(t, ...): missing closing ""#.into())
+        );
         assert_eq!(arith(r#"contains(t, "dl""#), Err("missing )".into()));
         // without a quote, a VHDL name as before
-        assert_eq!(arith("contains(3) == 1"), Err("unknown signal: contains(3)".into()));
-        assert_eq!(arith(r#"contains(3) == 1 && t == "idle""#), Err("unknown signal: contains(3)".into()));
+        assert_eq!(
+            arith("contains(3) == 1"),
+            Err("unknown signal: contains(3)".into())
+        );
+        assert_eq!(
+            arith(r#"contains(3) == 1 && t == "idle""#),
+            Err("unknown signal: contains(3)".into())
+        );
     }
 
     #[test]
     fn sv_literals() {
-        let bits = |b: &str, signed, sized| Some(Ok(Sv::Bits { bits: b.into(), signed, sized }));
+        let bits = |b: &str, signed, sized| {
+            Some(Ok(Sv::Bits {
+                bits: b.into(),
+                signed,
+                sized,
+            }))
+        };
         assert_eq!(sv_literal("8'hF"), bits("00001111", false, true));
         assert_eq!(sv_literal("'hF_F"), bits("11111111", false, false));
         assert_eq!(sv_literal("4'b10x0"), bits("10x0", false, true));
@@ -1422,14 +2013,25 @@ mod tests {
         assert_eq!(sv_literal("3'o7"), bits("111", false, true));
         assert_eq!(sv_literal("'1"), Some(Ok(Sv::Fill('1'))));
         assert_eq!(sv_literal("12"), None);
-        assert_eq!(sv_literal("4'hFF"), Some(Err("4'hFF: the value doesn't fit in 4 bits".into())));
-        assert_eq!(sv_literal("8'q1"), Some(Err("8'q1: an SV number is <size>'<b|o|d|h><digits>, e.g. 8'hFF, 'd12, 4'b10x0".into())));
+        assert_eq!(
+            sv_literal("4'hFF"),
+            Some(Err("4'hFF: the value doesn't fit in 4 bits".into()))
+        );
+        assert_eq!(
+            sv_literal("8'q1"),
+            Some(Err(
+                "8'q1: an SV number is <size>'<b|o|d|h><digits>, e.g. 8'hFF, 'd12, 4'b10x0".into()
+            ))
+        );
         // as values of a signal, and in arithmetic
         let bits = |s: &str| Ok(Target::Bits(s.into()));
         assert_eq!(parse("8'h40", Some(8), None), bits("01000000"));
         assert_eq!(parse("'1", Some(4), None), bits("1111"));
         assert_eq!(parse("4'b1x01", Some(6), None), bits("001x01"));
-        assert_eq!(parse("'h1FF", Some(8), None), Err("'h1FF doesn't fit in 8 bits".into()));
+        assert_eq!(
+            parse("'h1FF", Some(8), None),
+            Err("'h1FF doesn't fit in 8 bits".into())
+        );
         let yes = |s: &str| assert_eq!(arith(s), Ok(true), "{s}");
         yes("m == 4'b0100");
         yes("m == 'h4 && m != 1'b0");
@@ -1437,8 +2039,14 @@ mod tests {
         yes("a + 1'b1 == 33'h1_0000_0000");
         yes("4'sb1111 == -1");
         yes("s == 8'sd252 && s == -8'd4");
-        assert_eq!(arith("a + '1 == 0"), Err("'1: '1 has no width in arithmetic; write one, as 32'hFFFFFFFF".into()));
-        assert_eq!(arith("a + 4'b1x00 == 0"), Err("4'b1x00: arithmetic takes known numbers; compare with x instead (== x)".into()));
+        assert_eq!(
+            arith("a + '1 == 0"),
+            Err("'1: '1 has no width in arithmetic; write one, as 32'hFFFFFFFF".into())
+        );
+        assert_eq!(
+            arith("a + 4'b1x00 == 0"),
+            Err("4'b1x00: arithmetic takes known numbers; compare with x instead (== x)".into())
+        );
     }
 
     #[test]
@@ -1476,22 +2084,64 @@ mod tests {
     #[test]
     fn arithmetic_errors() {
         let err = |s: &str| arith(s).expect_err(s);
-        assert_eq!(err("(m ? 1) == 0"), "? is c ? a : b, with a nested ? in parentheses: c ? a : (d ? e : f); at: ) == 0");
-        assert_eq!(err("m ? 1 : b ? 2 : 3"), "? is c ? a : b, with a nested ? in parentheses: c ? a : (d ? e : f); at: ? 2 : 3");
+        assert_eq!(
+            err("(m ? 1) == 0"),
+            "? is c ? a : b, with a nested ? in parentheses: c ? a : (d ? e : f); at: ) == 0"
+        );
+        assert_eq!(
+            err("m ? 1 : b ? 2 : 3"),
+            "? is c ? a : b, with a nested ? in parentheses: c ? a : (d ? e : f); at: ? 2 : 3"
+        );
         assert_eq!(err("m == nope"), "m: not a value: nope");
-        assert_eq!(err("m & 3 == 0"), "m & 3 == 0: & and == need parentheses: (m & 3) == 0 or m & (3 == 0)");
-        assert_eq!(err("0 == m & 3"), "0 == m & 3: == and & need parentheses: 0 == (m & 3) or (0 == m) & 3");
-        assert_eq!(err("a + m & 3 == 0"), "a + m & 3: + and & need parentheses: (a + m) & 3 or a + (m & 3)");
-        assert_eq!(err("a << b == 0"), "a << b: b is 32 bits, so the result could be 2^32 bits; shift by a slice, a << b[14:0]");
-        assert_eq!(err("a << 70000 == 0"), "a << 70000: the result could be 70032 bits, more than 65536; slice an operand to fewer bits");
-        assert_eq!(err("a << s == 0"), "a << s: s can be negative; shift by an unsigned amount");
-        assert_eq!(err("~(a + b) == 0"), "~(a + b): ~ inverts bits at a width, so give one with a slice: ~(a + b)[31:0]");
-        assert_eq!(err("signed(a + b) == 0"), "signed(a + b): signed reads bits at a width, so give one with a slice: signed((a + b)[31:0])");
-        assert_eq!(err("t + 1 == 0"), "t is a real or string signal; arithmetic takes numbers");
-        assert_eq!(err("a + 1 < x"), "a + 1 < x: < compares numbers; x only with == or !=");
-        assert_eq!(err("a + 1 == z"), "a + 1 == z: an arithmetic result is a number or x");
+        assert_eq!(
+            err("m & 3 == 0"),
+            "m & 3 == 0: & and == need parentheses: (m & 3) == 0 or m & (3 == 0)"
+        );
+        assert_eq!(
+            err("0 == m & 3"),
+            "0 == m & 3: == and & need parentheses: 0 == (m & 3) or (0 == m) & 3"
+        );
+        assert_eq!(
+            err("a + m & 3 == 0"),
+            "a + m & 3: + and & need parentheses: (a + m) & 3 or a + (m & 3)"
+        );
+        assert_eq!(
+            err("a << b == 0"),
+            "a << b: b is 32 bits, so the result could be 2^32 bits; shift by a slice, a << b[14:0]"
+        );
+        assert_eq!(
+            err("a << 70000 == 0"),
+            "a << 70000: the result could be 70032 bits, more than 65536; slice an operand to fewer bits"
+        );
+        assert_eq!(
+            err("a << s == 0"),
+            "a << s: s can be negative; shift by an unsigned amount"
+        );
+        assert_eq!(
+            err("~(a + b) == 0"),
+            "~(a + b): ~ inverts bits at a width, so give one with a slice: ~(a + b)[31:0]"
+        );
+        assert_eq!(
+            err("signed(a + b) == 0"),
+            "signed(a + b): signed reads bits at a width, so give one with a slice: signed((a + b)[31:0])"
+        );
+        assert_eq!(
+            err("t + 1 == 0"),
+            "t is a real or string signal; arithmetic takes numbers"
+        );
+        assert_eq!(
+            err("a + 1 < x"),
+            "a + 1 < x: < compares numbers; x only with == or !="
+        );
+        assert_eq!(
+            err("a + 1 == z"),
+            "a + 1 == z: an arithmetic result is a number or x"
+        );
         assert_eq!(err("m[4:0] == 0"), "m[4:0]: m has no bits 4:0 (4 bits)");
         assert_eq!(err("q[1:0] == 0"), "unknown signal: q[1:0]");
-        assert_eq!(err("(a + b)[70000:0] == 0"), "(a + b)[70000:0]: a slice is [hi:lo], hi from lo to 65535");
+        assert_eq!(
+            err("(a + b)[70000:0] == 0"),
+            "(a + b)[70000:0]: a slice is [hi:lo], hi from lo to 65535"
+        );
     }
 }

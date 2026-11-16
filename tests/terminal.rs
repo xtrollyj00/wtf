@@ -37,18 +37,42 @@ impl Term {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("wtf")).unwrap();
         if config {
-            std::fs::write(dir.join("wtf/config.toml"), "glyphs = \"unicode\"\ntheme = \"dark\"\n").unwrap();
+            std::fs::write(
+                dir.join("wtf/config.toml"),
+                "glyphs = \"unicode\"\ntheme = \"dark\"\n",
+            )
+            .unwrap();
         }
         let (mut master, mut slave) = (0, 0);
-        let mut size = libc::winsize { ws_row: ROWS, ws_col: COLS, ws_xpixel: 0, ws_ypixel: 0 };
+        let mut size = libc::winsize {
+            ws_row: ROWS,
+            ws_col: COLS,
+            ws_xpixel: 0,
+            ws_ypixel: 0,
+        };
         // SAFETY: openpty writes the two descriptors; no name, default termios
-        let r = unsafe { libc::openpty(&mut master, &mut slave, std::ptr::null_mut(), std::ptr::null_mut(), &raw mut size) };
+        let r = unsafe {
+            libc::openpty(
+                &mut master,
+                &mut slave,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                &raw mut size,
+            )
+        };
         assert_eq!(r, 0, "openpty: {}", std::io::Error::last_os_error());
         // SAFETY: both descriptors are fresh from openpty and owned here
         let (master, slave) = unsafe { (File::from_raw_fd(master), File::from_raw_fd(slave)) };
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_wtf"));
-        cmd.args(args).env("XDG_CONFIG_HOME", &dir).env("XDG_STATE_HOME", &dir).env("XDG_RUNTIME_DIR", &dir).env("TERM", "xterm-256color").env("NO_COLOR", "1");
-        cmd.stdin(slave.try_clone().unwrap()).stdout(slave.try_clone().unwrap()).stderr(slave);
+        cmd.args(args)
+            .env("XDG_CONFIG_HOME", &dir)
+            .env("XDG_STATE_HOME", &dir)
+            .env("XDG_RUNTIME_DIR", &dir)
+            .env("TERM", "xterm-256color")
+            .env("NO_COLOR", "1");
+        cmd.stdin(slave.try_clone().unwrap())
+            .stdout(slave.try_clone().unwrap())
+            .stderr(slave);
         // SAFETY: only async-signal-safe calls between fork and exec: a new session whose
         // controlling terminal is the pty, as a terminal emulator starts its shell
         unsafe {
@@ -61,7 +85,11 @@ impl Term {
         }
         let child = cmd.spawn().unwrap();
         drop(cmd);
-        let screen = Arc::new(Mutex::new(vt100::Parser::new(ROWS.try_into().unwrap(), COLS.try_into().unwrap(), 0)));
+        let screen = Arc::new(Mutex::new(vt100::Parser::new(
+            ROWS.try_into().unwrap(),
+            COLS.try_into().unwrap(),
+            0,
+        )));
         let (mut output, parser) = (master.try_clone().unwrap(), screen.clone());
         std::thread::spawn(move || {
             let mut buf = [0; 4096];
@@ -70,7 +98,12 @@ impl Term {
                 parser.lock().unwrap().process(&buf[..n]);
             }
         });
-        Term { child, input: master, screen, dir }
+        Term {
+            child,
+            input: master,
+            screen,
+            dir,
+        }
     }
 
     /// Wait until `ok` holds for the screen; the screen as text.
@@ -97,17 +130,36 @@ impl Term {
     /// The mouse as a terminal reports it (SGR): `button` (0 left, +16 Ctrl, +32 moving) at
     /// column `x`, line `y` (from 0), pressed or let go.
     fn mouse(&mut self, button: u8, (x, y): (usize, usize), press: bool) {
-        self.send(&format!("\x1b[<{button};{};{}{}", x + 1, y + 1, if press { 'M' } else { 'm' }));
+        self.send(&format!(
+            "\x1b[<{button};{};{}{}",
+            x + 1,
+            y + 1,
+            if press { 'M' } else { 'm' }
+        ));
     }
 
     /// The terminal's window made `cols` x `rows`: the pty's size set, as a terminal emulator
     /// does, so wtf gets SIGWINCH and redraws.
     fn resize(&mut self, cols: u16, rows: u16) {
-        let size = libc::winsize { ws_row: rows, ws_col: cols, ws_xpixel: 0, ws_ypixel: 0 };
+        let size = libc::winsize {
+            ws_row: rows,
+            ws_col: cols,
+            ws_xpixel: 0,
+            ws_ypixel: 0,
+        };
         // SAFETY: the master side of a pty owned here, and a winsize to read
-        let r = unsafe { libc::ioctl(std::os::fd::AsRawFd::as_raw_fd(&self.input), libc::TIOCSWINSZ, &raw const size) };
+        let r = unsafe {
+            libc::ioctl(
+                std::os::fd::AsRawFd::as_raw_fd(&self.input),
+                libc::TIOCSWINSZ,
+                &raw const size,
+            )
+        };
         assert_eq!(r, 0, "TIOCSWINSZ: {}", std::io::Error::last_os_error());
-        self.screen.lock().unwrap().set_size(rows.try_into().unwrap(), cols.try_into().unwrap());
+        self.screen
+            .lock()
+            .unwrap()
+            .set_size(rows.try_into().unwrap(), cols.try_into().unwrap());
     }
 
     /// Press at `from`, move to `to`, let go there.
@@ -123,7 +175,8 @@ impl Drop for Term {
         // quit, so a coverage run gets wtf's profile (a killed process writes none); kill if stuck
         let _ = self.input.write_all(b"\x1b\x1b:q!\r");
         let start = Instant::now();
-        while start.elapsed() < Duration::from_secs(2) && matches!(self.child.try_wait(), Ok(None)) {
+        while start.elapsed() < Duration::from_secs(2) && matches!(self.child.try_wait(), Ok(None))
+        {
             std::thread::sleep(Duration::from_millis(20));
         }
         let _ = self.child.kill();
@@ -137,7 +190,9 @@ fn find(s: &vt100::Screen, text: &str, from: usize) -> Option<(usize, usize)> {
     s.rows(0, COLS).enumerate().find_map(|(y, line)| {
         let chars: Vec<char> = line.chars().collect();
         let want: Vec<char> = text.chars().collect();
-        (from..chars.len().saturating_sub(want.len() - 1)).find(|&x| chars[x..x + want.len()] == want[..]).map(|x| (x, y))
+        (from..chars.len().saturating_sub(want.len() - 1))
+            .find(|&x| chars[x..x + want.len()] == want[..])
+            .map(|x| (x, y))
     })
 }
 
@@ -148,23 +203,34 @@ fn line_of(s: &vt100::Screen, name: &str) -> Option<usize> {
 
 fn session() -> Vec<String> {
     let data = std::fs::canonicalize("tests/data").unwrap();
-    vec![data.join("simple.vcd").display().to_string(), "-S".into(), data.join("simple.session.toml").display().to_string()]
+    vec![
+        data.join("simple.vcd").display().to_string(),
+        "-S".into(),
+        data.join("simple.session.toml").display().to_string(),
+    ]
 }
 
 #[test]
 fn mouse_reporting_on_and_off() {
     // wtf asks for button-motion reporting in SGR, and turns it off again when it quits
     let args = session();
-    let mut t = Term::spawn("modes", &args.iter().map(String::as_str).collect::<Vec<_>>());
+    let mut t = Term::spawn(
+        "modes",
+        &args.iter().map(String::as_str).collect::<Vec<_>>(),
+    );
     t.wait("the rows", |s| line_of(s, "dma.state").is_some());
     t.wait("mouse reporting", |s| {
-        matches!(s.mouse_protocol_mode(), vt100::MouseProtocolMode::ButtonMotion | vt100::MouseProtocolMode::AnyMotion)
-            && s.mouse_protocol_encoding() == vt100::MouseProtocolEncoding::Sgr
+        matches!(
+            s.mouse_protocol_mode(),
+            vt100::MouseProtocolMode::ButtonMotion | vt100::MouseProtocolMode::AnyMotion
+        ) && s.mouse_protocol_encoding() == vt100::MouseProtocolEncoding::Sgr
     });
     t.send(":q!\r");
     let status = t.child.wait().unwrap();
     assert!(status.success());
-    t.wait("mouse reporting off", |s| s.mouse_protocol_mode() == vt100::MouseProtocolMode::None);
+    t.wait("mouse reporting off", |s| {
+        s.mouse_protocol_mode() == vt100::MouseProtocolMode::None
+    });
 }
 
 #[test]
@@ -172,18 +238,37 @@ fn start_screen_opens_a_trace() {
     // without a trace: the start screen; o, a path and Enter open it in a window, which goes
     // into the history, and the next start lists it as recent 1 (spec §4 "Start screen")
     let mut t = Term::spawn("start", &[]);
-    t.wait("the start screen", |s| s.contents().contains("Open a trace"));
+    t.wait("the start screen", |s| {
+        s.contents().contains("Open a trace")
+    });
     t.send("otests/data/nope.vcd\r");
-    t.wait("the error", |s| s.contents().contains("nope.vcd") && !s.contents().contains("open tests"));
+    t.wait("the error", |s| {
+        s.contents().contains("nope.vcd") && !s.contents().contains("open tests")
+    });
     t.send("otests/data/simple.vcd\r");
-    t.wait("the window", |s| s.contents().contains("Browse the signals"));
+    t.wait("the window", |s| {
+        s.contents().contains("Browse the signals")
+    });
     t.send(":q!\r");
     assert!(t.child.wait().unwrap().success());
     let history = std::fs::read_to_string(t.dir.join("wtf/history")).unwrap();
-    assert!(history.contains("\tyou\t") && history.trim_end().ends_with("simple.vcd"), "{history}");
-    let out = Command::new(env!("CARGO_BIN_EXE_wtf")).args(["--snapshot", "100x32"]).env("XDG_STATE_HOME", &t.dir).env("XDG_RUNTIME_DIR", &t.dir).output().unwrap();
+    assert!(
+        history.contains("\tyou\t") && history.trim_end().ends_with("simple.vcd"),
+        "{history}"
+    );
+    let out = Command::new(env!("CARGO_BIN_EXE_wtf"))
+        .args(["--snapshot", "100x32"])
+        .env("XDG_STATE_HOME", &t.dir)
+        .env("XDG_RUNTIME_DIR", &t.dir)
+        .output()
+        .unwrap();
     let screen = String::from_utf8(out.stdout).unwrap();
-    assert!(screen.lines().any(|l| l.contains("simple.vcd") && l.trim_end().ends_with('1')), "{screen}");
+    assert!(
+        screen
+            .lines()
+            .any(|l| l.contains("simple.vcd") && l.trim_end().ends_with('1')),
+        "{screen}"
+    );
 }
 
 #[test]
@@ -195,25 +280,44 @@ fn drag_moves_a_row() {
     t.wait("the rows", |s| line_of(s, "dma.state").is_some());
     let (clk, busy) = {
         let p = t.screen.lock().unwrap();
-        (line_of(p.screen(), "clk").unwrap(), find(p.screen(), "busy", 0).unwrap())
+        (
+            line_of(p.screen(), "clk").unwrap(),
+            find(p.screen(), "busy", 0).unwrap(),
+        )
     };
     t.drag((1, clk), busy);
-    let screen = t.wait("clk below busy", |s| find(s, "clk", 0).is_some_and(|(_, y)| y > find(s, "busy", 0).unwrap().1));
+    let screen = t.wait("clk below busy", |s| {
+        find(s, "clk", 0).is_some_and(|(_, y)| y > find(s, "busy", 0).unwrap().1)
+    });
     assert!(screen.contains("[+]"), "the session changed:\n{screen}");
     // `u` takes it back in one step
     t.send("u");
-    t.wait("clk first again", |s| line_of(s, "clk").is_some_and(|y| y < find(s, "busy", 0).unwrap().1));
+    t.wait("clk first again", |s| {
+        line_of(s, "clk").is_some_and(|y| y < find(s, "busy", 0).unwrap().1)
+    });
 }
 
 #[test]
 fn drag_adds_from_the_panel() {
     // the status line's button opens the panel; rst dragged out of it is added below dma.state
     let args = session();
-    let mut t = Term::spawn("panel", &args.iter().map(String::as_str).collect::<Vec<_>>());
+    let mut t = Term::spawn(
+        "panel",
+        &args.iter().map(String::as_str).collect::<Vec<_>>(),
+    );
     t.wait("the rows", |s| line_of(s, "dma.state").is_some());
     let button = t.wait("the button", |s| find(s, "signals ▸", 0).is_some());
-    let at = button.lines().position(|l| l.contains("signals ▸")).unwrap();
-    let x = button.lines().nth(at).unwrap().chars().position(|c| c == 's').unwrap();
+    let at = button
+        .lines()
+        .position(|l| l.contains("signals ▸"))
+        .unwrap();
+    let x = button
+        .lines()
+        .nth(at)
+        .unwrap()
+        .chars()
+        .position(|c| c == 's')
+        .unwrap();
     t.mouse(0, (x + 1, at), true);
     t.mouse(0, (x + 1, at), false);
     t.wait("the panel", |s| find(s, "signals ◂", 0).is_some());
@@ -225,7 +329,9 @@ fn drag_adds_from_the_panel() {
     };
     t.drag(rst, dma);
     t.send("\x1b");
-    t.wait("rst added below dma.state", |s| line_of(s, "rst").is_some_and(|y| y > line_of(s, "dma.state").unwrap()));
+    t.wait("rst added below dma.state", |s| {
+        line_of(s, "rst").is_some_and(|y| y > line_of(s, "dma.state").unwrap())
+    });
 }
 
 #[test]
@@ -236,10 +342,21 @@ fn an_agent_joins_and_leaves() {
     use std::io::{BufRead, BufReader};
     use std::os::unix::net::UnixListener;
     let args = session();
-    let t = Term::spawn("agent", &args.iter().map(String::as_str).collect::<Vec<_>>());
+    let t = Term::spawn(
+        "agent",
+        &args.iter().map(String::as_str).collect::<Vec<_>>(),
+    );
     t.wait("the rows", |s| line_of(s, "dma.state").is_some());
     let trace = std::fs::canonicalize("tests/data/simple.vcd").unwrap();
-    let step = |n: usize| (0..n).map(|k| format!("\n[[trail]]\ntool = \"find\"\nask = \"step {k}\"\nanswer = \"{k} matches\"\n")).collect::<String>();
+    let step = |n: usize| {
+        (0..n)
+            .map(|k| {
+                format!(
+                    "\n[[trail]]\ntool = \"find\"\nask = \"step {k}\"\nanswer = \"{k} matches\"\n"
+                )
+            })
+            .collect::<String>()
+    };
     let session = Arc::new(Mutex::new(format!("version = 1\n{}", step(1))));
     let sock = t.dir.join("wtf-999-1.sock");
     let listener = UnixListener::bind(&sock).unwrap();
@@ -249,7 +366,9 @@ fn an_agent_joins_and_leaves() {
         for stream in listener.incoming() {
             let Ok(mut stream) = stream else { return };
             let mut head = String::new();
-            BufReader::new(stream.try_clone().unwrap()).read_line(&mut head).unwrap();
+            BufReader::new(stream.try_clone().unwrap())
+                .read_line(&mut head)
+                .unwrap();
             let body = match head.trim_end() {
                 "INFO" => info.clone(),
                 _ => format!("rows (> selected):\n---\n{}", answer.lock().unwrap()),
@@ -257,19 +376,35 @@ fn an_agent_joins_and_leaves() {
             let _ = write!(stream, "OK {}\n{body}", body.len());
         }
     });
-    t.wait("the agent joined", |s| s.contents().contains("agent 999-1 joined"));
+    t.wait("the agent joined", |s| {
+        s.contents().contains("agent 999-1 joined")
+    });
     *session.lock().unwrap() = format!("version = 1\n{}", step(2));
-    t.wait("its new step", |s| s.contents().contains("999-1") && s.contents().contains("find") && s.contents().contains("│ step 1") && s.contents().contains("│ 1 matches"));
+    t.wait("its new step", |s| {
+        s.contents().contains("999-1")
+            && s.contents().contains("find")
+            && s.contents().contains("│ step 1")
+            && s.contents().contains("│ 1 matches")
+    });
     std::fs::remove_file(&sock).unwrap();
-    t.wait("the agent left", |s| s.contents().contains("agent 999-1 left"));
+    t.wait("the agent left", |s| {
+        s.contents().contains("agent 999-1 left")
+    });
     // a present arrives over the window's own socket
     let text = "version = 1\n[[rows]]\nsignal = \"top.rst\"\n";
-    let mut link = std::os::unix::net::UnixStream::connect(t.dir.join(format!("wtf-{}.sock", t.child.id()))).unwrap();
+    let mut link =
+        std::os::unix::net::UnixStream::connect(t.dir.join(format!("wtf-{}.sock", t.child.id())))
+            .unwrap();
     write!(link, "PUT {}\n{text}", text.len()).unwrap();
     let mut answer = String::new();
     link.read_to_string(&mut answer).unwrap();
-    assert!(answer.starts_with("OK ") && answer.contains("agent: presented 1 signals"), "{answer}");
-    t.wait("the present", |s| line_of(s, "rst").is_some() && line_of(s, "dma.state").is_none());
+    assert!(
+        answer.starts_with("OK ") && answer.contains("agent: presented 1 signals"),
+        "{answer}"
+    );
+    t.wait("the present", |s| {
+        line_of(s, "rst").is_some() && line_of(s, "dma.state").is_none()
+    });
 }
 
 #[test]
@@ -278,21 +413,39 @@ fn start_screen_joins_an_agent() {
     // follows it (spec §4 "Start screen"); this one answers INFO only, so the follow is refused
     // and said
     let mut t = Term::spawn("join", &[]);
-    t.wait("the start screen", |s| s.contents().contains("Open a trace"));
+    t.wait("the start screen", |s| {
+        s.contents().contains("Open a trace")
+    });
     let trace = std::fs::canonicalize("tests/data/simple.vcd").unwrap();
     let listener = std::os::unix::net::UnixListener::bind(t.dir.join("wtf-9-1.sock")).unwrap();
     std::thread::spawn(move || {
         for stream in listener.incoming() {
             let mut stream = stream.unwrap();
             let mut head = String::new();
-            std::io::BufRead::read_line(&mut std::io::BufReader::new(stream.try_clone().unwrap()), &mut head).unwrap();
-            let answer = if head.starts_with("INFO") { format!("OK {}\nagent\n{}", 6 + trace.as_os_str().len(), trace.display()) } else { "ERR no\n".into() };
+            std::io::BufRead::read_line(
+                &mut std::io::BufReader::new(stream.try_clone().unwrap()),
+                &mut head,
+            )
+            .unwrap();
+            let answer = if head.starts_with("INFO") {
+                format!(
+                    "OK {}\nagent\n{}",
+                    6 + trace.as_os_str().len(),
+                    trace.display()
+                )
+            } else {
+                "ERR no\n".into()
+            };
             let _ = stream.write_all(answer.as_bytes());
         }
     });
-    t.wait("the agent listed", |s| s.contents().contains("1 agent on this machine"));
+    t.wait("the agent listed", |s| {
+        s.contents().contains("1 agent on this machine")
+    });
     t.send("a");
-    t.wait("the window", |s| s.contents().contains("Browse the signals"));
+    t.wait("the window", |s| {
+        s.contents().contains("Browse the signals")
+    });
     t.send(":q!\r");
     assert!(t.child.wait().unwrap().success());
 }
@@ -300,7 +453,9 @@ fn start_screen_joins_an_agent() {
 #[test]
 fn start_screen_quits() {
     let mut t = Term::spawn("startq", &[]);
-    t.wait("the start screen", |s| s.contents().contains("Open a trace"));
+    t.wait("the start screen", |s| {
+        s.contents().contains("Open a trace")
+    });
     t.send("q");
     assert!(t.child.wait().unwrap().success());
 }
@@ -309,14 +464,24 @@ fn start_screen_quits() {
 /// still work there, and the screen comes back when it is made bigger (spec §4 "Too small").
 #[test]
 fn too_small_and_back() {
-    for (name, args, back) in [("smallw", &["tests/data/simple.vcd"][..], "NORMAL"), ("smalls", &[][..], "Open a trace")] {
+    for (name, args, back) in [
+        ("smallw", &["tests/data/simple.vcd"][..], "NORMAL"),
+        ("smalls", &[][..], "Open a trace"),
+    ] {
         let mut t = Term::spawn(name, args);
         t.wait("the screen", |s| s.contents().contains(back));
         t.resize(30, 6);
         let s = t.wait("too small", |s| s.contents().contains("Terminal too small"));
-        assert!(s.contains("width 30  height 6") && s.contains("width 40  height 10") && !s.contains(back), "{s}");
+        assert!(
+            s.contains("width 30  height 6")
+                && s.contains("width 40  height 10")
+                && !s.contains(back),
+            "{s}"
+        );
         t.resize(COLS, ROWS);
-        t.wait("the screen again", |s| s.contents().contains(back) && !s.contents().contains("too small"));
+        t.wait("the screen again", |s| {
+            s.contents().contains(back) && !s.contents().contains("too small")
+        });
         t.resize(30, 6);
         t.wait("too small", |s| s.contents().contains("Terminal too small"));
         t.send(if args.is_empty() { "q" } else { ":q!\r" });
@@ -339,8 +504,15 @@ fn decode_form_checks_as_typed() {
     t.send(":decode\r");
     t.wait("the form", |s| s.contents().contains("name the decode"));
     t.send("s\taxilite\taclk\ts_axi_");
-    let s = t.wait("the names checked", |s| s.contents().contains("the names match: Enter decodes"));
-    assert!(s.contains(":decode s axilite clock=aclk prefix=s_axi_"), "{s}");
+    let s = t.wait("the names checked", |s| {
+        s.contents().contains("the names match: Enter decodes")
+    });
+    assert!(
+        s.contains(":decode s axilite clock=aclk prefix=s_axi_"),
+        "{s}"
+    );
     t.send("\r");
-    t.wait("the results", |s| !s.contents().contains("the names match") && s.contents().contains("s.wr"));
+    t.wait("the results", |s| {
+        !s.contents().contains("the names match") && s.contents().contains("s.wr")
+    });
 }

@@ -3,9 +3,9 @@
 
 pub mod app;
 pub mod browser;
+pub mod commands;
 pub mod decodes;
 pub mod form;
-pub mod commands;
 pub mod keys;
 pub mod panel;
 pub mod picker;
@@ -37,7 +37,10 @@ pub fn run(app: &mut App) -> Result<(), String> {
         std::thread::spawn(move || {
             let mut last: Vec<(String, String)> = Vec::new();
             loop {
-                let now: Vec<(String, String)> = live::on_trace("agent", &trace).into_iter().filter_map(|id| live::get(&id).ok().map(|(_, t)| (id, t))).collect();
+                let now: Vec<(String, String)> = live::on_trace("agent", &trace)
+                    .into_iter()
+                    .filter_map(|id| live::get(&id).ok().map(|(_, t)| (id, t)))
+                    .collect();
                 if now != last {
                     last = now.clone();
                     if tx.send(now).is_err() {
@@ -79,7 +82,10 @@ pub fn run(app: &mut App) -> Result<(), String> {
                 if app.tick(std::time::Instant::now()) {
                     break;
                 }
-                if app.which_tick(std::time::Instant::now()) || app.note_tick(std::time::Instant::now()) || app.picker_tick(std::time::Instant::now()) {
+                if app.which_tick(std::time::Instant::now())
+                    || app.note_tick(std::time::Instant::now())
+                    || app.picker_tick(std::time::Instant::now())
+                {
                     break;
                 }
                 if let Ok(now) = agents.try_recv()
@@ -96,14 +102,26 @@ pub fn run(app: &mut App) -> Result<(), String> {
             let mut ev = crossterm::event::read()?;
             loop {
                 match ev {
-                    crossterm::event::Event::Key(k) if k.kind == crossterm::event::KeyEventKind::Press => app.key(k),
+                    crossterm::event::Event::Key(k)
+                        if k.kind == crossterm::event::KeyEventKind::Press =>
+                    {
+                        app.key(k)
+                    }
                     crossterm::event::Event::Mouse(m) => app.mouse(m),
                     _ => {}
                 }
                 // to the terminal's clipboard; one that can't take it ignores the sequence
                 if let Some(text) = app.yank.take() {
-                    use crossterm::clipboard::{ClipboardSelection, ClipboardType, CopyToClipboard};
-                    crossterm::execute!(std::io::stdout(), CopyToClipboard { content: text, destination: ClipboardSelection(vec![ClipboardType::Clipboard]) })?;
+                    use crossterm::clipboard::{
+                        ClipboardSelection, ClipboardType, CopyToClipboard,
+                    };
+                    crossterm::execute!(
+                        std::io::stdout(),
+                        CopyToClipboard {
+                            content: text,
+                            destination: ClipboardSelection(vec![ClipboardType::Clipboard])
+                        }
+                    )?;
                 }
                 if app.quit || !crossterm::event::poll(std::time::Duration::ZERO)? {
                     break;

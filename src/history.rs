@@ -16,18 +16,27 @@ pub struct Open {
 
 /// `$XDG_STATE_HOME/wtf/history`, or `~/.local/state/wtf/history`.
 pub fn path() -> Option<PathBuf> {
-    let state = std::env::var_os("XDG_STATE_HOME").filter(|d| !d.is_empty()).map(PathBuf::from).or_else(|| Some(PathBuf::from(std::env::var_os("HOME")?).join(".local/state")))?;
+    let state = std::env::var_os("XDG_STATE_HOME")
+        .filter(|d| !d.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| Some(PathBuf::from(std::env::var_os("HOME")?).join(".local/state")))?;
     Some(state.join("wtf/history"))
 }
 
 pub fn now() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
 }
 
 /// The opens in the file, oldest first; none if there is no file. Lines that don't parse are
 /// skipped.
 pub fn read(file: &Path) -> Vec<Open> {
-    std::fs::read_to_string(file).unwrap_or_default().lines().filter_map(parse).collect()
+    std::fs::read_to_string(file)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(parse)
+        .collect()
 }
 
 fn parse(line: &str) -> Option<Open> {
@@ -39,14 +48,33 @@ fn parse(line: &str) -> Option<Open> {
         _ => return None,
     };
     let trace = PathBuf::from(f.next().filter(|t| !t.is_empty())?);
-    Some(Open { at, agent, trace, session: f.next().map(PathBuf::from) })
+    Some(Open {
+        at,
+        agent,
+        trace,
+        session: f.next().map(PathBuf::from),
+    })
 }
 
 /// Adds an open to the file, made if missing. Paths are made absolute; one with a tab or a line
 /// break in it isn't kept.
-pub fn record(file: &Path, trace: &Path, session: Option<&Path>, agent: bool) -> Result<(), String> {
-    let abs = |p: &Path| std::fs::canonicalize(p).or_else(|_| std::path::absolute(p)).map_err(|e| format!("{}: {e}", p.display()));
-    let mut line = format!("{}\t{}\t{}", now(), if agent { "agent" } else { "you" }, abs(trace)?.display());
+pub fn record(
+    file: &Path,
+    trace: &Path,
+    session: Option<&Path>,
+    agent: bool,
+) -> Result<(), String> {
+    let abs = |p: &Path| {
+        std::fs::canonicalize(p)
+            .or_else(|_| std::path::absolute(p))
+            .map_err(|e| format!("{}: {e}", p.display()))
+    };
+    let mut line = format!(
+        "{}\t{}\t{}",
+        now(),
+        if agent { "agent" } else { "you" },
+        abs(trace)?.display()
+    );
     if let Some(s) = session {
         line += &format!("\t{}", abs(s)?.display());
     }
@@ -86,12 +114,27 @@ mod tests {
         assert!(read(&file).is_empty());
         let trace = Path::new("tests/data/simple.vcd");
         record(&file, trace, None, false).unwrap();
-        record(&file, trace, Some(Path::new("tests/data/simple.session.toml")), true).unwrap();
+        record(
+            &file,
+            trace,
+            Some(Path::new("tests/data/simple.session.toml")),
+            true,
+        )
+        .unwrap();
         let h = read(&file);
         let abs = std::fs::canonicalize(trace).unwrap();
         assert_eq!(h.len(), 2);
-        assert_eq!((h[0].agent, &h[0].trace, &h[0].session), (false, &abs, &None));
-        assert_eq!((h[1].agent, h[1].session.as_ref().unwrap().file_name().unwrap().to_str()), (true, Some("simple.session.toml")));
+        assert_eq!(
+            (h[0].agent, &h[0].trace, &h[0].session),
+            (false, &abs, &None)
+        );
+        assert_eq!(
+            (
+                h[1].agent,
+                h[1].session.as_ref().unwrap().file_name().unwrap().to_str()
+            ),
+            (true, Some("simple.session.toml"))
+        );
         assert!(now() - h[1].at < 60);
         // bounded: the newest kept
         std::fs::write(&file, "1\tyou\t/old.vcd\n".repeat(KEEP)).unwrap();

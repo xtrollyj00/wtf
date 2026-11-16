@@ -13,10 +13,10 @@ use nucleo_matcher::{Config, Matcher, Utf32Str};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
-use wtf_core::protocol::{self, Found};
+use wtf_core::protocol::Found;
 use wtf_core::stream::Decode;
-use wtf_core::workspace::reason::Reasons;
 use wtf_core::workspace::Workspace;
+use wtf_core::workspace::reason::Reasons;
 
 /// The suggestions a field offers at most.
 pub const HINTS: usize = 20;
@@ -27,14 +27,18 @@ pub enum Kind {
     Protocol,
     Clock,
     Prefix,
-    Role { required: bool },
+    Role {
+        required: bool,
+    },
     Param,
     /// The protocol form's: its roles' names, `when`, and a field `name = expression`.
     Roles,
     When,
     Expr,
     /// The value-names card's: a value the signal takes, how many times; its value the name.
-    Value { count: u64 },
+    Value {
+        count: u64,
+    },
 }
 
 pub struct Field {
@@ -45,7 +49,11 @@ pub struct Field {
 
 impl Field {
     fn new(key: &str, kind: Kind, value: &str) -> Self {
-        Field { key: key.into(), kind, value: value.into() }
+        Field {
+            key: key.into(),
+            kind,
+            value: value.into(),
+        }
     }
 
     /// It names a signal: the picker and the suggestions are signals.
@@ -113,10 +121,15 @@ pub enum Fill {
     Close,
 }
 
-/// The protocols the form decodes: the built-in ones, then the session's (spec §16). `frame`,
-/// `pair` and `check` work on streams and rules: their `:decode` line is typed.
+/// The protocols the form decodes: the built-in ones, the protocols loaded from files, then the
+/// session's own (spec §16). `frame`, `pair` and `check` work on streams and rules: their
+/// `:decode` line is typed.
 pub fn protocols(ws: &Workspace) -> Vec<String> {
-    protocol::BUILTINS.iter().map(|s| s.to_string()).chain(ws.protocols.iter().map(|p| p.name.clone())).collect()
+    ws.sources()
+        .names()
+        .into_iter()
+        .map(str::to_string)
+        .collect()
 }
 
 impl Form {
@@ -124,9 +137,34 @@ impl Form {
     /// interfaces picker's `clock=<clk>`) is left empty. The roles signals `from` play fill those
     /// `d` leaves empty.
     pub fn new(ws: &mut Workspace, d: &Decode, found: &[Found], from: &[usize]) -> Self {
-        let value = |v: &str| if v.starts_with('<') && v.ends_with('>') { String::new() } else { v.to_string() };
-        let mut f = Form { fields: vec![Field::new("name", Kind::Name, &d.name), Field::new("protocol", Kind::Protocol, &d.protocol)], at: 0, hints: Vec::new(), hint: 0, check: Ok(()), error: None, top: 0, editing: None, protocol: false, from: from.to_vec(), then: None, names: None };
-        let given: Vec<(String, String)> = std::iter::once(("clock".to_string(), d.clock.clone())).chain(d.signals.iter().cloned()).chain(d.params.iter().cloned()).collect();
+        let value = |v: &str| {
+            if v.starts_with('<') && v.ends_with('>') {
+                String::new()
+            } else {
+                v.to_string()
+            }
+        };
+        let mut f = Form {
+            fields: vec![
+                Field::new("name", Kind::Name, &d.name),
+                Field::new("protocol", Kind::Protocol, &d.protocol),
+            ],
+            at: 0,
+            hints: Vec::new(),
+            hint: 0,
+            check: Ok(()),
+            error: None,
+            top: 0,
+            editing: None,
+            protocol: false,
+            from: from.to_vec(),
+            then: None,
+            names: None,
+        };
+        let given: Vec<(String, String)> = std::iter::once(("clock".to_string(), d.clock.clone()))
+            .chain(d.signals.iter().cloned())
+            .chain(d.params.iter().cloned())
+            .collect();
         f.reshape(ws);
         for (k, v) in given.into_iter().filter(|g| !g.1.is_empty()) {
             if let Some(field) = f.fields.iter_mut().find(|x| x.key == k) {
@@ -134,18 +172,57 @@ impl Form {
             }
         }
         // the first field left to fill in
-        f.at = f.fields.iter().position(|x| x.value.is_empty() && !matches!(x.kind, Kind::Role { required: false } | Kind::Param | Kind::Prefix)).unwrap_or(0);
+        f.at = f
+            .fields
+            .iter()
+            .position(|x| {
+                x.value.is_empty()
+                    && !matches!(
+                        x.kind,
+                        Kind::Role { required: false } | Kind::Param | Kind::Prefix
+                    )
+            })
+            .unwrap_or(0);
         f.suggest(ws, found);
         f
     }
 
     /// The protocol form with `p`'s name, `when` and fields, and roles (role, signal): the
     /// selected rows', or a search's.
-    pub fn protocol(ws: &mut Workspace, p: &wtf_core::stream::Sampler, roles: &[(String, String)]) -> Self {
-        let names = roles.iter().map(|r| r.0.as_str()).collect::<Vec<_>>().join(", ");
-        let mut fields = vec![Field::new("name", Kind::Name, &p.name), Field::new("roles", Kind::Roles, &names), Field::new("when", Kind::When, &p.when)];
-        fields.extend(p.fields.iter().map(|(n, e)| Field::new("field", Kind::Expr, &format!("{n} = {e}"))));
-        let mut f = Form { fields, at: 0, hints: Vec::new(), hint: 0, check: Ok(()), error: None, top: 0, editing: None, protocol: true, from: Vec::new(), then: None, names: None };
+    pub fn protocol(
+        ws: &mut Workspace,
+        p: &wtf_core::stream::Sampler,
+        roles: &[(String, String)],
+    ) -> Self {
+        let names = roles
+            .iter()
+            .map(|r| r.0.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut fields = vec![
+            Field::new("name", Kind::Name, &p.name),
+            Field::new("roles", Kind::Roles, &names),
+            Field::new("when", Kind::When, &p.when),
+        ];
+        fields.extend(
+            p.fields
+                .iter()
+                .map(|(n, e)| Field::new("field", Kind::Expr, &format!("{n} = {e}"))),
+        );
+        let mut f = Form {
+            fields,
+            at: 0,
+            hints: Vec::new(),
+            hint: 0,
+            check: Ok(()),
+            error: None,
+            top: 0,
+            editing: None,
+            protocol: true,
+            from: Vec::new(),
+            then: None,
+            names: None,
+        };
         f.reshape(ws);
         for (r, sig) in roles {
             if let Some(field) = f.fields.iter_mut().find(|x| x.key == *r && x.signal()) {
@@ -158,9 +235,31 @@ impl Form {
     /// The value-names card on signal `path`: a field per value it takes (its text, as the row
     /// shows it), the name typed beside it.
     pub fn names(path: &str, taken: Vec<(String, wtf_core::workspace::Taken)>) -> Self {
-        let fields = taken.iter().map(|(text, t)| Field::new(text, Kind::Value { count: t.count }, t.name.as_deref().unwrap_or(""))).collect();
+        let fields = taken
+            .iter()
+            .map(|(text, t)| {
+                Field::new(
+                    text,
+                    Kind::Value { count: t.count },
+                    t.name.as_deref().unwrap_or(""),
+                )
+            })
+            .collect();
         let bits = taken.into_iter().map(|(_, t)| t.bits).collect();
-        Form { fields, at: 0, hints: Vec::new(), hint: 0, check: Ok(()), error: None, top: 0, editing: None, protocol: false, from: Vec::new(), then: None, names: Some((path.into(), bits)) }
+        Form {
+            fields,
+            at: 0,
+            hints: Vec::new(),
+            hint: 0,
+            check: Ok(()),
+            error: None,
+            top: 0,
+            editing: None,
+            protocol: false,
+            from: Vec::new(),
+            then: None,
+            names: Some((path.into(), bits)),
+        }
     }
 
     /// The fields after the protocol, as the protocol has them; the values of those kept. In
@@ -177,57 +276,113 @@ impl Form {
                     roles.push(r.to_string());
                 }
             }
-            let keep = |key: &str, kind: Kind| old.iter().find(|x| x.key == key && x.kind == kind).map_or(String::new(), |x| x.value.clone());
+            let keep = |key: &str, kind: Kind| {
+                old.iter()
+                    .find(|x| x.key == key && x.kind == kind)
+                    .map_or(String::new(), |x| x.value.clone())
+            };
             for r in roles {
                 let value = keep(&r, Kind::Role { required: true });
-                self.fields.push(Field { key: r, kind: Kind::Role { required: true }, value });
+                self.fields.push(Field {
+                    key: r,
+                    kind: Kind::Role { required: true },
+                    value,
+                });
             }
-            self.fields.push(Field { key: "when".into(), kind: Kind::When, value: keep("when", Kind::When) });
-            self.fields.extend(old.into_iter().filter(|x| x.kind == Kind::Expr));
-            if self.fields.last().is_none_or(|x| x.kind != Kind::Expr || !x.value.trim().is_empty()) {
+            self.fields.push(Field {
+                key: "when".into(),
+                kind: Kind::When,
+                value: keep("when", Kind::When),
+            });
+            self.fields
+                .extend(old.into_iter().filter(|x| x.kind == Kind::Expr));
+            if self
+                .fields
+                .last()
+                .is_none_or(|x| x.kind != Kind::Expr || !x.value.trim().is_empty())
+            {
                 self.fields.push(Field::new("field", Kind::Expr, ""));
             }
             return;
         }
         let name = self.fields[1].value.trim().to_string();
         let mut add = |key: &str, kind: Kind| {
-            let value = old.iter().find(|x| x.key == key).map_or(String::new(), |x| x.value.clone());
-            self.fields.push(Field { key: key.into(), kind, value });
+            let value = old
+                .iter()
+                .find(|x| x.key == key)
+                .map_or(String::new(), |x| x.value.clone());
+            self.fields.push(Field {
+                key: key.into(),
+                kind,
+                value,
+            });
         };
-        if let Some(b) = protocol::builtin(&name) {
-            if b.clocked {
+        if let Some(any) = ws.sources().get(&name) {
+            let def = any.def();
+            if def.clocked() {
                 add("clock", Kind::Clock);
             }
             add("prefix", Kind::Prefix);
-            b.required.iter().for_each(|r| add(r, Kind::Role { required: true }));
-            b.optional.iter().for_each(|r| add(r, Kind::Role { required: false }));
-            b.params.iter().for_each(|p| add(p, Kind::Param));
+            let (required, optional) = def.roles();
+            required
+                .into_iter()
+                .for_each(|r| add(r, Kind::Role { required: true }));
+            optional
+                .into_iter()
+                .for_each(|r| add(r, Kind::Role { required: false }));
+            def.params().iter().for_each(|p| add(p, Kind::Param));
         } else if let Some(p) = ws.protocols.iter().find(|p| p.name == name) {
             add("clock", Kind::Clock);
-            p.roles.iter().for_each(|r| add(r, Kind::Role { required: true }));
+            p.roles
+                .iter()
+                .for_each(|r| add(r, Kind::Role { required: true }));
         }
         if !self.from.is_empty() {
             let d = ws.plays(&name, &self.from);
-            for f in self.fields.iter_mut().filter(|f| f.signal() && f.value.trim().is_empty()) {
-                f.value = if f.kind == Kind::Clock { d.clock.clone() } else { d.signals.iter().find(|x| x.0 == f.key).map_or(String::new(), |x| x.1.clone()) };
+            for f in self
+                .fields
+                .iter_mut()
+                .filter(|f| f.signal() && f.value.trim().is_empty())
+            {
+                f.value = if f.kind == Kind::Clock {
+                    d.clock.clone()
+                } else {
+                    d.signals
+                        .iter()
+                        .find(|x| x.0 == f.key)
+                        .map_or(String::new(), |x| x.1.clone())
+                };
             }
         }
     }
 
     fn value(&self, key: &str) -> &str {
-        self.fields.iter().find(|f| f.key == key).map_or("", |f| f.value.trim())
+        self.fields
+            .iter()
+            .find(|f| f.key == key)
+            .map_or("", |f| f.value.trim())
     }
 
     /// The `:decode` line the fields make, without the `:`; the fields left empty aren't in it.
     pub fn line(&self) -> String {
         if let Some((path, bits)) = &self.names {
-            let named: Vec<(String, String)> = bits.iter().cloned().zip(self.fields.iter().map(|f| f.value.clone())).collect();
+            let named: Vec<(String, String)> = bits
+                .iter()
+                .cloned()
+                .zip(self.fields.iter().map(|f| f.value.clone()))
+                .collect();
             return wtf_core::workspace::names_line(path, &named);
         }
         if self.protocol {
             return self.sampler().line();
         }
-        let of = |k: fn(Kind) -> bool| self.fields[2..].iter().filter(move |f| k(f.kind)).map(|f| (f.key.clone(), f.value.trim().to_string())).collect::<Vec<_>>();
+        let of = |k: fn(Kind) -> bool| {
+            self.fields[2..]
+                .iter()
+                .filter(move |f| k(f.kind))
+                .map(|f| (f.key.clone(), f.value.trim().to_string()))
+                .collect::<Vec<_>>()
+        };
         Decode {
             name: self.value("name").into(),
             protocol: self.value("protocol").into(),
@@ -243,15 +398,26 @@ impl Form {
         let of = |k: Kind| self.fields.iter().filter(move |f| f.kind == k);
         wtf_core::stream::Sampler {
             name: self.value("name").into(),
-            roles: of(Kind::Role { required: true }).map(|f| f.key.clone()).collect(),
+            roles: of(Kind::Role { required: true })
+                .map(|f| f.key.clone())
+                .collect(),
             when: self.value("when").into(),
-            fields: of(Kind::Expr).filter_map(|f| f.value.split_once('=')).map(|(n, e)| (n.trim().to_string(), e.trim().to_string())).filter(|(n, e)| !n.is_empty() || !e.is_empty()).collect(),
+            fields: of(Kind::Expr)
+                .filter_map(|f| f.value.split_once('='))
+                .map(|(n, e)| (n.trim().to_string(), e.trim().to_string()))
+                .filter(|(n, e)| !n.is_empty() || !e.is_empty())
+                .collect(),
+            wasm: None,
         }
     }
 
     /// The roles given a signal in the protocol form (role, signal).
     fn role_signals(&self) -> Vec<(String, String)> {
-        self.fields.iter().filter(|f| f.signal() && !f.value.trim().is_empty()).map(|f| (f.key.clone(), f.value.trim().to_string())).collect()
+        self.fields
+            .iter()
+            .filter(|f| f.signal() && !f.value.trim().is_empty())
+            .map(|f| (f.key.clone(), f.value.trim().to_string()))
+            .collect()
     }
 
     /// The signal a role empty in the form is played by under the prefix, if there is one.
@@ -260,7 +426,9 @@ impl Form {
         if !matches!(f.kind, Kind::Role { .. }) || !f.value.trim().is_empty() || prefix.is_empty() {
             return None;
         }
-        ws.resolve(&format!("{prefix}{}", f.key)).ok().map(|p| ws.trace.probe_path(p))
+        ws.resolve(&format!("{prefix}{}", f.key))
+            .ok()
+            .map(|p| ws.trace.probe_path(p))
     }
 
     /// The suggestion shown, if any.
@@ -275,34 +443,66 @@ impl Form {
     /// picker's query does, those ending in the role's name first.
     fn suggest(&mut self, ws: &mut Workspace, found: &[Found]) {
         let (i, typed) = (self.at, self.fields[self.at].value.trim().to_string());
-        let (protocol, prefix) = (self.value("protocol").to_string(), self.value("prefix").to_string());
+        let (protocol, prefix) = (
+            self.value("protocol").to_string(),
+            self.value("prefix").to_string(),
+        );
         let mine = |x: &&Found| x.protocol == protocol;
-        let with_prefix = |x: &&Found| mine(x) && !prefix.is_empty() && x.prefix.ends_with(prefix.as_str());
+        let with_prefix =
+            |x: &&Found| mine(x) && !prefix.is_empty() && x.prefix.ends_with(prefix.as_str());
         let mut hints: Vec<String> = match self.fields[i].kind {
             Kind::Name => {
                 let leaf = prefix.rsplit('.').next().unwrap_or("").trim_matches('_');
-                if typed.is_empty() && !leaf.is_empty() { vec![leaf.to_string()] } else { Vec::new() }
+                if typed.is_empty() && !leaf.is_empty() {
+                    vec![leaf.to_string()]
+                } else {
+                    Vec::new()
+                }
             }
-            Kind::Protocol if typed.is_empty() && !self.from.is_empty() => ws.playable(&self.from).into_iter().map(|p| p.0).collect(),
-            Kind::Protocol if typed.is_empty() => found.iter().map(|x| x.protocol.to_string()).collect(),
+            Kind::Protocol if typed.is_empty() && !self.from.is_empty() => {
+                ws.playable(&self.from).into_iter().map(|p| p.0).collect()
+            }
+            Kind::Protocol if typed.is_empty() => {
+                found.iter().map(|x| x.protocol.to_string()).collect()
+            }
             Kind::Protocol => fuzzy(&typed, protocols(ws).iter().map(String::as_str)),
             Kind::Prefix => fuzzy(&typed, found.iter().filter(mine).map(|x| x.prefix.as_str())),
             Kind::Clock => {
-                let of_prefix = found.iter().filter(with_prefix).filter_map(|x| x.clock.clone()).filter(|_| typed.is_empty());
-                of_prefix.chain(signals(ws, &typed, &["clk", "clock"])).collect()
+                let of_prefix = found
+                    .iter()
+                    .filter(with_prefix)
+                    .filter_map(|x| x.clock.clone())
+                    .filter(|_| typed.is_empty());
+                of_prefix
+                    .chain(signals(ws, &typed, &["clk", "clock"]))
+                    .collect()
             }
             Kind::Role { .. } if self.by_prefix(ws, i).is_some() => Vec::new(),
-            Kind::Role { .. } => signals(ws, &typed, &[self.fields[i].key.to_ascii_lowercase().as_str()]),
+            Kind::Role { .. } => signals(
+                ws,
+                &typed,
+                &[self.fields[i].key.to_ascii_lowercase().as_str()],
+            ),
             Kind::Param | Kind::Roles | Kind::Value { .. } => Vec::new(),
             // the word being typed completed to a role or a field (`when` any, a field those before it)
             Kind::When | Kind::Expr => {
                 let when = self.fields[i].kind == Kind::When;
-                let names: Vec<String> = self.fields.iter().enumerate().filter_map(|(j, f)| match f.kind {
-                    Kind::Role { .. } => Some(f.key.clone()),
-                    Kind::Expr if when || j < i => Some(f.label().to_string()),
-                    _ => None,
-                }).filter(|n| !n.is_empty()).collect();
-                complete(&self.fields[i].value, self.fields[i].kind == Kind::Expr, &names)
+                let names: Vec<String> = self
+                    .fields
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(j, f)| match f.kind {
+                        Kind::Role { .. } => Some(f.key.clone()),
+                        Kind::Expr if when || j < i => Some(f.label().to_string()),
+                        _ => None,
+                    })
+                    .filter(|n| !n.is_empty())
+                    .collect();
+                complete(
+                    &self.fields[i].value,
+                    self.fields[i].kind == Kind::Expr,
+                    &names,
+                )
             }
         };
         let mut seen = std::collections::HashSet::new();
@@ -313,8 +513,15 @@ impl Form {
 
     /// A check's `Reasons`, as this form says it: the text, on the fields it names.
     fn wrong(&self, r: &Reasons) -> Wrong {
-        let fields = r.fields().into_iter().filter_map(|on| self.fields.iter().position(|f| f.label() == on)).collect();
-        Wrong { text: r.to_string(), fields }
+        let fields = r
+            .fields()
+            .into_iter()
+            .filter_map(|on| self.fields.iter().position(|f| f.label() == on))
+            .collect();
+        Wrong {
+            text: r.to_string(),
+            fields,
+        }
     }
 
     /// What is wrong, from `Enter` or the check, and the fields it names.
@@ -331,7 +538,10 @@ impl Form {
             return None;
         }
         if self.value("name").is_empty() {
-            return Some(format!("name the {}", if self.protocol { "protocol" } else { "decode" }));
+            return Some(format!(
+                "name the {}",
+                if self.protocol { "protocol" } else { "decode" }
+            ));
         }
         if self.protocol {
             return match () {
@@ -343,7 +553,10 @@ impl Form {
         }
         let p = self.value("protocol");
         if p.is_empty() || self.fields.len() == 2 {
-            return Some(format!("{} protocol to decode with", if p.is_empty() { "a" } else { "no such" }));
+            return Some(format!(
+                "{} protocol to decode with",
+                if p.is_empty() { "a" } else { "no such" }
+            ));
         }
         None
     }
@@ -352,13 +565,36 @@ impl Form {
 impl App {
     /// The form's keys (spec §5 "Decode form"): `form_key` and the keys page both read them.
     pub const FORM_KEYS: &Fixed<Fill> = &[
-        (&[(Key::code(KeyCode::Tab), Fill::Next), (Key::code(KeyCode::Down), Fill::Next), (Key::code(KeyCode::BackTab), Fill::Prev), (Key::code(KeyCode::Up), Fill::Prev)], "next / previous field"),
-        (&[(Key::code(KeyCode::Right), Fill::Take)], "take the suggestion"),
-        (&[(Key::ctrl('n'), Fill::Other), (Key::ctrl('p'), Fill::Back)], "the next / previous suggestion"),
-        (&[(Key::ctrl(' '), Fill::Choose)], "pick a signal; on the protocol, the next one"),
-        (&[(Key::code(KeyCode::Backspace), Fill::Delete)], "delete a character"),
+        (
+            &[
+                (Key::code(KeyCode::Tab), Fill::Next),
+                (Key::code(KeyCode::Down), Fill::Next),
+                (Key::code(KeyCode::BackTab), Fill::Prev),
+                (Key::code(KeyCode::Up), Fill::Prev),
+            ],
+            "next / previous field",
+        ),
+        (
+            &[(Key::code(KeyCode::Right), Fill::Take)],
+            "take the suggestion",
+        ),
+        (
+            &[(Key::ctrl('n'), Fill::Other), (Key::ctrl('p'), Fill::Back)],
+            "the next / previous suggestion",
+        ),
+        (
+            &[(Key::ctrl(' '), Fill::Choose)],
+            "pick a signal; on the protocol, the next one",
+        ),
+        (
+            &[(Key::code(KeyCode::Backspace), Fill::Delete)],
+            "delete a character",
+        ),
         (&[(Key::ctrl('u'), Fill::Clear)], "clear the field"),
-        (&[(Key::code(KeyCode::Enter), Fill::Run)], "run the line; a field it names keeps the form open"),
+        (
+            &[(Key::code(KeyCode::Enter), Fill::Run)],
+            "run the line; a field it names keeps the form open",
+        ),
         (&[(Key::code(KeyCode::Esc), Fill::Close)], "close"),
     ];
 
@@ -366,8 +602,20 @@ impl App {
     /// Alone on a `V` range, the range's signals play the roles (spec §5 "Decode form").
     pub fn open_form(&mut self, line: &str) -> Result<(), String> {
         let (d, from) = match line.trim() {
-            "" => (Decode { name: String::new(), protocol: String::new(), clock: String::new(), signals: Vec::new(), params: Vec::new() }, self.range_vars()),
-            l => (wtf_core::command::parse_decode(l)?, Vec::new()),
+            "" => (
+                Decode {
+                    name: String::new(),
+                    protocol: String::new(),
+                    clock: String::new(),
+                    signals: Vec::new(),
+                    params: Vec::new(),
+                },
+                self.range_vars(),
+            ),
+            l => (
+                wtf_core::command::parse_decode(l, self.ws.sources())?,
+                Vec::new(),
+            ),
         };
         self.form = Some(Form::new(&mut self.ws, &d, &self.found, &from));
         self.form_check();
@@ -376,7 +624,13 @@ impl App {
 
     /// The form for `protocol` on the `V` range's signals (the menu's `Decode as`).
     pub fn open_form_as(&mut self, protocol: &str) {
-        let d = Decode { name: String::new(), protocol: protocol.into(), clock: String::new(), signals: Vec::new(), params: Vec::new() };
+        let d = Decode {
+            name: String::new(),
+            protocol: protocol.into(),
+            clock: String::new(),
+            signals: Vec::new(),
+            params: Vec::new(),
+        };
         let from = self.range_vars();
         self.form = Some(Form::new(&mut self.ws, &d, &self.found, &from));
         self.form_check();
@@ -391,16 +645,35 @@ impl App {
         if sel.len() < 2 {
             return Vec::new();
         }
-        self.ws.rows[sel].iter().filter_map(wtf_core::rows::Row::sig).map(|s| s.var).collect()
+        self.ws.rows[sel]
+            .iter()
+            .filter_map(wtf_core::rows::Row::sig)
+            .map(|s| s.var)
+            .collect()
     }
 
     /// `:protocol` without arguments: the protocol form, a role for each selected signal, named
     /// after it without the start they share (`rx_valid`, `rx_data`: `valid`, `data`).
     pub fn open_protocol_form(&mut self) -> Result<(), String> {
-        let sel = if self.ws.rows.is_empty() { 0..0 } else { self.ws.selection() };
-        let paths: Vec<String> = self.ws.rows[sel].iter().filter_map(wtf_core::rows::Row::sig).map(|s| self.ws.trace.vars[s.var].path.clone()).collect();
-        let leaves: Vec<String> = paths.iter().map(|p| wtf_core::rows::child_name(p)).collect();
-        let roles: Vec<(String, String)> = role_names(&leaves).into_iter().zip(paths).filter(|r| !r.0.is_empty()).collect();
+        let sel = if self.ws.rows.is_empty() {
+            0..0
+        } else {
+            self.ws.selection()
+        };
+        let paths: Vec<String> = self.ws.rows[sel]
+            .iter()
+            .filter_map(wtf_core::rows::Row::sig)
+            .map(|s| self.ws.trace.vars[s.var].path.clone())
+            .collect();
+        let leaves: Vec<String> = paths
+            .iter()
+            .map(|p| wtf_core::rows::child_name(p))
+            .collect();
+        let roles: Vec<(String, String)> = role_names(&leaves)
+            .into_iter()
+            .zip(paths)
+            .filter(|r| !r.0.is_empty())
+            .collect();
         let mut f = Form::protocol(&mut self.ws, &wtf_core::stream::Sampler::default(), &roles);
         f.suggest(&mut self.ws, &self.found);
         self.form = Some(f);
@@ -411,10 +684,27 @@ impl App {
     /// `:protocol search`: the protocol form filled in from the last clocked search (spec §5
     /// "Protocol form"): its `when` on roles, the signal rows as fields.
     pub fn protocol_of_search(&mut self) -> Result<(), String> {
-        let search = self.last_search.clone().filter(|s| s.trim().starts_with('@')).ok_or("no clocked search: search with /@clk <expr> first")?;
-        let clock = self.ws.resolve(search.trim()[1..].split_whitespace().next().unwrap_or("")).map(|p| p.0).ok();
-        let shown: Vec<String> = self.ws.rows.iter().filter_map(wtf_core::rows::Row::sig).filter(|s| Some(s.var) != clock).map(|s| self.ws.trace.vars[s.var].path.clone()).collect();
-        let (p, d) = self.ws.protocol_of(&self.ws.free_name("ev"), "", &search, &shown)?;
+        let search = self
+            .last_search
+            .clone()
+            .filter(|s| s.trim().starts_with('@'))
+            .ok_or("no clocked search: search with /@clk <expr> first")?;
+        let clock = self
+            .ws
+            .resolve(search.trim()[1..].split_whitespace().next().unwrap_or(""))
+            .map(|p| p.0)
+            .ok();
+        let shown: Vec<String> = self
+            .ws
+            .rows
+            .iter()
+            .filter_map(wtf_core::rows::Row::sig)
+            .filter(|s| Some(s.var) != clock)
+            .map(|s| self.ws.trace.vars[s.var].path.clone())
+            .collect();
+        let (p, d) = self
+            .ws
+            .protocol_of(&self.ws.free_name("ev"), "", &search, &shown)?;
         let mut f = Form::protocol(&mut self.ws, &p, &d.signals);
         f.then = Some(d.clock);
         f.suggest(&mut self.ws, &self.found);
@@ -426,7 +716,15 @@ impl App {
     /// `:names` alone: the value-names card on the selected signal (spec §5 "Value-names card"),
     /// each value as its row shows it.
     pub fn open_names(&mut self) -> Result<(), String> {
-        let Some(s) = self.ws.rows.get(self.ws.sel).and_then(wtf_core::rows::Row::sig).cloned() else { return Err("select a signal to name its values".into()) };
+        let Some(s) = self
+            .ws
+            .rows
+            .get(self.ws.sel)
+            .and_then(wtf_core::rows::Row::sig)
+            .cloned()
+        else {
+            return Err("select a signal to name its values".into());
+        };
         let path = self.ws.trace.vars[s.var].path.clone();
         let width = self.ws.trace.vars[s.var].width.unwrap_or(1) as usize;
         let taken = self.ws.values_taken(&path)?;
@@ -434,14 +732,25 @@ impl App {
             return Err(format!("{path} takes no value without x or z bits"));
         }
         // the row's radix; its names' (`enum`) shows them in hex
-        let show = |b: &str| (wtf_core::radix::RADIXES[s.look.radix].format)(&format!("{b:0>width$}"), s.look.frac);
-        self.form = Some(Form::names(&path, taken.into_iter().map(|t| (show(&t.bits), t)).collect()));
+        let show = |b: &str| {
+            (wtf_core::radix::RADIXES[s.look.radix].format)(&format!("{b:0>width$}"), s.look.frac)
+        };
+        self.form = Some(Form::names(
+            &path,
+            taken.into_iter().map(|t| (show(&t.bits), t)).collect(),
+        ));
         Ok(())
     }
 
     /// The form on decode `name`, to edit it (the decodes list's `e`).
     pub fn edit_decode(&mut self, name: &str) -> Result<(), String> {
-        let d = self.ws.decodes.iter().find(|d| d.name == name).cloned().ok_or_else(|| format!("no decode {name}"))?;
+        let d = self
+            .ws
+            .decodes
+            .iter()
+            .find(|d| d.name == name)
+            .cloned()
+            .ok_or_else(|| format!("no decode {name}"))?;
         let mut f = Form::new(&mut self.ws, &d, &self.found, &[]);
         (f.editing, f.at) = (Some(name.to_string()), 1);
         self.form = Some(f);
@@ -458,7 +767,9 @@ impl App {
         let before = (f.at, f.fields[f.at].value.clone(), second(f));
         match act {
             None => match k.code {
-                KeyCode::Char(c) if !k.modifiers.contains(KeyModifiers::CONTROL) => f.fields[f.at].value.push(c),
+                KeyCode::Char(c) if !k.modifiers.contains(KeyModifiers::CONTROL) => {
+                    f.fields[f.at].value.push(c)
+                }
                 _ => return,
             },
             Some(Fill::Close) => return self.form = None,
@@ -473,16 +784,32 @@ impl App {
                 }
             }
             Some(Fill::Other) => return f.hint = (f.hint + 1) % f.hints.len().max(1),
-            Some(Fill::Back) => return f.hint = (f.hint + f.hints.len().max(1) - 1) % f.hints.len().max(1),
+            Some(Fill::Back) => {
+                return f.hint = (f.hint + f.hints.len().max(1) - 1) % f.hints.len().max(1);
+            }
             Some(Fill::Choose) if f.fields[f.at].kind == Kind::Protocol => {
                 let all = protocols(&self.ws);
-                let next = all.iter().position(|p| *p == f.fields[1].value.trim()).map_or(0, |i| (i + 1) % all.len());
+                let next = all
+                    .iter()
+                    .position(|p| *p == f.fields[1].value.trim())
+                    .map_or(0, |i| (i + 1) % all.len());
                 f.fields[1].value = all[next].clone();
             }
             Some(Fill::Choose) if f.fields[f.at].signal() => {
                 // the signals picker, its query the field's text or the role's name
-                let (i, query) = (f.at, if f.fields[f.at].value.is_empty() { f.fields[f.at].key.clone() } else { f.fields[f.at].value.clone() });
-                let query = if query == "clock" { "clk".to_string() } else { query };
+                let (i, query) = (
+                    f.at,
+                    if f.fields[f.at].value.is_empty() {
+                        f.fields[f.at].key.clone()
+                    } else {
+                        f.fields[f.at].value.clone()
+                    },
+                );
+                let query = if query == "clock" {
+                    "clk".to_string()
+                } else {
+                    query
+                };
                 if self.open_picker("signals").is_ok()
                     && let Some(p) = &mut self.picker
                 {
@@ -531,18 +858,42 @@ impl App {
         }
         let (line, name) = (f.line(), f.value("name").to_string());
         let taken = match f.protocol {
-            true => self.ws.protocols.iter().any(|p| p.name == name),
-            false => self.ws.decodes.iter().any(|d| d.name == name) && f.editing.as_deref() != Some(name.as_str()),
+            true => {
+                self.ws.sources().get(&name).is_some()
+                    || self.ws.protocols.iter().any(|p| p.name == name)
+            }
+            false => {
+                self.ws.decodes.iter().any(|d| d.name == name)
+                    && f.editing.as_deref() != Some(name.as_str())
+            }
         };
         let r = match taken {
-            true => Err(Wrong { text: format!("{name}: the name is taken; give another"), fields: vec![0] }),
+            true => Err(Wrong {
+                text: format!("{name}: the name is taken; give another"),
+                fields: vec![0],
+            }),
             // a role without a signal leaves the expressions unchecked: their widths are its
-            false if f.protocol && f.fields.iter().any(|x| x.signal() && x.value.trim().is_empty()) => Ok(()),
-            false if f.protocol => self.ws.check_protocol(&f.sampler(), &f.role_signals()).map_err(|r| f.wrong(&r)),
-            false => match wtf_core::command::parse_decode(&line["decode ".len()..]) {
-                Ok(d) => self.ws.check_decode(&d).map_err(|r| f.wrong(&r)),
-                Err(e) => Err(Wrong { text: e, fields: Vec::new() }),
-            },
+            false
+                if f.protocol
+                    && f.fields
+                        .iter()
+                        .any(|x| x.signal() && x.value.trim().is_empty()) =>
+            {
+                Ok(())
+            }
+            false if f.protocol => self
+                .ws
+                .check_protocol(&f.sampler(), &f.role_signals())
+                .map_err(|r| f.wrong(&r)),
+            false => {
+                match wtf_core::command::parse_decode(&line["decode ".len()..], self.ws.sources()) {
+                    Ok(d) => self.ws.check_decode(&d).map_err(|r| f.wrong(&r)),
+                    Err(e) => Err(Wrong {
+                        text: e,
+                        fields: Vec::new(),
+                    }),
+                }
+            }
         };
         if let Some(f) = &mut self.form {
             f.check = r;
@@ -557,10 +908,26 @@ impl App {
             let at = match () {
                 _ if f.value("name").is_empty() => 0,
                 _ if !f.protocol || f.value("roles").is_empty() => 1,
-                _ if f.value("when").is_empty() => f.fields.iter().position(|x| x.kind == Kind::When).unwrap_or(1),
-                _ => f.fields.iter().position(|x| x.kind == Kind::Expr && !x.value.trim().is_empty() && !x.value.contains('=')).unwrap_or(1),
+                _ if f.value("when").is_empty() => f
+                    .fields
+                    .iter()
+                    .position(|x| x.kind == Kind::When)
+                    .unwrap_or(1),
+                _ => f
+                    .fields
+                    .iter()
+                    .position(|x| {
+                        x.kind == Kind::Expr && !x.value.trim().is_empty() && !x.value.contains('=')
+                    })
+                    .unwrap_or(1),
             };
-            return (f.at, f.error) = (at, Some(Wrong { text: m, fields: vec![at] }));
+            return (f.at, f.error) = (
+                at,
+                Some(Wrong {
+                    text: m,
+                    fields: vec![at],
+                }),
+            );
         }
         if f.protocol {
             return self.protocol_run();
@@ -579,23 +946,36 @@ impl App {
                 }
                 Err(e) => {
                     let f = self.form.as_mut().expect("checked above");
-                    f.error = Some(Wrong { text: e, fields: Vec::new() });
+                    f.error = Some(Wrong {
+                        text: e,
+                        fields: Vec::new(),
+                    });
                 }
             };
         }
         let (line, name) = (f.line(), f.value("name").to_string());
         // a taken name failed the check above
-        let (editing, then) = (f.editing.as_deref() == Some(name.as_str()), f.then.is_some());
+        let (editing, then) = (
+            f.editing.as_deref() == Some(name.as_str()),
+            f.then.is_some(),
+        );
         // edited: made again in place, its rows kept where it still makes their streams
         let r = match editing {
-            true => wtf_core::command::parse_decode(&line["decode ".len()..]).and_then(|d| self.ws.redecode(d)).map(|failed| {
-                self.msg = Some(match failed.is_empty() {
-                    true => (format!("{name}: decoded again"), false),
-                    false => (format!("{name}: decoded again, but its readers failed: {failed}"), true),
-                });
-            }),
+            true => wtf_core::command::parse_decode(&line["decode ".len()..], self.ws.sources())
+                .and_then(|d| self.ws.redecode(d))
+                .map(|failed| {
+                    self.msg = Some(match failed.is_empty() {
+                        true => (format!("{name}: decoded again"), false),
+                        false => (
+                            format!("{name}: decoded again, but its readers failed: {failed}"),
+                            true,
+                        ),
+                    });
+                }),
             // from a search's matches: on to their records
-            false if then => self.decode_and_show(&line, &name).and_then(|()| self.open_browser(&name)),
+            false if then => self
+                .decode_and_show(&line, &name)
+                .and_then(|()| self.open_browser(&name)),
             false => self.decode_and_show(&line, &name),
         };
         match r {
@@ -603,7 +983,10 @@ impl App {
             // a decode run's own error names no field: it is the value walk's, not the check's
             Err(e) => {
                 let f = self.form.as_mut().expect("checked above");
-                f.error = Some(Wrong { text: e, fields: Vec::new() });
+                f.error = Some(Wrong {
+                    text: e,
+                    fields: Vec::new(),
+                });
             }
         }
     }
@@ -618,16 +1001,32 @@ impl App {
         let (line, name) = (f.line(), f.value("name").to_string());
         // `:protocol` checks only names; the form's check read the expressions against the signals
         let r = match self.ws.protocols.iter().any(|p| p.name == name) {
-            true => Err(Wrong { text: format!("{name}: the name is taken; give another"), fields: vec![0] }),
+            true => Err(Wrong {
+                text: format!("{name}: the name is taken; give another"),
+                fields: vec![0],
+            }),
             false if f.check.is_err() => Err(f.check.clone().unwrap_err()),
-            false => wtf_core::command::run(&mut self.ws, &line).map(drop).map_err(|e| Wrong { text: e, fields: Vec::new() }),
+            false => wtf_core::command::run(&mut self.ws, &line)
+                .map(drop)
+                .map_err(|e| Wrong {
+                    text: e,
+                    fields: Vec::new(),
+                }),
         };
         let f = self.form.as_mut().expect("checked above");
         match r {
             Ok(()) => {
                 let then = f.then.clone();
-                let decode = then.as_ref().map_or(String::new(), |_| self.ws.free_name("s"));
-                let d = Decode { name: decode, protocol: name.clone(), clock: then.clone().unwrap_or_default(), signals: f.role_signals(), params: Vec::new() };
+                let decode = then
+                    .as_ref()
+                    .map_or(String::new(), |_| self.ws.free_name("s"));
+                let d = Decode {
+                    name: decode,
+                    protocol: name.clone(),
+                    clock: then.clone().unwrap_or_default(),
+                    signals: f.role_signals(),
+                    params: Vec::new(),
+                };
                 self.msg = Some((format!("protocol {name} defined: put it on signals"), false));
                 let mut f = Form::new(&mut self.ws, &d, &self.found, &[]);
                 f.then = then;
@@ -635,8 +1034,15 @@ impl App {
                 self.form_check();
             }
             Err(w) => {
-                let text = w.text.strip_prefix(&format!("protocol {name} not made: ")).unwrap_or(&w.text).to_string();
-                let w = Wrong { text, fields: w.fields };
+                let text = w
+                    .text
+                    .strip_prefix(&format!("protocol {name} not made: "))
+                    .unwrap_or(&w.text)
+                    .to_string();
+                let w = Wrong {
+                    text,
+                    fields: w.fields,
+                };
                 if let Some(&i) = w.fields.first() {
                     f.at = i;
                     f.suggest(&mut self.ws, &self.found);
@@ -665,10 +1071,31 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
         // at most three lines of it, broken at its parts
         (Some(w), _) => result.extend(wrap(&w.text, bw - 4).into_iter().take(3).map(|l| (l, red))),
         (_, Some(m)) => result.push((m, dim)),
-        _ if f.protocol && f.fields.iter().any(|x| x.signal() && x.value.trim().is_empty()) => result.push(("a signal for each role checks when and the fields; Enter defines it as it is".into(), dim)),
-        _ if f.protocol => result.push(("the names match: Enter defines it, then decodes it".into(), card)),
-        _ if f.names.is_some() => result.push(("each value its name, or none: Enter names them".into(), dim)),
-        _ => result.push((format!("the names match: Enter decodes{}", if f.editing.is_some() { " it again" } else { "" }), card)),
+        _ if f.protocol
+            && f.fields
+                .iter()
+                .any(|x| x.signal() && x.value.trim().is_empty()) =>
+        {
+            result.push((
+                "a signal for each role checks when and the fields; Enter defines it as it is"
+                    .into(),
+                dim,
+            ))
+        }
+        _ if f.protocol => result.push((
+            "the names match: Enter defines it, then decodes it".into(),
+            card,
+        )),
+        _ if f.names.is_some() => {
+            result.push(("each value its name, or none: Enter names them".into(), dim))
+        }
+        _ => result.push((
+            format!(
+                "the names match: Enter decodes{}",
+                if f.editing.is_some() { " it again" } else { "" }
+            ),
+            card,
+        )),
     }
     let bad: Vec<usize> = failed.map_or(Vec::new(), |w| w.fields.clone());
     let line = format!(":{}", f.line());
@@ -689,15 +1116,27 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
     let what = match &f.editing {
         Some(n) => format!("edit decode {n}"),
         None if f.protocol => "protocol".into(),
-        None if f.names.is_some() => format!("names {}", f.names.as_ref().map_or("", |n| n.0.as_str())),
+        None if f.names.is_some() => {
+            format!("names {}", f.names.as_ref().map_or("", |n| n.0.as_str()))
+        }
         None => "decode".into(),
     };
-    let title = vec![(format!("{}{what}", crate::tui::render::icon_text(crate::draw::icon::RECORD)), acc)];
+    let title = vec![(
+        format!(
+            "{}{what}",
+            crate::tui::render::icon_text(crate::draw::icon::RECORD)
+        ),
+        acc,
+    )];
     let keys = format!(
         "Tab next  {}{}{}Enter run  Esc close",
         if f.hint().is_some() { "→ take  " } else { "" },
         if f.hints.len() > 1 { "C-n other  " } else { "" },
-        if f.fields[f.at].signal() { "C-Space pick  " } else { "" }
+        if f.fields[f.at].signal() {
+            "C-Space pick  "
+        } else {
+            ""
+        }
     );
     let keys = keys.as_str();
     crate::tui::render::card_frame(buf, r, pal().dim, &title, "", keys);
@@ -715,7 +1154,10 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
         let y = y0 + 1 + i - f.top;
         lines.push((y, i));
         let (field, on) = (&f.fields[i], i == f.at);
-        let required = !matches!(field.kind, Kind::Prefix | Kind::Role { required: false } | Kind::Param | Kind::Expr);
+        let required = !matches!(
+            field.kind,
+            Kind::Prefix | Kind::Role { required: false } | Kind::Param | Kind::Expr
+        );
         let bad = bad.contains(&i);
         let key_st = match (on, bad, required) {
             (true, _, _) => acc,
@@ -726,8 +1168,22 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
         if on {
             put(buf, x0 + 1, y, &gl().hl.to_string(), acc);
         }
-        put(buf, kx, y, &field.key.chars().take(10).collect::<String>(), key_st);
-        let text: String = field.value.chars().rev().take(vw.saturating_sub(1)).collect::<Vec<_>>().into_iter().rev().collect();
+        put(
+            buf,
+            kx,
+            y,
+            &field.key.chars().take(10).collect::<String>(),
+            key_st,
+        );
+        let text: String = field
+            .value
+            .chars()
+            .rev()
+            .take(vw.saturating_sub(1))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
         put(buf, vx, y, &text, card.add_modifier(Modifier::BOLD));
         let mut x = vx + text.chars().count();
         if on {
@@ -742,13 +1198,25 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
             }),
             Kind::Role { .. } => f.by_prefix(&mut app.ws, i),
             Kind::Prefix if !field.value.trim().is_empty() => {
-                let roles: Vec<usize> = (0..rows).filter(|&j| matches!(f.fields[j].kind, Kind::Role { .. })).collect();
-                let n = roles.iter().filter(|&&j| f.by_prefix(&mut app.ws, j).is_some()).count();
+                let roles: Vec<usize> = (0..rows)
+                    .filter(|&j| matches!(f.fields[j].kind, Kind::Role { .. }))
+                    .collect();
+                let n = roles
+                    .iter()
+                    .filter(|&&j| f.by_prefix(&mut app.ws, j).is_some())
+                    .count();
                 Some(format!("plays {n} of {} roles", roles.len()))
             }
-            Kind::Protocol => protocol::builtin(field.value.trim()).map(|b| b.about.to_string()),
+            Kind::Protocol => app
+                .ws
+                .sources()
+                .get(field.value.trim())
+                .map(|p| p.def().about().to_string()),
             Kind::Param if field.value.is_empty() => Some("default".into()),
-            Kind::Value { count } => Some(format!("{count} {}", if count == 1 { "time" } else { "times" })),
+            Kind::Value { count } => Some(format!(
+                "{count} {}",
+                if count == 1 { "time" } else { "times" }
+            )),
             _ => None,
         };
         if let Some(a) = after {
@@ -765,13 +1233,31 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
     }
     // the rule, what is wrong or missing, and the line
     let mut y = y0 + 1 + shown;
-    put(buf, x0 + 1, y, &gl().card[4].to_string().repeat(bw - 2), dim);
+    put(
+        buf,
+        x0 + 1,
+        y,
+        &gl().card[4].to_string().repeat(bw - 2),
+        dim,
+    );
     for (text, st) in &result {
         y += 1;
-        put(buf, kx, y, &text.chars().take(bw - 4).collect::<String>(), *st);
+        put(
+            buf,
+            kx,
+            y,
+            &text.chars().take(bw - 4).collect::<String>(),
+            *st,
+        );
     }
     y += 1;
-    put(buf, kx, y, &line.chars().take(bw - 4).collect::<String>(), dim);
+    put(
+        buf,
+        kx,
+        y,
+        &line.chars().take(bw - 4).collect::<String>(),
+        dim,
+    );
     app.hit.boxed = Some(r);
     app.hit.records = lines;
 }
@@ -781,7 +1267,9 @@ fn wrap(s: &str, w: usize) -> Vec<String> {
     let mut out = vec![String::new()];
     for word in s.split(' ') {
         let last = out.last_mut().expect("never empty");
-        if !last.is_empty() && (last.chars().count() + 1 + word.chars().count() > w || last.ends_with(';')) {
+        if !last.is_empty()
+            && (last.chars().count() + 1 + word.chars().count() > w || last.ends_with(';'))
+        {
             out.push(word.into());
         } else {
             if !last.is_empty() {
@@ -798,10 +1286,32 @@ fn wrap(s: &str, w: usize) -> Vec<String> {
 /// name (`data[3]`: `data_3`).
 fn role_names(leaves: &[String]) -> Vec<String> {
     let first = leaves.first().map_or("", String::as_str);
-    let len = leaves.iter().fold(first.len(), |n, l| first.bytes().zip(l.bytes()).take(n).take_while(|(a, b)| a == b).count());
+    let len = leaves.iter().fold(first.len(), |n, l| {
+        first
+            .bytes()
+            .zip(l.bytes())
+            .take(n)
+            .take_while(|(a, b)| a == b)
+            .count()
+    });
     let cut = first[..len].rfind(['_', '.']).map_or(0, |i| i + 1);
-    let plain = |l: &str| l.chars().map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' }).collect::<String>().trim_matches('_').to_string();
-    leaves.iter().map(|l| plain(if l.len() > cut { &l[cut..] } else { l })).collect()
+    let plain = |l: &str| {
+        l.chars()
+            .map(|c| {
+                if c.is_alphanumeric() || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect::<String>()
+            .trim_matches('_')
+            .to_string()
+    };
+    leaves
+        .iter()
+        .map(|l| plain(if l.len() > cut { &l[cut..] } else { l }))
+        .collect()
 }
 
 /// The text with its last word completed to each of `names` it starts (`valid && re` to
@@ -810,19 +1320,30 @@ fn complete(text: &str, field: bool, names: &[String]) -> Vec<String> {
     if field && !text.contains('=') {
         return Vec::new();
     }
-    let start = text.rfind(|c: char| !(c.is_alphanumeric() || c == '_')).map_or(0, |i| i + 1);
+    let start = text
+        .rfind(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .map_or(0, |i| i + 1);
     let word = &text[start..];
     if word.is_empty() || word.starts_with(|c: char| c.is_ascii_digit()) {
         return Vec::new();
     }
-    names.iter().filter(|n| n.starts_with(word) && n.as_str() != word).map(|n| format!("{}{n}", &text[..start])).collect()
+    names
+        .iter()
+        .filter(|n| n.starts_with(word) && n.as_str() != word)
+        .map(|n| format!("{}{n}", &text[..start]))
+        .collect()
 }
 
 /// The texts `query` matches as the picker's query does, best first; all of them for no query.
 fn fuzzy<'a>(query: &str, texts: impl Iterator<Item = &'a str>) -> Vec<String> {
     let pat = Pattern::parse(query, CaseMatching::Ignore, Normalization::Smart);
     let (mut m, mut buf) = (Matcher::new(Config::DEFAULT.match_paths()), Vec::new());
-    let mut scored: Vec<(u32, &str)> = texts.filter_map(|t| pat.score(Utf32Str::new(t, &mut buf), &mut m).map(|s| (s, t))).collect();
+    let mut scored: Vec<(u32, &str)> = texts
+        .filter_map(|t| {
+            pat.score(Utf32Str::new(t, &mut buf), &mut m)
+                .map(|s| (s, t))
+        })
+        .collect();
     scored.sort_by_key(|&(s, t)| (std::cmp::Reverse(s), t.len()));
     scored.into_iter().map(|(_, t)| t.to_string()).collect()
 }
@@ -832,7 +1353,9 @@ fn fuzzy<'a>(query: &str, texts: impl Iterator<Item = &'a str>) -> Vec<String> {
 fn signals(ws: &Workspace, typed: &str, ends: &[&str]) -> Vec<String> {
     let t = &ws.trace;
     let ends_in = |p: &str| ends.iter().any(|e| p.to_ascii_lowercase().ends_with(e));
-    let paths = (0..t.vars.len()).filter(|&v| !t.is_computed(v)).map(|v| t.vars[v].path.as_str());
+    let paths = (0..t.vars.len())
+        .filter(|&v| !t.is_computed(v))
+        .map(|v| t.vars[v].path.as_str());
     if typed.is_empty() {
         let mut v: Vec<&str> = paths.filter(|p| ends_in(p)).collect();
         v.sort_by_key(|p| p.len());
@@ -864,27 +1387,55 @@ mod tests {
     fn fills_checks_and_runs() {
         let mut a = app();
         a.keys(":decode\n").unwrap();
-        assert_eq!((form(&a).at, form(&a).fields.len(), form(&a).missing()), (0, 2, Some("name the decode".into())));
+        assert_eq!(
+            (form(&a).at, form(&a).fields.len(), form(&a).missing()),
+            (0, 2, Some("name the decode".into()))
+        );
         // the protocol by its suggestion: its roles and params come with it
         a.keys("s\taxil<Right>\t").unwrap();
         assert_eq!(form(&a).fields[1].value, "axilite");
-        assert_eq!(form(&a).fields.iter().map(|f| f.key.as_str()).take(5).collect::<Vec<_>>(), ["name", "protocol", "clock", "prefix", "awvalid"]);
+        assert_eq!(
+            form(&a)
+                .fields
+                .iter()
+                .map(|f| f.key.as_str())
+                .take(5)
+                .collect::<Vec<_>>(),
+            ["name", "protocol", "clock", "prefix", "awvalid"]
+        );
         // the clock: a signal ending in clk first
         a.keys("a").unwrap();
         assert_eq!(form(&a).hint(), Some("top.aclk"));
         a.keys("<Right>\ts_axi_").unwrap();
-        assert_eq!(form(&a).line(), "decode s axilite clock=top.aclk prefix=s_axi_");
+        assert_eq!(
+            form(&a).line(),
+            "decode s axilite clock=top.aclk prefix=s_axi_"
+        );
         let f = a.form.take().unwrap();
-        assert_eq!(f.by_prefix(&mut a.ws, 4).as_deref(), Some("top.s_axi_awvalid"));
+        assert_eq!(
+            f.by_prefix(&mut a.ws, 4).as_deref(),
+            Some("top.s_axi_awvalid")
+        );
         a.form = Some(f);
         // the names match; nothing decoded or read yet
         assert_eq!(form(&a).check, Ok(()));
-        let read = |a: &App| a.ws.trace.by_path.get("top.s_axi_awaddr").is_some_and(|&v| a.ws.trace.loaded(v));
+        let read = |a: &App| {
+            a.ws.trace
+                .by_path
+                .get("top.s_axi_awaddr")
+                .is_some_and(|&v| a.ws.trace.loaded(v))
+        };
         assert!(a.ws.decodes.is_empty() && a.ws.streams.is_empty() && !read(&a));
         a.keys("\n").unwrap();
         assert!(a.form.is_none());
         assert_eq!((a.ws.decodes.len(), read(&a)), (1, true));
-        assert!(a.ws.rows.iter().any(|r| matches!(r, wtf_core::rows::Row::Group { name, .. } if name == "s")), "{:?}", a.msg);
+        assert!(
+            a.ws.rows
+                .iter()
+                .any(|r| matches!(r, wtf_core::rows::Row::Group { name, .. } if name == "s")),
+            "{:?}",
+            a.msg
+        );
     }
 
     /// What is wrong stays on the fields it names: the check's error, and `Enter`'s, which keeps
@@ -896,30 +1447,53 @@ mod tests {
         let f = form(&a);
         let w = f.shown().expect("an error");
         let keys: Vec<&str> = w.fields.iter().map(|&i| f.fields[i].key.as_str()).collect();
-        assert!(keys.starts_with(&["awvalid", "awready"]) && keys.contains(&"clock"), "{keys:?}");
+        assert!(
+            keys.starts_with(&["awvalid", "awready"]) && keys.contains(&"clock"),
+            "{keys:?}"
+        );
         a.keys("\n").unwrap();
         assert_eq!(form(&a).fields[form(&a).at].key, "awvalid");
         assert!(a.ws.decodes.is_empty());
         // made, then the same name again
-        a.keys("<Esc>:decode s axilite clock=aclk prefix=s_axi_\n:decode\ns\taxilite\t").unwrap();
+        a.keys("<Esc>:decode s axilite clock=aclk prefix=s_axi_\n:decode\ns\taxilite\t")
+            .unwrap();
         a.keys("aclk\ts_axi_\n").unwrap();
         let f = form(&a);
-        assert_eq!((f.at, f.error.as_ref().map(|w| w.text.as_str())), (0, Some("s: the name is taken; give another")));
+        assert_eq!(
+            (f.at, f.error.as_ref().map(|w| w.text.as_str())),
+            (0, Some("s: the name is taken; give another"))
+        );
         let s = crate::snapshot(&mut a, 100, Some(30));
-        assert!(s.contains("│ s: the name is taken;") && s.contains("│ give another"), "{s}");
+        assert!(
+            s.contains("│ s: the name is taken;") && s.contains("│ give another"),
+            "{s}"
+        );
         // the check says so too, on the name, as it is typed
         a.keys("<BS>s").unwrap();
-        assert_eq!((form(&a).error.as_ref(), form(&a).shown().map(|w| w.fields.clone())), (None, Some(vec![0])));
+        assert_eq!(
+            (
+                form(&a).error.as_ref(),
+                form(&a).shown().map(|w| w.fields.clone())
+            ),
+            (None, Some(vec![0]))
+        );
         // a line that doesn't parse, a name with a space: its error, on no field
         a.keys("<Esc>:decode\nt u\taxilite\taclk\ts_axi_").unwrap();
-        assert_eq!(form(&a).check, Err(Wrong { text: "usage: :decode <name> <protocol> <role>=<signal>...".into(), fields: Vec::new() }));
+        assert_eq!(
+            form(&a).check,
+            Err(Wrong {
+                text: "usage: :decode <name> <protocol> <role>=<signal>...".into(),
+                fields: Vec::new()
+            })
+        );
     }
 
     /// A decode form missing two of a protocol's roles marks both, named by one reason.
     #[test]
     fn missed_roles_all_marked() {
         let mut a = app();
-        a.run("protocol w roles=valid,ready,last when=valid").unwrap();
+        a.run("protocol w roles=valid,ready,last when=valid")
+            .unwrap();
         a.keys(":decode\nx\tw\taclk\ts_axi_wvalid").unwrap();
         let f = form(&a);
         let w = f.shown().expect("an error");
@@ -933,11 +1507,19 @@ mod tests {
     fn params_and_narrow() {
         let mut a = app();
         a.keys(":decode\nu\tuart").unwrap();
-        let at = form(&a).fields.iter().position(|f| f.key == "baud").expect("uart's baud");
+        let at = form(&a)
+            .fields
+            .iter()
+            .position(|f| f.key == "baud")
+            .expect("uart's baud");
         (0..at - 1).for_each(|_| a.keys("\t").unwrap());
         assert!(form(&a).hints.is_empty());
         let s = crate::snapshot(&mut a, 100, Some(30));
-        assert!(s.lines().any(|l| l.contains("▌baud") && l.contains("default")), "{s}");
+        assert!(
+            s.lines()
+                .any(|l| l.contains("▌baud") && l.contains("default")),
+            "{s}"
+        );
         assert!(!crate::snapshot(&mut a, 40, Some(20)).contains("decode"));
     }
 
@@ -956,7 +1538,10 @@ mod tests {
         assert_eq!(form(&a).fields[4].value, "top.s_axi_awvalid");
         // Ctrl-s and Tab do nothing in it: a signal for the field, nothing else
         a.keys("<C-Space><C-s>\t").unwrap();
-        assert_eq!(a.picker.as_ref().map(|p| (p.source, p.marked.len())), Some((0, 0)));
+        assert_eq!(
+            a.picker.as_ref().map(|p| (p.source, p.marked.len())),
+            Some((0, 0))
+        );
         a.keys("<Esc>").unwrap();
         assert!(a.picker.is_none() && a.form.is_some());
         a.keys("<S-Tab><S-Tab><S-Tab><C-Space>").unwrap();
@@ -977,13 +1562,22 @@ mod tests {
         a.keys("<Right><S-Tab><S-Tab><S-Tab>").unwrap();
         assert_eq!(form(&a).hint(), Some("s_axi"));
         a.keys("<Right>").unwrap();
-        assert_eq!(form(&a).line(), "decode s_axi axilite clock=top.aclk prefix=top.s_axi_");
+        assert_eq!(
+            form(&a).line(),
+            "decode s_axi axilite clock=top.aclk prefix=top.s_axi_"
+        );
         // a role the prefix plays suggests nothing; without the prefix, its signal by its ending
         a.keys("\t\t\t<C-u>\t").unwrap();
-        assert_eq!((form(&a).fields[form(&a).at].key.as_str(), form(&a).hint()), ("awvalid", Some("top.s_axi_awvalid")));
+        assert_eq!(
+            (form(&a).fields[form(&a).at].key.as_str(), form(&a).hint()),
+            ("awvalid", Some("top.s_axi_awvalid"))
+        );
         a.keys("awv").unwrap();
         let hints = form(&a).hints.clone();
-        assert!(hints.len() > 1 && hints[0] == "top.s_axi_awvalid", "{hints:?}");
+        assert!(
+            hints.len() > 1 && hints[0] == "top.s_axi_awvalid",
+            "{hints:?}"
+        );
         a.keys("<C-n>").unwrap();
         assert_eq!(form(&a).hint(), Some(hints[1].as_str()));
         a.keys("<C-p><Right>").unwrap();
@@ -1002,7 +1596,10 @@ mod tests {
         // a role with two matches, the prefix cleared
         a.keys("<C-u>\tawv").unwrap();
         let s = crate::snapshot(&mut a, 100, Some(30));
-        assert!(s.contains("awv   → top.s_axi_awvalid  1/2") && s.contains("C-n other"), "{s}");
+        assert!(
+            s.contains("awv   → top.s_axi_awvalid  1/2") && s.contains("C-n other"),
+            "{s}"
+        );
         // too short for every field: scrolled to the one filled in, and back
         a.keys("<S-Tab><S-Tab><S-Tab><S-Tab><S-Tab>").unwrap();
         let s = crate::snapshot(&mut a, 100, Some(14));
@@ -1015,13 +1612,27 @@ mod tests {
     #[test]
     fn session_protocol() {
         let mut a = app();
-        a.keys(":protocol w roles=valid,ready when=valid && ready\n").unwrap();
+        a.keys(":protocol w roles=valid,ready when=valid && ready\n")
+            .unwrap();
         a.keys(":decode\nx\tw\t").unwrap();
-        assert_eq!(form(&a).fields.iter().map(|f| f.key.as_str()).collect::<Vec<_>>(), ["name", "protocol", "clock", "valid", "ready"]);
+        assert_eq!(
+            form(&a)
+                .fields
+                .iter()
+                .map(|f| f.key.as_str())
+                .collect::<Vec<_>>(),
+            ["name", "protocol", "clock", "valid", "ready"]
+        );
         a.keys("aclk\ts_axi_wvalid\ts_axi_wready").unwrap();
         assert_eq!(form(&a).check, Ok(()));
         a.keys("\n").unwrap();
-        assert_eq!(a.ws.streams.iter().map(|s| (s.name.as_str(), s.records.len())).collect::<Vec<_>>(), [("x", 2)]);
+        assert_eq!(
+            a.ws.streams
+                .iter()
+                .map(|s| (s.name.as_str(), s.records.len()))
+                .collect::<Vec<_>>(),
+            [("x", 2)]
+        );
     }
 
     /// The other keys: `Backspace` deletes, a key not in the table does nothing, `Enter` with
@@ -1034,17 +1645,43 @@ mod tests {
         assert_eq!(form(&a).fields[0].value, "s");
         a.form_key(KeyEvent::new(KeyCode::F(5), KeyModifiers::NONE));
         a.keys("<C-x><C-Space>").unwrap();
-        assert_eq!((form(&a).fields[0].value.as_str(), form(&a).at, a.picker.is_none()), ("s", 0, true));
+        assert_eq!(
+            (
+                form(&a).fields[0].value.as_str(),
+                form(&a).at,
+                a.picker.is_none()
+            ),
+            ("s", 0, true)
+        );
         a.keys("\n").unwrap();
-        assert_eq!((form(&a).at, form(&a).error.clone()), (1, Some(Wrong { text: "a protocol to decode with".into(), fields: vec![1] })));
+        assert_eq!(
+            (form(&a).at, form(&a).error.clone()),
+            (
+                1,
+                Some(Wrong {
+                    text: "a protocol to decode with".into(),
+                    fields: vec![1]
+                })
+            )
+        );
         a.keys("axilite").unwrap();
         crate::snapshot(&mut a, 100, Some(30));
         let (y, i) = a.hit.records[4];
         let x = a.hit.boxed.unwrap().x + 3;
-        a.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: x, row: y as u16, modifiers: KeyModifiers::NONE });
+        a.mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: x,
+            row: y as u16,
+            modifiers: KeyModifiers::NONE,
+        });
         assert_eq!(form(&a).at, i);
         // outside the card: nothing, and the rows under it take nothing either
-        a.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: 0, row: 0, modifiers: KeyModifiers::NONE });
+        a.mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 0,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        });
         assert_eq!(form(&a).at, i);
         a.keys("<Esc>").unwrap();
         assert!(a.form.is_none());
@@ -1055,12 +1692,30 @@ mod tests {
     #[test]
     fn protocol_form() {
         let mut a = app();
-        a.run("add top.s_axi_wvalid top.s_axi_wready top.s_axi_wdata").unwrap();
+        a.run("add top.s_axi_wvalid top.s_axi_wready top.s_axi_wdata")
+            .unwrap();
         a.run("select s_axi_wvalid s_axi_wdata").unwrap();
         a.keys(":protocol\n").unwrap();
-        let keys = |a: &App| form(a).fields.iter().map(|f| f.key.clone()).collect::<Vec<_>>();
-        assert_eq!(keys(&a), ["name", "roles", "wvalid", "wready", "wdata", "when", "field"]);
-        assert_eq!((form(&a).fields[1].value.as_str(), form(&a).fields[4].value.as_str()), ("wvalid, wready, wdata", "top.s_axi_wdata"));
+        let keys = |a: &App| {
+            form(a)
+                .fields
+                .iter()
+                .map(|f| f.key.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            keys(&a),
+            [
+                "name", "roles", "wvalid", "wready", "wdata", "when", "field"
+            ]
+        );
+        assert_eq!(
+            (
+                form(&a).fields[1].value.as_str(),
+                form(&a).fields[4].value.as_str()
+            ),
+            ("wvalid, wready, wdata", "top.s_axi_wdata")
+        );
         assert_eq!(form(&a).missing(), Some("name the protocol".into()));
         // when, a role's name completed; a field, and another row to add the next
         a.keys("w\t\t\t\t\twvalid && wr").unwrap();
@@ -1070,20 +1725,39 @@ mod tests {
         a.keys("<C-u>lo = wd<Right>[7:0]").unwrap();
         assert_eq!(keys(&a)[6..], ["field", "field"]);
         a.keys("\thi = lo[3").unwrap();
-        assert!(matches!(&form(&a).check, Err(w) if w.text.starts_with("hi: ")), "{:?}", form(&a).check);
+        assert!(
+            matches!(&form(&a).check, Err(w) if w.text.starts_with("hi: ")),
+            "{:?}",
+            form(&a).check
+        );
         a.keys(":0]").unwrap();
         assert_eq!(form(&a).check, Ok(()));
-        assert_eq!(form(&a).line(), "protocol w roles=wvalid,wready,wdata when=wvalid && wready lo=wdata[7:0] hi=lo[3:0]");
+        assert_eq!(
+            form(&a).line(),
+            "protocol w roles=wvalid,wready,wdata when=wvalid && wready lo=wdata[7:0] hi=lo[3:0]"
+        );
         insta::assert_snapshot!("protocol_form", crate::snapshot(&mut a, 100, Some(24)));
         // defined, then the decode form on it
         a.keys("\n").unwrap();
         assert_eq!(a.ws.protocols.len(), 1);
         let f = form(&a);
         assert!(!f.protocol && f.fields[1].value == "w" && f.at == 0);
-        assert_eq!(f.fields.iter().find(|x| x.key == "wready").map(|x| x.value.as_str()), Some("top.s_axi_wready"));
+        assert_eq!(
+            f.fields
+                .iter()
+                .find(|x| x.key == "wready")
+                .map(|x| x.value.as_str()),
+            Some("top.s_axi_wready")
+        );
         a.keys("x\t\taclk\n").unwrap();
         assert!(a.form.is_none(), "{:?}", a.msg);
-        assert_eq!(a.ws.streams.iter().map(|s| (s.name.as_str(), s.records.len())).collect::<Vec<_>>(), [("x", 2)]);
+        assert_eq!(
+            a.ws.streams
+                .iter()
+                .map(|s| (s.name.as_str(), s.records.len()))
+                .collect::<Vec<_>>(),
+            [("x", 2)]
+        );
     }
 
     /// A clocked search's matches as records (spec §5 "Protocol form"): the status line says the
@@ -1092,21 +1766,39 @@ mod tests {
     #[test]
     fn protocol_of_a_search() {
         let mut a = app();
-        assert!(a.run("protocol search").unwrap_err().starts_with("no clocked search"));
+        assert!(
+            a.run("protocol search")
+                .unwrap_err()
+                .starts_with("no clocked search")
+        );
         a.run("add top.aclk top.s_axi_wdata").unwrap();
         a.keys("/@aclk s_axi_wvalid && s_axi_wready\n").unwrap();
-        assert_eq!(a.msg.as_ref().map(|m| m.0.as_str()), Some("match 1 of 2; Space d m: records of them"));
+        assert_eq!(
+            a.msg.as_ref().map(|m| m.0.as_str()),
+            Some("match 1 of 2; Space d m: records of them")
+        );
         a.keys(" dm").unwrap();
         let f = form(&a);
-        assert_eq!(f.line(), "protocol ev roles=s_axi_wvalid,s_axi_wready,s_axi_wdata when=s_axi_wvalid && s_axi_wready s_axi_wdata=s_axi_wdata", "the clock row is no field");
+        assert_eq!(
+            f.line(),
+            "protocol ev roles=s_axi_wvalid,s_axi_wready,s_axi_wdata when=s_axi_wvalid && s_axi_wready s_axi_wdata=s_axi_wdata",
+            "the clock row is no field"
+        );
         a.keys("\n").unwrap();
-        assert_eq!(form(&a).line(), "decode s ev clock=aclk s_axi_wvalid=s_axi_wvalid s_axi_wready=s_axi_wready s_axi_wdata=top.s_axi_wdata");
+        assert_eq!(
+            form(&a).line(),
+            "decode s ev clock=aclk s_axi_wvalid=s_axi_wvalid s_axi_wready=s_axi_wready s_axi_wdata=top.s_axi_wdata"
+        );
         a.keys("\n").unwrap();
         assert!(a.form.is_none() && a.browser.is_some(), "{:?}", a.msg);
         // hints off: the count alone
         a.hints = false;
         a.keys("<Esc>/@aclk s_axi_wvalid\n").unwrap();
-        assert!(a.msg.as_ref().is_some_and(|m| m.0.ends_with(" of 2")), "{:?}", a.msg);
+        assert!(
+            a.msg.as_ref().is_some_and(|m| m.0.ends_with(" of 2")),
+            "{:?}",
+            a.msg
+        );
     }
 
     /// The value-names card (spec §5 "Value-names card"): simple.vcd's cpu.state is 0, 1, 2, 4
@@ -1118,24 +1810,50 @@ mod tests {
         assert!(a.run("names").unwrap_err().starts_with("select a signal"));
         a.run("add top.cpu.state").unwrap();
         a.keys(" dn").unwrap();
-        assert_eq!(form(&a).fields.iter().map(|f| f.key.as_str()).collect::<Vec<_>>(), ["0x0", "0x1", "0x2", "0x4", "0x5"]);
+        assert_eq!(
+            form(&a)
+                .fields
+                .iter()
+                .map(|f| f.key.as_str())
+                .collect::<Vec<_>>(),
+            ["0x0", "0x1", "0x2", "0x4", "0x5"]
+        );
         a.keys("IDLE\t\tBUSY").unwrap();
         assert_eq!(form(&a).line(), "names top.cpu.state 0x0=IDLE 0x2=BUSY");
         insta::assert_snapshot!("value_names_card", crate::snapshot(&mut a, 100, Some(16)));
         a.keys("\n").unwrap();
         assert!(a.form.is_none(), "{:?}", a.msg);
-        assert_eq!(a.ws.value_names, [("top.cpu.state".to_string(), "0x0=IDLE 0x2=BUSY".to_string())]);
+        assert_eq!(
+            a.ws.value_names,
+            [("top.cpu.state".to_string(), "0x0=IDLE 0x2=BUSY".to_string())]
+        );
         // opened again, the names are in it; all cleared, they are gone
         a.keys(" dn<C-u>\t\t<C-u>\n").unwrap();
         assert!(a.ws.value_names.is_empty(), "{:?}", a.msg);
         // a name of two words: :names fails, the card stays with the error
         a.keys(" dnA B\n").unwrap();
-        assert!(form(&a).error.as_ref().is_some_and(|w| w.text.starts_with("usage")), "{:?}", form(&a).error);
+        assert!(
+            form(&a)
+                .error
+                .as_ref()
+                .is_some_and(|w| w.text.starts_with("usage")),
+            "{:?}",
+            form(&a).error
+        );
         a.keys("<Esc>").unwrap();
         // a signal that is only ever x has no value to name
-        a.ws.trace.add_computed("top.ux", Some(2), vec![(0, wtf_core::trace::Val::Bits("xx".into()))]).unwrap();
+        a.ws.trace
+            .add_computed(
+                "top.ux",
+                Some(2),
+                vec![(0, wtf_core::trace::Val::Bits("xx".into()))],
+            )
+            .unwrap();
         a.run("add top.ux").unwrap();
-        assert_eq!(a.run("names").unwrap_err(), "top.ux takes no value without x or z bits");
+        assert_eq!(
+            a.run("names").unwrap_err(),
+            "top.ux takes no value without x or z bits"
+        );
     }
 
     /// What is wrong stays on the field it names: a name no role, a field written without `=`,
@@ -1147,10 +1865,21 @@ mod tests {
         a.keys(":protocol\n").unwrap();
         assert_eq!(form(&a).fields.len(), 4, "no rows: no roles");
         a.keys("p\tvalid, ready").unwrap();
-        assert_eq!(form(&a).fields.iter().map(|f| f.key.as_str()).collect::<Vec<_>>(), ["name", "roles", "valid", "ready", "when", "field"]);
-        a.keys("\ts_axi_wvalid\ts_axi_wready\tvalid && go\tlo").unwrap();
+        assert_eq!(
+            form(&a)
+                .fields
+                .iter()
+                .map(|f| f.key.as_str())
+                .collect::<Vec<_>>(),
+            ["name", "roles", "valid", "ready", "when", "field"]
+        );
+        a.keys("\ts_axi_wvalid\ts_axi_wready\tvalid && go\tlo")
+            .unwrap();
         let f = form(&a);
-        assert_eq!(f.missing(), Some("a field is a name and an expression: op = data[7:0]".into()));
+        assert_eq!(
+            f.missing(),
+            Some("a field is a name and an expression: op = data[7:0]".into())
+        );
         a.keys("\n").unwrap();
         assert_eq!(form(&a).at, 5);
         a.keys("<C-u>").unwrap();
@@ -1167,12 +1896,21 @@ mod tests {
         assert_eq!((a.ws.protocols.len(), form(&a).protocol), (1, false));
         // the name taken now
         a.keys("<Esc>:protocol\np\tvalid\t\tvalid").unwrap();
-        assert_eq!(form(&a).check, Err(Wrong { text: "p: the name is taken; give another".into(), fields: vec![0] }));
+        assert_eq!(
+            form(&a).check,
+            Err(Wrong {
+                text: "p: the name is taken; give another".into(),
+                fields: vec![0]
+            })
+        );
         assert_eq!(form(&a).shown().map(|w| w.fields.clone()), Some(vec![0]));
         // Enter keeps the form and the protocol already there
         a.keys("\n").unwrap();
         assert_eq!((a.ws.protocols.len(), form(&a).protocol), (1, true));
-        assert_eq!(super::role_names(&["rx_valid".into(), "rx_data[3]".into()]), ["valid", "data_3"]);
+        assert_eq!(
+            super::role_names(&["rx_valid".into(), "rx_data[3]".into()]),
+            ["valid", "data_3"]
+        );
         assert_eq!(super::role_names(&["s_axi_awvalid".into()]), ["awvalid"]);
     }
 
@@ -1186,19 +1924,60 @@ mod tests {
         a.keys("V10k").unwrap();
         crate::snapshot(&mut a, 100, Some(24));
         let (x, y) = ((a.hit.x0 + 2) as u16, (a.hit.head + 1) as u16);
-        a.mouse(crossterm::event::MouseEvent { kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Right), column: x, row: y, modifiers: crossterm::event::KeyModifiers::NONE });
+        a.mouse(crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Right),
+            column: x,
+            row: y,
+            modifiers: crossterm::event::KeyModifiers::NONE,
+        });
         let menu = a.menu.as_ref().expect("the menu");
-        let k = menu.items.iter().position(|i| i.label == "Decode as").expect("Decode as");
+        let k = menu
+            .items
+            .iter()
+            .position(|i| i.label == "Decode as")
+            .expect("Decode as");
         a.keys(&format!("{}<CR>", "j".repeat(k + 1))).unwrap();
-        let sub: Vec<String> = a.menu.as_ref().unwrap().sub.as_ref().unwrap().1.items.iter().map(|i| format!("{} {}", i.label, i.key)).collect();
+        let sub: Vec<String> = a
+            .menu
+            .as_ref()
+            .unwrap()
+            .sub
+            .as_ref()
+            .unwrap()
+            .1
+            .items
+            .iter()
+            .map(|i| format!("{} {}", i.label, i.key))
+            .collect();
         assert_eq!(sub, ["axilite 10 roles", "axi4 10 roles"]);
         a.keys("j<CR>").unwrap();
         let f = form(&a);
-        let value = |f: &Form, k: &str| f.fields.iter().find(|x| x.key == k).map(|x| x.value.clone()).unwrap();
-        assert_eq!((value(f, "protocol").as_str(), value(f, "clock").as_str(), value(f, "wdata").as_str()), ("axilite", "top.aclk", "top.s_axi_wdata"));
-        assert_eq!((value(f, "arvalid").as_str(), value(f, "prefix").as_str()), ("", ""));
+        let value = |f: &Form, k: &str| {
+            f.fields
+                .iter()
+                .find(|x| x.key == k)
+                .map(|x| x.value.clone())
+                .unwrap()
+        };
+        assert_eq!(
+            (
+                value(f, "protocol").as_str(),
+                value(f, "clock").as_str(),
+                value(f, "wdata").as_str()
+            ),
+            ("axilite", "top.aclk", "top.s_axi_wdata")
+        );
+        assert_eq!(
+            (value(f, "arvalid").as_str(), value(f, "prefix").as_str()),
+            ("", "")
+        );
         assert_eq!(f.at, 0, "the name is the first left empty");
-        assert!(f.line().starts_with("decode  axilite clock=top.aclk awvalid=top.s_axi_awvalid "), "{}", f.line());
+        assert!(
+            f.line()
+                .starts_with("decode  axilite clock=top.aclk awvalid=top.s_axi_awvalid "),
+            "{}",
+            f.line()
+        );
         // another protocol fills its roles: axi4's are the same names
         a.keys("\t<C-u>axi4").unwrap();
         assert_eq!(value(form(&a), "bresp"), "top.s_axi_bresp");

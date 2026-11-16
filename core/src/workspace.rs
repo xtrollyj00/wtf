@@ -9,13 +9,15 @@ use crate::rows::{self, Look, Row, Sig};
 use crate::search;
 use crate::session;
 use crate::stream::{self, Decode, Sampler, Stream};
-use std::collections::{HashMap, HashSet};
 use crate::time::{self, Tick};
 use crate::trace::{Trace, Val};
 use crate::view::View;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 mod decoding;
+mod play;
 pub mod reason;
 pub mod unknown;
 
@@ -89,6 +91,12 @@ pub struct Workspace {
     pub protocols: Vec<Sampler>,
     pub decodes: Vec<Decode>,
     pub streams: Vec<Stream>,
+    /// Protocols loaded from files (spec §16): the process's, not the session's, so `:e` reads no
+    /// file and a new workspace on the same trace decodes with them too.
+    pub loaded: Vec<Arc<protocol::Loaded>>,
+    /// How a `[[protocol]] wasm=` entry gets its protocol (spec §11): the binary sets it, which
+    /// has the host; a workspace core's tests build leaves it None.
+    pub loader: Option<protocol::Loader>,
     /// While an instance samples: its roles, names that stand for its signals.
     roles: HashMap<String, String>,
     /// While a sampled protocol's instance samples: names other than roles are errors, with the
@@ -118,7 +126,10 @@ impl Label {
     /// One line each, whitespace collapsed: the ruler and the status line show them.
     pub fn new(name: &str, note: &str) -> Label {
         let line = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
-        Label { name: line(name), note: line(note) }
+        Label {
+            name: line(name),
+            note: line(note),
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -154,8 +165,25 @@ pub struct Taken {
 /// The `:names` line that gives signal `path` these names (bits, name), without the `:`; those
 /// without a name left out, `off` when none has one.
 pub fn names_line(path: &str, names: &[(String, String)]) -> String {
-    let named: Vec<String> = names.iter().filter(|(_, n)| !n.trim().is_empty()).map(|(b, n)| format!("{}={}", (radix::RADIXES[radix::DEFAULT].format)(b, 0), n.trim())).collect();
-    format!("names {path} {}", if named.is_empty() { "off".to_string() } else { named.join(" ") })
+    let named: Vec<String> = names
+        .iter()
+        .filter(|(_, n)| !n.trim().is_empty())
+        .map(|(b, n)| {
+            format!(
+                "{}={}",
+                (radix::RADIXES[radix::DEFAULT].format)(b, 0),
+                n.trim()
+            )
+        })
+        .collect();
+    format!(
+        "names {path} {}",
+        if named.is_empty() {
+            "off".to_string()
+        } else {
+            named.join(" ")
+        }
+    )
 }
 
 /// What `Workspace::record` compares against.
@@ -182,14 +210,19 @@ struct Layout {
 impl Layout {
     /// The same rows (`rows::same_layout`), marks and named signals.
     fn same(&self, other: &Layout) -> bool {
-        rows::same_layout(&self.rows, &other.rows) && self.marks == other.marks && self.labels == other.labels && self.signals == other.signals
+        rows::same_layout(&self.rows, &other.rows)
+            && self.marks == other.marks
+            && self.labels == other.labels
+            && self.signals == other.signals
     }
 }
 
 impl Workspace {
     /// Open the trace file at `path`, with nothing shown yet.
     pub fn open(path: &std::path::Path) -> Result<Self, String> {
-        let name = path.file_name().map_or(String::new(), |n| n.to_string_lossy().into_owned());
+        let name = path
+            .file_name()
+            .map_or(String::new(), |n| n.to_string_lossy().into_owned());
         let mut app = Workspace::new(Trace::open(path)?, name);
         app.trace_path = path.to_path_buf();
         Ok(app)
@@ -219,6 +252,8 @@ impl Workspace {
             protocols: Vec::new(),
             decodes: Vec::new(),
             streams: Vec::new(),
+            loaded: Vec::new(),
+            loader: None,
             roles: HashMap::new(),
             only_roles: None,
             sel: 0,
@@ -229,13 +264,32 @@ impl Workspace {
         }
     }
 
+    /// Where a decode's protocol may come from (spec §16): the built-ins, the protocols loaded
+    /// from files, and this session's own.
+    pub fn sources(&self) -> protocol::Sources<'_> {
+        protocol::Sources {
+            session: &self.protocols,
+            loaded: &self.loaded,
+        }
+    }
+
     /// The state an undo step would restore, taken before a change (`record`).
     pub fn mark(&self) -> Mark {
-        Mark { before: self.layout(), counts: (self.undo.len(), self.redo.len(), self.reloads) }
+        Mark {
+            before: self.layout(),
+            counts: (self.undo.len(), self.redo.len(), self.reloads),
+        }
     }
 
     fn layout(&self) -> Layout {
-        Layout { rows: self.rows.clone(), marks: self.marks, labels: self.labels.clone(), sel: self.sel, signals: self.signals.clone(), value_names: self.value_names.clone() }
+        Layout {
+            rows: self.rows.clone(),
+            marks: self.marks,
+            labels: self.labels.clone(),
+            sel: self.sel,
+            signals: self.signals.clone(),
+            value_names: self.value_names.clone(),
+        }
     }
 
     /// Put back a layout, giving the one there was. A named signal defined otherwise since is made
@@ -253,7 +307,8 @@ impl Workspace {
                 }
             }
         }
-        (self.rows, self.marks, self.labels, self.sel, self.signals) = (l.rows, l.marks, l.labels, l.sel, l.signals);
+        (self.rows, self.marks, self.labels, self.sel, self.signals) =
+            (l.rows, l.marks, l.labels, l.sel, l.signals);
         now
     }
 
@@ -276,24 +331,43 @@ impl Workspace {
             return;
         }
         let mut keep: HashSet<usize> = HashSet::new();
-        let layouts = std::iter::once(&self.rows).chain(self.undo.iter().chain(&self.redo).map(|l| &l.rows));
+        let layouts =
+            std::iter::once(&self.rows).chain(self.undo.iter().chain(&self.redo).map(|l| &l.rows));
         for s in layouts.flat_map(|rows| rows.iter().filter_map(Row::sig)) {
             keep.insert(s.var);
             keep.extend(&s.open);
             keep.extend(s.looks.iter().map(|l| l.0));
         }
         let names = self.signals.iter().map(|(n, _)| n.clone());
-        let streams = self.streams.iter().flat_map(|s| std::iter::once(s.name.clone()).chain(s.schema.iter().map(|f| format!("{}.{}", s.name, f.name))));
-        keep.extend(names.chain(streams).filter_map(|p| self.trace.by_path.get(&p).copied()));
-        let Some(to) = self.trace.retain_computed(&keep) else { return };
-        let layouts = std::iter::once(&mut self.rows).chain(self.undo.iter_mut().chain(&mut self.redo).map(|l| &mut l.rows));
-        for s in layouts.flat_map(|rows| rows.iter_mut().filter_map(|r| match r {
-            Row::Signal(s) => Some(s),
-            _ => None,
-        })) {
+        let streams = self.streams.iter().flat_map(|s| {
+            std::iter::once(s.name.clone())
+                .chain(s.schema.iter().map(|f| format!("{}.{}", s.name, f.name)))
+        });
+        keep.extend(
+            names
+                .chain(streams)
+                .filter_map(|p| self.trace.by_path.get(&p).copied()),
+        );
+        let Some(to) = self.trace.retain_computed(&keep) else {
+            return;
+        };
+        let layouts = std::iter::once(&mut self.rows).chain(
+            self.undo
+                .iter_mut()
+                .chain(&mut self.redo)
+                .map(|l| &mut l.rows),
+        );
+        for s in layouts.flat_map(|rows| {
+            rows.iter_mut().filter_map(|r| match r {
+                Row::Signal(s) => Some(s),
+                _ => None,
+            })
+        }) {
             s.var = to[s.var].expect("a row's var is kept");
             s.open.iter_mut().for_each(|v| *v = to[*v].expect("kept"));
-            s.looks.iter_mut().for_each(|l| l.0 = to[l.0].expect("kept"));
+            s.looks
+                .iter_mut()
+                .for_each(|l| l.0 = to[l.0].expect("kept"));
         }
     }
 
@@ -310,7 +384,6 @@ impl Workspace {
         r
     }
 
-
     /// Value search (spec §8): a bare value on the selected signal or bit, or an expression over
     /// signals (`valid && ready && data == 0x40`, `@clk ...`). Goes `n` matches forward (back);
     /// the cursor stays where it is when nothing matches. Returns the query, for counting matches.
@@ -321,13 +394,17 @@ impl Workspace {
             _ => None,
         };
         // the names the file gives the selected signal's values
-        let names = selected.filter(|p| p.1.is_none()).and_then(|p| self.trace.vars[p.0].names.clone());
+        let names = selected
+            .filter(|p| p.1.is_none())
+            .and_then(|p| self.trace.vars[p.0].names.clone());
         // a number, x, z or a name of the selected signal's values is a value for it; another name
         // or an operator, an expression
         let value = !search::is_expr(text)
             && (text.starts_with(|c: char| c.is_ascii_digit() || c == '-' || c == '\'')
                 || matches!(text.to_lowercase().as_str(), "x" | "u" | "z")
-                || names.as_ref().is_some_and(|n| n.iter().any(|(_, name)| name.eq_ignore_ascii_case(text))));
+                || names
+                    .as_ref()
+                    .is_some_and(|n| n.iter().any(|(_, name)| name.eq_ignore_ascii_case(text))));
         let query = if value {
             let (var, bit) = match (selected, self.rows.get(self.sel)) {
                 (Some(p), _) => p,
@@ -336,7 +413,15 @@ impl Workspace {
             };
             let width = self.trace.probe_width((var, bit));
             let target = Some(search::parse(text, width, names.as_ref())?);
-            search::Query { clock: None, expr: search::Expr::Cmp { sig: (var, bit), past: 0, op: search::Op::Eq, target } }
+            search::Query {
+                clock: None,
+                expr: search::Expr::Cmp {
+                    sig: (var, bit),
+                    past: 0,
+                    op: search::Op::Eq,
+                    target,
+                },
+            }
         } else {
             self.query(text)?
         };
@@ -346,7 +431,10 @@ impl Workspace {
                 Some(x) => t = x,
                 None if t == self.view.cursor => {
                     let at = time::format(t, self.trace.fs_per_tick);
-                    return Err(format!("not found {} {at}: {text}", if forward { "after" } else { "before" }));
+                    return Err(format!(
+                        "not found {} {at}: {text}",
+                        if forward { "after" } else { "before" }
+                    ));
                 }
                 None => break,
             }
@@ -361,7 +449,11 @@ impl Workspace {
         let q = search::parse_query(text, self.trace.fs_per_tick, &mut |name| {
             let p = self.resolve(name)?;
             let var = &self.trace.vars[p.0];
-            Ok(if p.1.is_some() { (p, Some(1), None, false) } else { (p, var.width, var.names.clone(), var.signed) })
+            Ok(if p.1.is_some() {
+                (p, Some(1), None, false)
+            } else {
+                (p, var.width, var.names.clone(), var.signed)
+            })
         })?;
         let mut sigs: Vec<usize> = q.clock.iter().map(|c| c.0).collect();
         let mut probes = Vec::new();
@@ -371,7 +463,10 @@ impl Workspace {
         if let Some((v, b)) = q.clock {
             // its shortest phase, between its 2nd, 3rd and 4th changes (the 1st may leave X)
             let mut t = self.trace.start();
-            let edges: Vec<Tick> = std::iter::from_fn(|| self.trace.next_change_of(v, b, t).inspect(|&x| t = x)).take(4).collect();
+            let edges: Vec<Tick> =
+                std::iter::from_fn(|| self.trace.next_change_of(v, b, t).inspect(|&x| t = x))
+                    .take(4)
+                    .collect();
             let phase = edges.windows(2).skip(1).map(|w| w[1] - w[0]).min();
             // the largest unit in which it is 1 or more: ns for a 2.5ns phase
             if let (Some(p), Some(_)) = (phase, self.trace.fs_per_tick) {
@@ -385,7 +480,13 @@ impl Workspace {
     /// `:scope name`: names resolve under it first; empty: no scope.
     pub fn set_scope(&mut self, name: &str) -> Result<(), String> {
         let name = name.trim().trim_end_matches('.');
-        if !name.is_empty() && !self.trace.vars.iter().any(|v| v.path.starts_with(&format!("{name}."))) {
+        if !name.is_empty()
+            && !self
+                .trace
+                .vars
+                .iter()
+                .any(|v| v.path.starts_with(&format!("{name}.")))
+        {
             return Err(format!("no scope {name}"));
         }
         self.scope = (!name.is_empty()).then(|| name.to_string());
@@ -419,11 +520,20 @@ impl Workspace {
         {
             return Err(format!("{name} is no role: {why}"));
         }
-        if let Some(&v) = self.scope.as_ref().and_then(|s| self.trace.by_path.get(&format!("{s}.{name}"))) {
+        if let Some(&v) = self
+            .scope
+            .as_ref()
+            .and_then(|s| self.trace.by_path.get(&format!("{s}.{name}")))
+        {
             return Ok((v, None));
         }
         let names = crate::rows::display_names(&self.trace, &self.rows);
-        if let Some(s) = self.rows.iter().zip(&names).find_map(|(r, n)| r.sig().filter(|_| n.trim() == name)) {
+        if let Some(s) = self
+            .rows
+            .iter()
+            .zip(&names)
+            .find_map(|(r, n)| r.sig().filter(|_| n.trim() == name))
+        {
             return Ok((s.var, None));
         }
         if let Some(&v) = self.trace.by_path.get(name) {
@@ -453,7 +563,11 @@ impl Workspace {
                 }
             }
             let w = self.trace.vars[v].width.unwrap_or(1);
-            return if b < w { Ok((v, Some(b))) } else { Err(format!("{base} has no bit {b}")) };
+            return if b < w {
+                Ok((v, Some(b)))
+            } else {
+                Err(format!("{base} has no bit {b}"))
+            };
         }
         self.by_end(name).map(|v| (v, None))
     }
@@ -463,12 +577,21 @@ impl Workspace {
     fn by_end(&self, name: &str) -> Result<usize, String> {
         let vars = 0..self.trace.vars.len();
         let end = format!(".{name}");
-        let mut found: Vec<usize> = vars.clone().filter(|&v| self.trace.vars[v].path.ends_with(&end)).collect();
+        let mut found: Vec<usize> = vars
+            .clone()
+            .filter(|&v| self.trace.vars[v].path.ends_with(&end))
+            .collect();
         if found.is_empty() {
             let canon = self.trace.canon_paths();
             let key = crate::trace::canon(name);
-            let scoped = self.scope.as_ref().map(|s| crate::trace::canon(&format!("{s}.{name}")));
-            found = vars.clone().filter(|&v| canon[v] == key || scoped.as_ref() == Some(&canon[v])).collect();
+            let scoped = self
+                .scope
+                .as_ref()
+                .map(|s| crate::trace::canon(&format!("{s}.{name}")));
+            found = vars
+                .clone()
+                .filter(|&v| canon[v] == key || scoped.as_ref() == Some(&canon[v]))
+                .collect();
             if found.is_empty() {
                 let end = format!(".{key}");
                 found = vars.filter(|&v| canon[v].ends_with(&end)).collect();
@@ -480,15 +603,28 @@ impl Workspace {
             _ => {
                 // the only one of them in the rows is the one meant; else the only one of the file
                 // (decoding `tdata` makes `rx.beat.tdata`, which mustn't make `tdata` ambiguous)
-                if let [v] = found.iter().copied().filter(|&v| self.shown(v)).collect::<Vec<_>>()[..] {
-                    return Ok(v);
-                }
-                if let Some(s) = &self.scope
-                    && let [v] = found.iter().copied().filter(|&v| self.trace.vars[v].path.starts_with(&format!("{s}."))).collect::<Vec<_>>()[..]
+                if let [v] = found
+                    .iter()
+                    .copied()
+                    .filter(|&v| self.shown(v))
+                    .collect::<Vec<_>>()[..]
                 {
                     return Ok(v);
                 }
-                let file: Vec<usize> = found.iter().copied().filter(|&v| !self.trace.is_computed(v)).collect();
+                if let Some(s) = &self.scope
+                    && let [v] = found
+                        .iter()
+                        .copied()
+                        .filter(|&v| self.trace.vars[v].path.starts_with(&format!("{s}.")))
+                        .collect::<Vec<_>>()[..]
+                {
+                    return Ok(v);
+                }
+                let file: Vec<usize> = found
+                    .iter()
+                    .copied()
+                    .filter(|&v| !self.trace.is_computed(v))
+                    .collect();
                 if let [v] = file[..] {
                     return Ok(v);
                 }
@@ -496,16 +632,32 @@ impl Workspace {
                 let depth = |v: usize| self.trace.vars[v].path.matches('.').count();
                 let pool = if file.is_empty() { &found } else { &file };
                 let top = pool.iter().map(|&v| depth(v)).min();
-                if let [v] = pool.iter().copied().filter(|&v| Some(depth(v)) == top).collect::<Vec<_>>()[..] {
+                if let [v] = pool
+                    .iter()
+                    .copied()
+                    .filter(|&v| Some(depth(v)) == top)
+                    .collect::<Vec<_>>()[..]
+                {
                     return Ok(v);
                 }
-                let paths: Vec<&str> = found.iter().take(8).map(|&v| self.trace.vars[v].path.as_str()).collect();
-                let more = if found.len() > 8 { format!(", and {} more", found.len() - 8) } else { String::new() };
-                Err(format!("ambiguous: {name} ({} signals: {}{more})", found.len(), paths.join(", ")))
+                let paths: Vec<&str> = found
+                    .iter()
+                    .take(8)
+                    .map(|&v| self.trace.vars[v].path.as_str())
+                    .collect();
+                let more = if found.len() > 8 {
+                    format!(", and {} more", found.len() - 8)
+                } else {
+                    String::new()
+                };
+                Err(format!(
+                    "ambiguous: {name} ({} signals: {}{more})",
+                    found.len(),
+                    paths.join(", ")
+                ))
             }
         }
     }
-
 
     /// A signal named in full: a bit of a bus is a one-bit slice of it.
     pub fn whole(&mut self, name: &str) -> Result<usize, String> {
@@ -519,12 +671,22 @@ impl Workspace {
     fn part(&mut self, name: &str) -> Result<usize, String> {
         match search::sv_literal(name) {
             Some(Err(e)) => Err(e),
-            Some(Ok(search::Sv::Bits { bits, sized: true, .. })) => match self.trace.by_path.get(name) {
+            Some(Ok(search::Sv::Bits {
+                bits, sized: true, ..
+            })) => match self.trace.by_path.get(name) {
                 Some(&v) => Ok(v),
-                None => self.trace.add_computed(name, Some(bits.len() as u32), vec![(0, Val::Bits(bits))]),
+                None => self.trace.add_computed(
+                    name,
+                    Some(bits.len() as u32),
+                    vec![(0, Val::Bits(bits))],
+                ),
             },
-            Some(Ok(_)) => Err(format!("{name}: a number in a concatenation needs a width, as 1'b0")),
-            None if name.starts_with(|c: char| c.is_ascii_digit()) => Err(format!("{name}: a number in a concatenation needs a width, as 1'b0")),
+            Some(Ok(_)) => Err(format!(
+                "{name}: a number in a concatenation needs a width, as 1'b0"
+            )),
+            None if name.starts_with(|c: char| c.is_ascii_digit()) => Err(format!(
+                "{name}: a number in a concatenation needs a width, as 1'b0"
+            )),
             None => self.whole(name),
         }
     }
@@ -534,12 +696,18 @@ impl Workspace {
     pub fn define(&mut self, name: &str, expr: &str) -> Result<usize, String> {
         let (name, expr) = (name.trim(), expr.trim());
         // names go into search expressions, so no brackets, braces, spaces or operators
-        if name.is_empty() || !name.chars().all(|c| c.is_alphanumeric() || "_.$".contains(c)) {
+        if name.is_empty()
+            || !name
+                .chars()
+                .all(|c| c.is_alphanumeric() || "_.$".contains(c))
+        {
             return Err(format!("not a signal name: {name}"));
         }
         let v = self.whole(expr)?;
         let values = computed::values(&mut self.trace, v);
-        let var = self.trace.add_computed(name, self.trace.vars[v].width, values)?;
+        let var = self
+            .trace
+            .add_computed(name, self.trace.vars[v].width, values)?;
         self.trace.vars[var].signed = self.trace.vars[v].signed;
         match self.signals.iter_mut().find(|s| s.0 == name) {
             Some(s) => s.1 = expr.to_string(),
@@ -560,15 +728,38 @@ impl Workspace {
             });
         }
         // a name, a slice `name[3:0]` or a part of `{name, b}`: the words of a text
-        let reads = |text: &str| text.split(|c: char| !(c.is_alphanumeric() || "_.$".contains(c))).any(|w| w == name);
-        let mut readers: Vec<&str> = self.signals.iter().filter(|s| s.0 != name && reads(&s.1)).map(|s| s.0.as_str()).collect();
-        readers.extend(self.decodes.iter().filter(|d| reads(&d.clock) || d.signals.iter().chain(&d.params).any(|p| reads(&p.1))).map(|d| d.name.as_str()));
+        let reads = |text: &str| {
+            text.split(|c: char| !(c.is_alphanumeric() || "_.$".contains(c)))
+                .any(|w| w == name)
+        };
+        let mut readers: Vec<&str> = self
+            .signals
+            .iter()
+            .filter(|s| s.0 != name && reads(&s.1))
+            .map(|s| s.0.as_str())
+            .collect();
+        readers.extend(
+            self.decodes
+                .iter()
+                .filter(|d| {
+                    reads(&d.clock) || d.signals.iter().chain(&d.params).any(|p| reads(&p.1))
+                })
+                .map(|d| d.name.as_str()),
+        );
         if !readers.is_empty() {
-            return Err(format!("{name} is read by {}: remove {} first", readers.join(", "), if readers.len() > 1 { "them" } else { "it" }));
+            return Err(format!(
+                "{name} is read by {}: remove {} first",
+                readers.join(", "),
+                if readers.len() > 1 { "them" } else { "it" }
+            ));
         }
         self.signals.retain(|s| s.0 != name);
         self.value_names.retain(|(p, _)| p != name);
-        let keep: Vec<bool> = self.rows.iter().map(|r| r.sig().is_none_or(|s| !reads(&self.trace.vars[s.var].path))).collect();
+        let keep: Vec<bool> = self
+            .rows
+            .iter()
+            .map(|r| r.sig().is_none_or(|s| !reads(&self.trace.vars[s.var].path)))
+            .collect();
         let mut k = keep.into_iter();
         self.rows.retain(|_| k.next().expect("one per row"));
         rows::tidy(&mut self.rows);
@@ -585,7 +776,11 @@ impl Workspace {
         let (var, bit) = self.resolve(sig)?;
         let width = match (bit, self.trace.vars[var].width) {
             (None, Some(w)) => w,
-            _ => return Err(format!("{sig}: names are for a whole bus or bit signal, not a bit or a string")),
+            _ => {
+                return Err(format!(
+                    "{sig}: names are for a whole bus or bit signal, not a bit or a string"
+                ));
+            }
         };
         let path = self.trace.vars[var].path.clone();
         let names = match spec.trim() {
@@ -594,8 +789,13 @@ impl Workspace {
             spec => {
                 let mut names = Vec::new();
                 for pair in spec.split_whitespace() {
-                    let (v, n) = pair.split_once('=').filter(|(v, n)| !v.is_empty() && !n.is_empty()).ok_or(usage)?;
-                    let search::Target::Bits(bits) = search::parse(v, Some(width), None)? else { return Err(format!("{v}: a name is for a value without x or z bits")) };
+                    let (v, n) = pair
+                        .split_once('=')
+                        .filter(|(v, n)| !v.is_empty() && !n.is_empty())
+                        .ok_or(usage)?;
+                    let search::Target::Bits(bits) = search::parse(v, Some(width), None)? else {
+                        return Err(format!("{v}: a name is for a value without x or z bits"));
+                    };
                     names.push((crate::trace::names_key(&bits).to_string(), n.to_string()));
                 }
                 Some(names.into())
@@ -605,12 +805,18 @@ impl Workspace {
         self.trace.vars[var].names = names;
         self.value_names.retain(|(p, _)| *p != path);
         if named {
-            self.value_names.push((path, spec.split_whitespace().collect::<Vec<_>>().join(" ")));
+            self.value_names
+                .push((path, spec.split_whitespace().collect::<Vec<_>>().join(" ")));
         }
         let signed = self.trace.vars[var].signed;
         // every line showing it, a row's or one under a row
         for s in self.rows.iter_mut().filter_map(Row::sig_mut) {
-            for l in std::iter::once(&mut s.look).filter(|_| s.var == var).chain(s.looks.iter_mut().filter(|(v, _)| *v == var).map(|(_, l)| l)) {
+            for l in std::iter::once(&mut s.look).filter(|_| s.var == var).chain(
+                s.looks
+                    .iter_mut()
+                    .filter(|(v, _)| *v == var)
+                    .map(|(_, l)| l),
+            ) {
                 if named || l.radix == radix::ENUM {
                     (l.radix, l.frac) = (radix::default_for(named, signed), 0);
                 }
@@ -624,13 +830,18 @@ impl Workspace {
     pub fn values_taken(&mut self, sig: &str) -> Result<Vec<Taken>, String> {
         let (var, bit) = self.resolve(sig)?;
         if bit.is_some() || self.trace.vars[var].width.is_none() {
-            return Err(format!("{sig}: names are for a whole bus or bit signal, not a bit or a string"));
+            return Err(format!(
+                "{sig}: names are for a whole bus or bit signal, not a bit or a string"
+            ));
         }
         self.trace.load(&[var]);
         let t = &self.trace;
         let first = t.value_at(var, t.start()).map(|v| (t.start(), v));
         let mut counts: std::collections::BTreeMap<(usize, String), u64> = Default::default();
-        for (_, v) in first.into_iter().chain(t.walk(var, None, t.start(), true).filter_map(|(x, v)| Some((x, v?)))) {
+        for (_, v) in first.into_iter().chain(
+            t.walk(var, None, t.start(), true)
+                .filter_map(|(x, v)| Some((x, v?))),
+        ) {
             let Val::Bits(b) = v else { continue };
             if !b.bytes().all(|c| c == b'0' || c == b'1') {
                 continue;
@@ -638,16 +849,30 @@ impl Workspace {
             let key = crate::trace::names_key(&b).to_string();
             *counts.entry((key.len(), key)).or_default() += 1;
             if counts.len() > MAX_NAMES {
-                return Err(format!("{sig} takes more than {MAX_NAMES} values; name some with :names"));
+                return Err(format!(
+                    "{sig} takes more than {MAX_NAMES} values; name some with :names"
+                ));
             }
         }
-        Ok(counts.into_iter().map(|((_, bits), count)| Taken { name: t.vars[var].name_of(&bits).map(String::from), bits, count }).collect())
+        Ok(counts
+            .into_iter()
+            .map(|((_, bits), count)| Taken {
+                name: t.vars[var].name_of(&bits).map(String::from),
+                bits,
+                count,
+            })
+            .collect())
     }
 
     /// A var by full path, made again if it is a computed one (sessions, `:e`).
     pub fn var_named(&mut self, path: &str) -> Option<usize> {
         // sessions saved before paths had one form name nvc's `arr.[1]` and `gen(1)`
-        match self.trace.by_path.get(path).or_else(|| self.trace.by_path.get(&crate::trace::brackets(path))) {
+        match self
+            .trace
+            .by_path
+            .get(path)
+            .or_else(|| self.trace.by_path.get(&crate::trace::brackets(path)))
+        {
             Some(&v) => Some(v),
             None => match computed::form(path) {
                 Some(f) => self.compute(f).ok(),
@@ -673,12 +898,22 @@ impl Workspace {
                 let v = self.whole(base)?;
                 // one bit is named as a bit, as searches name it
                 // (not an array's: its `arr[1]` is an element)
-                let range = if hi == lo && self.trace.vars[v].children.is_empty() { hi.to_string() } else { format!("{hi}:{lo}") };
+                let range = if hi == lo && self.trace.vars[v].children.is_empty() {
+                    hi.to_string()
+                } else {
+                    format!("{hi}:{lo}")
+                };
                 (format!("{}[{range}]", self.trace.vars[v].path), vec![v])
             }
             Form::Concat(names) => {
-                let vs = names.iter().map(|n| self.part(n)).collect::<Result<Vec<_>, _>>()?;
-                let paths: Vec<&str> = vs.iter().map(|&v| self.trace.vars[v].path.as_str()).collect();
+                let vs = names
+                    .iter()
+                    .map(|n| self.part(n))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let paths: Vec<&str> = vs
+                    .iter()
+                    .map(|&v| self.trace.vars[v].path.as_str())
+                    .collect();
                 (format!("{{{}}}", paths.join(",")), vs)
             }
         };
@@ -686,7 +921,10 @@ impl Workspace {
             return Ok(v);
         }
         let (width, values) = match form {
-            Form::Slice(_, hi, lo) => (hi - lo + 1, computed::slice(&mut self.trace, parts[0], hi, lo)?),
+            Form::Slice(_, hi, lo) => (
+                hi - lo + 1,
+                computed::slice(&mut self.trace, parts[0], hi, lo)?,
+            ),
             Form::Concat(_) => computed::concat(&mut self.trace, &parts)?,
             Form::Expr(_) => unreachable!(),
         };
@@ -700,7 +938,11 @@ impl Workspace {
         let (term, names) = search::parse_term(text, self.trace.fs_per_tick, &mut |name| {
             let p = self.resolve(name)?;
             let var = &self.trace.vars[p.0];
-            Ok(if p.1.is_some() { (p, Some(1), None, false) } else { (p, var.width, var.names.clone(), var.signed) })
+            Ok(if p.1.is_some() {
+                (p, Some(1), None, false)
+            } else {
+                (p, var.width, var.names.clone(), var.signed)
+            })
         })?;
         let mut path = String::new();
         let mut end = 0;
@@ -752,24 +994,36 @@ impl Workspace {
         self.fix_sel();
         self.drop_unused();
         let signals = self.rows.iter().filter(|r| r.sig().is_some()).count();
-        let msg = format!("agent: presented {signals} signals, {} cursors", self.cursor_list().len());
-        Ok(if warn.is_empty() { (msg, false) } else { (format!("{msg}; {}", warn.join("; ")), true) })
+        let msg = format!(
+            "agent: presented {signals} signals, {} cursors",
+            self.cursor_list().len()
+        );
+        Ok(if warn.is_empty() {
+            (msg, false)
+        } else {
+            (format!("{msg}; {}", warn.join("; ")), true)
+        })
     }
-
 
     /// The layout differs from the session file: `[+]`, and `:q` refuses.
     pub fn modified(&self) -> bool {
         session::layout_toml(self) != self.saved
     }
 
-
     /// Make each again, in passes while some are made, so one that uses one made after it is made
     /// too. Those left, with their errors.
-    fn again<T: Clone>(&mut self, items: Vec<T>, mut make: impl FnMut(&mut Self, T) -> Result<(), String>) -> Vec<(T, String)> {
+    fn again<T: Clone>(
+        &mut self,
+        items: Vec<T>,
+        mut make: impl FnMut(&mut Self, T) -> Result<(), String>,
+    ) -> Vec<(T, String)> {
         let mut left: Vec<(T, String)> = items.into_iter().map(|t| (t, String::new())).collect();
         loop {
             let n = left.len();
-            left = left.into_iter().filter_map(|(t, _)| make(self, t.clone()).err().map(|e| (t, e))).collect();
+            left = left
+                .into_iter()
+                .filter_map(|(t, _)| make(self, t.clone()).err().map(|e| (t, e)))
+                .collect();
             if left.is_empty() || left.len() == n {
                 return left;
             }
@@ -784,7 +1038,9 @@ impl Workspace {
         // no rows while computed ones are made again: theirs name vars of the old trace
         let old_rows = std::mem::take(&mut self.rows);
         let mut missing = Vec::new();
-        for ((name, _), e) in self.again(self.signals.clone(), |ws, (n, e)| ws.define(&n, &e).map(drop)) {
+        for ((name, _), e) in self.again(self.signals.clone(), |ws, (n, e)| {
+            ws.define(&n, &e).map(drop)
+        }) {
             missing.push(format!("{name} ({e})"));
         }
         for (path, spec) in self.value_names.clone() {
@@ -813,7 +1069,11 @@ impl Workspace {
                     match self.var_named(path) {
                         Some(var) => {
                             // the open levels by path too: indices may differ in the new trace
-                            let open = s.open.iter().filter_map(|&o| self.var_named(&old.vars[o].path)).collect();
+                            let open = s
+                                .open
+                                .iter()
+                                .filter_map(|&o| self.var_named(&old.vars[o].path))
+                                .collect();
                             rows.push(Row::Signal(Sig { var, open, ..s }))
                         }
                         None => missing.push(path.clone()),
@@ -829,7 +1089,10 @@ impl Workspace {
         let end = self.trace.end();
         self.view.end = end;
         self.view.cursor = self.view.cursor.min(end);
-        self.marks.iter_mut().flatten().for_each(|c| *c = (*c).min(end));
+        self.marks
+            .iter_mut()
+            .flatten()
+            .for_each(|c| *c = (*c).min(end));
         self.view.start = self.view.start.min(end);
         self.undo.clear();
         self.redo.clear();
@@ -837,10 +1100,12 @@ impl Workspace {
         self.fix_sel();
         Ok(match missing.is_empty() {
             true => ("reloaded".into(), false),
-            false => (format!("reloaded; not in trace: {}", missing.join(", ")), true),
+            false => (
+                format!("reloaded; not in trace: {}", missing.join(", ")),
+                true,
+            ),
         })
     }
-
 
     pub fn undo(&mut self) -> Result<(), String> {
         let l = self.undo.pop().ok_or("already at oldest change")?;
@@ -850,7 +1115,6 @@ impl Workspace {
         Ok(())
     }
 
-
     pub fn redo(&mut self) -> Result<(), String> {
         let l = self.redo.pop().ok_or("already at newest change")?;
         let now = self.restore(l);
@@ -859,17 +1123,22 @@ impl Workspace {
         Ok(())
     }
 
-
     /// The stream a var shows, if it is one's own var.
     pub fn stream_of(&self, var: usize) -> Option<&Stream> {
-        self.streams.iter().find(|s| s.name == self.trace.vars[var].path)
+        self.streams
+            .iter()
+            .find(|s| s.name == self.trace.vars[var].path)
     }
 
     /// What a var is (spec §14 "Icons"), the first that holds.
     pub fn kind(&self, var: usize, bit: Option<u32>) -> Kind {
         let v = &self.trace.vars[var];
         let stream = self.stream_of(var);
-        let field = self.streams.iter().any(|s| v.path.strip_prefix(s.name.as_str()).is_some_and(|f| f.starts_with('.')));
+        let field = self.streams.iter().any(|s| {
+            v.path
+                .strip_prefix(s.name.as_str())
+                .is_some_and(|f| f.starts_with('.'))
+        });
         match () {
             _ if bit.is_some() => Kind::Wire,
             _ if stream.is_some_and(|s| s.violations) => Kind::Violations,
@@ -890,8 +1159,14 @@ impl Workspace {
     /// The record of a stream's own var at the cursor, if there is one there.
     pub fn record_at(&self, var: usize) -> Option<(&Stream, usize)> {
         let s = self.stream_of(var)?;
-        let Some(crate::trace::Val::Text(t)) = self.trace.value_at(var, self.view.cursor) else { return None };
-        let i = t.strip_prefix('#')?.parse().ok().filter(|&i| i < s.records.len())?;
+        let Some(crate::trace::Val::Text(t)) = self.trace.value_at(var, self.view.cursor) else {
+            return None;
+        };
+        let i = t
+            .strip_prefix('#')?
+            .parse()
+            .ok()
+            .filter(|&i| i < s.records.len())?;
         Some((s, i))
     }
 
@@ -899,13 +1174,25 @@ impl Workspace {
     /// vars, a bus its bits (MSB first); nothing for a 1-bit or text signal.
     pub fn children(&self, var: usize) -> Vec<(usize, Option<u32>)> {
         if let Some(s) = self.stream_of(var) {
-            return s.schema.iter().filter_map(|f| self.trace.by_path.get(&format!("{}.{}", s.name, f.name)).map(|&v| (v, None))).collect();
+            return s
+                .schema
+                .iter()
+                .filter_map(|f| {
+                    self.trace
+                        .by_path
+                        .get(&format!("{}.{}", s.name, f.name))
+                        .map(|&v| (v, None))
+                })
+                .collect();
         }
         let v = &self.trace.vars[var];
         if !v.children.is_empty() {
             return v.children.iter().map(|&c| (c, None)).collect();
         }
-        (0..v.width.filter(|&w| w > 1).unwrap_or(0)).rev().map(|b| (var, Some(b))).collect()
+        (0..v.width.filter(|&w| w > 1).unwrap_or(0))
+            .rev()
+            .map(|b| (var, Some(b)))
+            .collect()
     }
 
     /// The lines under a row, top to bottom: the children of each open var, nested (spec §6).
@@ -954,11 +1241,13 @@ impl Workspace {
     pub fn sel_vars(&self) -> Vec<(usize, Option<u32>)> {
         match self.rows.get(self.sel) {
             Some(Row::Signal(s)) => vec![self.probe(s, self.bit)],
-            Some(Row::Group { .. }) => rows::members(&self.rows, self.sel).into_iter().map(|v| (v, None)).collect(),
+            Some(Row::Group { .. }) => rows::members(&self.rows, self.sel)
+                .into_iter()
+                .map(|v| (v, None))
+                .collect(),
             None => Vec::new(),
         }
     }
-
 
     /// Keep the selection on a row that exists and is visible.
     pub fn fix_sel(&mut self) {
@@ -970,7 +1259,6 @@ impl Workspace {
             self.sel = rows::header_of(&self.rows, self.sel).unwrap_or(0);
         }
     }
-
 
     /// Space: collapse / expand a group, or open a bus into its bits, a stream into its fields, a
     /// composite one level / fold it with every level under it. On a line that opens nothing (a
@@ -987,7 +1275,9 @@ impl Workspace {
             None => return,
         };
         let subs = self.subs(&s);
-        let line = self.bit.and_then(|b| subs.len().checked_sub(b as usize + 1));
+        let line = self
+            .bit
+            .and_then(|b| subs.len().checked_sub(b as usize + 1));
         // the line's var if it opens, else the level it is in
         let mut target = s.var;
         if let Some(k) = line {
@@ -1006,19 +1296,30 @@ impl Workspace {
         }
         // levels under a folded one are folded with it
         let mut row = Sig { open, ..s };
-        let reach: Vec<usize> = std::iter::once(row.var).chain(self.subs(&row).iter().filter(|l| l.bit.is_none()).map(|l| l.var)).collect();
+        let reach: Vec<usize> = std::iter::once(row.var)
+            .chain(
+                self.subs(&row)
+                    .iter()
+                    .filter(|l| l.bit.is_none())
+                    .map(|l| l.var),
+            )
+            .collect();
         row.open.retain(|v| reach.contains(v));
         let subs = self.subs(&row);
-        self.bit = (target != row.var).then(|| subs.iter().position(|l| l.var == target && l.bit.is_none()).map(|k| (subs.len() - 1 - k) as u32)).flatten();
+        self.bit = (target != row.var)
+            .then(|| {
+                subs.iter()
+                    .position(|l| l.var == target && l.bit.is_none())
+                    .map(|k| (subs.len() - 1 - k) as u32)
+            })
+            .flatten();
         self.rows[self.sel] = Row::Signal(row);
     }
-
 
     /// The `V` selection, or the selected row; a header brings its whole group.
     pub fn selection(&self) -> std::ops::Range<usize> {
         rows::range(&self.rows, self.anchor.unwrap_or(self.sel), self.sel)
     }
-
 
     /// Remove the selected rows (`dd`, `:rm`).
     pub fn delete(&mut self) -> Result<(), String> {
@@ -1033,7 +1334,6 @@ impl Workspace {
         self.fix_sel();
         Ok(())
     }
-
 
     /// The selected rows out of their groups (`<`, `rows::ungroup`).
     pub fn ungroup_rows(&mut self) -> Result<(), String> {
@@ -1079,10 +1379,11 @@ impl Workspace {
         Ok(())
     }
 
-
     /// The cursor and the marks as (index, time), by number (index 0 is cursor 1).
     pub fn cursor_list(&self) -> Vec<(usize, Tick)> {
-        std::iter::once((0, self.view.cursor)).chain((1..9).filter_map(|i| self.marks[i].map(|t| (i, t)))).collect()
+        std::iter::once((0, self.view.cursor))
+            .chain((1..9).filter_map(|i| self.marks[i].map(|t| (i, t))))
+            .collect()
     }
 
     /// Add one of the agent's steps to the trail, dropping the oldest past `TRAIL`.
@@ -1094,7 +1395,9 @@ impl Workspace {
 
     /// The lowest numbered mark at the cursor with a name or a note, as (index, label).
     pub fn label_at_cursor(&self) -> Option<(usize, &Label)> {
-        (1..9).find(|&i| self.marks[i] == Some(self.view.cursor) && !self.labels[i].is_empty()).map(|i| (i, &self.labels[i]))
+        (1..9)
+            .find(|&i| self.marks[i] == Some(self.view.cursor) && !self.labels[i].is_empty())
+            .map(|i| (i, &self.labels[i]))
     }
 
     /// `m` / `Nm`: mark `n` (an index, 1 - 8), or the lowest free one, at the cursor.
@@ -1103,7 +1406,9 @@ impl Workspace {
             Some(0) => return Err("cursor 1 is the cursor; marks are 2-9".into()),
             Some(i) if i < 9 => i,
             Some(i) => return Err(format!("no cursor {}: marks are 2-9", i + 1)),
-            None => (1..9).find(|&i| self.marks[i].is_none()).ok_or("all 8 marks in use")?,
+            None => (1..9)
+                .find(|&i| self.marks[i].is_none())
+                .ok_or("all 8 marks in use")?,
         };
         // a mark moved keeps its name; a new one has none
         if self.marks[i].is_none() {
@@ -1119,7 +1424,9 @@ impl Workspace {
             Some(0) => return Err("cursor 1 can't be removed".into()),
             Some(i) if self.marks.get(i).is_some_and(Option::is_some) => i,
             Some(i) => return Err(format!("no cursor {}", i + 1)),
-            None => (1..9).find(|&i| self.marks[i] == Some(self.view.cursor)).ok_or("no mark under the cursor")?,
+            None => (1..9)
+                .find(|&i| self.marks[i] == Some(self.view.cursor))
+                .ok_or("no mark under the cursor")?,
         };
         self.marks[i] = None;
         self.labels[i] = Label::default();
@@ -1130,7 +1437,11 @@ impl Workspace {
     /// centres the screen on it; others scroll only if it is off screen.
     pub fn jump(&mut self, t: Tick, center: bool) {
         let from = self.view.cursor;
-        if center { self.view.center(t) } else { self.view.jump(t) }
+        if center {
+            self.view.center(t)
+        } else {
+            self.view.jump(t)
+        }
         if self.view.cursor != from {
             self.back = Some(from);
         }
@@ -1174,13 +1485,19 @@ impl Workspace {
         }
         let own = s.looks.iter().find(|(v, _)| *v == var).map(|&(_, l)| l);
         let l = own.unwrap_or_else(|| self.line_default(s, var));
-        Look { color: l.color.or(s.look.color), ..l }
+        Look {
+            color: l.color.or(s.look.color),
+            ..l
+        }
     }
 
     /// The look of a line under a row that has none of its own, before the row's colour.
     pub(crate) fn line_default(&self, s: &Sig, var: usize) -> Look {
         match self.stream_of(s.var) {
-            Some(_) => Look { color: None, ..s.look },
+            Some(_) => Look {
+                color: None,
+                ..s.look
+            },
             None => Look::of(&self.trace.vars[var]),
         }
     }
@@ -1190,7 +1507,11 @@ impl Workspace {
     pub fn targets(&self) -> Vec<(usize, usize)> {
         let r = self.selection();
         if self.anchor.is_some() || self.rows.get(self.sel).is_some_and(Row::is_group) {
-            return self.rows[r.clone()].iter().zip(r).filter_map(|(row, i)| row.sig().map(|s| (i, s.var))).collect();
+            return self.rows[r.clone()]
+                .iter()
+                .zip(r)
+                .filter_map(|(row, i)| row.sig().map(|s| (i, s.var)))
+                .collect();
         }
         match self.rows.get(self.sel) {
             Some(Row::Signal(s)) => vec![(self.sel, self.probe(s, self.bit).0)],
@@ -1201,9 +1522,13 @@ impl Workspace {
     /// Change the look of line `var` under row `row`. A line under the row keeps a look of its own
     /// only while it differs from its default.
     fn edit_look(&mut self, row: usize, var: usize, f: impl Fn(&mut Look)) {
-        let Some(Row::Signal(s)) = self.rows.get(row) else { return };
+        let Some(Row::Signal(s)) = self.rows.get(row) else {
+            return;
+        };
         let base = self.line_default(s, var);
-        let Some(Row::Signal(s)) = self.rows.get_mut(row) else { return };
+        let Some(Row::Signal(s)) = self.rows.get_mut(row) else {
+            return;
+        };
         if var == s.var {
             return f(&mut s.look);
         }
@@ -1228,17 +1553,31 @@ impl Workspace {
         let vars = &self.trace.vars;
         let width = |v: usize| vars[v].width.unwrap_or(0);
         let named = |v: usize| vars[v].names.is_some();
-        let targets: Vec<(usize, usize)> = self.targets().into_iter().filter(|&(_, v)| vars[v].width != Some(1)).collect();
-        let Some(&(row, first)) = targets.first() else { return Err("1-bit signals have no radix".into()) };
-        let now = self.rows[row].sig().map_or(0, |s| self.look(s, first).radix);
+        let targets: Vec<(usize, usize)> = self
+            .targets()
+            .into_iter()
+            .filter(|&(_, v)| vars[v].width != Some(1))
+            .collect();
+        let Some(&(row, first)) = targets.first() else {
+            return Err("1-bit signals have no radix".into());
+        };
+        let now = self.rows[row]
+            .sig()
+            .map_or(0, |s| self.look(s, first).radix);
         let (r, frac, need) = r.unwrap_or((radix::next(now, width(first), named(first)), 0, None));
-        let fit: Vec<(usize, usize)> = targets.into_iter().filter(|&(_, v)| radix::fits(r, need, width(v), named(v))).collect();
+        let fit: Vec<(usize, usize)> = targets
+            .into_iter()
+            .filter(|&(_, v)| radix::fits(r, need, width(v), named(v)))
+            .collect();
         if fit.is_empty() {
             if r == radix::ENUM {
                 return Err("enum: the file names no values of this signal".into());
             }
             let w = width(first);
-            return Err(format!("{} doesn't fit a {w}-bit signal", radix::name(r, frac, need.unwrap_or(w))));
+            return Err(format!(
+                "{} doesn't fit a {w}-bit signal",
+                radix::name(r, frac, need.unwrap_or(w))
+            ));
         }
         for (row, v) in fit {
             self.edit_look(row, v, |l| (l.radix, l.frac) = (r, frac));
@@ -1259,12 +1598,17 @@ impl Workspace {
     }
 
     pub fn shown(&self, var: usize) -> bool {
-        self.rows.iter().any(|r| r.sig().is_some_and(|s| s.var == var))
+        self.rows
+            .iter()
+            .any(|r| r.sig().is_some_and(|s| s.var == var))
     }
 
     /// A row for a var in its default radix. Its values must be loaded (`Trace::load`).
     pub fn sig(&self, var: usize, grouped: bool) -> Row {
-        Row::Signal(Sig { grouped, ..Sig::of(var, &self.trace.vars[var]) })
+        Row::Signal(Sig {
+            grouped,
+            ..Sig::of(var, &self.trace.vars[var])
+        })
     }
 
     /// New rows go below the selected row and join its group, if it is in one; with a group's
@@ -1282,7 +1626,8 @@ impl Workspace {
             false if header => rows::group_end(&self.rows, self.sel),
             false => self.sel + 1,
         };
-        let grouped = !self.rows.is_empty() && !header && rows::header_of(&self.rows, self.sel).is_some();
+        let grouped =
+            !self.rows.is_empty() && !header && rows::header_of(&self.rows, self.sel).is_some();
         let new: Vec<Row> = vars.iter().map(|&v| self.sig(v, grouped)).collect();
         self.rows.splice(at..at, new);
         self.sel = at + vars.len() - 1;
@@ -1293,10 +1638,14 @@ impl Workspace {
     pub fn add_group(&mut self, name: &str, vars: &[usize]) {
         let at = match self.rows.is_empty() {
             true => 0,
-            false => rows::header_of(&self.rows, self.sel).map_or(self.sel + 1, |h| rows::group_end(&self.rows, h)),
+            false => rows::header_of(&self.rows, self.sel)
+                .map_or(self.sel + 1, |h| rows::group_end(&self.rows, h)),
         };
         self.trace.load(vars);
-        let mut new = vec![Row::Group { name: name.into(), collapsed: false }];
+        let mut new = vec![Row::Group {
+            name: name.into(),
+            collapsed: false,
+        }];
         new.extend(vars.iter().map(|&v| self.sig(v, true)));
         self.rows.splice(at..at, new);
         self.sel = at + vars.len();

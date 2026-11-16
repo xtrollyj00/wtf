@@ -37,10 +37,17 @@ pub fn format_as(t: Tick, fpt: Option<u128>, unit: Option<usize>, decimals: Opti
             let n = (fs * scale + ufs / 2) / ufs;
             (n / scale, format!("{:0w$}", n % scale, w = d as usize))
         }
-        None => (fs / ufs, format!("{:0w$}", fs % ufs, w = ufs.ilog10() as usize)),
+        None => (
+            fs / ufs,
+            format!("{:0w$}", fs % ufs, w = ufs.ilog10() as usize),
+        ),
     };
     let frac = frac.trim_end_matches('0');
-    if frac.is_empty() { format!("{whole}{name}") } else { format!("{whole}.{frac}{name}") }
+    if frac.is_empty() {
+        format!("{whole}{name}")
+    } else {
+        format!("{whole}.{frac}{name}")
+    }
 }
 
 /// For people (spec §14 "Time"): the largest unit that keeps the value at 1 or more, up to 3
@@ -57,9 +64,18 @@ pub fn format_exact(t: Tick, fpt: Option<u128>) -> String {
 /// The unit for a set of times shown together: the largest that keeps the smallest nonzero one at
 /// 1 or more, or the file's own unit if all are zero. An index into the units, `s` first.
 pub fn unit_for(ts: impl IntoIterator<Item = Tick>, fpt: Option<u128>) -> usize {
-    let Some(fpt) = fpt else { return UNITS.len() - 1 };
-    let base = ts.into_iter().filter(|&t| t > 0).min().map_or(fpt, |t| t as u128 * fpt);
-    UNITS.iter().position(|(_, u)| base >= *u).unwrap_or(UNITS.len() - 1)
+    let Some(fpt) = fpt else {
+        return UNITS.len() - 1;
+    };
+    let base = ts
+        .into_iter()
+        .filter(|&t| t > 0)
+        .min()
+        .map_or(fpt, |t| t as u128 * fpt);
+    UNITS
+        .iter()
+        .position(|(_, u)| base >= *u)
+        .unwrap_or(UNITS.len() - 1)
 }
 
 /// A unit's name, by its index.
@@ -69,13 +85,19 @@ pub fn unit_name(unit: usize) -> &'static str {
 
 /// A unit by name, e.g. `ns`.
 pub fn unit_named(name: &str) -> Result<usize, String> {
-    UNITS.iter().position(|(n, _)| *n == name).ok_or(BadTime::Unit(name.to_string()).to_string())
+    UNITS
+        .iter()
+        .position(|(n, _)| *n == name)
+        .ok_or(BadTime::Unit(name.to_string()).to_string())
 }
 
 /// Whether `text` is a time with a unit (`40ns`, `1.5us`), not a number.
 pub fn has_unit(text: &str) -> bool {
     let t = text.trim();
-    UNITS.iter().any(|(u, _)| t.strip_suffix(u).is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit() || c == '.')))
+    UNITS.iter().any(|(u, _)| {
+        t.strip_suffix(u)
+            .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit() || c == '.'))
+    })
 }
 
 /// Why a text is no time, worked out by `parse` apart from how it is said (`Display`), so an
@@ -101,7 +123,10 @@ impl std::fmt::Display for BadTime {
             BadTime::Quoted(t) => write!(f, "bad time: \"{t}\": without quotes, {t}"),
             BadTime::Spaced(t) => write!(f, "bad time: a space before the unit: {t}"),
             BadTime::Unit(u) => write!(f, "bad time unit: {u} ({units})"),
-            BadTime::NotANumber(t) => write!(f, "bad time: {t} (a number and a unit, 20ns or 1.5us; a plain number is file ticks)"),
+            BadTime::NotANumber(t) => write!(
+                f,
+                "bad time: {t} (a number and a unit, 20ns or 1.5us; a plain number is file ticks)"
+            ),
             BadTime::NoTimescale => write!(f, "file has no timescale; use ticks"),
         }
     }
@@ -116,26 +141,45 @@ impl From<BadTime> for String {
 /// Parse `2000ns`, `1.5us`, or a plain tick count. Returns ticks, possibly fractional.
 pub fn parse(s: &str, fpt: Option<u128>) -> Result<f64, BadTime> {
     let s = s.trim();
-    if let Some(inner) = s.strip_prefix(['"', '\'']).and_then(|r| r.strip_suffix(['"', '\''])) {
+    if let Some(inner) = s
+        .strip_prefix(['"', '\''])
+        .and_then(|r| r.strip_suffix(['"', '\'']))
+    {
         return Err(BadTime::Quoted(inner.trim().to_string()));
     }
-    let split = s.find(|c: char| !(c.is_ascii_digit() || c == '.')).unwrap_or(s.len());
+    let split = s
+        .find(|c: char| !(c.is_ascii_digit() || c == '.'))
+        .unwrap_or(s.len());
     let (num, unit) = s.split_at(split);
-    let v: f64 = num.parse().map_err(|_| BadTime::NotANumber(s.to_string()))?;
+    let v: f64 = num
+        .parse()
+        .map_err(|_| BadTime::NotANumber(s.to_string()))?;
     if unit.is_empty() {
         return Ok(v);
     }
     let ufs = match UNITS.iter().find(|(n, _)| *n == unit) {
         Some(u) => u.1,
-        None if UNITS.iter().any(|(n, _)| *n == unit.trim()) => return Err(BadTime::Spaced(format!("{num}{}", unit.trim()))),
+        None if UNITS.iter().any(|(n, _)| *n == unit.trim()) => {
+            return Err(BadTime::Spaced(format!("{num}{}", unit.trim())));
+        }
         None => return Err(BadTime::Unit(unit.to_string())),
     };
     let fpt = fpt.ok_or(BadTime::NoTimescale)?;
     // in whole femtoseconds when it is one, so long exact times (`69.360000001us`) don't lose
     // their last digits to floating point
     let (int, frac) = num.split_once('.').unwrap_or((num, ""));
-    let scale = 10u128.checked_pow(frac.len() as u32).filter(|&d| ufs.is_multiple_of(d));
-    if let (Some(d), Ok(i), Ok(f)) = (scale, int.parse::<u128>(), if frac.is_empty() { Ok(0) } else { frac.parse::<u128>() }) {
+    let scale = 10u128
+        .checked_pow(frac.len() as u32)
+        .filter(|&d| ufs.is_multiple_of(d));
+    if let (Some(d), Ok(i), Ok(f)) = (
+        scale,
+        int.parse::<u128>(),
+        if frac.is_empty() {
+            Ok(0)
+        } else {
+            frac.parse::<u128>()
+        },
+    ) {
         let fs = i * ufs + f * (ufs / d);
         return Ok((fs / fpt) as f64 + (fs % fpt) as f64 / fpt as f64);
     }
@@ -149,17 +193,33 @@ pub fn parse(s: &str, fpt: Option<u128>) -> Result<f64, BadTime> {
 pub fn span(s: &str, fpt: Option<u128>) -> Result<(Tick, Tick), String> {
     let point = parse(s, fpt)?.max(0.0).round() as Tick;
     let s = s.trim();
-    let (num, unit) = s.split_at(s.find(|c: char| !(c.is_ascii_digit() || c == '.')).unwrap_or(s.len()));
-    let (Some(fpt), Some(&(_, ufs))) = (fpt, UNITS.iter().find(|(n, _)| *n == unit)) else { return Ok((point, point)) };
+    let (num, unit) = s.split_at(
+        s.find(|c: char| !(c.is_ascii_digit() || c == '.'))
+            .unwrap_or(s.len()),
+    );
+    let (Some(fpt), Some(&(_, ufs))) = (fpt, UNITS.iter().find(|(n, _)| *n == unit)) else {
+        return Ok((point, point));
+    };
     let (int, frac) = num.split_once('.').unwrap_or((num, ""));
     let span = || -> Option<(Tick, Tick)> {
         // in halves of the last place (ufs / 10^p / 2), the span is [2n - 1, 2n + 1)
         let p = frac.len().max(3) as u32;
-        let frac = if frac.is_empty() { 0 } else { frac.parse::<u128>().ok()? * 10u128.pow(p - frac.len() as u32) };
-        let n = int.parse::<u128>().ok()?.checked_mul(10u128.checked_pow(p)?)?.checked_add(frac)?;
+        let frac = if frac.is_empty() {
+            0
+        } else {
+            frac.parse::<u128>().ok()? * 10u128.pow(p - frac.len() as u32)
+        };
+        let n = int
+            .parse::<u128>()
+            .ok()?
+            .checked_mul(10u128.checked_pow(p)?)?
+            .checked_add(frac)?;
         let tick = fpt.checked_mul(2)?.checked_mul(10u128.pow(p))?;
         let lo = (2 * n).saturating_sub(1).checked_mul(ufs)?.div_ceil(tick);
-        let hi = (2 * n + 1).checked_mul(ufs)?.div_ceil(tick).checked_sub(1)?;
+        let hi = (2 * n + 1)
+            .checked_mul(ufs)?
+            .div_ceil(tick)
+            .checked_sub(1)?;
         let (lo, hi) = (Tick::try_from(lo).ok()?, Tick::try_from(hi).ok()?);
         (lo <= hi).then_some((lo, hi))
     };
@@ -193,13 +253,22 @@ mod tests {
         // exact
         assert_eq!(format_as(2_595_000_001, fs, ns, None), "2595.000001ns");
         assert_eq!(format_as(0, fs, ns, None), "0ns");
-        assert!(has_unit("40ns") && has_unit("1.5us") && !has_unit("40") && !has_unit("ns") && !has_unit("0x40"));
+        assert!(
+            has_unit("40ns")
+                && has_unit("1.5us")
+                && !has_unit("40")
+                && !has_unit("ns")
+                && !has_unit("0x40")
+        );
     }
 
     #[test]
     fn no_timescale() {
         assert_eq!(parse("20ns", None), Err(BadTime::NoTimescale));
-        assert_eq!(BadTime::NoTimescale.to_string(), "file has no timescale; use ticks");
+        assert_eq!(
+            BadTime::NoTimescale.to_string(),
+            "file has no timescale; use ticks"
+        );
     }
 
     #[test]
@@ -233,7 +302,10 @@ mod tests {
         assert_eq!(format_as(lo - 1, fs, ns, Some(3)), "2594.999ns");
         assert_eq!(format_as(hi + 1, fs, ns, Some(3)), "2595.001ns");
         // more digits, narrower; a femtosecond or a tick count is one tick
-        assert_eq!(span("2595.0004ns", fs).unwrap(), (2_595_000_350, 2_595_000_449));
+        assert_eq!(
+            span("2595.0004ns", fs).unwrap(),
+            (2_595_000_350, 2_595_000_449)
+        );
         assert_eq!(span("20000002fs", fs).unwrap(), (20_000_002, 20_000_002));
         assert_eq!(span("42", fs).unwrap(), (42, 42));
         assert_eq!(span("0ns", fs).unwrap(), (0, 499));

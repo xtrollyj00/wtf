@@ -2,7 +2,7 @@
 source: src/main.rs
 expression: "snapshot(&mut app, 100, Some(16))"
 ---
-Name        │ Value      │ 0               50ns             100ns            150ns
+Name        │ Value            │ 0               50ns             100ns            150ns
   ╭─ records · rx.frame ──────────────────────────────────────────────────────────────── 2 of 4 ─╮
 ▸ │ all  frame  errors  beat                                                                     │
   │ ▸ where len >= 8                                                                             │
@@ -16,5 +16,5 @@ Name        │ Value      │ 0               50ns             100ns           
   │                                                                                              │
   │                                                                                              │
   ╰──────────────────── Enter jump  / filter  s S sort  = group  h l scroll  Tab set  Esc close ─╯
-            │            │
+            │                  │
  NORMAL   signals ▸  rx.errors                                                0  3ns/col  axis [+]

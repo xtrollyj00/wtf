@@ -8,6 +8,7 @@ bus         = ["#6f42c1", 98]   # bus and stream outlines (their labels are in t
 fill        = ["#9fd3da", 152]  # 1-bit signals toggling faster than a column
 unknown     = ["#c62828", 160]  # X
 highz       = ["#00897b", 36]   # Z
+warning     = ["#a67c00", 136]  # violations the spec advises against
 cursor      = ["#c18401", 136]  # the accent: the cursor's time, the selected name, EDIT
 cursor_text = ["#fafafa", 231]  # text on the accent
 column      = ["#f2d896", 222]  # behind the cursor's column

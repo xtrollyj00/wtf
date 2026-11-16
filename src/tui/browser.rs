@@ -60,23 +60,40 @@ impl Browser {
     pub fn new(ws: &Workspace, names: &str, filter: &str) -> Browser {
         let streams = ws.stream_set(names).unwrap_or_default();
         // the decode every stream named is of
-        let of = |i: usize| ws.decodes.iter().find(|d| ws.streams_of_decode(&d.name).contains(&i)).map(|d| d.name.clone());
-        let decode = of(streams[0]).filter(|d| streams.iter().all(|&i| of(i).as_deref() == Some(d)));
+        let of = |i: usize| {
+            ws.decodes
+                .iter()
+                .find(|d| ws.streams_of_decode(&d.name).contains(&i))
+                .map(|d| d.name.clone())
+        };
+        let decode =
+            of(streams[0]).filter(|d| streams.iter().all(|&i| of(i).as_deref() == Some(d)));
         let mut all = None;
         let tabs = match &decode {
             Some(d) => {
                 // all, its results, its violations, then the streams they are made from
                 let mut each = ws.results(d);
-                let rest: Vec<usize> = ws.streams_of_decode(d).into_iter().filter(|i| !each.contains(i)).collect();
+                let rest: Vec<usize> = ws
+                    .streams_of_decode(d)
+                    .into_iter()
+                    .filter(|i| !each.contains(i))
+                    .collect();
                 each.extend(rest);
                 // a stream named as its decode (`pair`, `check`, `frame`) is that stream alone, so
                 // the results are then named one by one
                 let a = match ws.streams.iter().any(|s| &s.name == d) {
-                    true => ws.results(d).iter().map(|&i| ws.streams[i].name.as_str()).collect::<Vec<_>>().join(" "),
+                    true => ws
+                        .results(d)
+                        .iter()
+                        .map(|&i| ws.streams[i].name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(" "),
                     false => d.clone(),
                 };
                 all = Some(a.clone());
-                std::iter::once(a).chain(each.into_iter().map(|i| ws.streams[i].name.clone())).collect()
+                std::iter::once(a)
+                    .chain(each.into_iter().map(|i| ws.streams[i].name.clone()))
+                    .collect()
             }
             None => vec![names.to_string()],
         };
@@ -87,15 +104,41 @@ impl Browser {
         }
         // by start, as `select` gives them
         let sort = (1 + (streams.len() > 1) as usize, false);
-        Browser { tabs, tab, all, decode, filter: filter.into(), typing: false, error: None, sort, group: false, streams, rows: Vec::new(), groups: Vec::new(), total: 0, widths: Vec::new(), left: 0, hl: 0, top: 0, page: 1 }
+        Browser {
+            tabs,
+            tab,
+            all,
+            decode,
+            filter: filter.into(),
+            typing: false,
+            error: None,
+            sort,
+            group: false,
+            streams,
+            rows: Vec::new(),
+            groups: Vec::new(),
+            total: 0,
+            widths: Vec::new(),
+            left: 0,
+            hl: 0,
+            top: 0,
+            page: 1,
+        }
     }
 
     fn len(&self) -> usize {
-        if self.group { self.groups.len() } else { self.rows.len() }
+        if self.group {
+            self.groups.len()
+        } else {
+            self.rows.len()
+        }
     }
 
     fn step(&mut self, d: isize) {
-        self.hl = self.hl.saturating_add_signed(d).min(self.len().saturating_sub(1));
+        self.hl = self
+            .hl
+            .saturating_add_signed(d)
+            .min(self.len().saturating_sub(1));
     }
 
     fn set<'a>(&self, ws: &'a Workspace) -> Set<'a> {
@@ -114,7 +157,11 @@ impl Browser {
 
     /// A stream's name as its column shows it: without the decode's.
     fn short<'a>(&self, name: &'a str) -> &'a str {
-        self.decode.as_ref().and_then(|d| name.strip_prefix(d.as_str())).and_then(|n| n.strip_prefix('.')).unwrap_or(name)
+        self.decode
+            .as_ref()
+            .and_then(|d| name.strip_prefix(d.as_str()))
+            .and_then(|n| n.strip_prefix('.'))
+            .unwrap_or(name)
     }
 
     /// Filters, sorts and groups the records again. A filter that fails keeps the rows it had and
@@ -130,13 +177,18 @@ impl Browser {
         let (col, fixed) = (self.sort.0, self.fixed());
         match fixed - col.min(fixed) {
             // the stream, then time
-            4 => self.rows.sort_by_key(|&(s, i)| (s, set.record((s, i)).start)),
+            4 => self
+                .rows
+                .sort_by_key(|&(s, i)| (s, set.record((s, i)).start)),
             3 => self.rows.sort_by_key(|&(s, i)| (i, s)),
             2 => self.rows.sort_by_key(|&at| set.record(at).start),
-            1 => self.rows.sort_by_key(|&at| set.record(at).end - set.record(at).start),
+            1 => self
+                .rows
+                .sort_by_key(|&at| set.record(at).end - set.record(at).start),
             _ => {
                 let c = col - fixed;
-                self.rows.sort_by_cached_key(|&at| key(set.value(at, c), set.columns[c].field.signed));
+                self.rows
+                    .sort_by_cached_key(|&at| key(set.value(at, c), set.columns[c].field.signed));
             }
         }
         if self.sort.1 {
@@ -145,14 +197,20 @@ impl Browser {
         self.group &= col >= fixed;
         self.groups = match self.group {
             true => {
-                let mut g = set.group_by(&self.rows, &[set.columns[col - fixed].name.clone()]).unwrap_or_default();
+                let mut g = set
+                    .group_by(&self.rows, &[set.columns[col - fixed].name.clone()])
+                    .unwrap_or_default();
                 // the commonest first
                 g.sort_by_key(|g| std::cmp::Reverse(g.count));
                 g
             }
             false => Vec::new(),
         };
-        let mut widths: Vec<usize> = self.heads(&set).iter().map(|c| c.chars().count() + 2).collect();
+        let mut widths: Vec<usize> = self
+            .heads(&set)
+            .iter()
+            .map(|c| c.chars().count() + 2)
+            .collect();
         for line in (0..self.len()).map(|k| self.cells(&set, k, fpt)) {
             for (w, c) in widths.iter_mut().zip(line) {
                 *w = (*w).max(c.chars().count()).min(CELL);
@@ -167,8 +225,17 @@ impl Browser {
     fn heads(&self, set: &Set) -> Vec<String> {
         let fixed = ["stream", "n", "start", "length"];
         match self.group {
-            true => vec![set.columns[self.sort.0 - self.fixed()].name.clone(), "count".into(), "first".into(), "last".into()],
-            false => fixed[4 - self.fixed()..].iter().map(|s| s.to_string()).chain(set.columns.iter().map(|c| c.name.clone())).collect(),
+            true => vec![
+                set.columns[self.sort.0 - self.fixed()].name.clone(),
+                "count".into(),
+                "first".into(),
+                "last".into(),
+            ],
+            false => fixed[4 - self.fixed()..]
+                .iter()
+                .map(|s| s.to_string())
+                .chain(set.columns.iter().map(|c| c.name.clone()))
+                .collect(),
         }
     }
 
@@ -178,7 +245,12 @@ impl Browser {
         if self.group {
             let g = &self.groups[k];
             let f = &set.columns[self.sort.0 - self.fixed()].field;
-            return vec![wtf_core::stream::value_text(f, &g.values[0], fpt, None, None), g.count.to_string(), time::format(g.first, fpt), time::format(g.last, fpt)];
+            return vec![
+                wtf_core::stream::value_text(f, &g.values[0], fpt, None, None),
+                g.count.to_string(),
+                time::format(g.first, fpt),
+                time::format(g.last, fpt),
+            ];
         }
         let (s, i) = self.rows[k];
         let r = set.record((s, i));
@@ -187,13 +259,23 @@ impl Browser {
             Some(f) => wtf_core::stream::value_text(&c.field, &r.fields[f], fpt, None, Some(3)),
             None => String::new(),
         });
-        stream.into_iter().chain([format!("#{i}"), time::format(r.start, fpt), time::format(r.end - r.start, fpt)]).chain(fields).collect()
+        stream
+            .into_iter()
+            .chain([
+                format!("#{i}"),
+                time::format(r.start, fpt),
+                time::format(r.end - r.start, fpt),
+            ])
+            .chain(fields)
+            .collect()
     }
 
     /// The columns drawn, in order: the pinned ones, then from `left` on.
     fn shown(&self) -> Vec<usize> {
         let pinned = if self.group { 0 } else { self.pinned() };
-        (0..pinned).chain(pinned + self.left..self.widths.len()).collect()
+        (0..pinned)
+            .chain(pinned + self.left..self.widths.len())
+            .collect()
     }
 }
 
@@ -203,7 +285,11 @@ fn key(v: Option<&Val>, signed: bool) -> (u8, i128, String) {
     match v {
         Some(Val::Bits(b)) if b.len() < 127 && b.chars().all(|c| c == '0' || c == '1') => {
             let n = i128::from_str_radix(b, 2).unwrap_or(0);
-            let n = if signed && b.starts_with('1') { n - (1i128 << b.len()) } else { n };
+            let n = if signed && b.starts_with('1') {
+                n - (1i128 << b.len())
+            } else {
+                n
+            };
             (0, n, String::new())
         }
         Some(Val::Bits(b)) => (1, 0, b.clone()),
@@ -246,9 +332,14 @@ pub fn no_stream(ws: &Workspace, e: &NoStream) -> String {
                     false => format!("`:{}` makes {}.{part}", f.decode_line(), f.name()),
                 })
                 .collect();
-            format!("unknown stream: {name}: its interface isn't decoded yet; {}", how.join("; or "))
+            format!(
+                "unknown stream: {name}: its interface isn't decoded yet; {}",
+                how.join("; or ")
+            )
         }
-        _ if ws.streams.is_empty() => "no streams yet: make one with :decode or :protocol".to_string(),
+        _ if ws.streams.is_empty() => {
+            "no streams yet: make one with :decode or :protocol".to_string()
+        }
         e => e.to_string(),
     }
 }
@@ -281,16 +372,68 @@ impl App {
 
     /// The browser's keys (spec §5 "Records"): `browser_key` and the keys page both read them.
     pub const BROWSER_KEYS: &Fixed<Browse> = &[
-        (&[(Key::ch('j'), Browse::Down), (Key::ch('k'), Browse::Up), (Key::code(KeyCode::Down), Browse::Down), (Key::code(KeyCode::Up), Browse::Up)], "move"),
-        (&[(Key::ctrl('f'), Browse::PageDown), (Key::ctrl('b'), Browse::PageUp)], "a screen of records"),
-        (&[(Key::ch('g'), Browse::First), (Key::ch('G'), Browse::Last)], "first / last record"),
-        (&[(Key::ch('h'), Browse::Left), (Key::ch('l'), Browse::Right), (Key::code(KeyCode::Left), Browse::Left), (Key::code(KeyCode::Right), Browse::Right)], "scroll the columns"),
-        (&[(Key::ch('/'), Browse::Filter)], "filter; Enter or Esc stops, Ctrl-u clears"),
-        (&[(Key::ch('s'), Browse::Sort), (Key::ch('S'), Browse::Reverse)], "sort by the next column / reverse"),
-        (&[(Key::ch('='), Browse::Group)], "group by the sorted field; again to ungroup"),
-        (&[(Key::code(KeyCode::Tab), Browse::NextSet), (Key::code(KeyCode::BackTab), Browse::PrevSet)], "next / previous set"),
-        (&[(Key::code(KeyCode::Enter), Browse::Pick)], "jump to a record; on a group, keep its records"),
-        (&[(Key::code(KeyCode::Esc), Browse::Close), (Key::ch('q'), Browse::Close)], "close"),
+        (
+            &[
+                (Key::ch('j'), Browse::Down),
+                (Key::ch('k'), Browse::Up),
+                (Key::code(KeyCode::Down), Browse::Down),
+                (Key::code(KeyCode::Up), Browse::Up),
+            ],
+            "move",
+        ),
+        (
+            &[
+                (Key::ctrl('f'), Browse::PageDown),
+                (Key::ctrl('b'), Browse::PageUp),
+            ],
+            "a screen of records",
+        ),
+        (
+            &[(Key::ch('g'), Browse::First), (Key::ch('G'), Browse::Last)],
+            "first / last record",
+        ),
+        (
+            &[
+                (Key::ch('h'), Browse::Left),
+                (Key::ch('l'), Browse::Right),
+                (Key::code(KeyCode::Left), Browse::Left),
+                (Key::code(KeyCode::Right), Browse::Right),
+            ],
+            "scroll the columns",
+        ),
+        (
+            &[(Key::ch('/'), Browse::Filter)],
+            "filter; Enter or Esc stops, Ctrl-u clears",
+        ),
+        (
+            &[
+                (Key::ch('s'), Browse::Sort),
+                (Key::ch('S'), Browse::Reverse),
+            ],
+            "sort by the next column / reverse",
+        ),
+        (
+            &[(Key::ch('='), Browse::Group)],
+            "group by the sorted field; again to ungroup",
+        ),
+        (
+            &[
+                (Key::code(KeyCode::Tab), Browse::NextSet),
+                (Key::code(KeyCode::BackTab), Browse::PrevSet),
+            ],
+            "next / previous set",
+        ),
+        (
+            &[(Key::code(KeyCode::Enter), Browse::Pick)],
+            "jump to a record; on a group, keep its records",
+        ),
+        (
+            &[
+                (Key::code(KeyCode::Esc), Browse::Close),
+                (Key::ch('q'), Browse::Close),
+            ],
+            "close",
+        ),
     ];
 
     /// The browser has the keys; they are fixed (spec §5 "Records").
@@ -308,7 +451,9 @@ impl App {
             return self.browser_refresh();
         }
         let ncols = b.fixed() + b.set(&self.ws).columns.len();
-        let Some(act) = keys::fixed(Self::BROWSER_KEYS, k) else { return };
+        let Some(act) = keys::fixed(Self::BROWSER_KEYS, k) else {
+            return;
+        };
         match act {
             Browse::Close => self.browser = None,
             Browse::Down => b.step(1),
@@ -318,7 +463,9 @@ impl App {
             Browse::First => b.hl = 0,
             Browse::Last => b.hl = usize::MAX,
             Browse::Left => b.left = b.left.saturating_sub(1),
-            Browse::Right => b.left = (b.left + 1).min(b.widths.len().saturating_sub(b.pinned() + 1)),
+            Browse::Right => {
+                b.left = (b.left + 1).min(b.widths.len().saturating_sub(b.pinned() + 1))
+            }
             Browse::Filter => b.typing = true,
             Browse::Sort => {
                 b.sort = ((b.sort.0 + 1) % ncols, false);
@@ -328,14 +475,23 @@ impl App {
                 b.sort.1 = !b.sort.1;
                 self.browser_refresh();
             }
-            Browse::Group if b.sort.0 < b.fixed() => self.msg = Some(("= groups by the sorted column, a field: s sorts by one".into(), true)),
+            Browse::Group if b.sort.0 < b.fixed() => {
+                self.msg = Some((
+                    "= groups by the sorted column, a field: s sorts by one".into(),
+                    true,
+                ))
+            }
             Browse::Group => {
                 (b.group, b.hl, b.left) = (!b.group, 0, 0);
                 self.browser_refresh();
             }
             Browse::NextSet | Browse::PrevSet => {
                 // the next set, its filter and sort fresh
-                let d = if act == Browse::NextSet { 1 } else { b.tabs.len() - 1 };
+                let d = if act == Browse::NextSet {
+                    1
+                } else {
+                    b.tabs.len() - 1
+                };
                 let (tabs, tab) = (b.tabs.clone(), (b.tab + d) % b.tabs.len());
                 let mut next = Browser::new(&self.ws, &tabs[tab], "");
                 (next.tabs, next.tab) = (tabs, tab);
@@ -359,8 +515,13 @@ impl App {
             let Some(g) = b.groups.get(b.hl) else { return };
             let c = &set.columns[b.sort.0 - b.fixed()];
             // a value the filter can write back: a number, or a word
-            if !matches!(&g.values[0], Some(Val::Bits(v)) if v.chars().all(|c| c == '0' || c == '1')) && !matches!(&g.values[0], Some(Val::Text(t)) if !t.is_empty() && !t.contains(char::is_whitespace)) {
-                return self.msg = Some((format!("{}: this value can't be written in a filter", c.name), true));
+            if !matches!(&g.values[0], Some(Val::Bits(v)) if v.chars().all(|c| c == '0' || c == '1'))
+                && !matches!(&g.values[0], Some(Val::Text(t)) if !t.is_empty() && !t.contains(char::is_whitespace))
+            {
+                return self.msg = Some((
+                    format!("{}: this value can't be written in a filter", c.name),
+                    true,
+                ));
             }
             let value = wtf_core::stream::value_text(&c.field, &g.values[0], fpt, None, None);
             let this = format!("{} == {value}", c.name);
@@ -374,7 +535,11 @@ impl App {
         let Some(&at) = b.rows.get(b.hl) else { return };
         let (t, name) = (set.record(at).start, set.streams[at.0].name.clone());
         self.browser = None;
-        if let Some(r) = self.ws.rows.iter().position(|row| matches!(row, Row::Signal(s) if self.ws.trace.vars[s.var].path == name)) {
+        if let Some(r) =
+            self.ws.rows.iter().position(
+                |row| matches!(row, Row::Signal(s) if self.ws.trace.vars[s.var].path == name),
+            )
+        {
             (self.ws.sel, self.ws.bit) = (r, None);
         }
         self.ws.jump(t, false);
@@ -383,14 +548,19 @@ impl App {
     /// The mouse over the browser: the wheel moves, a click highlights, a double click picks, a
     /// click outside closes it.
     pub fn browser_mouse(&mut self, m: MouseEvent, (x, y): (usize, usize), now: Instant) {
-        let inside = self.hit.boxed.is_some_and(|r| r.contains((x as u16, y as u16).into()));
+        let inside = self
+            .hit
+            .boxed
+            .is_some_and(|r| r.contains((x as u16, y as u16).into()));
         let Some(b) = &mut self.browser else { return };
         match m.kind {
             MouseEventKind::ScrollDown => b.step(1),
             MouseEventKind::ScrollUp => b.step(-1),
             MouseEventKind::Down(_) if !inside => self.browser = None,
             MouseEventKind::Down(MouseButton::Left) => {
-                let Some(&(_, k)) = self.hit.records.iter().find(|(ly, _)| *ly == y) else { return };
+                let Some(&(_, k)) = self.hit.records.iter().find(|(ly, _)| *ly == y) else {
+                    return;
+                };
                 b.hl = k;
                 if self.double(crate::tui::app::Target::Record(k), now) {
                     self.browser_pick();
@@ -414,9 +584,22 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
     let (x0, y0) = ((w - bw) / 2, 1);
     let r = Rect::new(x0 as u16, y0 as u16, bw as u16, bh as u16);
     let acc = Style::new().fg(pal().cursor).add_modifier(Modifier::BOLD);
-    let title = vec![(format!("{}records {} {}", crate::tui::render::icon_text(crate::draw::icon::RECORD), gl().dot, b.tabs[b.tab]), acc)];
+    let title = vec![(
+        format!(
+            "{}records {} {}",
+            crate::tui::render::icon_text(crate::draw::icon::RECORD),
+            gl().dot,
+            b.tabs[b.tab]
+        ),
+        acc,
+    )];
     let count = match (b.group, b.filter.trim().is_empty()) {
-        (true, _) => format!("{} values, {} of {} records", b.groups.len(), b.rows.len(), b.total),
+        (true, _) => format!(
+            "{} values, {} of {} records",
+            b.groups.len(),
+            b.rows.len(),
+            b.total
+        ),
         (false, true) => format!("{} records", b.total),
         (false, false) => format!("{} of {}", b.rows.len(), b.total),
     };
@@ -434,34 +617,90 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
     if b.tabs.len() > 1 {
         let mut x = ix;
         for (k, t) in b.tabs.iter().enumerate() {
-            let label = if b.all.as_ref() == Some(t) { "all".to_string() } else { b.short(t).to_string() };
+            let label = if b.all.as_ref() == Some(t) {
+                "all".to_string()
+            } else {
+                b.short(t).to_string()
+            };
             if x + label.chars().count() + 1 >= ix + iw {
                 put(buf, x, y, &gl().cut.to_string(), dim);
                 break;
             }
-            put(buf, x, y, &label, if k == b.tab { st_card.patch(acc) } else { dim });
+            put(
+                buf,
+                x,
+                y,
+                &label,
+                if k == b.tab { st_card.patch(acc) } else { dim },
+            );
             x += label.chars().count() + 2;
         }
         y += 1;
     }
     // the filter
-    let prompt = format!("{} where ", crate::draw::icon(crate::draw::icon::SEARCH).unwrap_or(gl().insert));
-    put(buf, ix, y, &prompt, if b.typing { st_card.patch(acc) } else { dim });
+    let prompt = format!(
+        "{} where ",
+        crate::draw::icon(crate::draw::icon::SEARCH).unwrap_or(gl().insert)
+    );
+    put(
+        buf,
+        ix,
+        y,
+        &prompt,
+        if b.typing { st_card.patch(acc) } else { dim },
+    );
     let px = ix + prompt.chars().count();
     match (b.filter.is_empty(), b.typing) {
         (true, false) => {
             // the set's own fields, so the hint never names one it hasn't
             let fields: Vec<&str> = set.columns.iter().map(|c| c.name.as_str()).collect();
-            let hint = format!("/ filters on {}", if fields.is_empty() { "n, start".into() } else { fields.join(", ") });
-            put(buf, px, y, &hint.chars().take(iw.saturating_sub(prompt.chars().count())).collect::<String>(), dim)
+            let hint = format!(
+                "/ filters on {}",
+                if fields.is_empty() {
+                    "n, start".into()
+                } else {
+                    fields.join(", ")
+                }
+            );
+            put(
+                buf,
+                px,
+                y,
+                &hint
+                    .chars()
+                    .take(iw.saturating_sub(prompt.chars().count()))
+                    .collect::<String>(),
+                dim,
+            )
         }
-        _ => put(buf, px, y, &b.filter.chars().take(iw.saturating_sub(prompt.len())).collect::<String>(), st_card),
+        _ => put(
+            buf,
+            px,
+            y,
+            &b.filter
+                .chars()
+                .take(iw.saturating_sub(prompt.len()))
+                .collect::<String>(),
+            st_card,
+        ),
     }
     if let Some(e) = &b.error {
         let e: String = e.chars().take(iw / 2).collect();
-        put(buf, (ix + iw).saturating_sub(e.chars().count()), y, &e, st_card.fg(pal().unknown));
+        put(
+            buf,
+            (ix + iw).saturating_sub(e.chars().count()),
+            y,
+            &e,
+            st_card.fg(pal().unknown),
+        );
     }
-    put(buf, x0 + 1, y + 1, &gl().card[4].to_string().repeat(bw - 2), dim);
+    put(
+        buf,
+        x0 + 1,
+        y + 1,
+        &gl().card[4].to_string().repeat(bw - 2),
+        dim,
+    );
     let (head_y, first_y) = (y + 2, y + 3);
     // the column names, the sorted one in the accent; the stream and number stay at the left
     let heads = b.heads(&set);
@@ -472,9 +711,19 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
         if x >= ix + iw {
             break;
         }
-        let name = if k == sorted && b.sort.1 && !b.group { format!("{} {}", heads[k], gl().group_open) } else { heads[k].clone() };
+        let name = if k == sorted && b.sort.1 && !b.group {
+            format!("{} {}", heads[k], gl().group_open)
+        } else {
+            heads[k].clone()
+        };
         let s = if k == sorted { st_card.patch(acc) } else { dim };
-        put(buf, x, head_y, &name.chars().take(ix + iw - x).collect::<String>(), s);
+        put(
+            buf,
+            x,
+            head_y,
+            &name.chars().take(ix + iw - x).collect::<String>(),
+            s,
+        );
         x += b.widths[k] + 2;
     }
     // the lines, scrolled to the highlight
@@ -489,13 +738,24 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
     for (row, k) in (b.top..n).take(b.page).enumerate() {
         let y = first_y + row;
         let on = k == b.hl;
-        let line = if on { st_card.bg(pal().selected) } else { st_card };
+        let line = if on {
+            st_card.bg(pal().selected)
+        } else {
+            st_card
+        };
         put(buf, x0 + 1, y, &" ".repeat(bw - 2), line);
         if on {
             put(buf, x0 + 1, y, &gl().hl.to_string(), line.fg(pal().cursor));
         }
-        // a record of violations red
-        let red = !b.group && set.streams[b.rows[k].0].violations;
+        // a record of violations in its severity's colour, red without one
+        let viol = (!b.group)
+            .then(|| b.rows[k])
+            .filter(|at| set.streams[at.0].violations)
+            .map(|at| {
+                set.streams[at.0]
+                    .severity_at(set.record(at).start)
+                    .map_or(pal().unknown, crate::draw::severity_color)
+            });
         let cells = b.cells(&set, k, fpt);
         let mut x = ix + 2;
         for &c in &shown {
@@ -505,22 +765,46 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
             let room = b.widths[c].min(ix + iw - x);
             let cell = &cells[c];
             let text: String = match cell.chars().count() > room {
-                true => cell.chars().take(room.saturating_sub(1)).chain([gl().cut]).collect(),
+                true => cell
+                    .chars()
+                    .take(room.saturating_sub(1))
+                    .chain([gl().cut])
+                    .collect(),
                 false => cell.clone(),
             };
             // the stream, number and times dim
-            let s = match red {
-                true => line.fg(pal().unknown),
-                false if !b.group && c < b.fixed() => line.fg(pal().dim),
-                false => line,
+            let s = match viol {
+                Some(col) => line.fg(col),
+                None if !b.group && c < b.fixed() => line.fg(pal().dim),
+                None => line,
             };
-            put(buf, x, y, &text, if on { s.add_modifier(Modifier::BOLD) } else { s });
+            put(
+                buf,
+                x,
+                y,
+                &text,
+                if on {
+                    s.add_modifier(Modifier::BOLD)
+                } else {
+                    s
+                },
+            );
             x += b.widths[c] + 2;
         }
         app.hit.records.push((y, k));
     }
     if n == 0 {
-        put(buf, ix + 2, first_y, if b.error.is_some() { "the filter keeps none" } else { "no records match" }, dim);
+        put(
+            buf,
+            ix + 2,
+            first_y,
+            if b.error.is_some() {
+                "the filter keeps none"
+            } else {
+                "no records match"
+            },
+            dim,
+        );
     }
     app.hit.boxed = Some(r);
 }
@@ -533,7 +817,8 @@ mod tests {
     fn axi() -> App {
         let t = Trace::open("tests/data/axilite.vcd".as_ref()).unwrap();
         let mut app = App::new(Workspace::new(t, "x".into()));
-        app.keys(":decode s_axi axilite clock=top.aclk prefix=top.s_axi_\n:records s_axi\n").unwrap();
+        app.keys(":decode s_axi axilite clock=top.aclk prefix=top.s_axi_\n:records s_axi\n")
+            .unwrap();
         app
     }
 
@@ -550,21 +835,28 @@ mod tests {
         // spec §5 "Records": `s` sorts by the next column, blanks last; `S` reverses
         let mut app = axi();
         let ncols = b(&app).fixed() + b(&app).set(&app.ws).columns.len();
-        assert_eq!((b(&app).sort, ncols), ((2, false), 11));
+        assert_eq!((b(&app).sort, ncols), ((2, false), 13));
         for col in (2..ncols).chain(0..2) {
             let br = b(&app);
             assert_eq!(br.sort.0, col);
             let set = br.set(&app.ws);
             let rec = |at| set.record(at);
-            let key: Vec<_> = br.rows.iter().map(|&at| match col {
-                0 => (at.0 as u64, rec(at).start),
-                1 => (at.1 as u64, at.0 as u64),
-                2 => (rec(at).start, 0),
-                3 => (rec(at).end - rec(at).start, 0),
-                c => (set.value(at, c - 4).is_none() as u64, 0),
-            }).collect();
+            let key: Vec<_> = br
+                .rows
+                .iter()
+                .map(|&at| match col {
+                    0 => (at.0 as u64, rec(at).start),
+                    1 => (at.1 as u64, at.0 as u64),
+                    2 => (rec(at).start, 0),
+                    3 => (rec(at).end - rec(at).start, 0),
+                    c => (set.value(at, c - 4).is_none() as u64, 0),
+                })
+                .collect();
             // for a field, a stream without it comes after the ones with it
-            assert!(key.windows(2).all(|w| w[0] <= w[1]), "column {col}: {key:?}");
+            assert!(
+                key.windows(2).all(|w| w[0] <= w[1]),
+                "column {col}: {key:?}"
+            );
             app.keys("s").unwrap();
         }
         assert_eq!(b(&app).sort.0, 2);
@@ -580,7 +872,10 @@ mod tests {
         app.keys("ssssss=").unwrap();
         assert!(b(&app).group);
         let screen = crate::snapshot(&mut app, 120, Some(30));
-        assert!(screen.contains("values,") && screen.contains("Enter keep these"), "{screen}");
+        assert!(
+            screen.contains("values,") && screen.contains("Enter keep these"),
+            "{screen}"
+        );
         app.keys("\n").unwrap();
         let f1 = b(&app).filter.clone();
         assert!(f1.starts_with("resp == ") && !b(&app).group, "{f1}");
@@ -594,7 +889,18 @@ mod tests {
         app.keys("<C-u>zz ==\n").unwrap();
         assert!(b(&app).error.is_some());
         let screen = crate::snapshot(&mut app, 120, Some(30));
-        assert!(screen.contains(&b(&app).error.clone().unwrap().chars().take(10).collect::<String>()), "{screen}");
+        assert!(
+            screen.contains(
+                &b(&app)
+                    .error
+                    .clone()
+                    .unwrap()
+                    .chars()
+                    .take(10)
+                    .collect::<String>()
+            ),
+            "{screen}"
+        );
         // Backspace edits it; Ctrl-x and Tab are ignored while typing
         app.keys("/<BS><BS><BS>").unwrap();
         assert_eq!(b(&app).filter, "zz");
@@ -604,7 +910,11 @@ mod tests {
         // group by rule: the commonest value is blank, which a filter cannot write
         app.keys("<Esc>:records s_axi\n").unwrap();
         app.keys("sssssss=\n").unwrap();
-        assert!(b(&app).group && msg(&app).ends_with("this value can't be written in a filter"), "{}", msg(&app));
+        assert!(
+            b(&app).group && msg(&app).ends_with("this value can't be written in a filter"),
+            "{}",
+            msg(&app)
+        );
     }
 
     #[test]
@@ -625,7 +935,12 @@ mod tests {
         app.keys("<C-b>z").unwrap();
         assert_eq!(b(&app).hl, 0);
         // wheel moves; a click outside closes
-        app.mouse(crossterm::event::MouseEvent { kind: MouseEventKind::ScrollDown, column: 40, row: 5, modifiers: KeyModifiers::NONE });
+        app.mouse(crossterm::event::MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: 40,
+            row: 5,
+            modifiers: KeyModifiers::NONE,
+        });
         assert_eq!(b(&app).hl, 1);
         // a card too small to draw: nothing
         let screen = crate::snapshot(&mut app, 20, Some(12));
@@ -639,7 +954,10 @@ mod tests {
         // the tabs cut with an ellipsis and the columns stop at the card's edge
         let mut app = axi();
         let screen = crate::snapshot(&mut app, 40, Some(20));
-        assert!(screen.contains(gl().cut) && screen.contains("stream"), "{screen}");
+        assert!(
+            screen.contains(gl().cut) && screen.contains("stream"),
+            "{screen}"
+        );
         assert!(!screen.contains("delay  "), "{screen}");
     }
 
@@ -651,8 +969,14 @@ mod tests {
         assert_eq!(b(&app).tabs[0], "s_axi.wr s_axi.rd");
         assert_eq!(b(&app).tabs.len(), 12);
         // streams of two decodes: no decode's tabs, the set alone
-        app.keys("<Esc>:decode s2 axilite clock=top.aclk prefix=top.s_axi_\n:records s_axi.wr s2.wr\n").unwrap();
-        assert_eq!((b(&app).tabs.clone(), b(&app).decode.clone()), (vec!["s_axi.wr s2.wr".to_string()], None));
+        app.keys(
+            "<Esc>:decode s2 axilite clock=top.aclk prefix=top.s_axi_\n:records s_axi.wr s2.wr\n",
+        )
+        .unwrap();
+        assert_eq!(
+            (b(&app).tabs.clone(), b(&app).decode.clone()),
+            (vec!["s_axi.wr s2.wr".to_string()], None)
+        );
         // one set: no tab line
         let screen = crate::snapshot(&mut app, 120, Some(20));
         assert!(!screen.contains("all "), "{screen}");
@@ -666,5 +990,27 @@ mod tests {
         assert_eq!(key(bits("111").as_ref(), false).1, 7);
         assert_eq!(key(bits("1x0").as_ref(), false), (1, 0, "1x0".into()));
         assert_eq!(key(None, false).0, 2);
+    }
+
+    #[test]
+    fn severity_rows() {
+        // spec §5 "Records": a warning's row in the theme's warning, an error's red
+        let t = Trace::open("tests/data/axis_wakeup.vcd".as_ref()).unwrap();
+        let mut app = App::new(Workspace::new(t, "x".into()));
+        app.keys(":decode rx axis clock=clk tvalid=tvalid tready=tready twakeup=twakeup\n:records rx.errors\n").unwrap();
+        let area = ratatui::layout::Rect::new(0, 0, 120, 30);
+        let mut buf = ratatui::buffer::Buffer::empty(area);
+        crate::tui::render::draw(&mut app, area, &mut buf);
+        let fg = |word: &str| {
+            (0..area.height).find_map(|y| {
+                let line: String = (0..area.width)
+                    .map(|x| buf[(x, y)].symbol().to_string())
+                    .collect();
+                line.find(word)
+                    .map(|x| buf[(line[..x].chars().count() as u16, y)].fg)
+            })
+        };
+        assert_eq!(fg("wakeup_early"), Some(crate::draw::pal().warning));
+        assert_eq!(fg("dropped"), Some(crate::draw::pal().unknown));
     }
 }

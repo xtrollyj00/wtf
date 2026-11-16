@@ -26,7 +26,7 @@ panel = 235
 red = "#ff5555"         # the shade of a signal colour (section 14)
 ```
 
-- `[colors]` keys are the palette's: `line`, `bus`, `fill`, `unknown`, `highz`, `cursor`, `cursor_text`,
+- `[colors]` keys are the palette's: `line`, `bus`, `fill`, `unknown`, `highz`, `warning`, `cursor`, `cursor_text`,
   `column`, `cursor_dim`, `mark`, `selected`, `panel`, `hatch`, `dim`, `background`, `text`, and the signal colours `red`, `orange`,
   `yellow`, `green`, `cyan`, `blue`, `magenta`, `gray`. A value is `"#rrggbb"` (the nearest
   256-colour shade on terminals without truecolor), a 256-colour index, `["#rrggbb", index]` (that
@@ -194,6 +194,15 @@ cursor     = ["#fabd2f", 214]
 - A bad entry in a theme is skipped and named with the theme (`config: theme gruvbox: unknown
   key lne (keys: …)`); an unknown theme lists the ones there are.
 
+### Protocols
+
+`protocols/<name>.wasm` next to `config.toml` holds protocols written as WebAssembly components
+(section 16.7): the file's name is the protocol's, each decodes in every workspace, and `protocols`
+lists them under `loaded from files:`. Read once at start, as `config.toml` is.
+
+A module that doesn't load is skipped and named on the status line
+(`~/.config/wtf/protocols/probe.wasm: …`), and the others still decode.
+
 ### The terminal's background
 
 `dark` keeps the terminal's own background and text, so its fixed shades behind cards (`panel`),
@@ -216,5 +225,6 @@ answer). The text colour is what the terminal's own text fades from in a notific
 - `--glyphs` over `glyphs` in the file, over `unicode`.
 - `NO_COLOR` over the theme and `[colors]` (section 14).
 - `--snapshot` follows the glyphs too, so a snapshot can be ASCII, and with `--ansi` the theme and
-  `NO_COLOR`; plain text keeps the default theme. `wtf --mcp` reads no config:
-  what agents get doesn't depend on the machine.
+  `NO_COLOR`; plain text keeps the default theme. `wtf --mcp` reads no `config.toml`: what agents get
+  doesn't depend on the machine's taste, though the protocols in `protocols/` are the machine's and
+  decode there as they do in a window.

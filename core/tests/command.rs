@@ -2,10 +2,13 @@
 
 mod common;
 use common::*;
-use wtf_core::workspace::Workspace;
 use wtf_core::command::{self, no_match};
+use wtf_core::workspace::Workspace;
 
-fn run(ws: &mut wtf_core::workspace::Workspace, line: &str) -> Result<Option<(String, bool)>, String> {
+fn run(
+    ws: &mut wtf_core::workspace::Workspace,
+    line: &str,
+) -> Result<Option<(String, bool)>, String> {
     command::run(ws, line)
 }
 
@@ -17,9 +20,15 @@ fn view_and_cursors() {
     assert_eq!(ws.view.cursor, 25);
     run(&mut ws, "zoom 2ns").unwrap();
     assert_eq!((ws.view.ticks, ws.view.cols), (2, 1));
-    assert_eq!(run(&mut ws, "zoom 0ns"), Err("zoom must be above zero".into()));
+    assert_eq!(
+        run(&mut ws, "zoom 0ns"),
+        Err("zoom must be above zero".into())
+    );
     assert!(run(&mut ws, "zoom soon").is_err());
-    assert_eq!(run(&mut ws, "zoom 0ns 40ns"), Err("zoom takes one time, per column (`zoom 1ns`); to show a range: fit 0ns 40ns".into()));
+    assert_eq!(
+        run(&mut ws, "zoom 0ns 40ns"),
+        Err("zoom takes one time, per column (`zoom 1ns`); to show a range: fit 0ns 40ns".into())
+    );
     run(&mut ws, "fit").unwrap();
     assert_eq!(ws.view.start, 0);
     // cursor 3 is a mark: placed, jumped to, and left where it is when the cursor moves on
@@ -32,9 +41,15 @@ fn view_and_cursors() {
     run(&mut ws, "cursor 3 off").unwrap();
     assert_eq!(ws.cursor_list(), [(0, 70)]);
     assert_eq!(run(&mut ws, "cursor 1"), Ok(None));
-    assert_eq!(run(&mut ws, "cursor 1 off"), Err("cursor 1 can't be removed".into()));
+    assert_eq!(
+        run(&mut ws, "cursor 1 off"),
+        Err("cursor 1 can't be removed".into())
+    );
     assert_eq!(run(&mut ws, "cursor 4"), Err("no cursor 4".into()));
-    assert_eq!(run(&mut ws, "cursor 10 1ns"), Err("usage: :cursor <1-9> [time|off] [name=<text>] [note=<text>]".into()));
+    assert_eq!(
+        run(&mut ws, "cursor 10 1ns"),
+        Err("usage: :cursor <1-9> [time|off] [name=<text>] [note=<text>]".into())
+    );
     assert_eq!(run(&mut ws, "warp"), Err("unknown command: warp".into()));
 }
 
@@ -46,31 +61,61 @@ fn fit_a_range() {
     run(&mut ws, "cursor 3 65ns").unwrap();
     // the cursor to mark 3, in either order; the cursor stays
     run(&mut ws, "fit '3 '1").unwrap();
-    assert_eq!((ws.view.start, ws.view.ticks, ws.view.cols, ws.view.cursor), (25, 1, 1, 25));
+    assert_eq!(
+        (ws.view.start, ws.view.ticks, ws.view.cols, ws.view.cursor),
+        (25, 1, 1, 25)
+    );
     assert!(ws.view.last_visible() + 1 >= 65);
     run(&mut ws, "fit 10ns 20ns").unwrap();
     assert_eq!((ws.view.start, ws.view.ticks, ws.view.cols), (10, 1, 4));
     assert_eq!(run(&mut ws, "fit '1 '2"), Err("no cursor 2".into()));
-    assert_eq!(run(&mut ws, "fit '0 '1"), Err("no cursor 0: cursors are '1 to '9".into()));
-    assert_eq!(run(&mut ws, "fit '1 25ns"), Err("nothing between them: the same time".into()));
-    assert_eq!(run(&mut ws, "fit 10ns"), Err("usage: :fit, or :fit <from> <to> as cursors ('2 '3) or times".into()));
+    assert_eq!(
+        run(&mut ws, "fit '0 '1"),
+        Err("no cursor 0: cursors are '1 to '9".into())
+    );
+    assert_eq!(
+        run(&mut ws, "fit '1 25ns"),
+        Err("nothing between them: the same time".into())
+    );
+    assert_eq!(
+        run(&mut ws, "fit 10ns"),
+        Err("usage: :fit, or :fit <from> <to> as cursors ('2 '3) or times".into())
+    );
 }
 
 #[test]
 fn adding_and_removing() {
     let mut ws = open();
-    assert_eq!(run(&mut ws, "add"), Err("usage: :add <path|pattern>...".into()));
+    assert_eq!(
+        run(&mut ws, "add"),
+        Err("usage: :add <path|pattern>...".into())
+    );
     // a scope's direct signals become a group named after it
     run(&mut ws, "add top.cpu").unwrap();
     assert_eq!(names(&ws), ["▾ cpu", "  state", "  data", "  busy"]);
-    assert_eq!(run(&mut ws, "add top.cpu.*"), Err("already shown: top.cpu.*".into()));
-    assert_eq!(run(&mut ws, "add top.nope"), Err("no match: top.nope".into()));
-    assert_eq!(run(&mut ws, "add top.zz*"), Err("no match: top.zz* (a pattern matches the whole path)".into()));
-    assert_eq!(run(&mut ws, "add top.clk nope"), Ok(Some(("no match: nope".into(), true))));
+    assert_eq!(
+        run(&mut ws, "add top.cpu.*"),
+        Err("already shown: top.cpu.*".into())
+    );
+    assert_eq!(
+        run(&mut ws, "add top.nope"),
+        Err("no match: top.nope".into())
+    );
+    assert_eq!(
+        run(&mut ws, "add top.zz*"),
+        Err("no match: top.zz* (a pattern matches the whole path)".into())
+    );
+    assert_eq!(
+        run(&mut ws, "add top.clk nope"),
+        Ok(Some(("no match: nope".into(), true)))
+    );
     assert_eq!(run(&mut ws, "rm top.cpu.*a*"), Ok(None));
     // clk went in below busy, a row of the group, so it joined the group
     assert_eq!(names(&ws), ["▾ cpu", "  busy", "  clk"]);
-    assert_eq!(run(&mut ws, "rm top.cpu.data"), Err("no matching rows: top.cpu.data".into()));
+    assert_eq!(
+        run(&mut ws, "rm top.cpu.data"),
+        Err("no matching rows: top.cpu.data".into())
+    );
     // without an argument: the selected row
     ws.sel = 2;
     run(&mut ws, "rm").unwrap();
@@ -95,9 +140,18 @@ fn groups() {
     run(&mut ws, "select core").unwrap();
     run(&mut ws, "ungroup").unwrap();
     assert_eq!(names(&ws), ["clk", "data", "busy"]);
-    assert_eq!(run(&mut ws, "select nope"), Err("unknown signal: nope".into()));
-    assert_eq!(run(&mut ws, "select top.rst"), Err("not shown: top.rst".into()));
-    assert_eq!(run(&mut ws, "select"), Err("usage: :select <row> [<last row>]".into()));
+    assert_eq!(
+        run(&mut ws, "select nope"),
+        Err("unknown signal: nope".into())
+    );
+    assert_eq!(
+        run(&mut ws, "select top.rst"),
+        Err("not shown: top.rst".into())
+    );
+    assert_eq!(
+        run(&mut ws, "select"),
+        Err("usage: :select <row> [<last row>]".into())
+    );
 }
 
 #[test]
@@ -106,7 +160,10 @@ fn radix_and_undo() {
     ws.sel = 0;
     run(&mut ws, "radix sdec").unwrap();
     assert_eq!(radix_of(&ws, "top.cpu.data"), "sdec");
-    assert_eq!(run(&mut ws, "radix roman"), Err("unknown radix: roman".into()));
+    assert_eq!(
+        run(&mut ws, "radix roman"),
+        Err("unknown radix: roman".into())
+    );
     ws.undoable(|ws| run(ws, "add top.clk")).unwrap();
     run(&mut ws, "undo").unwrap();
     assert_eq!(names(&ws), ["data"]);
@@ -119,10 +176,26 @@ fn color_and_undo() {
     let mut ws = with(&["top.cpu"]);
     ws.sel = 0; // the group: every signal in it
     ws.undoable(|ws| run(ws, "color red")).unwrap();
-    assert!(ws.rows.iter().filter_map(|r| r.sig()).all(|s| s.look.color == Some(0)));
-    assert_eq!(run(&mut ws, "color pink"), Err("unknown colour: pink (colours: red, orange, yellow, green, cyan, blue, magenta, gray)".into()));
+    assert!(
+        ws.rows
+            .iter()
+            .filter_map(|r| r.sig())
+            .all(|s| s.look.color == Some(0))
+    );
+    assert_eq!(
+        run(&mut ws, "color pink"),
+        Err(
+            "unknown colour: pink (colours: red, orange, yellow, green, cyan, blue, magenta, gray)"
+                .into()
+        )
+    );
     run(&mut ws, "undo").unwrap();
-    assert!(ws.rows.iter().filter_map(|r| r.sig()).all(|s| s.look.color.is_none()));
+    assert!(
+        ws.rows
+            .iter()
+            .filter_map(|r| r.sig())
+            .all(|s| s.look.color.is_none())
+    );
     run(&mut ws, "redo").unwrap();
     ws.sel = 1;
     run(&mut ws, "color off").unwrap();
@@ -134,32 +207,59 @@ fn color_and_undo() {
 #[test]
 fn signal_off_and_undo() {
     let mut ws = with(&["top.cpu.data"]);
-    ws.undoable(|ws| run(ws, "signal lo = top.cpu.data[3:0]")).unwrap();
+    ws.undoable(|ws| run(ws, "signal lo = top.cpu.data[3:0]"))
+        .unwrap();
     ws.undoable(|ws| run(ws, "signal hi = lo[3:2]")).unwrap();
     ws.undoable(|ws| run(ws, "add lo")).unwrap();
-    ws.undoable(|ws| run(ws, "decode c check clock=top.clk big=lo == 15")).unwrap();
-    assert_eq!(run(&mut ws, "signal lo off"), Err("lo is read by hi, c: remove them first".into()));
+    ws.undoable(|ws| run(ws, "decode c check clock=top.clk big=lo == 15"))
+        .unwrap();
+    assert_eq!(
+        run(&mut ws, "signal lo off"),
+        Err("lo is read by hi, c: remove them first".into())
+    );
     run(&mut ws, "decode c off").unwrap();
-    assert_eq!(run(&mut ws, "signal lo off"), Err("lo is read by hi: remove it first".into()));
-    assert_eq!(run(&mut ws, "signal nope off"), Err("no signal nope (signals: lo, hi)".into()));
-    assert_eq!(ws.undoable(|ws| run(ws, "signal hi off")), Ok(Some(("hi: removed".into(), false))));
+    assert_eq!(
+        run(&mut ws, "signal lo off"),
+        Err("lo is read by hi: remove it first".into())
+    );
+    assert_eq!(
+        run(&mut ws, "signal nope off"),
+        Err("no signal nope (signals: lo, hi)".into())
+    );
+    assert_eq!(
+        ws.undoable(|ws| run(ws, "signal hi off")),
+        Ok(Some(("hi: removed".into(), false)))
+    );
     run(&mut ws, "names lo 0=zero").unwrap();
     let rows = names(&ws).len();
-    assert_eq!(ws.undoable(|ws| run(ws, "signal lo off")), Ok(Some(("lo: removed".into(), false))));
+    assert_eq!(
+        ws.undoable(|ws| run(ws, "signal lo off")),
+        Ok(Some(("lo: removed".into(), false)))
+    );
     assert!(ws.signals.is_empty() && ws.value_names.is_empty());
     assert_eq!(names(&ws).len(), rows - 1);
-    assert_eq!(run(&mut ws, "signal lo off"), Err("no signal lo: there are none yet".into()));
+    assert_eq!(
+        run(&mut ws, "signal lo off"),
+        Err("no signal lo: there are none yet".into())
+    );
     // undo gives back lo with its row and names, then hi
     run(&mut ws, "undo").unwrap();
-    assert_eq!(ws.signals.iter().map(|s| s.0.as_str()).collect::<Vec<_>>(), ["lo"]);
+    assert_eq!(
+        ws.signals.iter().map(|s| s.0.as_str()).collect::<Vec<_>>(),
+        ["lo"]
+    );
     assert_eq!(ws.value_names, [("lo".to_string(), "0=zero".to_string())]);
     assert_eq!(names(&ws).len(), rows);
     run(&mut ws, "undo").unwrap();
     assert_eq!(ws.signals.len(), 2);
     // a definition replaced is undone too
-    ws.undoable(|ws| run(ws, "signal lo = top.cpu.data[7:4]")).unwrap();
+    ws.undoable(|ws| run(ws, "signal lo = top.cpu.data[7:4]"))
+        .unwrap();
     run(&mut ws, "undo").unwrap();
-    assert_eq!(ws.signals[0], ("lo".to_string(), "top.cpu.data[3:0]".to_string()));
+    assert_eq!(
+        ws.signals[0],
+        ("lo".to_string(), "top.cpu.data[3:0]".to_string())
+    );
 }
 
 #[test]
@@ -171,20 +271,44 @@ fn reload_answers() {
 #[test]
 fn patterns() {
     let ws = open();
-    let paths = |arg: &str| command::resolve(&ws, arg).unwrap().into_iter().map(|v| ws.trace.vars[v].path.clone()).collect::<Vec<_>>();
-    assert_eq!(paths("top.cpu"), ["top.cpu.state", "top.cpu.data", "top.cpu.busy"]);
+    let paths = |arg: &str| {
+        command::resolve(&ws, arg)
+            .unwrap()
+            .into_iter()
+            .map(|v| ws.trace.vars[v].path.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        paths("top.cpu"),
+        ["top.cpu.state", "top.cpu.data", "top.cpu.busy"]
+    );
     assert_eq!(paths("**.state"), ["top.cpu.state", "top.dma.state"]);
     assert_eq!(paths("top.clk"), ["top.clk"]);
     assert!(paths("top.nope").is_empty());
     let no_match = |arg| no_match(&ws, arg);
     assert_eq!(no_match("x"), "no match: x");
     assert_eq!(no_match("**.x*"), "no match: **.x*");
-    assert_eq!(no_match("*"), "no match: * (`*` is one level of the path, `**` any number: `**` matches every signal)");
+    assert_eq!(
+        no_match("*"),
+        "no match: * (`*` is one level of the path, `**` any number: `**` matches every signal)"
+    );
     // a scope named so: the signals in it; a signal named so: it
-    assert_eq!(no_match("*cpu*"), "no match: *cpu* (a pattern matches the whole path: **.*cpu*.* for cpu anywhere; nearest: top.cpu)");
-    assert_eq!(no_match("*stat*"), "no match: *stat* (a pattern matches the whole path: **.*stat* for stat anywhere; nearest: top.cpu.state, top.dma.state)");
-    assert_eq!(no_match("**.{busy,data}"), "no match: **.{busy,data} (braces are no pattern: one name or pattern each; nearest: top.cpu.data)");
-    assert_eq!(no_match("top.bsy"), "no match: top.bsy (nearest: top.cpu.busy)");
+    assert_eq!(
+        no_match("*cpu*"),
+        "no match: *cpu* (a pattern matches the whole path: **.*cpu*.* for cpu anywhere; nearest: top.cpu)"
+    );
+    assert_eq!(
+        no_match("*stat*"),
+        "no match: *stat* (a pattern matches the whole path: **.*stat* for stat anywhere; nearest: top.cpu.state, top.dma.state)"
+    );
+    assert_eq!(
+        no_match("**.{busy,data}"),
+        "no match: **.{busy,data} (braces are no pattern: one name or pattern each; nearest: top.cpu.data)"
+    );
+    assert_eq!(
+        no_match("top.bsy"),
+        "no match: top.bsy (nearest: top.cpu.busy)"
+    );
 }
 
 /// An agent's workspace writes patterns as regexes in slashes, matched in the canonical path; a
@@ -193,17 +317,38 @@ fn patterns() {
 fn regex_patterns() {
     let mut ws = open();
     ws.patterns = wtf_core::pattern::Syntax::Regex;
-    let paths = |ws: &Workspace, arg: &str| command::resolve(ws, arg).map(|f| f.into_iter().map(|v| ws.trace.vars[v].path.clone()).collect::<Vec<_>>());
-    assert_eq!(paths(&ws, "/state$/"), Ok(vec!["top.cpu.state".to_string(), "top.dma.state".to_string()]));
+    let paths = |ws: &Workspace, arg: &str| {
+        command::resolve(ws, arg).map(|f| {
+            f.into_iter()
+                .map(|v| ws.trace.vars[v].path.clone())
+                .collect::<Vec<_>>()
+        })
+    };
+    assert_eq!(
+        paths(&ws, "/state$/"),
+        Ok(vec![
+            "top.cpu.state".to_string(),
+            "top.dma.state".to_string()
+        ])
+    );
     assert_eq!(paths(&ws, "/^TOP\\.CPU\\./").unwrap().len(), 3);
     // a bare word is a name, as in the window
     assert_eq!(paths(&ws, "top.cpu").unwrap().len(), 3);
-    assert_eq!(paths(&ws, "**.state"), Err("**.state is a glob; a pattern is a regex in slashes: /state/".into()));
+    assert_eq!(
+        paths(&ws, "**.state"),
+        Err("**.state is a glob; a pattern is a regex in slashes: /state/".into())
+    );
     assert_eq!(run(&mut ws, "add /^top\\.cpu\\./"), Ok(None));
     assert_eq!(names(&ws), ["state", "data", "busy"]);
     assert_eq!(run(&mut ws, "add /nope/"), Err("no match: /nope/".into()));
-    assert_eq!(run(&mut ws, "add /^top\\.cpu\\./"), Err("already shown: /^top\\.cpu\\./".into()));
-    assert_eq!(run(&mut ws, "add"), Err("usage: add <path|/regex/>...".into()));
+    assert_eq!(
+        run(&mut ws, "add /^top\\.cpu\\./"),
+        Err("already shown: /^top\\.cpu\\./".into())
+    );
+    assert_eq!(
+        run(&mut ws, "add"),
+        Err("usage: add <path|/regex/>...".into())
+    );
     assert_eq!(run(&mut ws, "rm /.*/"), Ok(None));
     assert!(ws.rows.is_empty());
 }
@@ -213,15 +358,40 @@ fn regex_patterns() {
 fn quoted_values() {
     let mut ws = open();
     run(&mut ws, "decode a check clock=clk hot=busy && data != 0").unwrap();
-    run(&mut ws, r#"decode b check clock=clk hot="busy && data != 0""#).unwrap();
-    let records = |ws: &wtf_core::workspace::Workspace, n: &str| ws.streams.iter().find(|s| s.name == n).unwrap().records.len();
+    run(
+        &mut ws,
+        r#"decode b check clock=clk hot="busy && data != 0""#,
+    )
+    .unwrap();
+    let records = |ws: &wtf_core::workspace::Workspace, n: &str| {
+        ws.streams
+            .iter()
+            .find(|s| s.name == n)
+            .unwrap()
+            .records
+            .len()
+    };
     assert_eq!(records(&ws, "b"), records(&ws, "a"));
     assert!(records(&ws, "a") > 0);
     // a quoted `key=` stays in the value; an unclosed quote is a mistake
-    assert_eq!(ws.decodes[1].params, [("hot".to_string(), "busy && data != 0".to_string())]);
-    run(&mut ws, r#"protocol p roles=busy,data when="busy" d="data""#).unwrap();
-    assert_eq!(ws.protocols[0].fields, [("d".to_string(), "data".to_string())]);
-    assert!(run(&mut ws, r#"decode c check clock=clk hot="busy"#).unwrap_err().starts_with("usage"));
+    assert_eq!(
+        ws.decodes[1].params,
+        [("hot".to_string(), "busy && data != 0".to_string())]
+    );
+    run(
+        &mut ws,
+        r#"protocol p roles=busy,data when="busy" d="data""#,
+    )
+    .unwrap();
+    assert_eq!(
+        ws.protocols[0].fields,
+        [("d".to_string(), "data".to_string())]
+    );
+    assert!(
+        run(&mut ws, r#"decode c check clock=clk hot="busy"#)
+            .unwrap_err()
+            .starts_with("usage")
+    );
     let err = run(&mut ws, r#"decode c check clock=clk hot="x=1 && busy""#).unwrap_err();
     assert_eq!(err, "c: hot: unknown signal: x");
 }
@@ -230,12 +400,33 @@ fn quoted_values() {
 fn mark_names_and_notes() {
     // spec §9: a mark has a name and a note; `:cursor` sets them, moving keeps them
     let mut ws = with(&["top.clk"]);
-    run(&mut ws, "cursor 2 30ns name=first bad write note=AW came before W, addr latched stale").unwrap();
-    assert_eq!((ws.marks[1], ws.labels[1].name.as_str(), ws.labels[1].note.as_str()), (Some(30), "first bad write", "AW came before W, addr latched stale"));
+    run(
+        &mut ws,
+        "cursor 2 30ns name=first bad write note=AW came before W, addr latched stale",
+    )
+    .unwrap();
+    assert_eq!(
+        (
+            ws.marks[1],
+            ws.labels[1].name.as_str(),
+            ws.labels[1].note.as_str()
+        ),
+        (
+            Some(30),
+            "first bad write",
+            "AW came before W, addr latched stale"
+        )
+    );
     run(&mut ws, "cursor 2 40ns").unwrap();
-    assert_eq!((ws.marks[1], ws.labels[1].name.as_str()), (Some(40), "first bad write"));
+    assert_eq!(
+        (ws.marks[1], ws.labels[1].name.as_str()),
+        (Some(40), "first bad write")
+    );
     run(&mut ws, "cursor 2 name=\"stale  addr\"").unwrap();
-    assert_eq!((ws.labels[1].name.as_str(), ws.labels[1].note.as_str()), ("stale addr", "AW came before W, addr latched stale"));
+    assert_eq!(
+        (ws.labels[1].name.as_str(), ws.labels[1].note.as_str()),
+        ("stale addr", "AW came before W, addr latched stale")
+    );
     run(&mut ws, "cursor 2 note=").unwrap();
     assert!(ws.labels[1].note.is_empty());
     // removed, then placed again: a new mark, no name
@@ -245,8 +436,20 @@ fn mark_names_and_notes() {
     // the cursor at a named mark
     run(&mut ws, "cursor 3 60ns name=here").unwrap();
     run(&mut ws, "cursor 1 60ns").unwrap();
-    assert_eq!(ws.label_at_cursor().map(|(i, l)| (i, l.name.as_str())), Some((2, "here")));
-    assert_eq!(run(&mut ws, "cursor 1 name=x"), Err("cursor 1 is the cursor and moves: name a mark (2-9)".into()));
-    assert_eq!(run(&mut ws, "cursor 4 name=x"), Err("no cursor 4: give it a time first (:cursor 4 <time> ...)".into()));
-    assert_eq!(run(&mut ws, "cursor 3 colour=red"), Err(":cursor has no key colour (name, note)".into()));
+    assert_eq!(
+        ws.label_at_cursor().map(|(i, l)| (i, l.name.as_str())),
+        Some((2, "here"))
+    );
+    assert_eq!(
+        run(&mut ws, "cursor 1 name=x"),
+        Err("cursor 1 is the cursor and moves: name a mark (2-9)".into())
+    );
+    assert_eq!(
+        run(&mut ws, "cursor 4 name=x"),
+        Err("no cursor 4: give it a time first (:cursor 4 <time> ...)".into())
+    );
+    assert_eq!(
+        run(&mut ws, "cursor 3 colour=red"),
+        Err(":cursor has no key colour (name, note)".into())
+    );
 }

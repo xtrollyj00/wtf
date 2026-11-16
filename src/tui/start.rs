@@ -52,13 +52,18 @@ const COL_W: usize = 54;
 const STRIP: usize = 14;
 const CELL_SECS: u64 = 12 * 3600;
 
-
 /// What the user picked.
 #[derive(Debug, PartialEq)]
 pub enum Choice {
-    Open { trace: PathBuf, session: Option<PathBuf> },
+    Open {
+        trace: PathBuf,
+        session: Option<PathBuf>,
+    },
     /// Open the agent workspace's trace and follow it.
-    Join { trace: PathBuf, id: String },
+    Join {
+        trace: PathBuf,
+        id: String,
+    },
     Quit,
 }
 
@@ -98,10 +103,18 @@ impl Start {
     pub fn new(opens: &[Open], now: u64, agents: Vec<live::Session>) -> Start {
         let mut recent: Vec<Recent> = Vec::new();
         for o in opens {
-            let i = match recent.iter().position(|r| r.trace == o.trace && r.session == o.session) {
+            let i = match recent
+                .iter()
+                .position(|r| r.trace == o.trace && r.session == o.session)
+            {
                 Some(i) => i,
                 None => {
-                    recent.push(Recent { trace: o.trace.clone(), session: o.session.clone(), last: 0, strip: [None; STRIP] });
+                    recent.push(Recent {
+                        trace: o.trace.clone(),
+                        session: o.session.clone(),
+                        last: 0,
+                        strip: [None; STRIP],
+                    });
                     recent.len() - 1
                 }
             };
@@ -114,18 +127,35 @@ impl Start {
             }
         }
         recent.sort_by_key(|r| std::cmp::Reverse(r.last));
-        Start { recent, agents: agents.into_iter().filter(|s| s.kind == "agent").collect(), list: List::Recent, typing: None, msg: None, now, plain: false }
+        Start {
+            recent,
+            agents: agents.into_iter().filter(|s| s.kind == "agent").collect(),
+            list: List::Recent,
+            typing: None,
+            msg: None,
+            now,
+            plain: false,
+        }
     }
 
     /// The user's history, its traces that are gone left out, and the agents on this machine.
     pub fn load() -> Start {
-        let opens: Vec<Open> = history::path().map(|f| history::read(&f)).unwrap_or_default().into_iter().filter(|o| o.trace.exists()).collect();
+        let opens: Vec<Open> = history::path()
+            .map(|f| history::read(&f))
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|o| o.trace.exists())
+            .collect();
         Start::new(&opens, history::now(), live::sessions().unwrap_or_default())
     }
 
     /// Lists the agents' workspaces again.
     pub fn refresh_agents(&mut self) {
-        self.agents = live::sessions().unwrap_or_default().into_iter().filter(|s| s.kind == "agent").collect();
+        self.agents = live::sessions()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|s| s.kind == "agent")
+            .collect();
     }
 
     /// The keys (spec §4 "Start screen"). Returns what was picked, if anything.
@@ -141,10 +171,14 @@ impl Start {
                 KeyCode::Enter => {
                     let t = self.typing.take().unwrap_or_default();
                     let trace = match t.strip_prefix("~/") {
-                        Some(rest) => std::env::var_os("HOME").map_or(PathBuf::from(&t), |h| Path::new(&h).join(rest)),
+                        Some(rest) => std::env::var_os("HOME")
+                            .map_or(PathBuf::from(&t), |h| Path::new(&h).join(rest)),
                         None => PathBuf::from(t.trim()),
                     };
-                    return (!t.trim().is_empty()).then_some(Choice::Open { trace, session: None });
+                    return (!t.trim().is_empty()).then_some(Choice::Open {
+                        trace,
+                        session: None,
+                    });
                 }
                 _ => {}
             }
@@ -154,18 +188,43 @@ impl Start {
         match k.code {
             KeyCode::Char('o') => self.typing = Some(String::new()),
             KeyCode::Char('a') => match self.agents.as_slice() {
-                [] => self.msg = Some("no agent works on this machine; one opens a trace with wtf --mcp".into()),
-                [s] => return Some(Choice::Join { trace: s.trace.clone(), id: s.id.clone() }),
+                [] => {
+                    self.msg = Some(
+                        "no agent works on this machine; one opens a trace with wtf --mcp".into(),
+                    )
+                }
+                [s] => {
+                    return Some(Choice::Join {
+                        trace: s.trace.clone(),
+                        id: s.id.clone(),
+                    });
+                }
                 _ => self.list = List::Agents,
             },
-            KeyCode::Char('?') => self.list = if self.list == List::Keys { List::Recent } else { List::Keys },
+            KeyCode::Char('?') => {
+                self.list = if self.list == List::Keys {
+                    List::Recent
+                } else {
+                    List::Keys
+                }
+            }
             KeyCode::Char('q') => return Some(Choice::Quit),
             KeyCode::Esc => self.list = List::Recent,
             KeyCode::Char(c @ '1'..='9') => {
                 let i = c as usize - '1' as usize;
                 match self.list {
-                    List::Agents => return self.agents.get(i).map(|s| Choice::Join { trace: s.trace.clone(), id: s.id.clone() }),
-                    _ => return self.recent.get(i).map(|r| Choice::Open { trace: r.trace.clone(), session: r.session.clone() }),
+                    List::Agents => {
+                        return self.agents.get(i).map(|s| Choice::Join {
+                            trace: s.trace.clone(),
+                            id: s.id.clone(),
+                        });
+                    }
+                    _ => {
+                        return self.recent.get(i).map(|r| Choice::Open {
+                            trace: r.trace.clone(),
+                            session: r.session.clone(),
+                        });
+                    }
                 }
             }
             _ => {}
@@ -177,11 +236,29 @@ impl Start {
     fn actions(&self) -> Vec<Action> {
         let p = pal();
         let (blue, cyan) = (p.hues[5], p.hues[4]);
-        let mut a = vec![(icon::FOLDER, blue, "Open a trace".to_string(), String::new(), "o".to_string())];
+        let mut a = vec![(
+            icon::FOLDER,
+            blue,
+            "Open a trace".to_string(),
+            String::new(),
+            "o".to_string(),
+        )];
         match self.agents.as_slice() {
             [] => {}
-            [s] => a.push((icon::AGENT, cyan, format!("Join {}", s.id), format!("on {}", name(&s.trace)), "a".into())),
-            all => a.push((icon::AGENT, cyan, "Join an agent".into(), format!("{} workspaces", all.len()), "a".into())),
+            [s] => a.push((
+                icon::AGENT,
+                cyan,
+                format!("Join {}", s.id),
+                format!("on {}", name(&s.trace)),
+                "a".into(),
+            )),
+            all => a.push((
+                icon::AGENT,
+                cyan,
+                "Join an agent".into(),
+                format!("{} workspaces", all.len()),
+                "a".into(),
+            )),
         }
         a.push((icon::KEYS, blue, "Keys".into(), String::new(), "?".into()));
         a.push((icon::ERROR, p.dim, "Quit".into(), String::new(), "q".into()));
@@ -250,7 +327,12 @@ impl Start {
             if gl().icons {
                 put(x, y, &ic.to_string(), Style::new().fg(c));
             }
-            put(x + ix, y, head, Style::new().fg(c).add_modifier(Modifier::BOLD));
+            put(
+                x + ix,
+                y,
+                head,
+                Style::new().fg(c).add_modifier(Modifier::BOLD),
+            );
             put(x + 22, y, note, dim);
             y += 1;
             for (i, num) in (1..=n).map(|k| k.to_string()).enumerate() {
@@ -265,15 +347,24 @@ impl Start {
                         put(x + ix, y, &cut(&file, room), Style::new());
                         if let Some(s) = &r.session {
                             let used = file.chars().count() + 1;
-                            put(x + ix + used, y, &cut(&name(s), room.saturating_sub(used)), dim);
+                            put(
+                                x + ix + used,
+                                y,
+                                &cut(&name(s), room.saturating_sub(used)),
+                                dim,
+                            );
                         }
                         for (k, on) in r.strip.iter().enumerate() {
                             let (ch, c) = match on {
                                 // you in the bus's colour, an agent in cyan; without colour the
                                 // agent's line is thin
                                 Some(false) => (gl().unknown, p.bus),
-                                Some(true) => (if p.mono { gl().line } else { gl().unknown }, p.hues[4]),
-                                None => (if gl().line.is_ascii() { '.' } else { '·' }, p.cursor_dim),
+                                Some(true) => {
+                                    (if p.mono { gl().line } else { gl().unknown }, p.hues[4])
+                                }
+                                None => {
+                                    (if gl().line.is_ascii() { '.' } else { '·' }, p.cursor_dim)
+                                }
                             };
                             put(x + 22 + k, y, &ch.to_string(), Style::new().fg(c));
                         }
@@ -308,21 +399,40 @@ impl Start {
             let fx = x.min(w.saturating_sub(line.chars().count() + 1));
             put(fx, y, "open ", dim);
             put(fx + 5, y, t, Style::new());
-            at = (y < h).then_some((area.x + (fx + line.chars().count()).min(w - 1) as u16, area.y + y as u16));
+            at = (y < h).then_some((
+                area.x + (fx + line.chars().count()).min(w - 1) as u16,
+                area.y + y as u16,
+            ));
         } else if let Some(m) = &self.msg {
-            put(w.saturating_sub(m.chars().count()) / 2, y, m, Style::new().fg(p.unknown));
+            put(
+                w.saturating_sub(m.chars().count()) / 2,
+                y,
+                m,
+                Style::new().fg(p.unknown),
+            );
         } else {
             let agents = {
-                let mut pids: Vec<&str> = self.agents.iter().map(|s| s.id.split('-').next().unwrap_or(&s.id)).collect();
+                let mut pids: Vec<&str> = self
+                    .agents
+                    .iter()
+                    .map(|s| s.id.split('-').next().unwrap_or(&s.id))
+                    .collect();
                 pids.sort();
                 pids.dedup();
                 pids.len()
             };
             let mut foot = format!("wtf {}", env!("CARGO_PKG_VERSION"));
             if agents > 0 {
-                foot += &format!("   {agents} agent{} on this machine", if agents == 1 { "" } else { "s" });
+                foot += &format!(
+                    "   {agents} agent{} on this machine",
+                    if agents == 1 { "" } else { "s" }
+                );
             }
-            let icon = if gl().icons { format!("{} ", icon::STREAM) } else { String::new() };
+            let icon = if gl().icons {
+                format!("{} ", icon::STREAM)
+            } else {
+                String::new()
+            };
             let fx = w.saturating_sub(icon.chars().count() + foot.len()) / 2;
             put(fx, y, &icon, Style::new().fg(p.hues[1]));
             put(fx + icon.chars().count(), y, &foot, dim);
@@ -347,7 +457,14 @@ pub type Action = (char, Color, String, String, String);
 
 /// The actions in a column `cw` wide at (`x`, `y`) of `area`: the icon (with the `nerd` glyphs),
 /// the label, its note dim, the key at the right in the accent.
-pub fn action_rows(buf: &mut Buffer, area: Rect, x: usize, y: usize, cw: usize, actions: &[Action]) {
+pub fn action_rows(
+    buf: &mut Buffer,
+    area: Rect,
+    x: usize,
+    y: usize,
+    cw: usize,
+    actions: &[Action],
+) {
     let (w, h) = (area.width as usize, area.height as usize);
     let accent = Style::new().fg(pal().cursor).add_modifier(Modifier::BOLD);
     let mut put = |x: usize, y: usize, s: &str, st: Style| {
@@ -361,8 +478,18 @@ pub fn action_rows(buf: &mut Buffer, area: Rect, x: usize, y: usize, cw: usize, 
             put(x, y + k, &ic.to_string(), Style::new().fg(*c));
         }
         put(x + ix, y + k, label, Style::new());
-        put(x + ix + label.chars().count() + 1, y + k, note, Style::new().fg(pal().dim));
-        put((x + cw).saturating_sub(key.chars().count()), y + k, key, accent);
+        put(
+            x + ix + label.chars().count() + 1,
+            y + k,
+            note,
+            Style::new().fg(pal().dim),
+        );
+        put(
+            (x + cw).saturating_sub(key.chars().count()),
+            y + k,
+            key,
+            accent,
+        );
     }
 }
 
@@ -384,7 +511,11 @@ pub fn big_logo(buf: &mut Buffer, area: Rect, y: usize, plain: bool) {
     let lx = w.saturating_sub(LOGO_W) / 2;
     logo(&mut put, lx, y, plain || gl().line.is_ascii() || p.mono);
     let by = y + LOGO_H + 1;
-    let segs = [(0, SPLIT, "0x77", p.bus, gl().line), (SPLIT, CURSOR, "0x74", p.bus, gl().line), (CURSOR, INK_W, "0xXX", p.unknown, gl().unknown)];
+    let segs = [
+        (0, SPLIT, "0x77", p.bus, gl().line),
+        (SPLIT, CURSOR, "0x74", p.bus, gl().line),
+        (CURSOR, INK_W, "0xXX", p.unknown, gl().unknown),
+    ];
     for (i, (a, b, label, c, ln)) in segs.into_iter().enumerate() {
         let st = Style::new().fg(c);
         if i > 0 {
@@ -396,7 +527,12 @@ pub fn big_logo(buf: &mut Buffer, area: Rect, y: usize, plain: bool) {
         let pad = n - label.len();
         let line = |k: usize| ln.to_string().repeat(k);
         put(lx + x0, by, &line(n), st);
-        put(lx + x0, by + 1, &format!("{}{label}{}", line(pad / 2), line(pad - pad / 2)), st);
+        put(
+            lx + x0,
+            by + 1,
+            &format!("{}{label}{}", line(pad / 2), line(pad - pad / 2)),
+            st,
+        );
     }
     for y in (y.saturating_sub(1)..y + LOGO_H + 3).filter(|&y| y < h && lx + CURSOR < w) {
         cursor_cell(buf, area, lx + CURSOR, y);
@@ -409,8 +545,18 @@ pub fn small_logo(buf: &mut Buffer, area: Rect, x: usize, y: usize) {
         return;
     }
     let bold = Style::new().add_modifier(Modifier::BOLD);
-    buf.set_string(area.x + x as u16, area.y + y as u16, "w t", bold.fg(pal().cursor));
-    buf.set_string(area.x + (x + 6) as u16, area.y + y as u16, "f", bold.fg(pal().unknown));
+    buf.set_string(
+        area.x + x as u16,
+        area.y + y as u16,
+        "w t",
+        bold.fg(pal().cursor),
+    );
+    buf.set_string(
+        area.x + (x + 6) as u16,
+        area.y + y as u16,
+        "f",
+        bold.fg(pal().unknown),
+    );
     cursor_cell(buf, area, x + 4, y);
 }
 
@@ -427,10 +573,15 @@ fn cursor_cell(buf: &mut Buffer, area: Rect, x: usize, y: usize) {
 /// colour after, with a shadow; or in plain characters (`plain`), without the shadow.
 fn logo(put: &mut impl FnMut(usize, usize, &str, Style), x: usize, y: usize, plain: bool) {
     let p = pal();
-    let ink = |py: usize, px: usize| INK.get(py).is_some_and(|l| l.as_bytes().get(px) == Some(&b'#'));
+    let ink = |py: usize, px: usize| {
+        INK.get(py)
+            .is_some_and(|l| l.as_bytes().get(px) == Some(&b'#'))
+    };
     let colour = |py: usize, px: usize| match ink(py, px) {
         true => Some(if px < CURSOR { p.cursor } else { p.unknown }),
-        false if !plain && py >= SHADOW && px >= SHADOW && ink(py - SHADOW, px - SHADOW) => Some(p.cursor_dim),
+        false if !plain && py >= SHADOW && px >= SHADOW && ink(py - SHADOW, px - SHADOW) => {
+            Some(p.cursor_dim)
+        }
         false => None,
     };
     for r in 0..LOGO_H {
@@ -450,14 +601,21 @@ fn logo(put: &mut impl FnMut(usize, usize, &str, Style), x: usize, y: usize, pla
 }
 
 fn name(p: &Path) -> String {
-    p.file_name().map_or_else(|| p.display().to_string(), |n| n.to_string_lossy().into_owned())
+    p.file_name().map_or_else(
+        || p.display().to_string(),
+        |n| n.to_string_lossy().into_owned(),
+    )
 }
 
 /// `s` in `n` columns, cut with `…`.
 fn cut(s: &str, n: usize) -> String {
     match s.chars().count() <= n {
         true => s.to_string(),
-        false => s.chars().take(n.saturating_sub(1)).chain(std::iter::once(gl().cut)).collect(),
+        false => s
+            .chars()
+            .take(n.saturating_sub(1))
+            .chain(std::iter::once(gl().cut))
+            .collect(),
     }
 }
 
@@ -511,7 +669,12 @@ mod tests {
     const NOW: u64 = 1_800_000_000;
 
     fn start() -> Start {
-        let o = |at: u64, agent: bool, t: &str, s: Option<&str>| Open { at: NOW - at, agent, trace: t.into(), session: s.map(PathBuf::from) };
+        let o = |at: u64, agent: bool, t: &str, s: Option<&str>| Open {
+            at: NOW - at,
+            agent,
+            trace: t.into(),
+            session: s.map(PathBuf::from),
+        };
         let opens = [
             o(6 * DAY, false, "/w/tx_drift.fst", None),
             o(5 * DAY, false, "/w/eth_parser.fst", None),
@@ -521,7 +684,11 @@ mod tests {
             o(7200, false, "/w/axilite.vcd", None),
             o(30, true, "/w/axilite.vcd", None),
         ];
-        let agent = live::Session { id: "4123-1".into(), kind: "agent".into(), trace: "/w/axilite.vcd".into() };
+        let agent = live::Session {
+            id: "4123-1".into(),
+            kind: "agent".into(),
+            trace: "/w/axilite.vcd".into(),
+        };
         Start::new(&opens, NOW, vec![agent])
     }
 
@@ -529,13 +696,26 @@ mod tests {
         let mut buf = Buffer::empty(Rect::new(0, 0, w, h));
         s.draw(buf.area, &mut buf);
         // the cells as drawn: `draw::text` would read the logo's colours as cursor columns
-        let text: String = (0..h).map(|y| (0..w).map(|x| buf[(x, y)].symbol()).collect::<String>().trim_end().to_string() + "\n").collect();
+        let text: String = (0..h)
+            .map(|y| {
+                (0..w)
+                    .map(|x| buf[(x, y)].symbol())
+                    .collect::<String>()
+                    .trim_end()
+                    .to_string()
+                    + "\n"
+            })
+            .collect();
         // the snapshots outlive a release: the version as a placeholder
         text.replace(&format!("wtf {}", env!("CARGO_PKG_VERSION")), "wtf x.y.z")
     }
 
     fn press(s: &mut Start, keys: &str) -> Option<Choice> {
-        crate::tui::app::parse_keys(keys).unwrap().into_iter().filter_map(|k| s.key(k)).last()
+        crate::tui::app::parse_keys(keys)
+            .unwrap()
+            .into_iter()
+            .filter_map(|k| s.key(k))
+            .last()
     }
 
     #[test]
@@ -555,7 +735,10 @@ mod tests {
         draw::set_glyphs(&draw::NERD);
         let s = screen(&start(), 100, 32);
         draw::set_glyphs(&draw::UNICODE);
-        assert!(s.contains("\u{ea83}  Open a trace") && s.contains("\u{ea7b}  axilite.vcd"), "{s}");
+        assert!(
+            s.contains("\u{ea83}  Open a trace") && s.contains("\u{ea7b}  axilite.vcd"),
+            "{s}"
+        );
     }
 
     #[test]
@@ -566,12 +749,36 @@ mod tests {
     #[test]
     fn keys() {
         let mut s = start();
-        assert_eq!(press(&mut s, "1"), Some(Choice::Open { trace: "/w/axilite.vcd".into(), session: None }));
-        assert_eq!(press(&mut s, "2"), Some(Choice::Open { trace: "/w/axilite.vcd".into(), session: Some("/w/bug.toml".into()) }));
-        assert_eq!(press(&mut s, "a"), Some(Choice::Join { trace: "/w/axilite.vcd".into(), id: "4123-1".into() }));
+        assert_eq!(
+            press(&mut s, "1"),
+            Some(Choice::Open {
+                trace: "/w/axilite.vcd".into(),
+                session: None
+            })
+        );
+        assert_eq!(
+            press(&mut s, "2"),
+            Some(Choice::Open {
+                trace: "/w/axilite.vcd".into(),
+                session: Some("/w/bug.toml".into())
+            })
+        );
+        assert_eq!(
+            press(&mut s, "a"),
+            Some(Choice::Join {
+                trace: "/w/axilite.vcd".into(),
+                id: "4123-1".into()
+            })
+        );
         assert_eq!(press(&mut s, "8"), None);
         assert_eq!(press(&mut s, "o<Esc>q"), Some(Choice::Quit));
-        assert_eq!(press(&mut s, "ox.vcdd<BS><CR>"), Some(Choice::Open { trace: "x.vcd".into(), session: None }));
+        assert_eq!(
+            press(&mut s, "ox.vcdd<BS><CR>"),
+            Some(Choice::Open {
+                trace: "x.vcd".into(),
+                session: None
+            })
+        );
         assert_eq!(press(&mut s, "o<CR>"), None);
         assert!(screen(&s, 100, 32).contains("wtf "));
         // ? lists the keys in Recent's place
@@ -579,10 +786,20 @@ mod tests {
         assert!(screen(&s, 100, 32).contains("join an agent's workspace"));
         // several agents: a lists them, a number joins one
         let mut s = start();
-        s.agents.push(live::Session { id: "5000-2".into(), kind: "agent".into(), trace: "/w/eth_parser.fst".into() });
+        s.agents.push(live::Session {
+            id: "5000-2".into(),
+            kind: "agent".into(),
+            trace: "/w/eth_parser.fst".into(),
+        });
         assert_eq!(press(&mut s, "a"), None);
         assert!(screen(&s, 100, 32).contains("5000-2"));
-        assert_eq!(press(&mut s, "2"), Some(Choice::Join { trace: "/w/eth_parser.fst".into(), id: "5000-2".into() }));
+        assert_eq!(
+            press(&mut s, "2"),
+            Some(Choice::Join {
+                trace: "/w/eth_parser.fst".into(),
+                id: "5000-2".into()
+            })
+        );
         assert!(screen(&s, 100, 32).contains("2 agents on this machine"));
         // no agents: said
         let mut s = Start::new(&[], NOW, Vec::new());
@@ -605,14 +822,27 @@ mod tests {
         assert!(s.list == List::Recent);
         // `~/` is the home directory
         let home = std::env::var_os("HOME").map_or(PathBuf::from("~"), PathBuf::from);
-        assert_eq!(press(&mut s, "o~/a.vcd<CR>"), Some(Choice::Open { trace: home.join("a.vcd"), session: None }));
+        assert_eq!(
+            press(&mut s, "o~/a.vcd<CR>"),
+            Some(Choice::Open {
+                trace: home.join("a.vcd"),
+                session: None
+            })
+        );
         // agents, with icons; a screen too small for a big logo takes the small one in a corner
-        s.agents.push(live::Session { id: "5000-2".into(), kind: "agent".into(), trace: "/w/b.fst".into() });
+        s.agents.push(live::Session {
+            id: "5000-2".into(),
+            kind: "agent".into(),
+            trace: "/w/b.fst".into(),
+        });
         press(&mut s, "a");
         draw::set_glyphs(&draw::NERD);
         let nerd = screen(&s, 100, 32);
         draw::set_glyphs(&draw::UNICODE);
-        assert!(nerd.contains(&icon::AGENT.to_string()) && nerd.contains("5000-2"), "{nerd}");
+        assert!(
+            nerd.contains(&icon::AGENT.to_string()) && nerd.contains("5000-2"),
+            "{nerd}"
+        );
         let mut buf = Buffer::empty(Rect::new(0, 0, 3, 1));
         let area = buf.area;
         small_logo(&mut buf, area, 0, 0);
@@ -626,6 +856,12 @@ mod tests {
 
     #[test]
     fn times_ago() {
-        assert_eq!([0, 59, 60, 3599, 3600, 86399, 86400, 1_209_599, 1_209_600].map(ago), ["now", "now", "1m ago", "59m ago", "1h ago", "23h ago", "1d ago", "13d ago", "2w ago"]);
+        assert_eq!(
+            [0, 59, 60, 3599, 3600, 86399, 86400, 1_209_599, 1_209_600].map(ago),
+            [
+                "now", "now", "1m ago", "59m ago", "1h ago", "23h ago", "1d ago", "13d ago",
+                "2w ago"
+            ]
+        );
     }
 }

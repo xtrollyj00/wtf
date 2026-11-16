@@ -9,7 +9,9 @@ use wtf_core::workspace::Workspace;
 use wtf_core::{radix, session};
 
 fn open() -> Workspace {
-    let mut ws = Workspace::open(format!("{}/../tests/data/enum.fst", env!("CARGO_MANIFEST_DIR")).as_ref()).unwrap();
+    let mut ws =
+        Workspace::open(format!("{}/../tests/data/enum.fst", env!("CARGO_MANIFEST_DIR")).as_ref())
+            .unwrap();
     run(&mut ws, "add top.state top.count").unwrap();
     run(&mut ws, "select state").unwrap();
     ws
@@ -17,26 +19,43 @@ fn open() -> Workspace {
 
 /// The selected row's value at `t` ns, as the row shows it.
 fn shown(ws: &Workspace, t: u64) -> String {
-    let Row::Signal(s) = &ws.rows[ws.sel] else { panic!() };
-    rows::label(&ws.trace.vars[s.var], &s.look, &ws.trace.value_at(s.var, t).unwrap())
+    let Row::Signal(s) = &ws.rows[ws.sel] else {
+        panic!()
+    };
+    rows::label(
+        &ws.trace.vars[s.var],
+        &s.look,
+        &ws.trace.value_at(s.var, t).unwrap(),
+    )
 }
 
 #[test]
 fn shown_by_name() {
     let mut ws = open();
-    let Row::Signal(s) = &ws.rows[ws.sel] else { panic!() };
+    let Row::Signal(s) = &ws.rows[ws.sel] else {
+        panic!()
+    };
     assert_eq!(s.look.radix, radix::ENUM);
-    let all: Vec<String> = [0, 10, 20, 30, 40, 50].iter().map(|&t| shown(&ws, t)).collect();
+    let all: Vec<String> = [0, 10, 20, 30, 40, 50]
+        .iter()
+        .map(|&t| shown(&ws, t))
+        .collect();
     assert_eq!(all, ["IDLE", "READ", "WRITE", "DONE", "0x5", "0xX"]); // no name: hex
     run(&mut ws, "radix hex").unwrap();
     assert_eq!(shown(&ws, 10), "0x1");
     // r cycles through enum on a signal with names, and only there
     ws.set_radix(None).unwrap(); // bin
-    assert_eq!(radix::next(ws.rows[ws.sel].sig().unwrap().look.radix, 3, true), 2);
+    assert_eq!(
+        radix::next(ws.rows[ws.sel].sig().unwrap().look.radix, 3, true),
+        2
+    );
     run(&mut ws, "radix float").unwrap_err();
     run(&mut ws, "select count").unwrap();
     assert_eq!(ws.rows[ws.sel].sig().unwrap().look.radix, radix::DEFAULT);
-    assert_eq!(run(&mut ws, "radix enum"), Err("enum: the file names no values of this signal".into()));
+    assert_eq!(
+        run(&mut ws, "radix enum"),
+        Err("enum: the file names no values of this signal".into())
+    );
 }
 
 #[test]
@@ -51,7 +70,11 @@ fn searched_by_name() {
     ws.search("idle", true, 1).unwrap(); // IDLE at 0 is the first value, no change
     assert_eq!(ws.view.cursor, 60);
     // count has no names: READ is a signal name there, and there is none
-    assert!(ws.search("count == READ", true, 1).unwrap_err().contains("READ"));
+    assert!(
+        ws.search("count == READ", true, 1)
+            .unwrap_err()
+            .contains("READ")
+    );
 }
 
 #[test]
@@ -61,8 +84,13 @@ fn saved_only_when_not_enum() {
     assert!(!text.contains("radix"), "{text}");
     run(&mut ws, "radix hex").unwrap();
     let text = session::to_toml(&ws);
-    assert!(text.contains("signal = \"top.state\"\nradix = \"hex\""), "{text}");
-    let mut back = Workspace::open(format!("{}/../tests/data/enum.fst", env!("CARGO_MANIFEST_DIR")).as_ref()).unwrap();
+    assert!(
+        text.contains("signal = \"top.state\"\nradix = \"hex\""),
+        "{text}"
+    );
+    let mut back =
+        Workspace::open(format!("{}/../tests/data/enum.fst", env!("CARGO_MANIFEST_DIR")).as_ref())
+            .unwrap();
     assert_eq!(session::apply(&mut back, &text), Ok(vec![]));
     assert_eq!(back.rows, ws.rows);
 }
@@ -73,7 +101,9 @@ fn named_by_the_user() {
     let mut ws = open();
     run(&mut ws, "select count").unwrap();
     run(&mut ws, "names count 0=ZERO 0b1=ONE 'h2=TWO").unwrap();
-    let Row::Signal(s) = &ws.rows[ws.sel] else { panic!() };
+    let Row::Signal(s) = &ws.rows[ws.sel] else {
+        panic!()
+    };
     assert_eq!(s.look.radix, radix::ENUM);
     let all: Vec<String> = [0, 10, 20, 30].iter().map(|&t| shown(&ws, t)).collect();
     assert_eq!(all, ["ZERO", "ONE", "TWO", "0x3"]);
@@ -81,19 +111,35 @@ fn named_by_the_user() {
     assert_eq!(ws.view.cursor, 20);
     // saved, and given again on :e and from a session
     let text = session::to_toml(&ws);
-    assert!(text.contains("[[names]]\nsignal = \"top.count\"\nvalues = \"0=ZERO 0b1=ONE 'h2=TWO\"\n"), "{text}");
+    assert!(
+        text.contains("[[names]]\nsignal = \"top.count\"\nvalues = \"0=ZERO 0b1=ONE 'h2=TWO\"\n"),
+        "{text}"
+    );
     ws.reload().unwrap();
     assert_eq!(shown(&ws, 10), "ONE");
-    let mut back = Workspace::open(format!("{}/../tests/data/enum.fst", env!("CARGO_MANIFEST_DIR")).as_ref()).unwrap();
+    let mut back =
+        Workspace::open(format!("{}/../tests/data/enum.fst", env!("CARGO_MANIFEST_DIR")).as_ref())
+            .unwrap();
     assert!(session::apply(&mut back, &text).unwrap().is_empty());
     assert_eq!(session::to_toml(&back), text);
     // off: back to the default radix, no names
     run(&mut ws, "names count off").unwrap();
     assert_eq!(shown(&ws, 10), "0x1");
     assert!(!session::to_toml(&ws).contains("[[names]]"));
-    assert_eq!(run(&mut ws, "names count 9=NINE"), Err("9 doesn't fit in 3 bits".into()));
-    assert!(run(&mut ws, "names count ZERO").unwrap_err().starts_with("usage: :names"));
-    assert!(run(&mut ws, "names count[0] 1=ON").unwrap_err().contains("not a bit"));
+    assert_eq!(
+        run(&mut ws, "names count 9=NINE"),
+        Err("9 doesn't fit in 3 bits".into())
+    );
+    assert!(
+        run(&mut ws, "names count ZERO")
+            .unwrap_err()
+            .starts_with("usage: :names")
+    );
+    assert!(
+        run(&mut ws, "names count[0] 1=ON")
+            .unwrap_err()
+            .contains("not a bit")
+    );
 }
 
 /// Names given to a signal a rerun no longer has: `:e` reports them.
@@ -102,15 +148,29 @@ fn names_lost_on_reload() {
     let dir = std::env::temp_dir().join(format!("wtf-core-names-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let trace = dir.join("t.vcd");
-    let text = std::fs::read_to_string(format!("{}/../tests/data/simple.vcd", env!("CARGO_MANIFEST_DIR"))).unwrap();
+    let text = std::fs::read_to_string(format!(
+        "{}/../tests/data/simple.vcd",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .unwrap();
     std::fs::write(&trace, &text).unwrap();
     let mut ws = Workspace::open(&trace).unwrap();
     run(&mut ws, "names top.dma.state 0=IDLE").unwrap();
     // the simulation ran again, without dma
-    std::fs::write(&trace, text.lines().filter(|l| !l.contains("dma") && !l.ends_with('&')).map(|l| format!("{l}\n")).collect::<String>()).unwrap();
+    std::fs::write(
+        &trace,
+        text.lines()
+            .filter(|l| !l.contains("dma") && !l.ends_with('&'))
+            .map(|l| format!("{l}\n"))
+            .collect::<String>(),
+    )
+    .unwrap();
     let (msg, _) = ws.reload().unwrap();
     std::fs::remove_dir_all(&dir).unwrap();
-    assert_eq!(msg, "reloaded; not in trace: names of top.dma.state (unknown signal: top.dma.state (nearest: top.state, top.cpu.state))");
+    assert_eq!(
+        msg,
+        "reloaded; not in trace: names of top.dma.state (unknown signal: top.dma.state (nearest: top.state, top.cpu.state))"
+    );
 }
 
 /// The card lists the values taken, x left out, in value order with how often and their names
@@ -119,19 +179,54 @@ fn names_lost_on_reload() {
 fn values_taken() {
     let mut ws = open();
     let taken = ws.values_taken("state").unwrap();
-    let got: Vec<(&str, u64, Option<&str>)> = taken.iter().map(|t| (t.bits.as_str(), t.count, t.name.as_deref())).collect();
-    assert_eq!(got, [("0", 2, Some("IDLE")), ("1", 1, Some("READ")), ("10", 1, Some("WRITE")), ("11", 1, Some("DONE")), ("101", 1, None)]);
-    let count: Vec<String> = ws.values_taken("count").unwrap().into_iter().map(|t| t.bits).collect();
+    let got: Vec<(&str, u64, Option<&str>)> = taken
+        .iter()
+        .map(|t| (t.bits.as_str(), t.count, t.name.as_deref()))
+        .collect();
+    assert_eq!(
+        got,
+        [
+            ("0", 2, Some("IDLE")),
+            ("1", 1, Some("READ")),
+            ("10", 1, Some("WRITE")),
+            ("11", 1, Some("DONE")),
+            ("101", 1, None)
+        ]
+    );
+    let count: Vec<String> = ws
+        .values_taken("count")
+        .unwrap()
+        .into_iter()
+        .map(|t| t.bits)
+        .collect();
     assert_eq!(count, ["0", "1", "10", "11", "100", "101", "110", "111"]);
     assert!(ws.values_taken("state[1]").is_err());
     // a name left empty is none; none at all is `off`
-    let line = wtf_core::workspace::names_line("top.count", &[("1".into(), "ONE".into()), ("10".into(), " ".into()), ("101".into(), "FIVE".into())]);
+    let line = wtf_core::workspace::names_line(
+        "top.count",
+        &[
+            ("1".into(), "ONE".into()),
+            ("10".into(), " ".into()),
+            ("101".into(), "FIVE".into()),
+        ],
+    );
     assert_eq!(line, "names top.count 0x1=ONE 0x5=FIVE");
     run(&mut ws, &line).unwrap();
-    assert_eq!(ws.values_taken("count").unwrap()[5].name.as_deref(), Some("FIVE"));
-    assert_eq!(wtf_core::workspace::names_line("top.count", &[]), "names top.count off");
+    assert_eq!(
+        ws.values_taken("count").unwrap()[5].name.as_deref(),
+        Some("FIVE")
+    );
+    assert_eq!(
+        wtf_core::workspace::names_line("top.count", &[]),
+        "names top.count off"
+    );
     // more values than a card holds: name some with :names
-    let many = (0..300u64).map(|t| (t, wtf_core::trace::Val::Bits(format!("{t:016b}")))).collect();
+    let many = (0..300u64)
+        .map(|t| (t, wtf_core::trace::Val::Bits(format!("{t:016b}"))))
+        .collect();
     ws.trace.add_computed("top.wide", Some(16), many).unwrap();
-    assert_eq!(ws.values_taken("top.wide").unwrap_err(), "top.wide takes more than 256 values; name some with :names");
+    assert_eq!(
+        ws.values_taken("top.wide").unwrap_err(),
+        "top.wide takes more than 256 values; name some with :names"
+    );
 }

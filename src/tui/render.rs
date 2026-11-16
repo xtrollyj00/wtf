@@ -1,15 +1,15 @@
 //! The terminal UI's screen (spec §4, §14): the workspace's rows (`draw`), with the signal panel,
 //! the `?` box, the launch guide, the status line and the command line around them.
 
+use crate::draw::{self, ROW_LINES, gl, pal, put};
 use crate::tui::app::{App, Held, Mode};
 use crate::tui::keys::Action as A;
-use crate::draw::{self, gl, pal, put, ROW_LINES};
-use wtf_core::rows::Row;
-use wtf_core::time;
-use wtf_core::view::View;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
+use wtf_core::rows::Row;
+use wtf_core::time;
+use wtf_core::view::View;
 
 /// Draws the whole screen. Returns where the terminal cursor goes, if anywhere.
 pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
@@ -18,7 +18,10 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
         return None;
     }
     let body = h - 1;
-    app.hit = crate::tui::app::Hit { body, ..Default::default() };
+    app.hit = crate::tui::app::Hit {
+        body,
+        ..Default::default()
+    };
     app.note_msg();
     // computed signals made since (`:signal`, a slice named in a search)
     if app.panel.version != app.ws.trace.version {
@@ -26,7 +29,11 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
     }
     // the signal panel takes the left of the screen; the rows are drawn beside it
     // (not on screens too small to hold it)
-    let pw = if app.panel_shown() && w >= 30 && body >= 4 { (w / 3).clamp(24, 48).min(w / 2) } else { 0 };
+    let pw = if app.panel_shown() && w >= 30 && body >= 4 {
+        (w / 3).clamp(24, 48).min(w / 2)
+    } else {
+        0
+    };
     app.hit.x0 = pw;
     let mut right = Buffer::empty(Rect::new(0, 0, (w - pw) as u16, h as u16));
     if app.ws.rows.is_empty() {
@@ -43,18 +50,45 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
     buf.merge(&right);
     // a group's name being typed: a caret after it on its header (spec §6)
     if let Some(n) = &app.naming
-        && let Some(&(ly, _, _)) = app.hit.lines.iter().find(|(_, (r, b), _)| *r == n.header && b.is_none())
+        && let Some(&(ly, _, _)) = app
+            .hit
+            .lines
+            .iter()
+            .find(|(_, (r, b), _)| *r == n.header && b.is_none())
     {
         let y = (ly + 1).min(body.saturating_sub(1));
-        let end = (pw..pw + app.hit.name_w).rev().find(|&x| !buf[(x as u16, y as u16)].symbol().trim().is_empty()).map_or(pw, |x| x + 1);
+        let end = (pw..pw + app.hit.name_w)
+            .rev()
+            .find(|&x| !buf[(x as u16, y as u16)].symbol().trim().is_empty())
+            .map_or(pw, |x| x + 1);
         if end < w {
-            buf[(end as u16, y as u16)].set_char(' ').set_style(Style::new().add_modifier(Modifier::REVERSED));
+            buf[(end as u16, y as u16)]
+                .set_char(' ')
+                .set_style(Style::new().add_modifier(Modifier::REVERSED));
         }
     }
     // a row being moved, lifted: its name in the accent, its lines tinted (spec §2 "Drags")
-    if let Some(Held::Move { row, len, moved: true, .. }) = app.held {
-        let name = if pal().mono { Style::new().add_modifier(Modifier::REVERSED) } else { Style::new().bg(pal().cursor).fg(pal().cursor_text).add_modifier(Modifier::BOLD) };
-        for &(ly, _, _) in app.hit.lines.iter().filter(|(_, (r, _), _)| (row..row + len).contains(r)) {
+    if let Some(Held::Move {
+        row,
+        len,
+        moved: true,
+        ..
+    }) = app.held
+    {
+        let name = if pal().mono {
+            Style::new().add_modifier(Modifier::REVERSED)
+        } else {
+            Style::new()
+                .bg(pal().cursor)
+                .fg(pal().cursor_text)
+                .add_modifier(Modifier::BOLD)
+        };
+        for &(ly, _, _) in app
+            .hit
+            .lines
+            .iter()
+            .filter(|(_, (r, _), _)| (row..row + len).contains(r))
+        {
             for y in (ly..ly + ROW_LINES).filter(|&y| y < body) {
                 for x in pw..w {
                     let cell = &mut buf[(x as u16, y as u16)];
@@ -67,21 +101,55 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
         }
     }
     // a zoom being dragged: its columns tinted as the marks are (spec §2 "Drags")
-    if let Some(Held::Zoom { from, to, moved: true, .. }) = &app.held {
-        for x in (app.wave_x + *from.min(to) as usize..=app.wave_x + *from.max(to) as usize).filter(|&x| x < w) {
+    if let Some(Held::Zoom {
+        from,
+        to,
+        moved: true,
+        ..
+    }) = &app.held
+    {
+        for x in (app.wave_x + *from.min(to) as usize..=app.wave_x + *from.max(to) as usize)
+            .filter(|&x| x < w)
+        {
             (0..body).for_each(|y| _ = buf[(x as u16, y as u16)].set_bg(pal().cursor_dim));
         }
     }
-    let search = if pw > 0 { panel(app, buf, pw, body) } else { None };
+    let search = if pw > 0 {
+        panel(app, buf, pw, body)
+    } else {
+        None
+    };
     if let (label, Some((x, y))) = app.drag_label() {
         // what a drop adds, beside the pointer
         let text = format!(" + {label} ");
         let x = (x + 1).min(w.saturating_sub(text.chars().count()));
-        put(buf, x, y, &text, Style::new().bg(pal().cursor).fg(pal().cursor_text).add_modifier(Modifier::BOLD));
+        put(
+            buf,
+            x,
+            y,
+            &text,
+            Style::new()
+                .bg(pal().cursor)
+                .fg(pal().cursor_text)
+                .add_modifier(Modifier::BOLD),
+        );
     }
     // under what has the keys, so they don't show around its edges
-    let covered = app.help || app.examine.is_some() || app.records.is_some() || app.browser.is_some() || app.messages.is_some() || app.menu.is_some() || app.leader.is_some() || app.picker.is_some() || app.form.is_some() || app.decodes.is_some();
-    app.hit.notes = if covered { Vec::new() } else { notes(app, buf, w, body) };
+    let covered = app.help
+        || app.examine.is_some()
+        || app.records.is_some()
+        || app.browser.is_some()
+        || app.messages.is_some()
+        || app.menu.is_some()
+        || app.leader.is_some()
+        || app.picker.is_some()
+        || app.form.is_some()
+        || app.decodes.is_some();
+    app.hit.notes = if covered {
+        Vec::new()
+    } else {
+        notes(app, buf, w, body)
+    };
     let drawn = app.hit.notes.len();
     app.hit.unshown = drawn == 0 && !app.shown_notes(std::time::Instant::now()).is_empty();
     if app.help {
@@ -91,19 +159,54 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
     }
     if let Some(ex) = &app.examine {
         // as a hover: beside the cursor, under the selected row
-        let x = app.wave_x + app.ws.view.col_of(app.ws.view.cursor).map_or(0, |c| c as usize);
-        let y = app.hit.lines.iter().find(|(_, (r, b), _)| *r == app.ws.sel && *b == app.ws.bit).map(|l| l.0);
-        let nw = ex.lines.iter().map(|(n, _)| n.chars().count()).max().unwrap_or(0);
+        let x = app.wave_x
+            + app
+                .ws
+                .view
+                .col_of(app.ws.view.cursor)
+                .map_or(0, |c| c as usize);
+        let y = app
+            .hit
+            .lines
+            .iter()
+            .find(|(_, (r, b), _)| *r == app.ws.sel && *b == app.ws.bit)
+            .map(|l| l.0);
+        let nw = ex
+            .lines
+            .iter()
+            .map(|(n, _)| n.chars().count())
+            .max()
+            .unwrap_or(0);
         let name = Style::new().fg(pal().hues[5]);
-        let lines: Vec<Line> = ex.lines.iter().map(|(n, v)| match n.is_empty() {
-            true => vec![(v.clone(), Style::new())],
-            false => vec![(format!("{n:<nw$}  "), name), (v.clone(), Style::new())],
-        }).collect();
+        let lines: Vec<Line> = ex
+            .lines
+            .iter()
+            .map(|(n, v)| match n.is_empty() {
+                true => vec![(v.clone(), Style::new())],
+                false => vec![(format!("{n:<nw$}  "), name), (v.clone(), Style::new())],
+            })
+            .collect();
         let title = match draw::kind(&app.ws, ex.of.0, ex.of.1) {
-            Some((c, col)) => vec![(format!("{c} "), Style::new().fg(col)), (ex.title.clone(), Style::new().fg(pal().cursor).add_modifier(Modifier::BOLD))],
+            Some((c, col)) => vec![
+                (format!("{c} "), Style::new().fg(col)),
+                (
+                    ex.title.clone(),
+                    Style::new().fg(pal().cursor).add_modifier(Modifier::BOLD),
+                ),
+            ],
             None => float_title(' ', &ex.title),
         };
-        app.hit.boxed = boxed(buf, w, body, &title, &format!("{}{}", icon_text(draw::icon::CLOCK), ex.at), &lines, "e Esc close", &mut app.scroll, y.map(|y| (x, y)));
+        app.hit.boxed = boxed(
+            buf,
+            w,
+            body,
+            &title,
+            &format!("{}{}", icon_text(draw::icon::CLOCK), ex.at),
+            &lines,
+            "e Esc close",
+            &mut app.scroll,
+            y.map(|y| (x, y)),
+        );
     }
     if let Some(r) = &mut app.records {
         // the title line and a blank, then as many lines as fit; records scroll to show the
@@ -119,19 +222,59 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
             r.top = r.hl + 1 - r.page;
         }
         // as wide as the widest line, so the box keeps its size while scrolling
-        let ww = r.items.iter().map(|i| i.1.chars().count() + 2).max().unwrap_or(0);
-        let mut lines = if text { Vec::new() } else { vec![format!("{:<ww$}", r.title)] };
+        let ww = r
+            .items
+            .iter()
+            .map(|i| i.1.chars().count() + 2)
+            .max()
+            .unwrap_or(0);
+        let mut lines = if text {
+            Vec::new()
+        } else {
+            vec![format!("{:<ww$}", r.title)]
+        };
         for (k, (_, l)) in r.items.iter().enumerate().skip(r.top).take(r.page) {
             lines.push(match text {
                 true => format!("{l:<ww$}"),
-                false => format!("{}{l}", if k == r.hl { format!("{} ", gl().hl) } else { "  ".into() }),
+                false => format!(
+                    "{}{l}",
+                    if k == r.hl {
+                        format!("{} ", gl().hl)
+                    } else {
+                        "  ".into()
+                    }
+                ),
             });
         }
         let shown = (r.top..r.items.len()).take(r.page);
-        app.hit.boxed = boxed(buf, w, body, &float_title(if text { draw::icon::INFO } else { draw::icon::RECORD }, &r.name), "", &plain(&lines), if text { "j k scroll  Esc close" } else { "Enter jump  Esc close" }, &mut 0, None);
+        app.hit.boxed = boxed(
+            buf,
+            w,
+            body,
+            &float_title(
+                if text {
+                    draw::icon::INFO
+                } else {
+                    draw::icon::RECORD
+                },
+                &r.name,
+            ),
+            "",
+            &plain(&lines),
+            if text {
+                "j k scroll  Esc close"
+            } else {
+                "Enter jump  Esc close"
+            },
+            &mut 0,
+            None,
+        );
         if let Some(b) = app.hit.boxed.filter(|_| !text) {
             // under the title line
-            app.hit.records = shown.enumerate().map(|(k, i)| (b.y as usize + 2 + k, i)).collect();
+            app.hit.records = shown
+                .enumerate()
+                .map(|(k, i)| (b.y as usize + 2 + k, i))
+                .collect();
         }
     }
     crate::tui::browser::draw(app, buf, w, body);
@@ -163,21 +306,61 @@ fn panel(app: &mut App, buf: &mut Buffer, pw: usize, body: usize) -> Option<(u16
     let inner = pw - 2;
     if pal().mono {
         // no background to tell the panel by: a border
-        put(buf, 0, 0, &format!("{} signals {}{}", gl().border[0], gl().border[4].to_string().repeat(pw.saturating_sub(11)), gl().border[1]), dim);
+        put(
+            buf,
+            0,
+            0,
+            &format!(
+                "{} signals {}{}",
+                gl().border[0],
+                gl().border[4].to_string().repeat(pw.saturating_sub(11)),
+                gl().border[1]
+            ),
+            dim,
+        );
         for y in 1..body.saturating_sub(1) {
-            put(buf, 0, y, &format!("{v}{}{v}", " ".repeat(inner), v = gl().border[5]), dim);
+            put(
+                buf,
+                0,
+                y,
+                &format!("{v}{}{v}", " ".repeat(inner), v = gl().border[5]),
+                dim,
+            );
         }
-        put(buf, 0, body.saturating_sub(1), &format!("{}{}{}", gl().border[2], gl().border[4].to_string().repeat(inner), gl().border[3]), dim);
+        put(
+            buf,
+            0,
+            body.saturating_sub(1),
+            &format!(
+                "{}{}{}",
+                gl().border[2],
+                gl().border[4].to_string().repeat(inner),
+                gl().border[3]
+            ),
+            dim,
+        );
     } else {
         let st = Style::new().bg(pal().panel).fg(Color::Reset);
         for y in 0..body {
             put(buf, 0, y, &" ".repeat(pw), st);
         }
         // titled as a card is (spec §14)
-        put(buf, 2, 0, &format!("{}signals", icon_text(draw::icon::WIRE)), st.fg(pal().cursor).add_modifier(Modifier::BOLD));
+        put(
+            buf,
+            2,
+            0,
+            &format!("{}signals", icon_text(draw::icon::WIRE)),
+            st.fg(pal().cursor).add_modifier(Modifier::BOLD),
+        );
     }
     if !app.panel.marked.is_empty() {
-        put(buf, 2, body.saturating_sub(1), &format!(" {} marked ", app.panel.marked.len()), Style::new().fg(pal().cursor));
+        put(
+            buf,
+            2,
+            body.saturating_sub(1),
+            &format!(" {} marked ", app.panel.marked.len()),
+            Style::new().fg(pal().cursor),
+        );
     }
 
     let p = &mut app.panel;
@@ -186,9 +369,21 @@ fn panel(app: &mut App, buf: &mut Buffer, pw: usize, body: usize) -> Option<(u16
         None if p.pattern.is_empty() => put(buf, 2, 1, "/ to search", dim),
         None => {
             put(buf, 2, 1, &format!("/{}", p.pattern), dim);
-            let pos = p.match_pos().map_or(String::new(), |k| format!("{k}/{}", p.matches.len()));
-            let count = if pos.is_empty() { format!("{}", p.matches.len()) } else { pos };
-            put(buf, (pw - 2).saturating_sub(count.chars().count() + 1), 1, &format!(" {count}"), dim);
+            let pos = p
+                .match_pos()
+                .map_or(String::new(), |k| format!("{k}/{}", p.matches.len()));
+            let count = if pos.is_empty() {
+                format!("{}", p.matches.len())
+            } else {
+                pos
+            };
+            put(
+                buf,
+                (pw - 2).saturating_sub(count.chars().count() + 1),
+                1,
+                &format!(" {count}"),
+                dim,
+            );
         }
     }
     let range = p.range();
@@ -228,14 +423,32 @@ fn panel(app: &mut App, buf: &mut Buffer, pw: usize, body: usize) -> Option<(u16
         let text = format!("{}{mark} {ic}{}{whole}", " ".repeat(2 * n.depth), n.name);
         // too long: keep the end, where the leaf name is
         let len = text.chars().count();
-        let text = if len > inner - 1 { format!("{}{}", gl().cut, text.chars().skip(len + 2 - inner).collect::<String>()) } else { text };
-        let marked = n.var.or(n.whole).is_some_and(|v| app.panel.marked.contains(&v));
+        let text = if len > inner - 1 {
+            format!(
+                "{}{}",
+                gl().cut,
+                text.chars().skip(len + 2 - inner).collect::<String>()
+            )
+        } else {
+            text
+        };
+        let marked = n
+            .var
+            .or(n.whole)
+            .is_some_and(|v| app.panel.marked.contains(&v));
         let st = match (Some(i) == cur, marked) {
-            (true, _) => Style::new().bg(pal().selected).fg(pal().cursor).add_modifier(Modifier::BOLD | pal().accent()),
+            (true, _) => Style::new()
+                .bg(pal().selected)
+                .fg(pal().cursor)
+                .add_modifier(Modifier::BOLD | pal().accent()),
             (false, true) => Style::new().fg(pal().cursor),
             (false, false) => Style::new(),
         };
-        let st = if range.contains(&i) { st.bg(pal().selected) } else { st };
+        let st = if range.contains(&i) {
+            st.bg(pal().selected)
+        } else {
+            st
+        };
         put(buf, 1, y, &format!(" {text:<w$}", w = inner - 1), st);
         if let Some((c, col)) = kind.filter(|_| len < inner) {
             put(buf, 4 + 2 * n.depth, y, &c.to_string(), st.fg(col));
@@ -254,14 +467,51 @@ pub(crate) type Examples = &'static [(&'static str, &'static str)];
 /// headings, and a few things to type, each with what it does. Normal mode's keys are the
 /// keymap's, so a key changed in the config file shows here (spec §19 "Keys").
 pub(crate) fn help_text(app: &App) -> (&'static str, Vec<Section>, &'static str, Examples) {
-    let fixed = |keys: &[(&str, &'static str)]| keys.iter().map(|&(k, d)| (k.to_string(), d)).collect::<Vec<_>>();
+    let fixed = |keys: &[(&str, &'static str)]| {
+        keys.iter()
+            .map(|&(k, d)| (k.to_string(), d))
+            .collect::<Vec<_>>()
+    };
     if app.panel_shown() {
         let keys = vec![
-            ("Move", fixed(&[("j k", "move"), ("l h", "open / close a scope"), ("gg G", "first / last line"), ("/", "search paths"), ("n N", "next / previous match")])),
-            ("Mark", fixed(&[("Space", "mark a signal or scope"), ("V", "mark a range"), ("Ctrl-a", "mark all matches")])),
-            ("Add", fixed(&[("Enter", "add as rows"), ("Ctrl-g", "add as a group"), ("u Ctrl-r", "undo / redo"), ("a", "close"), ("Esc", "clear marks / close")])),
+            (
+                "Move",
+                fixed(&[
+                    ("j k", "move"),
+                    ("l h", "open / close a scope"),
+                    ("gg G", "first / last line"),
+                    ("/", "search paths"),
+                    ("n N", "next / previous match"),
+                ]),
+            ),
+            (
+                "Mark",
+                fixed(&[
+                    ("Space", "mark a signal or scope"),
+                    ("V", "mark a range"),
+                    ("Ctrl-a", "mark all matches"),
+                ]),
+            ),
+            (
+                "Add",
+                fixed(&[
+                    ("Enter", "add as rows"),
+                    ("Ctrl-g", "add as a group"),
+                    ("u Ctrl-r", "undo / redo"),
+                    ("a", "close"),
+                    ("Esc", "clear marks / close"),
+                ]),
+            ),
         ];
-        return ("signal panel", keys, "", &[("", "New signals go below the selected row, at the accent line.")]);
+        return (
+            "signal panel",
+            keys,
+            "",
+            &[(
+                "",
+                "New signals go below the selected row, at the accent line.",
+            )],
+        );
     }
     let m = &app.keymap;
     let k = |acts: &[A], d: &'static str| {
@@ -270,7 +520,9 @@ pub(crate) fn help_text(app: &App) -> (&'static str, Vec<Section>, &'static str,
         let rest: Option<Vec<&str>> = keys.iter().map(|k| k.strip_prefix("Ctrl-")).collect();
         match rest {
             Some(r) if r.len() > 1 => (format!("Ctrl-{}", r.join("/")), d),
-            _ if keys.len() == 2 && keys[1] == format!("Shift-{}", keys[0]) => (format!("{0}/S-{0}", keys[0]), d),
+            _ if keys.len() == 2 && keys[1] == format!("Shift-{}", keys[0]) => {
+                (format!("{0}/S-{0}", keys[0]), d)
+            }
             _ => (keys.join(" "), d),
         }
     };
@@ -312,7 +564,13 @@ pub(crate) fn help_text(app: &App) -> (&'static str, Vec<Section>, &'static str,
                 k(&[A::Undo, A::Redo], "undo / redo"),
             ],
         ),
-        ("Search", vec![k(&[A::Search], "search"), k(&[A::NextMatch, A::PrevMatch], "next / previous match")]),
+        (
+            "Search",
+            vec![
+                k(&[A::Search], "search"),
+                k(&[A::NextMatch, A::PrevMatch], "next / previous match"),
+            ],
+        ),
         (
             "Marks",
             vec![
@@ -322,13 +580,27 @@ pub(crate) fn help_text(app: &App) -> (&'static str, Vec<Section>, &'static str,
                 k(&[A::JumpBack], "back before the jump"),
             ],
         ),
-        ("Other", vec![k(&[A::Command], "command"), k(&[A::Leader], "leader menu"), (format!("5{} 3{}", m.show(A::Right), m.show(A::NextChange)), "a count repeats a key"), k(&[A::Quit], "quit")]),
+        (
+            "Other",
+            vec![
+                k(&[A::Command], "command"),
+                k(&[A::Leader], "leader menu"),
+                (
+                    format!("5{} 3{}", m.show(A::Right), m.show(A::NextChange)),
+                    "a count repeats a key",
+                ),
+                k(&[A::Quit], "quit"),
+            ],
+        ),
     ];
     let search: Examples = &[
         ("/0x40", "the selected row's value, in any radix"),
         ("/x  /z", "unknown, high impedance"),
         ("/valid && ready && data == 0x40", "several signals at once"),
-        ("/@clk fell(valid) && !past(ready)", "sampled at clk; also rose() stable()"),
+        (
+            "/@clk fell(valid) && !past(ready)",
+            "sampled at clk; also rose() stable()",
+        ),
     ];
     ("keys", keys, "Search expressions", search)
 }
@@ -344,10 +616,24 @@ fn help(app: &App, buf: &mut Buffer, w: usize, body: usize, scroll: &mut usize) 
     let key = Style::new().fg(pal().cursor).add_modifier(Modifier::BOLD);
     let dim = Style::new().fg(pal().dim);
     // each column's keys as wide as its widest
-    let kw = |sec: Keys| sec.iter().flat_map(|(_, k)| k.iter()).map(|(k, _)| k.chars().count()).max().unwrap_or(0);
-    let width = |sec: Keys| sec.iter().flat_map(|(_, k)| k.iter()).map(|(_, d)| kw(sec) + 2 + d.chars().count()).max().unwrap_or(0);
+    let kw = |sec: Keys| {
+        sec.iter()
+            .flat_map(|(_, k)| k.iter())
+            .map(|(k, _)| k.chars().count())
+            .max()
+            .unwrap_or(0)
+    };
+    let width = |sec: Keys| {
+        sec.iter()
+            .flat_map(|(_, k)| k.iter())
+            .map(|(_, d)| kw(sec) + 2 + d.chars().count())
+            .max()
+            .unwrap_or(0)
+    };
     const GAP: usize = 3;
-    let lines_of = |sec: Keys| sec.iter().map(|(_, k)| k.len() + 1).sum::<usize>() + sec.len().saturating_sub(1);
+    let lines_of = |sec: Keys| {
+        sec.iter().map(|(_, k)| k.len() + 1).sum::<usize>() + sec.len().saturating_sub(1)
+    };
     // the most columns that fit side by side: sections fill them in order, each about as tall
     let mut cols: Vec<Keys> = vec![sections];
     for n in (2..=3).rev() {
@@ -368,11 +654,19 @@ fn help(app: &App, buf: &mut Buffer, w: usize, body: usize, scroll: &mut usize) 
     }
     let mut lines: Vec<Line> = Vec::new();
     for (x, col) in cols.iter().enumerate() {
-        let (cw, kw) = (width(col) + if x + 1 < cols.len() { GAP } else { 0 }, kw(col));
+        let (cw, kw) = (
+            width(col) + if x + 1 < cols.len() { GAP } else { 0 },
+            kw(col),
+        );
         let mut y = 0;
         for (i, (head, keys)) in col.iter().enumerate() {
             let mut text = vec![vec![(format!("{head:<cw$}"), dim)]];
-            text.extend(keys.iter().map(|(k, d)| vec![(format!("{k:<kw$}  "), key), (format!("{d:<w$}", w = cw - kw - 2), Style::new())]));
+            text.extend(keys.iter().map(|(k, d)| {
+                vec![
+                    (format!("{k:<kw$}  "), key),
+                    (format!("{d:<w$}", w = cw - kw - 2), Style::new()),
+                ]
+            }));
             if i > 0 {
                 text.insert(0, vec![(" ".repeat(cw), Style::new())]);
             }
@@ -396,11 +690,24 @@ fn help(app: &App, buf: &mut Buffer, w: usize, body: usize, scroll: &mut usize) 
         if !heading.is_empty() {
             lines.push(vec![(heading.to_string(), dim)]);
         }
-        let ew = examples.iter().map(|(e, _)| e.chars().count()).max().unwrap_or(0);
+        let ew = examples
+            .iter()
+            .map(|(e, _)| e.chars().count())
+            .max()
+            .unwrap_or(0);
         // too narrow for both side by side: what it does under each
-        let stacked = examples.iter().any(|(_, d)| ew + 2 + d.chars().count() > w.saturating_sub(4));
+        let stacked = examples
+            .iter()
+            .any(|(_, d)| ew + 2 + d.chars().count() > w.saturating_sub(4));
         for (e, d) in examples {
-            let ex = (if stacked { e.to_string() } else { format!("{e:<ew$}  ") }, Style::new().fg(pal().cursor));
+            let ex = (
+                if stacked {
+                    e.to_string()
+                } else {
+                    format!("{e:<ew$}  ")
+                },
+                Style::new().fg(pal().cursor),
+            );
             match (e.is_empty(), stacked) {
                 (true, _) => lines.push(vec![(d.to_string(), dim)]),
                 (false, true) => lines.extend([vec![ex], vec![(format!("  {d}"), dim)]]),
@@ -408,7 +715,17 @@ fn help(app: &App, buf: &mut Buffer, w: usize, body: usize, scroll: &mut usize) 
             }
         }
     }
-    boxed(buf, w, body, &float_title(draw::icon::KEYS, &format!("help {} {title}", gl().dot)), "", &lines, "? Esc close", scroll, None)
+    boxed(
+        buf,
+        w,
+        body,
+        &float_title(draw::icon::KEYS, &format!("help {} {title}", gl().dot)),
+        "",
+        &lines,
+        "? Esc close",
+        scroll,
+        None,
+    )
 }
 
 /// A float (spec §2 `e`, `?`): a card with the title and `right` in its top border, the keys in
@@ -416,7 +733,17 @@ fn help(app: &App, buf: &mut Buffer, w: usize, body: usize, scroll: &mut usize) 
 /// else in the middle. Too long for the screen it takes the whole width and scrolls from `top`,
 /// its bottom border saying which lines show. Returns where it was drawn.
 #[allow(clippy::too_many_arguments)]
-fn boxed(buf: &mut Buffer, w: usize, body: usize, title: &[(String, Style)], right: &str, lines: &[Line], keys: &str, top: &mut usize, at: Option<(usize, usize)>) -> Option<Rect> {
+fn boxed(
+    buf: &mut Buffer,
+    w: usize,
+    body: usize,
+    title: &[(String, Style)],
+    right: &str,
+    lines: &[Line],
+    keys: &str,
+    top: &mut usize,
+    at: Option<(usize, usize)>,
+) -> Option<Rect> {
     let all = lines.len();
     let room = body.saturating_sub(2);
     let full = all > room && room > 0;
@@ -425,15 +752,31 @@ fn boxed(buf: &mut Buffer, w: usize, body: usize, title: &[(String, Style)], rig
     if full {
         *top = (*top).min(all - room);
         lines = lines[*top..*top + room].to_vec();
-        footer = format!("{}{}{} of {all}  j k scroll  {keys}", *top + 1, gl().dash, *top + room);
+        footer = format!(
+            "{}{}{} of {all}  j k scroll  {keys}",
+            *top + 1,
+            gl().dash,
+            *top + room
+        );
     } else {
         *top = 0;
     }
     let len = |l: &Line| l.iter().map(|(s, _)| s.chars().count()).sum::<usize>();
-    let head = title.iter().map(|(t, _)| t.chars().count()).sum::<usize>() + right.chars().count() + 8;
-    let widest = lines.iter().map(len).max().unwrap_or(0).max(head).max(footer.chars().count() + 6);
+    let head =
+        title.iter().map(|(t, _)| t.chars().count()).sum::<usize>() + right.chars().count() + 8;
+    let widest = lines
+        .iter()
+        .map(len)
+        .max()
+        .unwrap_or(0)
+        .max(head)
+        .max(footer.chars().count() + 6);
     // margins too narrow to read what is under them, or too long for the screen: the whole width
-    let inner = if widest + 4 + 12 > w || full { w.saturating_sub(4) } else { widest };
+    let inner = if widest + 4 + 12 > w || full {
+        w.saturating_sub(4)
+    } else {
+        widest
+    };
     let (bw, bh) = (inner + 4, lines.len() + 2);
     if bw > w || bh > body || bh < 3 {
         return None;
@@ -441,8 +784,20 @@ fn boxed(buf: &mut Buffer, w: usize, body: usize, title: &[(String, Style)], rig
     let below = |y: usize| y + draw::ROW_LINES;
     let (x0, y0) = match at.filter(|_| !full) {
         Some((x, y)) if below(y) + bh <= body || y >= bh => {
-            let x0 = if x + 2 + bw <= w { x + 2 } else { x.saturating_sub(bw + 1) }.min(w - bw);
-            (x0, if below(y) + bh <= body { below(y) } else { y - bh })
+            let x0 = if x + 2 + bw <= w {
+                x + 2
+            } else {
+                x.saturating_sub(bw + 1)
+            }
+            .min(w - bw);
+            (
+                x0,
+                if below(y) + bh <= body {
+                    below(y)
+                } else {
+                    y - bh
+                },
+            )
         }
         _ => ((w - bw) / 2, (body - bh) / 2),
     };
@@ -462,7 +817,10 @@ fn boxed(buf: &mut Buffer, w: usize, body: usize, title: &[(String, Style)], rig
 
 /// A float's title: an icon and the name in the accent.
 fn float_title(ic: char, name: &str) -> Vec<(String, Style)> {
-    vec![(format!("{}{name}", icon_text(ic)), Style::new().fg(pal().cursor).add_modifier(Modifier::BOLD))]
+    vec![(
+        format!("{}{name}", icon_text(ic)),
+        Style::new().fg(pal().cursor).add_modifier(Modifier::BOLD),
+    )]
 }
 
 /// The right click's menu (spec §2 "Menu"), with its corner at the pointer moved to fit, and
@@ -475,8 +833,20 @@ fn menu(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
         let sw = card_width(&sub.items);
         // right of the menu, or left where there is no room; a column apart, which each card
         // clears beside it
-        let x = if r.right() as usize + 1 + sw <= w { r.right() as usize + 1 } else { (r.x as usize).saturating_sub(sw + 1) };
-        if let Some(r) = card(buf, w, body, (x, r.y as usize + p), &sub.items, sub.hl, false) {
+        let x = if r.right() as usize + 1 + sw <= w {
+            r.right() as usize + 1
+        } else {
+            (r.x as usize).saturating_sub(sw + 1)
+        };
+        if let Some(r) = card(
+            buf,
+            w,
+            body,
+            (x, r.y as usize + p),
+            &sub.items,
+            sub.hl,
+            false,
+        ) {
             app.hit.menus.push(r);
         }
     }
@@ -501,14 +871,53 @@ fn notes(app: &App, buf: &mut Buffer, w: usize, body: usize) -> Vec<(Rect, std::
     for n in app.shown_notes(now).into_iter().take(3) {
         let f = crate::tui::app::note_fade(n, now);
         // the title (icon, word, colour), the tool at the right, the lines and their colours
-        let short = n.text.split_once(": ").filter(|(t, _)| !t.contains(' ') && t.chars().count() <= 16);
-        let (ic, word, col, right, body_lines): (char, String, Color, String, Vec<(String, Color)>) = match (&n.step, &n.who) {
-            (_, _) if n.err => (icon::ERROR, "error".into(), pal().unknown, String::new(), vec![(n.text.clone(), Color::Reset)]),
-            (Some((tool, ask, answer)), Some(id)) => (icon::AGENT, id.clone(), pal().hues[4], tool.clone(), vec![(ask.clone(), Color::Reset), (answer.clone(), green)]),
-            (_, Some(id)) => (icon::AGENT, id.clone(), pal().hues[4], String::new(), vec![(n.text.clone(), Color::Reset)]),
+        let short = n
+            .text
+            .split_once(": ")
+            .filter(|(t, _)| !t.contains(' ') && t.chars().count() <= 16);
+        let (ic, word, col, right, body_lines): (
+            char,
+            String,
+            Color,
+            String,
+            Vec<(String, Color)>,
+        ) = match (&n.step, &n.who) {
+            (_, _) if n.err => (
+                icon::ERROR,
+                "error".into(),
+                pal().unknown,
+                String::new(),
+                vec![(n.text.clone(), Color::Reset)],
+            ),
+            (Some((tool, ask, answer)), Some(id)) => (
+                icon::AGENT,
+                id.clone(),
+                pal().hues[4],
+                tool.clone(),
+                vec![(ask.clone(), Color::Reset), (answer.clone(), green)],
+            ),
+            (_, Some(id)) => (
+                icon::AGENT,
+                id.clone(),
+                pal().hues[4],
+                String::new(),
+                vec![(n.text.clone(), Color::Reset)],
+            ),
             (_, None) => match short {
-                Some((t, rest)) => (icon::OK, t.into(), green, String::new(), vec![(rest.into(), Color::Reset)]),
-                None => (icon::INFO, String::new(), pal().dim, String::new(), vec![(n.text.clone(), Color::Reset)]),
+                Some((t, rest)) => (
+                    icon::OK,
+                    t.into(),
+                    green,
+                    String::new(),
+                    vec![(rest.into(), Color::Reset)],
+                ),
+                None => (
+                    icon::INFO,
+                    String::new(),
+                    pal().dim,
+                    String::new(),
+                    vec![(n.text.clone(), Color::Reset)],
+                ),
             },
         };
         let mut lines: Vec<(String, Color)> = Vec::new();
@@ -522,7 +931,15 @@ fn notes(app: &App, buf: &mut Buffer, w: usize, body: usize) -> Vec<(Rect, std::
             break;
         }
         drawn.push((Rect::new(x0 as u16, y as u16, nw as u16, bh as u16), n.at));
-        let edge = faded(if n.who.is_none() && !n.err { pal().dim } else { col }, f, false);
+        let edge = faded(
+            if n.who.is_none() && !n.err {
+                pal().dim
+            } else {
+                col
+            },
+            f,
+            false,
+        );
         let tcol = faded(col, f, false);
         let title_st = Style::new().fg(tcol).add_modifier(Modifier::BOLD);
         let mut title = Vec::new();
@@ -530,7 +947,14 @@ fn notes(app: &App, buf: &mut Buffer, w: usize, body: usize) -> Vec<(Rect, std::
             title.push((c.to_string(), title_st));
         }
         if !word.is_empty() {
-            title.push((if title.is_empty() { word } else { format!(" {word}") }, title_st));
+            title.push((
+                if title.is_empty() {
+                    word
+                } else {
+                    format!(" {word}")
+                },
+                title_st,
+            ));
         }
         let r = Rect::new(x0 as u16, y as u16, nw as u16, bh as u16);
         card_frame(buf, r, edge, &title, &right, "");
@@ -564,14 +988,36 @@ fn messages(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
     let y0 = body - bh;
     let st = card_style();
     let rule = Style::new().fg(pal().dim);
-    put(buf, 0, y0, &gl().card[4].to_string().repeat(w), if pal().mono { rule } else { rule.bg(pal().panel) });
+    put(
+        buf,
+        0,
+        y0,
+        &gl().card[4].to_string().repeat(w),
+        if pal().mono {
+            rule
+        } else {
+            rule.bg(pal().panel)
+        },
+    );
     for y in y0 + 1..body {
         put(buf, 0, y, &" ".repeat(w), st);
     }
     let acc = Style::new().fg(pal().cursor).add_modifier(Modifier::BOLD);
-    put(buf, 2, y0, &format!(" {}messages ", icon_text(icon::BELL)), st.patch(acc));
+    put(
+        buf,
+        2,
+        y0,
+        &format!(" {}messages ", icon_text(icon::BELL)),
+        st.patch(acc),
+    );
     let keys = " j k move  y copy  Esc close ";
-    put(buf, w.saturating_sub(keys.chars().count() + 2), y0, keys, st.fg(pal().dim));
+    put(
+        buf,
+        w.saturating_sub(keys.chars().count() + 2),
+        y0,
+        keys,
+        st.fg(pal().dim),
+    );
     let top = hl.saturating_sub(page - 1).min(app.notes.len() - page);
     let ix = if gl().icons { 2 } else { 0 };
     for (k, n) in app.notes.iter().enumerate().skip(top).take(page) {
@@ -592,11 +1038,35 @@ fn messages(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
             put(buf, 12, y, &c.to_string(), row.fg(col));
         }
         let who = n.who.as_deref().unwrap_or("you");
-        put(buf, 12 + ix, y, who, row.fg(col).add_modifier(Modifier::BOLD));
+        put(
+            buf,
+            12 + ix,
+            y,
+            who,
+            row.fg(col).add_modifier(Modifier::BOLD),
+        );
         let x = 12 + ix + who.chars().count().max(8) + 2;
         let room = w.saturating_sub(x + 1);
-        let text: String = if n.text.chars().count() > room { n.text.chars().take(room.saturating_sub(1)).chain([gl().cut]).collect() } else { n.text.clone() };
-        put(buf, x, y, &text, if on { row.add_modifier(Modifier::BOLD) } else { row });
+        let text: String = if n.text.chars().count() > room {
+            n.text
+                .chars()
+                .take(room.saturating_sub(1))
+                .chain([gl().cut])
+                .collect()
+        } else {
+            n.text.clone()
+        };
+        put(
+            buf,
+            x,
+            y,
+            &text,
+            if on {
+                row.add_modifier(Modifier::BOLD)
+            } else {
+                row
+            },
+        );
     }
     app.hit.boxed = Some(Rect::new(0, y0 as u16, w as u16, bh as u16));
 }
@@ -636,8 +1106,20 @@ fn wrap_text(text: &str, width: usize, max: usize) -> Vec<String> {
 /// A card (which-key, the leader menu, notifications): its background, a round border in
 /// `edge`, the title's parts set in the top border at the left, `right` dim in it at the right,
 /// `footer` dim in the bottom border at the right; a column cleared on each side.
-pub(super) fn card_frame(buf: &mut Buffer, r: Rect, edge: Color, title: &[(String, Style)], right: &str, footer: &str) {
-    let (x0, y0, bw, bh) = (r.x as usize, r.y as usize, r.width as usize, r.height as usize);
+pub(super) fn card_frame(
+    buf: &mut Buffer,
+    r: Rect,
+    edge: Color,
+    title: &[(String, Style)],
+    right: &str,
+    footer: &str,
+) {
+    let (x0, y0, bw, bh) = (
+        r.x as usize,
+        r.y as usize,
+        r.width as usize,
+        r.height as usize,
+    );
     let st = card_style();
     let b = gl().card;
     let w = buf.area.width as usize;
@@ -662,10 +1144,22 @@ pub(super) fn card_frame(buf: &mut Buffer, r: Rect, edge: Color, title: &[(Strin
         put(buf, x, y0, " ", st);
     }
     if !right.is_empty() {
-        put(buf, (x0 + bw).saturating_sub(right.chars().count() + 4), y0, &format!(" {right} "), st.fg(pal().dim));
+        put(
+            buf,
+            (x0 + bw).saturating_sub(right.chars().count() + 4),
+            y0,
+            &format!(" {right} "),
+            st.fg(pal().dim),
+        );
     }
     if !footer.is_empty() {
-        put(buf, (x0 + bw).saturating_sub(footer.chars().count() + 4), y0 + bh - 1, &format!(" {footer} "), st.fg(pal().dim));
+        put(
+            buf,
+            (x0 + bw).saturating_sub(footer.chars().count() + 4),
+            y0 + bh - 1,
+            &format!(" {footer} "),
+            st.fg(pal().dim),
+        );
     }
 }
 
@@ -691,7 +1185,11 @@ fn faded(c: Color, f: f32, bg: bool) -> Color {
 
 /// A card's inside: the panel's colour (none without colour, where the border tells it).
 pub(super) fn card_style() -> Style {
-    if pal().mono { Style::new() } else { Style::new().bg(pal().panel).fg(Color::Reset) }
+    if pal().mono {
+        Style::new()
+    } else {
+        Style::new().bg(pal().panel).fg(Color::Reset)
+    }
 }
 
 /// An icon and a space before a label, with the `nerd` glyphs (spec §14); nothing with the others.
@@ -711,7 +1209,11 @@ fn which_key(app: &App, buf: &mut Buffer, w: usize, body: usize) {
     let mut lines: Vec<Line> = Vec::new();
     let typed = app.pending();
     let count = typed.chars().all(|c| c.is_ascii_digit());
-    let next = if count { app.keymap.counted() } else { app.keymap.next(&app.typed_keys()) };
+    let next = if count {
+        app.keymap.counted()
+    } else {
+        app.keymap.next(&app.typed_keys())
+    };
     let mut group = if count { "times" } else { "" };
     for (k, a) in next {
         if group.is_empty() {
@@ -721,37 +1223,79 @@ fn which_key(app: &App, buf: &mut Buffer, w: usize, body: usize) {
             for (i, t) in ws.cursor_list() {
                 let (name, ic) = match i {
                     0 => ("cursor".into(), (icon::CLOCK, pal().hues[4])),
-                    _ if ws.labels[i].name.is_empty() => (format!("mark {}", i + 1), (icon::MARK, pal().bus)),
+                    _ if ws.labels[i].name.is_empty() => {
+                        (format!("mark {}", i + 1), (icon::MARK, pal().bus))
+                    }
                     _ => (ws.labels[i].name.clone(), (icon::MARK, pal().bus)),
                 };
-                lines.push((format!("{k}{}", i + 1), Some(ic), name, time::format(t, fpt)));
+                lines.push((
+                    format!("{k}{}", i + 1),
+                    Some(ic),
+                    name,
+                    time::format(t, fpt),
+                ));
             }
         } else {
             lines.push((k, None, Keymap::desc(a).into(), String::new()));
         }
     }
-    let ix = if gl().icons && lines.iter().any(|l| l.1.is_some()) { 2 } else { 0 };
+    let ix = if gl().icons && lines.iter().any(|l| l.1.is_some()) {
+        2
+    } else {
+        0
+    };
     let kw = lines.iter().map(|l| l.0.chars().count()).max().unwrap_or(0);
     let dw = lines.iter().map(|l| l.2.chars().count()).max().unwrap_or(0);
     let tw = lines.iter().map(|l| l.3.chars().count()).max().unwrap_or(0);
     let inner = kw + 3 + ix + dw + if tw > 0 { 3 + tw } else { 0 };
     let title = format!("{typed} {group}");
-    let (bw, bh) = ((inner + 4).max(title.chars().count() + 16), lines.len().min(body.saturating_sub(1)) + 2);
+    let (bw, bh) = (
+        (inner + 4).max(title.chars().count() + 16),
+        lines.len().min(body.saturating_sub(1)) + 2,
+    );
     if bw + 1 > w || bh > body || bh < 3 {
         return;
     }
-    let r = Rect::new((w - bw - 1) as u16, (body - bh) as u16, bw as u16, bh as u16);
+    let r = Rect::new(
+        (w - bw - 1) as u16,
+        (body - bh) as u16,
+        bw as u16,
+        bh as u16,
+    );
     let acc = Style::new().fg(pal().cursor).add_modifier(Modifier::BOLD);
-    card_frame(buf, r, pal().dim, &[(typed.clone(), acc), (format!(" {group}"), acc)], "", "Esc close");
+    card_frame(
+        buf,
+        r,
+        pal().dim,
+        &[(typed.clone(), acc), (format!(" {group}"), acc)],
+        "",
+        "Esc close",
+    );
     let st = card_style();
     for (y, (k, ic, d, t)) in lines.iter().take(bh - 2).enumerate() {
         let (x, y) = (r.x as usize + 2, r.y as usize + 1 + y);
         put(buf, x, y, k, st.patch(acc));
-        put(buf, x + kw + 1, y, &gl().arrow.to_string(), st.fg(pal().dim));
+        put(
+            buf,
+            x + kw + 1,
+            y,
+            &gl().arrow.to_string(),
+            st.fg(pal().dim),
+        );
         if let Some((c, col)) = ic.and_then(|(c, col)| draw::icon(c).map(|c| (c, col))) {
             put(buf, x + kw + 3, y, &c.to_string(), st.fg(col));
         }
-        put(buf, x + kw + 3 + ix, y, d, if t.is_empty() && k.ends_with('\'') { st.fg(pal().dim) } else { st });
+        put(
+            buf,
+            x + kw + 3 + ix,
+            y,
+            d,
+            if t.is_empty() && k.ends_with('\'') {
+                st.fg(pal().dim)
+            } else {
+                st
+            },
+        );
         put(buf, x + inner - t.chars().count(), y, t, st.fg(pal().dim));
     }
 }
@@ -763,11 +1307,19 @@ fn leader(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
     use crate::draw::icon;
     use crate::tui::keys::Entry;
     let Some(path) = &app.leader else { return };
-    let Some(Entry::Group { name, items }) = app.keymap.leader.at(path) else { return };
+    let Some(Entry::Group { name, items }) = app.keymap.leader.at(path) else {
+        return;
+    };
     let mut items: Vec<&(crate::tui::keys::Key, Entry)> = items.iter().collect();
     items.sort_by_key(|(_, e)| !matches!(e, Entry::Group { .. }));
-    let why = items.iter().any(|(_, e)| matches!(e, Entry::Run { why, .. } if !why.is_empty()));
-    let cols = if why { 1 } else { (w.saturating_sub(3) / 39).clamp(1, 3) };
+    let why = items
+        .iter()
+        .any(|(_, e)| matches!(e, Entry::Run { why, .. } if !why.is_empty()));
+    let cols = if why {
+        1
+    } else {
+        (w.saturating_sub(3) / 39).clamp(1, 3)
+    };
     let rows = items.len().div_ceil(cols).max(1);
     let bh = rows + 4;
     if bh > body || w < 20 {
@@ -779,11 +1331,31 @@ fn leader(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
     if !name.is_empty() {
         title.push((format!("  {name}"), acc));
     }
-    card_frame(buf, r, pal().dim, &title, "", if path.is_empty() { "Esc close" } else { "Esc close   Backspace back" });
+    card_frame(
+        buf,
+        r,
+        pal().dim,
+        &title,
+        "",
+        if path.is_empty() {
+            "Esc close"
+        } else {
+            "Esc close   Backspace back"
+        },
+    );
     let st = card_style();
     let ix = if gl().icons { 2 } else { 0 };
     let cw = if why { w - 6 } else { (w - 6) / cols };
-    let cut = |t: &str, n: usize| if t.chars().count() > n { t.chars().take(n.saturating_sub(1)).chain([gl().cut]).collect() } else { t.to_string() };
+    let cut = |t: &str, n: usize| {
+        if t.chars().count() > n {
+            t.chars()
+                .take(n.saturating_sub(1))
+                .chain([gl().cut])
+                .collect()
+        } else {
+            t.to_string()
+        }
+    };
     let mut hits = Vec::new();
     for (i, (k, e)) in items.into_iter().enumerate() {
         let (x, y) = (3 + (i / rows) * cw, r.y as usize + 2 + i % rows);
@@ -801,18 +1373,44 @@ fn leader(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
                     _ => icon::FOLDER,
                 };
                 put(buf, x + 4, y, &icon_text(ic), st.fg(pal().bus));
-                let mag = if pal().mono { st.add_modifier(Modifier::BOLD) } else { st.fg(pal().hues[6]).add_modifier(Modifier::BOLD) };
-                put(buf, lx, y, &cut(&format!("+{name}"), cw.saturating_sub(6 + ix)), mag);
+                let mag = if pal().mono {
+                    st.add_modifier(Modifier::BOLD)
+                } else {
+                    st.fg(pal().hues[6]).add_modifier(Modifier::BOLD)
+                };
+                put(
+                    buf,
+                    lx,
+                    y,
+                    &cut(&format!("+{name}"), cw.saturating_sub(6 + ix)),
+                    mag,
+                );
             }
-            Entry::Run { label, line, why: text } => {
-                put(buf, x + 4, y, &icon_text(crate::tui::commands::icon(line)), st.fg(pal().hues[4]));
+            Entry::Run {
+                label,
+                line,
+                why: text,
+            } => {
+                put(
+                    buf,
+                    x + 4,
+                    y,
+                    &icon_text(crate::tui::commands::icon(line)),
+                    st.fg(pal().hues[4]),
+                );
                 let cmd = line.trim_end();
                 if why {
                     // label, command, what happens: at fixed columns, as far as the screen goes
                     let (cx, wx) = (x + 39, x + 61);
                     put(buf, lx, y, &cut(label, cx.saturating_sub(lx + 1)), st);
                     put(buf, cx, y, &cut(cmd, 21), st.fg(pal().hues[5]));
-                    put(buf, wx, y, &cut(text, w.saturating_sub(wx + 3)), st.fg(pal().dim));
+                    put(
+                        buf,
+                        wx,
+                        y,
+                        &cut(text, w.saturating_sub(wx + 3)),
+                        st.fg(pal().dim),
+                    );
                 } else {
                     let room = cw.saturating_sub(6 + ix);
                     let lw = label.chars().count().min(room);
@@ -832,22 +1430,50 @@ fn leader(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
 /// A menu card's width: the border, a column for the highlight, the labels, two spaces, the
 /// keys, a space and the border.
 fn card_width(items: &[crate::tui::app::Item]) -> usize {
-    let lw = items.iter().map(|i| i.label.chars().count()).max().unwrap_or(0);
-    let kw = items.iter().map(|i| i.key.chars().count()).max().unwrap_or(0);
+    let lw = items
+        .iter()
+        .map(|i| i.label.chars().count())
+        .max()
+        .unwrap_or(0);
+    let kw = items
+        .iter()
+        .map(|i| i.key.chars().count())
+        .max()
+        .unwrap_or(0);
     1 + 1 + lw + 2 + kw + 1 + 1
 }
 
 /// A menu card at `at` (moved left and up to fit with `fit`, else placed as given), a card as
 /// the other floats are (spec §14). Returns where it was drawn.
-fn card(buf: &mut Buffer, w: usize, body: usize, at: (usize, usize), items: &[crate::tui::app::Item], hl: Option<usize>, fit: bool) -> Option<Rect> {
-    let lw = items.iter().map(|i| i.label.chars().count()).max().unwrap_or(0);
-    let kw = items.iter().map(|i| i.key.chars().count()).max().unwrap_or(0);
+fn card(
+    buf: &mut Buffer,
+    w: usize,
+    body: usize,
+    at: (usize, usize),
+    items: &[crate::tui::app::Item],
+    hl: Option<usize>,
+    fit: bool,
+) -> Option<Rect> {
+    let lw = items
+        .iter()
+        .map(|i| i.label.chars().count())
+        .max()
+        .unwrap_or(0);
+    let kw = items
+        .iter()
+        .map(|i| i.key.chars().count())
+        .max()
+        .unwrap_or(0);
     let (bw, bh) = (card_width(items), items.len() + 2);
     if bw > w || bh > body || items.is_empty() {
         return None;
     }
     let x0 = at.0.min(w - bw);
-    let y0 = if fit || at.1 + bh > body { at.1.min(body - bh) } else { at.1 };
+    let y0 = if fit || at.1 + bh > body {
+        at.1.min(body - bh)
+    } else {
+        at.1
+    };
     let r = Rect::new(x0 as u16, y0 as u16, bw as u16, bh as u16);
     card_frame(buf, r, pal().dim, &[], "", "");
     let st = card_style();
@@ -863,27 +1489,52 @@ fn card(buf: &mut Buffer, w: usize, body: usize, at: (usize, usize), items: &[cr
             Some(h) => row.fg(pal().hues[h]),
             None => row,
         };
-        put(buf, x0 + 2, y, &i.label, if on { label.add_modifier(Modifier::BOLD) } else { label });
-        put(buf, x0 + 2 + lw + 2, y, &format!("{:>kw$}", i.key), row.fg(pal().dim));
+        put(
+            buf,
+            x0 + 2,
+            y,
+            &i.label,
+            if on {
+                label.add_modifier(Modifier::BOLD)
+            } else {
+                label
+            },
+        );
+        put(
+            buf,
+            x0 + 2 + lw + 2,
+            y,
+            &format!("{:>kw$}", i.key),
+            row.fg(pal().dim),
+        );
     }
     Some(r)
 }
 
 /// Lines in one style.
 fn plain(lines: &[String]) -> Vec<Line> {
-    lines.iter().map(|l| vec![(l.clone(), Style::new())]).collect()
+    lines
+        .iter()
+        .map(|l| vec![(l.clone(), Style::new())])
+        .collect()
 }
 
 /// The launch guide, before any row (spec §4): the start screen's look, a dashboard of the
 /// trace. The one-line logo, the trace's name and what is in it, then what to do first, each
 /// with its key as the keymap and the leader menu have it; with the signal panel open, its keys.
 fn guide(app: &App, buf: &mut Buffer, w: usize, body: usize) {
-    use crate::tui::start::{action_rows, big_logo, small_logo, BIG_LOGO};
+    use crate::tui::start::{BIG_LOGO, action_rows, big_logo, small_logo};
     let actions = guide_actions(app);
     let t = &app.ws.trace;
     let fpt = t.fs_per_tick;
     let signals = (0..t.vars.len()).filter(|&v| !t.is_computed(v)).count();
-    let facts = format!("{signals} signals  {}  {}{}{}", gl().dot, time::format(t.start(), fpt), gl().dash, time::format(t.end(), fpt));
+    let facts = format!(
+        "{signals} signals  {}  {}{}{}",
+        gl().dot,
+        time::format(t.start(), fpt),
+        gl().dash,
+        time::format(t.end(), fpt)
+    );
     let area = Rect::new(0, 0, w as u16, body as u16);
     let cw = 54.min(w.saturating_sub(2));
     let x = w.saturating_sub(cw) / 2;
@@ -908,11 +1559,22 @@ fn guide(app: &App, buf: &mut Buffer, w: usize, body: usize) {
     };
     let len = dir.chars().count() + file.chars().count();
     let dir: String = match len > cw {
-        true => std::iter::once(gl().cut).chain(dir.chars().skip((len + 1 - cw).min(dir.chars().count()))).collect(),
+        true => std::iter::once(gl().cut)
+            .chain(dir.chars().skip((len + 1 - cw).min(dir.chars().count())))
+            .collect(),
         false => dir,
     };
     put(buf, x, y0 + 2, &dir, Style::new().fg(pal().dim));
-    put(buf, x + dir.chars().count(), y0 + 2, &file.chars().take(cw.saturating_sub(dir.chars().count())).collect::<String>(), Style::new().add_modifier(Modifier::BOLD));
+    put(
+        buf,
+        x + dir.chars().count(),
+        y0 + 2,
+        &file
+            .chars()
+            .take(cw.saturating_sub(dir.chars().count()))
+            .collect::<String>(),
+        Style::new().add_modifier(Modifier::BOLD),
+    );
     put(buf, x, y0 + 3, &facts, Style::new().fg(pal().dim));
     action_rows(buf, area, x, y0 + 5, cw, &actions);
 }
@@ -921,9 +1583,15 @@ fn guide(app: &App, buf: &mut Buffer, w: usize, body: usize) {
 /// the `/` after it) and its file name.
 fn trace_path(path: &std::path::Path) -> (String, String) {
     let full = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    let file = full.file_name().map_or(String::new(), |f| f.to_string_lossy().into_owned());
-    let mut dir = full.parent().map_or(String::new(), |d| d.to_string_lossy().into_owned());
-    if let Some(home) = std::env::var_os("HOME").map(|h| h.to_string_lossy().into_owned()).filter(|h| !h.is_empty())
+    let file = full
+        .file_name()
+        .map_or(String::new(), |f| f.to_string_lossy().into_owned());
+    let mut dir = full
+        .parent()
+        .map_or(String::new(), |d| d.to_string_lossy().into_owned());
+    if let Some(home) = std::env::var_os("HOME")
+        .map(|h| h.to_string_lossy().into_owned())
+        .filter(|h| !h.is_empty())
         && let Some(rest) = dir.strip_prefix(&home)
         && (rest.is_empty() || rest.starts_with('/'))
     {
@@ -942,7 +1610,9 @@ fn guide_actions(app: &App) -> Vec<crate::tui::start::Action> {
     use draw::icon;
     let p = pal();
     let (blue, purple) = (p.hues[5], p.hues[6]);
-    let a = |ic: char, c: Color, label: &str, key: String| (ic, c, label.to_string(), String::new(), key);
+    let a = |ic: char, c: Color, label: &str, key: String| {
+        (ic, c, label.to_string(), String::new(), key)
+    };
     if app.panel_shown() {
         return vec![
             a(icon::SEARCH, blue, "Search", "/".into()),
@@ -957,7 +1627,12 @@ fn guide_actions(app: &App) -> Vec<crate::tui::start::Action> {
     if let Some(k) = leader_key(app, ":pick signals") {
         out.push(a(icon::SEARCH, blue, "Find a signal", k));
     }
-    out.push(a(icon::FOLDER, blue, "Browse the signals", keys.show(K::Panel)));
+    out.push(a(
+        icon::FOLDER,
+        blue,
+        "Browse the signals",
+        keys.show(K::Panel),
+    ));
     if let Some(k) = leader_key(app, ":pick interfaces") {
         let mut d = a(icon::PLUG, blue, "Decode an interface", k);
         d.3 = match app.found.len() {
@@ -966,7 +1641,12 @@ fn guide_actions(app: &App) -> Vec<crate::tui::start::Action> {
         };
         out.push(d);
     }
-    out.push(a(icon::CMD, purple, "Everything else", keys.show(K::Leader)));
+    out.push(a(
+        icon::CMD,
+        purple,
+        "Everything else",
+        keys.show(K::Leader),
+    ));
     out.push(a(icon::KEYS, blue, "Keys", keys.show(K::Help)));
     out.push(a(icon::ERROR, p.dim, "Quit", keys.show(K::Quit)));
     out
@@ -976,7 +1656,9 @@ fn guide_actions(app: &App) -> Vec<crate::tui::start::Action> {
 pub fn leader_key(app: &App, line: &str) -> Option<String> {
     use crate::tui::keys::Entry;
     fn find(e: &Entry, line: &str, path: &mut Vec<String>) -> bool {
-        let Entry::Group { items, .. } = e else { return false };
+        let Entry::Group { items, .. } = e else {
+            return false;
+        };
         for (k, e) in items {
             path.push(k.show());
             if matches!(e, Entry::Run { line: l, .. } if l == line) || find(e, line, path) {
@@ -1011,39 +1693,110 @@ fn status(app: &App, buf: &mut Buffer, w: usize, y: usize) -> Rect {
     use crate::draw::icon;
     let fpt = app.ws.trace.fs_per_tick;
     let mono = pal().mono;
-    let seg = |fg: Color, bg: Color| if mono { Style::new() } else { Style::new().fg(fg).bg(bg) };
+    let seg = |fg: Color, bg: Color| {
+        if mono {
+            Style::new()
+        } else {
+            Style::new().fg(fg).bg(bg)
+        }
+    };
     let (panel, sel) = (pal().panel, pal().selected);
     put(buf, 0, y, &" ".repeat(w), Style::new());
-    let mode = if app.naming.is_some() { "NAME" } else if app.picker.is_some() { "PICK" } else if app.panel_shown() { "SIGNALS" } else { "NORMAL" };
-    let badge = if mono { Style::new().add_modifier(Modifier::REVERSED | Modifier::BOLD) } else { Style::new().bg(pal().cursor).fg(pal().cursor_text).add_modifier(Modifier::BOLD) };
+    let mode = if app.naming.is_some() {
+        "NAME"
+    } else if app.picker.is_some() {
+        "PICK"
+    } else if app.panel_shown() {
+        "SIGNALS"
+    } else {
+        "NORMAL"
+    };
+    let badge = if mono {
+        Style::new().add_modifier(Modifier::REVERSED | Modifier::BOLD)
+    } else {
+        Style::new()
+            .bg(pal().cursor)
+            .fg(pal().cursor_text)
+            .add_modifier(Modifier::BOLD)
+    };
     let mut x = 0;
     // as wide as the longest, so the button doesn't move when the mode changes
     x += put_seg(buf, x, y, &format!("{mode:<7}"), badge);
     // typing a group's name: what the keys do, in place of the keys pending
-    let pending = if app.naming.is_some() { "Enter keeps the name  Esc as it was".to_string() } else { app.pending() };
+    let pending = if app.naming.is_some() {
+        "Enter keeps the name  Esc as it was".to_string()
+    } else {
+        app.pending()
+    };
     if !pending.is_empty() {
-        x += put_seg(buf, x, y, &pending, seg(pal().cursor, sel).add_modifier(Modifier::BOLD));
+        x += put_seg(
+            buf,
+            x,
+            y,
+            &pending,
+            seg(pal().cursor, sel).add_modifier(Modifier::BOLD),
+        );
     }
     // the panel's button
-    let button = format!("signals {}", if app.adding { gl().left } else { gl().right });
+    let button = format!(
+        "signals {}",
+        if app.adding { gl().left } else { gl().right }
+    );
     let bx = x + if mono { 1 } else { 0 };
-    x += put_seg(buf, bx, y, &button, seg(Color::Reset, panel).add_modifier(Modifier::BOLD)) + (bx - x);
+    x += put_seg(
+        buf,
+        bx,
+        y,
+        &button,
+        seg(Color::Reset, panel).add_modifier(Modifier::BOLD),
+    ) + (bx - x);
     let at = Rect::new(bx as u16, y as u16, (button.chars().count() + 2) as u16, 1);
     // the right: (text, style, how much it is needed)
     let mut right: Vec<(String, Style, u8)> = Vec::new();
     if let Some(f) = app.follow.as_ref() {
-        right.push((format!("{}following {}", icon_text(icon::EYE), f.id), seg(pal().hues[4], sel), 3));
+        right.push((
+            format!("{}following {}", icon_text(icon::EYE), f.id),
+            seg(pal().hues[4], sel),
+            3,
+        ));
     }
-    right.push((format!("{}{}", icon_text(icon::CLOCK), time::format(app.ws.view.cursor, fpt)), seg(pal().cursor, panel).add_modifier(Modifier::BOLD), 5));
+    right.push((
+        format!(
+            "{}{}",
+            icon_text(icon::CLOCK),
+            time::format(app.ws.view.cursor, fpt)
+        ),
+        seg(pal().cursor, panel).add_modifier(Modifier::BOLD),
+        5,
+    ));
     right.push((zoom_text(&app.ws.view, fpt), seg(Color::Reset, panel), 1));
     if let Some(u) = app.ws.unit {
-        right.push((format!("unit {}", time::unit_name(u)), seg(pal().dim, panel), 0));
+        right.push((
+            format!("unit {}", time::unit_name(u)),
+            seg(pal().dim, panel),
+            0,
+        ));
     }
-    right.push((format!("{}{}", icon_text(icon::FILE), app.ws.file_name), seg(Color::Reset, sel), 2));
+    right.push((
+        format!("{}{}", icon_text(icon::FILE), app.ws.file_name),
+        seg(Color::Reset, sel),
+        2,
+    ));
     let modified = app.ws.modified();
-    let width = |r: &[(String, Style, u8)]| r.iter().map(|(t, ..)| t.chars().count() + 2 + mono as usize).sum::<usize>() + if modified { 4 } else { 0 } + 1;
+    let width = |r: &[(String, Style, u8)]| {
+        r.iter()
+            .map(|(t, ..)| t.chars().count() + 2 + mono as usize)
+            .sum::<usize>()
+            + if modified { 4 } else { 0 }
+            + 1
+    };
     while width(&right) + x + 12 > w {
-        let Some(i) = (0..right.len()).min_by_key(|&i| right[i].2).filter(|_| right.len() > 1) else { break };
+        let Some(i) = (0..right.len())
+            .min_by_key(|&i| right[i].2)
+            .filter(|_| right.len() > 1)
+        else {
+            break;
+        };
         right.remove(i);
     }
     // the middle: the mark under the cursor, else the record or path of the selected row
@@ -1053,7 +1806,11 @@ fn status(app: &App, buf: &mut Buffer, w: usize, y: usize) -> Rect {
         // a message no card could show
         _ if msg.is_some() => msg.unwrap().0.clone(),
         Some((i, l)) => {
-            let text = [l.name.as_str(), l.note.as_str()].into_iter().filter(|t| !t.is_empty()).collect::<Vec<_>>().join(": ");
+            let text = [l.name.as_str(), l.note.as_str()]
+                .into_iter()
+                .filter(|t| !t.is_empty())
+                .collect::<Vec<_>>()
+                .join(": ");
             format!("{}{} {text}", icon_text(icon::MARK), i + 1)
         }
         None => match app.ws.rows.get(app.ws.sel) {
@@ -1061,8 +1818,17 @@ fn status(app: &App, buf: &mut Buffer, w: usize, y: usize) -> Rect {
             Some(Row::Signal(r)) if app.ws.record_at(r.var).is_some() => {
                 let (s, i) = app.ws.record_at(r.var).unwrap();
                 let rec = &s.records[i];
-                let fields: Vec<String> = s.fields_text(i, fpt).into_iter().map(|(n, v)| format!("{n}={v}")).collect();
-                let times = format!("{}{}{}", time::format(rec.start, fpt), gl().dash, time::format(rec.end, fpt));
+                let fields: Vec<String> = s
+                    .fields_text(i, fpt)
+                    .into_iter()
+                    .map(|(n, v)| format!("{n}={v}"))
+                    .collect();
+                let times = format!(
+                    "{}{}{}",
+                    time::format(rec.start, fpt),
+                    gl().dash,
+                    time::format(rec.end, fpt)
+                );
                 format!("{} #{i}  {times}  {}", s.name, fields.join(" "))
             }
             Some(Row::Signal(r)) => {
@@ -1077,8 +1843,27 @@ fn status(app: &App, buf: &mut Buffer, w: usize, y: usize) -> Rect {
     };
     let room = w.saturating_sub(x + 1 + width(&right) + 1);
     let len = mid.chars().count();
-    let mid = if len > room { mid.chars().take(room.saturating_sub(1)).chain([gl().cut]).collect() } else { mid };
-    put(buf, x + 1, y, &mid, if msg.is_some_and(|m| m.1) { crate::draw::red() } else if msg.is_some() { Style::new() } else { dim });
+    let mid = if len > room {
+        mid.chars()
+            .take(room.saturating_sub(1))
+            .chain([gl().cut])
+            .collect()
+    } else {
+        mid
+    };
+    put(
+        buf,
+        x + 1,
+        y,
+        &mid,
+        if msg.is_some_and(|m| m.1) {
+            crate::draw::red()
+        } else if msg.is_some() {
+            Style::new()
+        } else {
+            dim
+        },
+    );
     let mut x = w.saturating_sub(width(&right));
     let n = right.len();
     for (i, (t, st, _)) in right.into_iter().enumerate() {
@@ -1103,8 +1888,19 @@ fn command_line(app: &mut App, buf: &mut Buffer, w: usize, h: usize) -> Option<(
     let y = h - 1;
     let search = app.mode == Mode::Search;
     // the mode's badge, as on the status line (spec §4), where it leaves room for the line
-    let (name, colour) = if search { ("SEARCH", pal().hues[1]) } else { ("CMD", pal().hues[5]) };
-    let badge = if pal().mono { Style::new().add_modifier(Modifier::REVERSED | Modifier::BOLD) } else { Style::new().bg(colour).fg(pal().cursor_text).add_modifier(Modifier::BOLD) };
+    let (name, colour) = if search {
+        ("SEARCH", pal().hues[1])
+    } else {
+        ("CMD", pal().hues[5])
+    };
+    let badge = if pal().mono {
+        Style::new().add_modifier(Modifier::REVERSED | Modifier::BOLD)
+    } else {
+        Style::new()
+            .bg(colour)
+            .fg(pal().cursor_text)
+            .add_modifier(Modifier::BOLD)
+    };
     let bw = if w >= 40 { name.len() + 3 } else { 0 };
     put(buf, 0, y, &" ".repeat(w), Style::new());
     if bw > 0 {
@@ -1119,36 +1915,81 @@ fn command_line(app: &mut App, buf: &mut Buffer, w: usize, h: usize) -> Option<(
         && app.cursor() == app.line.chars().count()
     {
         let x = bw + line.chars().count();
-        put(buf, x, y, &c.ghost(&app.line, app.hl).chars().take(w.saturating_sub(x)).collect::<String>(), Style::new().fg(pal().dim));
+        put(
+            buf,
+            x,
+            y,
+            &c.ghost(&app.line, app.hl)
+                .chars()
+                .take(w.saturating_sub(x))
+                .collect::<String>(),
+            Style::new().fg(pal().dim),
+        );
     }
     // a card over the line at the word being completed, up to ten, scrolled to the highlight: each
     // label, its description dim after it; the docs of the highlighted one in a card beside it
     let shown = items.len().min(10).min(y.saturating_sub(2));
     if shown == 0 {
-        return Some(((bw + 1 + app.cursor()).min(w.saturating_sub(1)) as u16, y as u16));
+        return Some((
+            (bw + 1 + app.cursor()).min(w.saturating_sub(1)) as u16,
+            y as u16,
+        ));
     }
     let first = app.hl.saturating_sub(shown - 1);
-    let cut = |s: &str, n: usize| if s.chars().count() > n { s.chars().take(n.saturating_sub(1)).chain([gl().cut]).collect() } else { s.to_string() };
+    let cut = |s: &str, n: usize| {
+        if s.chars().count() > n {
+            s.chars()
+                .take(n.saturating_sub(1))
+                .chain([gl().cut])
+                .collect()
+        } else {
+            s.to_string()
+        }
+    };
     let what = comp.as_ref().map_or("", |c| c.what);
     let ix = if gl().icons { 2 } else { 0 };
-    let uw = items.iter().map(|c| c.label.chars().count()).max().unwrap_or(0).min(36);
-    let dw0 = items.iter().map(|c| c.desc.chars().count()).max().unwrap_or(0).min(26);
+    let uw = items
+        .iter()
+        .map(|c| c.label.chars().count())
+        .max()
+        .unwrap_or(0)
+        .min(36);
+    let dw0 = items
+        .iter()
+        .map(|c| c.desc.chars().count())
+        .max()
+        .unwrap_or(0)
+        .min(26);
     // as wide as it needs, the descriptions cut at 26; half the screen at most, the docs beside it
-    let lw = (2 + ix + uw + if dw0 > 0 { 2 + dw0 } else { 0 } + 3).max(what.chars().count() + 18).min((w / 2).max(40)).min(w);
+    let lw = (2 + ix + uw + if dw0 > 0 { 2 + dw0 } else { 0 } + 3)
+        .max(what.chars().count() + 18)
+        .min((w / 2).max(40))
+        .min(w);
     let start = comp.as_ref().map_or(0, |c| c.start);
     let lx = (bw + 1 + start).saturating_sub(3).min(w - lw);
     let bh = shown + 2;
     let ly0 = y - bh;
     let r = Rect::new(lx as u16, ly0 as u16, lw as u16, bh as u16);
     let acc = Style::new().fg(pal().cursor).add_modifier(Modifier::BOLD);
-    card_frame(buf, r, pal().dim, &[(what.to_string(), acc)], "", "Tab accept");
+    card_frame(
+        buf,
+        r,
+        pal().dim,
+        &[(what.to_string(), acc)],
+        "",
+        "Tab accept",
+    );
     app.hit.completion_card = Some(r);
     let st = card_style();
     for (k, c) in items.iter().enumerate().skip(first).take(shown) {
         // top down under the title, as a menu reads
         let ly = ly0 + 1 + (k - first);
         app.hit.completions.push((ly, k));
-        let row = if k == app.hl { st.bg(pal().selected) } else { st };
+        let row = if k == app.hl {
+            st.bg(pal().selected)
+        } else {
+            st
+        };
         put(buf, lx + 1, ly, &" ".repeat(lw - 2), row);
         if k == app.hl {
             put(buf, lx + 1, ly, &gl().hl.to_string(), row.fg(pal().cursor));
@@ -1157,8 +1998,24 @@ fn command_line(app: &mut App, buf: &mut Buffer, w: usize, h: usize) -> Option<(
             put(buf, lx + 2, ly, &ic.to_string(), row.fg(pal().hues[5]));
         }
         let x = lx + 2 + ix;
-        put(buf, x, ly, &cut(&c.label, uw), if k == app.hl { row.add_modifier(Modifier::BOLD) } else { row });
-        put(buf, x + uw + 2, ly, &cut(&c.desc, (lx + lw).saturating_sub(x + uw + 4)), row.fg(pal().dim));
+        put(
+            buf,
+            x,
+            ly,
+            &cut(&c.label, uw),
+            if k == app.hl {
+                row.add_modifier(Modifier::BOLD)
+            } else {
+                row
+            },
+        );
+        put(
+            buf,
+            x + uw + 2,
+            ly,
+            &cut(&c.desc, (lx + lw).saturating_sub(x + uw + 4)),
+            row.fg(pal().dim),
+        );
     }
     // the docs: what the highlighted item is, where the screen leaves it 40 columns
     let it = &items[app.hl.min(items.len() - 1)];
@@ -1175,20 +2032,49 @@ fn command_line(app: &mut App, buf: &mut Buffer, w: usize, h: usize) -> Option<(
         for l in doc.lines() {
             let indent = l.len() - l.trim_start().len();
             let wrapped = wrap_text(l, tw.saturating_sub(indent).max(8), usize::MAX);
-            lines.extend(if wrapped.is_empty() { vec![String::new()] } else { wrapped.into_iter().map(|t| format!("{}{t}", " ".repeat(indent))).collect() });
+            lines.extend(if wrapped.is_empty() {
+                vec![String::new()]
+            } else {
+                wrapped
+                    .into_iter()
+                    .map(|t| format!("{}{t}", " ".repeat(indent)))
+                    .collect()
+            });
         }
         let dh = (lines.len() + 2).min(y);
         if dh >= 3 {
             let dx = lx + lw;
-            card_frame(buf, Rect::new(dx as u16, (y - dh) as u16, dw as u16, dh as u16), pal().dim, &[(it.label.clone(), acc)], "", "");
+            card_frame(
+                buf,
+                Rect::new(dx as u16, (y - dh) as u16, dw as u16, dh as u16),
+                pal().dim,
+                &[(it.label.clone(), acc)],
+                "",
+                "",
+            );
             for (i, l) in lines.iter().take(dh - 2).enumerate() {
                 let green = l.starts_with("This trace:");
                 let dim = l.starts_with("Tab takes it");
-                put(buf, dx + 2, y - dh + 1 + i, &cut(l, tw), if green { st.fg(pal().hues[3]) } else if dim { st.fg(pal().dim) } else { st });
+                put(
+                    buf,
+                    dx + 2,
+                    y - dh + 1 + i,
+                    &cut(l, tw),
+                    if green {
+                        st.fg(pal().hues[3])
+                    } else if dim {
+                        st.fg(pal().dim)
+                    } else {
+                        st
+                    },
+                );
             }
         }
     }
-    Some(((bw + 1 + app.cursor()).min(w.saturating_sub(1)) as u16, y as u16))
+    Some((
+        (bw + 1 + app.cursor()).min(w.saturating_sub(1)) as u16,
+        y as u16,
+    ))
 }
 
 #[cfg(test)]
@@ -1199,7 +2085,10 @@ mod tests {
     fn trace_path_splits() {
         // the whole path, its directory with the `/` after it, the file apart
         let (dir, file) = trace_path(std::path::Path::new("tests/data/simple.vcd"));
-        assert!(dir.ends_with("/tests/data/") && (dir.starts_with('/') || dir.starts_with('~')), "{dir}");
+        assert!(
+            dir.ends_with("/tests/data/") && (dir.starts_with('/') || dir.starts_with('~')),
+            "{dir}"
+        );
         assert_eq!(file, "simple.vcd");
     }
 
@@ -1208,7 +2097,10 @@ mod tests {
         // light paints its own background: a card's background and text both end on it, together
         draw::set_palette(crate::theme::builtin("light", true).unwrap());
         let (panel, back) = (pal().panel, pal().background);
-        assert_eq!((faded(panel, 0.0, true), faded(panel, 1.0, true)), (panel, back));
+        assert_eq!(
+            (faded(panel, 0.0, true), faded(panel, 1.0, true)),
+            (panel, back)
+        );
         assert_eq!(faded(pal().unknown, 1.0, false), back);
         let mid = faded(panel, 0.5, true);
         assert!(mid != panel && mid != back, "{mid:?}");
@@ -1217,7 +2109,14 @@ mod tests {
         (p.mono, p.background, p.dim) = (false, Color::Indexed(0), Color::Indexed(8));
         draw::set_palette(p);
         let c = Color::Indexed(5);
-        assert_eq!((faded(c, 0.5, false), faded(c, 0.9, false), faded(c, 0.9, true)), (c, Color::Indexed(8), Color::Indexed(0)));
+        assert_eq!(
+            (
+                faded(c, 0.5, false),
+                faded(c, 0.9, false),
+                faded(c, 0.9, true)
+            ),
+            (c, Color::Indexed(8), Color::Indexed(0))
+        );
         draw::set_palette(crate::theme::builtin("dark", true).unwrap());
     }
 
@@ -1229,7 +2128,9 @@ mod tests {
 
     /// Characters in the private-use range: the Nerd Font icons (spec §14).
     fn icons(t: &str) -> usize {
-        t.chars().filter(|c| ('\u{e000}'..='\u{f8ff}').contains(c)).count()
+        t.chars()
+            .filter(|c| ('\u{e000}'..='\u{f8ff}').contains(c))
+            .count()
     }
 
     #[test]
@@ -1248,14 +2149,22 @@ mod tests {
         a.keys(":cursor 2 20ns\n'").unwrap();
         a.which_key = true;
         let s = crate::snapshot(&mut a, 100, Some(16));
-        assert!(s.contains("mark 2") && s.contains("cursor") && icons(&s) >= 2, "{s}");
+        assert!(
+            s.contains("mark 2") && s.contains("cursor") && icons(&s) >= 2,
+            "{s}"
+        );
         // too small for the card: nothing is drawn of it
         assert!(!crate::snapshot(&mut a, 12, Some(16)).contains("mark 2"));
         assert!(!crate::snapshot(&mut a, 100, Some(3)).contains("mark 2"));
         a.keys("<Esc>").unwrap();
         // the leader menu: a chip for each group, a folder for any other; none where it doesn't fit
         let mut w = Vec::new();
-        a.keymap.set_leader(&"[z]\nname = \"mine\"\nq = [\"quit\", \":q\"]".parse().unwrap(), &mut w);
+        a.keymap.set_leader(
+            &"[z]\nname = \"mine\"\nq = [\"quit\", \":q\"]"
+                .parse()
+                .unwrap(),
+            &mut w,
+        );
         assert!(w.is_empty(), "{w:?}");
         a.keys("<Space>").unwrap();
         let s = crate::snapshot(&mut a, 120, Some(24));
@@ -1281,13 +2190,20 @@ mod tests {
         // the start screen with a long path: cut at the left, the file kept
         a.ws.trace_path = std::path::PathBuf::from(format!("/{}/simple.vcd", "d".repeat(80)));
         let s = crate::snapshot(&mut a, 70, Some(24));
-        assert!(s.contains(draw::gl().cut) && s.contains("simple.vcd"), "{s}");
+        assert!(
+            s.contains(draw::gl().cut) && s.contains("simple.vcd"),
+            "{s}"
+        );
         // a big logo where it fits
         let big = crate::snapshot(&mut a, 120, Some(40));
-        assert!(big.lines().filter(|l| !l.trim().is_empty()).count() > s.lines().filter(|l| !l.trim().is_empty()).count());
+        assert!(
+            big.lines().filter(|l| !l.trim().is_empty()).count()
+                > s.lines().filter(|l| !l.trim().is_empty()).count()
+        );
         // a leader without the interfaces entry: the action is left out
         let mut w = Vec::new();
-        a.keymap.set_leader(&"[d]\nd = \"\"".parse().unwrap(), &mut w);
+        a.keymap
+            .set_leader(&"[d]\nd = \"\"".parse().unwrap(), &mut w);
         assert!(!crate::snapshot(&mut a, 100, Some(24)).contains("Decode an interface"));
         // interfaces found in the trace are counted in the action
         let mut b = nerd_app("axilite.vcd");

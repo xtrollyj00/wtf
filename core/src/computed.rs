@@ -5,8 +5,8 @@
 
 use dashu_int::IBig;
 
-use crate::time::Tick;
 use crate::search::Term;
+use crate::time::Tick;
 use crate::trace::{Trace, Val};
 
 /// What a name computes.
@@ -48,7 +48,11 @@ pub fn form(name: &str) -> Option<Form<'_>> {
     }
     let (base, range) = name.strip_suffix(']')?.rsplit_once('[')?;
     let (hi, lo) = range.split_once(':')?;
-    Some(Form::Slice(base.trim(), hi.trim().parse().ok()?, lo.trim().parse().ok()?))
+    Some(Form::Slice(
+        base.trim(),
+        hi.trim().parse().ok()?,
+        lo.trim().parse().ok()?,
+    ))
 }
 
 /// An operator outside brackets and braces, or a leading `(`, `~` or `signed(`. A `*` at an end
@@ -56,7 +60,9 @@ pub fn form(name: &str) -> Option<Form<'_>> {
 fn is_expr(name: &str) -> bool {
     let mut depth = 0i32;
     let b = name.as_bytes();
-    let glob = |i: usize| i == 0 || i + 1 == b.len() || b".*".contains(&b[i - 1]) || b".*".contains(&b[i + 1]);
+    let glob = |i: usize| {
+        i == 0 || i + 1 == b.len() || b".*".contains(&b[i - 1]) || b".*".contains(&b[i + 1])
+    };
     name.starts_with(['(', '~'])
         || name.starts_with("signed(")
         || name.char_indices().any(|(i, c)| {
@@ -84,8 +90,12 @@ fn depth_ok(s: &str) -> bool {
 
 /// The times a var has a value from: its first, then each change.
 fn times(trace: &Trace, var: usize) -> Vec<Tick> {
-    let Some(first) = trace.first_time(var) else { return vec![] };
-    std::iter::once(first).chain(trace.walk(var, None, first, true).map(|c| c.0)).collect()
+    let Some(first) = trace.first_time(var) else {
+        return vec![];
+    };
+    std::iter::once(first)
+        .chain(trace.walk(var, None, first, true).map(|c| c.0))
+        .collect()
 }
 
 /// A var's bits at `t`, as wide as it is; `x`s where it has no value (yet).
@@ -97,35 +107,65 @@ fn bits(trace: &Trace, var: usize, w: usize, t: Tick) -> String {
 }
 
 fn width(trace: &Trace, var: usize) -> Result<u32, String> {
-    trace.vars[var].width.ok_or(format!("{} is a real or string signal, not bits", trace.vars[var].path))
+    trace.vars[var].width.ok_or(format!(
+        "{} is a real or string signal, not bits",
+        trace.vars[var].path
+    ))
 }
 
 /// All of a var's values, its first then each change.
 pub fn values(trace: &mut Trace, var: usize) -> Vec<(Tick, Val)> {
     trace.load(&[var]);
-    times(trace, var).into_iter().filter_map(|t| Some((t, trace.value_at(var, t)?))).collect()
+    times(trace, var)
+        .into_iter()
+        .filter_map(|t| Some((t, trace.value_at(var, t)?)))
+        .collect()
 }
 
 /// The values of bits `hi` down to `lo` of a bus.
 pub fn slice(trace: &mut Trace, var: usize, hi: u32, lo: u32) -> Result<Vec<(Tick, Val)>, String> {
     let w = width(trace, var)?;
     if hi < lo || hi >= w {
-        return Err(format!("{} has no bits {hi}:{lo} ({w} bits)", trace.vars[var].path));
+        return Err(format!(
+            "{} has no bits {hi}:{lo} ({w} bits)",
+            trace.vars[var].path
+        ));
     }
     trace.load(&[var]);
     let (a, b) = ((w - 1 - hi) as usize, (w - lo) as usize);
-    Ok(times(trace, var).into_iter().map(|t| (t, Val::Bits(bits(trace, var, w as usize, t)[a..b].to_string()))).collect())
+    Ok(times(trace, var)
+        .into_iter()
+        .map(|t| {
+            (
+                t,
+                Val::Bits(bits(trace, var, w as usize, t)[a..b].to_string()),
+            )
+        })
+        .collect())
 }
 
 /// The values of signals side by side, the first one's bits most significant.
 pub fn concat(trace: &mut Trace, vars: &[usize]) -> Result<(u32, Vec<(Tick, Val)>), String> {
-    let widths = vars.iter().map(|&v| width(trace, v)).collect::<Result<Vec<u32>, String>>()?;
+    let widths = vars
+        .iter()
+        .map(|&v| width(trace, v))
+        .collect::<Result<Vec<u32>, String>>()?;
     trace.load(vars);
     let mut all: Vec<Tick> = vars.iter().flat_map(|&v| times(trace, v)).collect();
     all.sort();
     all.dedup();
-    let value = |t| Val::Bits(vars.iter().zip(&widths).map(|(&v, &w)| bits(trace, v, w as usize, t)).collect());
-    Ok((widths.iter().sum(), all.into_iter().map(|t| (t, value(t))).collect()))
+    let value = |t| {
+        Val::Bits(
+            vars.iter()
+                .zip(&widths)
+                .map(|(&v, &w)| bits(trace, v, w as usize, t))
+                .collect(),
+        )
+    };
+    Ok((
+        widths.iter().sum(),
+        all.into_iter().map(|t| (t, value(t))).collect(),
+    ))
 }
 
 /// The values of an expression, at each change of the signals it reads, as `shape` bits (two's
@@ -144,7 +184,9 @@ pub fn term(trace: &mut Trace, t: &Term) -> Vec<(Tick, Val)> {
         Some(n) => format!("{:0w$b}", n & ((IBig::ONE << w) - IBig::ONE)),
         None => "x".repeat(w),
     };
-    all.into_iter().map(|at| (at, Val::Bits(bits(at)))).collect()
+    all.into_iter()
+        .map(|at| (at, Val::Bits(bits(at))))
+        .collect()
 }
 
 #[cfg(test)]
@@ -155,14 +197,20 @@ mod tests {
     fn forms() {
         assert_eq!(form("tdata[63:32]"), Some(Form::Slice("tdata", 63, 32)));
         assert_eq!(form(" top.x [ 7 : 4 ] "), Some(Form::Slice("top.x", 7, 4)));
-        assert_eq!(form("{a, b[3:0], {c, d}}"), Some(Form::Concat(vec!["a", "b[3:0]", "{c, d}"])));
+        assert_eq!(
+            form("{a, b[3:0], {c, d}}"),
+            Some(Form::Concat(vec!["a", "b[3:0]", "{c, d}"]))
+        );
         assert_eq!(form("{a,b}[3:0]"), Some(Form::Slice("{a,b}", 3, 0)));
         assert_eq!(form("{a}, {b}"), None);
         assert_eq!(form("data[3]"), None);
         assert_eq!(form("data[x:1]"), None);
         assert_eq!(form("top.clk"), None);
         assert_eq!(form("pc + 4"), Some(Form::Expr("pc + 4")));
-        assert_eq!(form("signed(insn[31:20])"), Some(Form::Expr("signed(insn[31:20])")));
+        assert_eq!(
+            form("signed(insn[31:20])"),
+            Some(Form::Expr("signed(insn[31:20])"))
+        );
         assert_eq!(form("{a, b - 1}"), Some(Form::Concat(vec!["a", "b - 1"])));
         assert_eq!(form("x[7:4]"), Some(Form::Slice("x", 7, 4)));
         assert_eq!(form("pc * 4"), Some(Form::Expr("pc * 4")));

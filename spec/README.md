@@ -22,7 +22,7 @@ One file per section; code cites them as `spec §N`. Read only the sections a ch
 | 11, 12, 13 | [11-sessions.md](11-sessions.md) | session files, command-line options, trace formats |
 | 14 | [14-display.md](14-display.md) | time, zoom, waveforms, values |
 | 15 | [15-mcp.md](15-mcp.md) | MCP server, workspaces, present, the link, joining and following, the trail |
-| 16 | [16-decoders.md](16-decoders.md) | computed signals, streams, protocols, decoders, instances |
+| 16 | [16-decoders/README.md](16-decoders/README.md) | computed signals, streams, protocols (one file each: axis, axilite, axi4, spi, uart), decoders, instances, the AXIS matrix |
 | 17 | [17-milestones.md](17-milestones.md) | build order |
 | 18 | [18-limits.md](18-limits.md) | limits outside wtf, performance targets |
 | 19 | [19-config.md](19-config.md) | config file: glyphs, themes, colours |

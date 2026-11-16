@@ -9,7 +9,7 @@ readme = "README.md"
 keywords = ["waveform", "vcd", "fst", "tui", "mcp"]
 categories = ["command-line-utilities", "development-tools::debugging", "simulation"]
 # what `cargo install wtf-wave` builds from; the tests and their fixtures stay in the repository
-include = ["/src/**/*", "/themes/*.toml", "/README.md", "/CHANGELOG.md", "/LICENSE-*"]
+include = ["/src/**/*", "/themes/*.toml", "/wit/*.wit", "/README.md", "/CHANGELOG.md", "/LICENSE-*"]
 
 # the package is wtf-wave (wtf is taken on crates.io); the command is wtf
 [[bin]]
@@ -34,6 +34,7 @@ serde = { version = "1.0.229", features = ["derive"] }
 tokio = { version = "1.54.0", features = ["rt", "macros", "io-std"] }
 toml = "1.1.8"
 terminal-colorsaurus = "1.0.3"
+wasmtime = { version = "50.0.1", default-features = false, features = ["component-model", "cranelift", "runtime", "std"] }
 
 [dev-dependencies]
 insta = "1.49.0"

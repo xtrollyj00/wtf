@@ -44,9 +44,9 @@ reuse wtf's own pieces:
   4. A `help` topic is the reference for one concept, as `protocols <name>` is for a protocol:
      a line on what it covers, then Form (how to write it), Recipes (a task and the call doing
      it) and Details (edge cases, rounding, errors). The topics: `names`, `patterns`, `times`,
-     `radix`, `expressions`, `decode`, `records`, `workspace`, `commands`. A recipe is a task a
-     real session needed (the recipes page, agents' feedback, the shell commands agents ran on
-     traces), never a benchmark's question, so a benchmark measures the guide and doesn't shape it.
+     `radix`, `expressions`, `decode`, `wasm`, `records`, `workspace`, `commands`. A recipe is a
+     task a real session needed (the recipes page, agents' feedback, the shell commands agents ran
+     on traces), never a benchmark's question, so a benchmark measures the guide and doesn't shape it.
   5. An error says what to write instead and lists the candidates.
 
   Each concept is explained in one topic, which the others point to; the window shows the same
@@ -200,9 +200,10 @@ reuse wtf's own pieces:
   of AW and W to B`). An unknown protocol's error names them all.
 - Agents are pushed to decode: a decoder's records and checks are written and tested once, while
   searches an agent writes differ from run to run and go wrong. So `info` names the interfaces
-  found by their signals (every required role of a built-in protocol a signal `<prefix><role>`;
-  AXI4 over AXI-Lite, whose roles it has too; the clock `<prefix>aclk`, or the one clock-like
-  signal in the scope), the server's instructions put decoding before `find`, `find`'s
+  found by their signals (every role the instance needs a signal `<prefix><role>`, and at least two
+  of the protocol's roles there; a protocol with one role, UART's `line`, is never found; AXI4 over
+  AXI-Lite, whose roles it has too; the clock `<prefix>aclk`, or the one clock-like signal in the
+  scope), the server's instructions put decoding before `find`, `find`'s
   description and `help expressions` point to the decoders, and `decode` answers that `pair`
   matches a stream with another. A `find` with a clock and `show` is a table of events, which is
   what a sampled protocol makes: its answer ends with the two lines that make it, the protocol on

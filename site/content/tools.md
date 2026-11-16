@@ -34,7 +34,7 @@ When a search expression holds, as a table of times; `show` adds values, `count_
 
 ### `help`
 
-The reference for one concept: its form, recipes and details. Topics: names, patterns, times, radix, expressions, decode, records, workspace, commands; without a topic, lists them. Call it when an argument's doc or an error isn't enough.
+The reference for one concept: its form, recipes and details. Topics: names, patterns, times, radix, expressions, decode, wasm, records, workspace, commands; without a topic, lists them. Call it when an argument's doc or an error isn't enough.
 
 | Argument | Means |
 |---|---|

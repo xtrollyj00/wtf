@@ -1,11 +1,10 @@
 //! `:` commands (spec §7), run on a workspace.
 
-use crate::workspace::{Msg, Workspace};
 use crate::pattern::{Pattern, Syntax};
-use crate::rows::{self, Row};
 use crate::radix;
+use crate::rows::{self, Row};
 use crate::session;
-
+use crate::workspace::{Msg, Workspace};
 
 /// Run a `:` command on the workspace; some answer with a message (`:e`, or `:add` naming what
 /// it couldn't add). The window's own commands (`:w`, `:q`, `:help`) are the terminal UI's.
@@ -35,7 +34,9 @@ pub fn run(app: &mut Workspace, line: &str) -> Result<Option<Msg>, String> {
         }
         "zoom" => {
             if arg.split_whitespace().count() > 1 {
-                return Err(format!("zoom takes one time, per column (`zoom 1ns`); to show a range: fit {arg}"));
+                return Err(format!(
+                    "zoom takes one time, per column (`zoom 1ns`); to show a range: fit {arg}"
+                ));
             }
             let t = crate::time::parse(arg, fpt)?;
             if t <= 0.0 {
@@ -49,7 +50,10 @@ pub fn run(app: &mut Workspace, line: &str) -> Result<Option<Msg>, String> {
         "unit" => {
             app.unit = match arg {
                 "auto" => None,
-                u => Some(crate::time::unit_named(u).map_err(|_| "usage: :unit <s|ms|us|ns|ps|fs|auto>")?),
+                u => Some(
+                    crate::time::unit_named(u)
+                        .map_err(|_| "usage: :unit <s|ms|us|ns|ps|fs|auto>")?,
+                ),
             };
             Ok(())
         }
@@ -63,7 +67,9 @@ pub fn run(app: &mut Workspace, line: &str) -> Result<Option<Msg>, String> {
         "group" if arg.is_empty() => Err("usage: :group <name>".into()),
         "group" => app.group(arg),
         "signal" => {
-            let (name, expr) = arg.split_once('=').ok_or("usage: :signal <name> = <signal>, or :signal <name> off")?;
+            let (name, expr) = arg
+                .split_once('=')
+                .ok_or("usage: :signal <name> = <signal>, or :signal <name> off")?;
             app.define(name, expr).map(drop)
         }
         "protocol" => protocol(app, arg),
@@ -73,14 +79,22 @@ pub fn run(app: &mut Workspace, line: &str) -> Result<Option<Msg>, String> {
         }
         "rename" if arg.is_empty() => Err("usage: :rename <name>".into()),
         "rename" => {
-            let h = app.rows.get(app.sel).and_then(|_| rows::header_of(&app.rows, app.sel)).ok_or("not in a group")?;
+            let h = app
+                .rows
+                .get(app.sel)
+                .and_then(|_| rows::header_of(&app.rows, app.sel))
+                .ok_or("not in a group")?;
             if let Row::Group { name, .. } = &mut app.rows[h] {
                 *name = arg.to_string();
             }
             Ok(())
         }
         "ungroup" => {
-            let h = app.rows.get(app.sel).and_then(|_| rows::header_of(&app.rows, app.sel)).ok_or("not in a group")?;
+            let h = app
+                .rows
+                .get(app.sel)
+                .and_then(|_| rows::header_of(&app.rows, app.sel))
+                .ok_or("not in a group")?;
             let end = rows::group_end(&app.rows, h);
             for r in &mut app.rows[h + 1..end] {
                 if let Row::Signal(s) = r {
@@ -109,7 +123,10 @@ pub fn run(app: &mut Workspace, line: &str) -> Result<Option<Msg>, String> {
 /// Answers with the streams the instance made and how many records each has, violations apart,
 /// so what there is to look at shows: `bus: records bus.aw 2, ...; violations bus.errors 2, ...`.
 /// A `:decode` line's argument as an instance, not made yet (the TUI's decode form checks it).
-pub fn parse_decode(arg: &str) -> Result<crate::stream::Decode, String> {
+pub fn parse_decode(
+    arg: &str,
+    from: crate::protocol::Sources<'_>,
+) -> Result<crate::stream::Decode, String> {
     let usage = "usage: :decode <name> <protocol> <role>=<signal>...";
     let (name, rest) = word(arg);
     let (protocol, rest) = word(rest);
@@ -117,14 +134,28 @@ pub fn parse_decode(arg: &str) -> Result<crate::stream::Decode, String> {
         return Err(usage.into());
     }
     let mut pairs = key_values(rest).ok_or(usage)?;
-    let clock = pairs.iter().position(|p| p.0 == "clock").map_or(String::new(), |i| pairs.remove(i).1);
+    let clock = pairs
+        .iter()
+        .position(|p| p.0 == "clock")
+        .map_or(String::new(), |i| pairs.remove(i).1);
     let on_streams = matches!(protocol, "frame" | "pair" | "check");
     let (signals, params) = pairs.into_iter().partition(|(k, _)| match on_streams {
         true => matches!(k.as_str(), "input" | "request" | "response"),
         // a built-in's params (`mode=0`, `baud=115200`) aren't roles
-        false => k != "prefix" && !crate::protocol::builtin(protocol).is_some_and(|b| b.params.contains(&k.as_str())),
+        false => {
+            k != "prefix"
+                && !from
+                    .get(protocol)
+                    .is_some_and(|p| p.def().params().contains(&k.as_str()))
+        }
     });
-    Ok(crate::stream::Decode { name: name.into(), protocol: protocol.into(), clock, signals, params })
+    Ok(crate::stream::Decode {
+        name: name.into(),
+        protocol: protocol.into(),
+        clock,
+        signals,
+        params,
+    })
 }
 
 fn decode(app: &mut Workspace, arg: &str) -> Result<String, String> {
@@ -133,7 +164,7 @@ fn decode(app: &mut Workspace, arg: &str) -> Result<String, String> {
         app.remove_decode(name)?;
         return Ok(format!("{name}: removed"));
     }
-    let d = parse_decode(arg)?;
+    let d = parse_decode(arg, app.sources())?;
     let name = d.name.clone();
     let name = name.as_str();
     app.add_decode(d)?;
@@ -145,9 +176,21 @@ fn decode(app: &mut Workspace, arg: &str) -> Result<String, String> {
             (_, true) => 1,
             _ => 0,
         };
-        made.iter().filter(|&&i| of(i) == kind).map(|&i| format!("{} {}", app.streams[i].name, app.streams[i].records.len())).collect::<Vec<_>>().join(", ")
+        made.iter()
+            .filter(|&&i| of(i) == kind)
+            .map(|&i| format!("{} {}", app.streams[i].name, app.streams[i].records.len()))
+            .collect::<Vec<_>>()
+            .join(", ")
     };
-    let parts: Vec<String> = [("records", list(0)), ("violations", list(1)), ("made from", list(2))].into_iter().filter(|(_, l)| !l.is_empty()).map(|(w, l)| format!("{w} {l}")).collect();
+    let parts: Vec<String> = [
+        ("records", list(0)),
+        ("violations", list(1)),
+        ("made from", list(2)),
+    ]
+    .into_iter()
+    .filter(|(_, l)| !l.is_empty())
+    .map(|(w, l)| format!("{w} {l}"))
+    .collect();
     Ok(format!("{name}: {}", parts.join("; ")))
 }
 
@@ -155,20 +198,62 @@ fn decode(app: &mut Workspace, arg: &str) -> Result<String, String> {
 /// on its roles, no signals; `:decode` puts it on signals at a clock. The other keys are its
 /// fields in order.
 fn protocol(app: &mut Workspace, arg: &str) -> Result<(), String> {
-    let usage = "usage: :protocol <name> roles=<a,b> when=<expr> <field>=<expr>...";
+    let usage = "usage: :protocol <name> roles=<a,b> when=<expr> <field>=<expr>... | :protocol <name> wasm=<file>";
     let (name, rest) = word(arg);
     if name.is_empty() {
         return Err(usage.into());
     }
     let mut fields = key_values(rest).ok_or(usage)?;
-    let mut take = |k: &str| fields.iter().position(|p| p.0 == k).map(|i| fields.remove(i).1);
+    let mut take = |k: &str| {
+        fields
+            .iter()
+            .position(|p| p.0 == k)
+            .map(|i| fields.remove(i).1)
+    };
     if let Some(c) = take("clock") {
-        return Err(format!("a protocol names no signals, its clock neither: :decode gives it (:decode x {name} clock={c} ...)"));
+        return Err(format!(
+            "a protocol names no signals, its clock neither: :decode gives it (:decode x {name} clock={c} ...)"
+        ));
+    }
+    if let Some(path) = take("wasm") {
+        // the file's name is the protocol's, and the session keeps both (spec §11)
+        let stem = std::path::Path::new(&path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default();
+        if stem != name {
+            return Err(format!(
+                "wasm {path} holds {stem}, not {name}: :protocol {stem} wasm={path}"
+            ));
+        }
+        if !fields.is_empty() {
+            return Err(format!(
+                "a protocol from a file has no roles, when or fields of its own: :protocol {name} wasm={path}"
+            ));
+        }
+        let loader = app
+            .loader
+            .clone()
+            .ok_or_else(|| format!("{path}: this wtf has no host for protocols from files"))?;
+        let loaded = loader(&path)?;
+        return app.add_loaded(loaded, &path);
     }
     let (when, roles) = (take("when").ok_or(usage)?, take("roles").ok_or(usage)?);
-    let roles = roles.split(',').map(|r| r.trim().to_string()).filter(|r| !r.is_empty()).collect();
-    let p = crate::stream::Sampler { name: name.into(), when, fields, roles };
-    app.add_protocol(p).map(drop).map_err(|e| format!("protocol {name} not made: {e}"))
+    let roles = roles
+        .split(',')
+        .map(|r| r.trim().to_string())
+        .filter(|r| !r.is_empty())
+        .collect();
+    let p = crate::stream::Sampler {
+        name: name.into(),
+        when,
+        fields,
+        roles,
+        wasm: None,
+    };
+    app.add_protocol(p)
+        .map(drop)
+        .map_err(|e| format!("protocol {name} not made: {e}"))
 }
 
 /// A value as a `key=value` line writes it: as it is when it reads back so, else in quotes
@@ -197,7 +282,11 @@ fn key_values(text: &str) -> Option<Vec<(String, String)>> {
         if w.is_empty() {
             return Some(pairs);
         }
-        let key = w.split_once('=').filter(|(k, v)| !k.is_empty() && k.chars().all(|c| c.is_alphanumeric() || c == '_') && !v.starts_with('='));
+        let key = w.split_once('=').filter(|(k, v)| {
+            !k.is_empty()
+                && k.chars().all(|c| c.is_alphanumeric() || c == '_')
+                && !v.starts_with('=')
+        });
         match (key, pairs.last_mut()) {
             (Some((k, v)), _) if v.starts_with('"') => {
                 // from after `key="` to the closing quote, spaces and all
@@ -219,11 +308,18 @@ fn key_values(text: &str) -> Option<Vec<(String, String)>> {
 /// rows from `a` to `b`, as `V` would select them.
 fn select(app: &mut Workspace, arg: &str) -> Result<(), String> {
     let mut row = |name: &str| -> Result<usize, String> {
-        if let Some(i) = app.rows.iter().position(|r| matches!(r, Row::Group { name: n, .. } if n == name)) {
+        if let Some(i) = app
+            .rows
+            .iter()
+            .position(|r| matches!(r, Row::Group { name: n, .. } if n == name))
+        {
             return Ok(i);
         }
         let (var, _) = app.resolve(name)?;
-        app.rows.iter().position(|r| r.sig().is_some_and(|s| s.var == var)).ok_or(format!("not shown: {name}"))
+        app.rows
+            .iter()
+            .position(|r| r.sig().is_some_and(|s| s.var == var))
+            .ok_or(format!("not shown: {name}"))
     };
     let mut names = arg.split_whitespace();
     let first = row(names.next().ok_or("usage: :select <row> [<last row>]")?)?;
@@ -242,10 +338,18 @@ fn select(app: &mut Workspace, arg: &str) -> Result<(), String> {
 fn cursor(app: &mut Workspace, arg: &str) -> Result<(), String> {
     let usage = "usage: :cursor <1-9> [time|off] [name=<text>] [note=<text>]";
     let (n, rest) = arg.split_once(char::is_whitespace).unwrap_or((arg, ""));
-    let i = n.parse::<usize>().ok().filter(|n| (1..=9).contains(n)).ok_or(usage)? - 1;
+    let i = n
+        .parse::<usize>()
+        .ok()
+        .filter(|n| (1..=9).contains(n))
+        .ok_or(usage)?
+        - 1;
     // the keys start at the first word with `=`; a name or note runs to the next key
     let rest = rest.trim();
-    let at = rest.split_whitespace().find(|w| w.contains('=')).map_or(rest.len(), |w| w.as_ptr() as usize - rest.as_ptr() as usize);
+    let at = rest
+        .split_whitespace()
+        .find(|w| w.contains('='))
+        .map_or(rest.len(), |w| w.as_ptr() as usize - rest.as_ptr() as usize);
     let (what, keys) = (rest[..at].trim(), key_values(&rest[at..]).ok_or(usage)?);
     if let Some((k, _)) = keys.iter().find(|(k, _)| k != "name" && k != "note") {
         return Err(format!(":cursor has no key {k} (name, note)"));
@@ -255,12 +359,21 @@ fn cursor(app: &mut Workspace, arg: &str) -> Result<(), String> {
     }
     match what {
         "" if keys.is_empty() => return app.goto_mark(i),
-        "" if app.marks[i].is_none() => return Err(format!("no cursor {}: give it a time first (:cursor {} <time> ...)", i + 1, i + 1)),
+        "" if app.marks[i].is_none() => {
+            return Err(format!(
+                "no cursor {}: give it a time first (:cursor {} <time> ...)",
+                i + 1,
+                i + 1
+            ));
+        }
         "" => {}
         "off" if keys.is_empty() => return app.remove_mark(Some(i)),
         "off" => return Err(usage.into()),
         t => {
-            let t = (crate::time::parse(t, app.trace.fs_per_tick)?.max(0.0).round() as u64).min(app.trace.end());
+            let t = (crate::time::parse(t, app.trace.fs_per_tick)?
+                .max(0.0)
+                .round() as u64)
+                .min(app.trace.end());
             match i {
                 0 => app.jump(t, false),
                 i => {
@@ -289,10 +402,22 @@ fn fit(app: &mut Workspace, arg: &str) -> Result<(), String> {
     let at = |a: &str| -> Result<crate::time::Tick, String> {
         match a.strip_prefix('\'') {
             Some(n) => {
-                let i = n.parse::<usize>().ok().filter(|n| (1..=9).contains(n)).ok_or(format!("no cursor {n}: cursors are '1 to '9"))? - 1;
-                app.cursor_list().into_iter().find(|c| c.0 == i).map(|c| c.1).ok_or(format!("no cursor {n}"))
+                let i = n
+                    .parse::<usize>()
+                    .ok()
+                    .filter(|n| (1..=9).contains(n))
+                    .ok_or(format!("no cursor {n}: cursors are '1 to '9"))?
+                    - 1;
+                app.cursor_list()
+                    .into_iter()
+                    .find(|c| c.0 == i)
+                    .map(|c| c.1)
+                    .ok_or(format!("no cursor {n}"))
             }
-            None => Ok((crate::time::parse(a, app.trace.fs_per_tick)?.max(0.0).round() as u64).min(app.trace.end())),
+            None => Ok((crate::time::parse(a, app.trace.fs_per_tick)?
+                .max(0.0)
+                .round() as u64)
+                .min(app.trace.end())),
         }
     };
     match arg.split_whitespace().collect::<Vec<_>>()[..] {
@@ -312,7 +437,11 @@ fn fit(app: &mut Workspace, arg: &str) -> Result<(), String> {
 
 /// `:w [file]`: the file given becomes the session file in use.
 pub fn save(app: &mut Workspace, arg: &str) -> Result<Msg, String> {
-    let path = if arg.is_empty() { app.session_path.clone() } else { arg.into() };
+    let path = if arg.is_empty() {
+        app.session_path.clone()
+    } else {
+        arg.into()
+    };
     session::write(&path, &session::to_toml(app))?;
     app.saved = session::layout_toml(app);
     let msg = format!("written: {}", path.display());
@@ -333,7 +462,9 @@ pub fn resolve(app: &Workspace, arg: &str) -> Result<Vec<usize>, String> {
 /// not the structs and arrays they make up.
 fn regex_matches(app: &Workspace, re: &regex::Regex, leaves: bool) -> Vec<usize> {
     let canon = app.trace.canon_paths();
-    (0..app.trace.vars.len()).filter(|&v| !(leaves && app.trace.is_composite(v)) && re.is_match(&canon[v])).collect()
+    (0..app.trace.vars.len())
+        .filter(|&v| !(leaves && app.trace.is_composite(v)) && re.is_match(&canon[v]))
+        .collect()
 }
 
 /// `arg` under the workspace's scope (`:scope`) if it names something there, else as it is.
@@ -351,7 +482,12 @@ fn paths(app: &Workspace, arg: &str) -> Vec<usize> {
     }
     // a struct, record or array in either HDL's form is one signal, not the signals in it
     let c = crate::trace::canon(arg);
-    if let Some(v) = app.trace.vars.iter().position(|v| !v.children.is_empty() && crate::trace::canon(&v.path) == c) {
+    if let Some(v) = app
+        .trace
+        .vars
+        .iter()
+        .position(|v| !v.children.is_empty() && crate::trace::canon(&v.path) == c)
+    {
         return vec![v];
     }
     let found = matching(app, arg, &|p| p.to_string());
@@ -375,7 +511,13 @@ fn matching(app: &Workspace, arg: &str, form: &dyn Fn(&str) -> String) -> Vec<us
         let rest = p.len().saturating_sub(a.len());
         p.starts_with(&a) && (rest <= 1 || a.len() > p.len() - v.decl.min(p.len()))
     };
-    app.trace.vars.iter().enumerate().filter(|(_, v)| hit(v)).map(|(i, _)| i).collect()
+    app.trace
+        .vars
+        .iter()
+        .enumerate()
+        .filter(|(_, v)| hit(v))
+        .map(|(i, _)| i)
+        .collect()
 }
 
 /// The name of a group of a scope's signals (spec §5, §7): the scope's tail from its last part
@@ -390,7 +532,10 @@ pub fn group_name(ws: &Workspace, scope: &str, var: usize) -> String {
     let p = crate::trace::parts(&v.path);
     // the parts of the path `scope` names, in whichever form it was written
     let key = crate::trace::canon(scope);
-    let n = (1..=p.len()).find(|&k| crate::trace::canon(&crate::trace::join(p[..k].iter().copied())) == key).unwrap_or(p.len().saturating_sub(1)).max(1);
+    let n = (1..=p.len())
+        .find(|&k| crate::trace::canon(&crate::trace::join(p[..k].iter().copied())) == key)
+        .unwrap_or(p.len().saturating_sub(1))
+        .max(1);
     let mut start = (p.len() - v.decl.min(p.len())).min(n - 1);
     while start > 0 && p[start].starts_with('[') {
         start -= 1;
@@ -400,12 +545,18 @@ pub fn group_name(ws: &Workspace, scope: &str, var: usize) -> String {
 
 /// The scope the paths share, part by part: `top.cpu.a`, `top.cpu.sub.b` → `top.cpu`.
 pub fn common_scope(paths: &[&str]) -> String {
-    let scopes: Vec<Vec<&str>> = paths.iter().map(|p| crate::trace::parts(p)).map(|mut v| {
-        v.pop();
-        v
-    }).collect();
+    let scopes: Vec<Vec<&str>> = paths
+        .iter()
+        .map(|p| crate::trace::parts(p))
+        .map(|mut v| {
+            v.pop();
+            v
+        })
+        .collect();
     let first = scopes.first().cloned().unwrap_or_default();
-    let n = (0..first.len()).take_while(|&i| scopes.iter().all(|s| s.get(i) == Some(&first[i]))).count();
+    let n = (0..first.len())
+        .take_while(|&i| scopes.iter().all(|s| s.get(i) == Some(&first[i])))
+        .count();
     crate::trace::join(first[..n].iter().copied())
 }
 
@@ -438,11 +589,20 @@ pub fn no_match(app: &Workspace, arg: &str) -> String {
     if glob_syntax && arg.contains(['{', '}']) {
         hints.push("braces are no pattern: one name or pattern each".to_string());
     } else if glob_syntax && arg.contains('*') && core.is_empty() {
-        hints.push("`*` is one level of the path, `**` any number: `**` matches every signal".to_string());
+        hints.push(
+            "`*` is one level of the path, `**` any number: `**` matches every signal".to_string(),
+        );
     } else if glob_syntax && arg.contains('*') && !arg.starts_with("**.") {
         // the pattern that does match: signals named so, or the signals in a scope named so
-        let any = |p: &str| trace.vars.iter().any(|v| v.children.is_empty() && glob(p, &v.path));
-        let fix = [format!("**.*{core}*"), format!("**.*{core}*.*")].into_iter().find(|p| any(p));
+        let any = |p: &str| {
+            trace
+                .vars
+                .iter()
+                .any(|v| v.children.is_empty() && glob(p, &v.path))
+        };
+        let fix = [format!("**.*{core}*"), format!("**.*{core}*.*")]
+            .into_iter()
+            .find(|p| any(p));
         let fix = fix.map_or(String::new(), |p| format!(": {p} for {core} anywhere"));
         hints.push(format!("a pattern matches the whole path{fix}"));
     }
@@ -471,7 +631,8 @@ fn add_one(app: &mut Workspace, arg: &str) -> Result<(), String> {
         return Ok(());
     }
     // a bit of a bus (`state[1]`) is a one-bit slice, as in a concatenation
-    let bit = paths(app, &scoped(app, arg)).is_empty() && matches!(app.resolve(arg), Ok((_, Some(_))));
+    let bit =
+        paths(app, &scoped(app, arg)).is_empty() && matches!(app.resolve(arg), Ok((_, Some(_))));
     if crate::computed::form(arg).is_some() || bit {
         let v = app.whole(arg)?;
         if app.shown(v) {
@@ -486,7 +647,10 @@ fn add_one(app: &mut Workspace, arg: &str) -> Result<(), String> {
         // the end of a scope's path, as a signal can be named by the end of its path
         let scopes: Vec<String> = {
             let d = app.trace.design();
-            d.ending(&arg).into_iter().map(|i| d.nodes[i].path.clone()).collect()
+            d.ending(&arg)
+                .into_iter()
+                .map(|i| d.nodes[i].path.clone())
+                .collect()
         };
         match &scopes[..] {
             [one] => {
@@ -494,7 +658,13 @@ fn add_one(app: &mut Workspace, arg: &str) -> Result<(), String> {
                 found = paths(app, &arg);
             }
             [] => {}
-            many => return Err(format!("ambiguous: {arg} ({} scopes: {})", many.len(), many.iter().take(5).cloned().collect::<Vec<_>>().join(", "))),
+            many => {
+                return Err(format!(
+                    "ambiguous: {arg} ({} scopes: {})",
+                    many.len(),
+                    many.iter().take(5).cloned().collect::<Vec<_>>().join(", ")
+                ));
+            }
         }
     }
     let arg = &arg;
@@ -505,7 +675,11 @@ fn add_one(app: &mut Workspace, arg: &str) -> Result<(), String> {
         // compared in either HDL's form, named as in the trace: nvc's `gen(1)` is one part
         for v in &app.trace.vars {
             let p = crate::trace::parts(&v.path);
-            let k = (1..p.len()).find(|&k| crate::trace::parts(&crate::trace::canon(&crate::trace::join(p[..k].iter().copied()))) == a);
+            let k = (1..p.len()).find(|&k| {
+                crate::trace::parts(&crate::trace::canon(&crate::trace::join(
+                    p[..k].iter().copied(),
+                ))) == a
+            });
             if let Some(k) = k.filter(|&k| p.len() > k + 1) {
                 here = crate::trace::join(p[..k].iter().copied());
                 let scope = crate::trace::join(p[..=k].iter().copied());
@@ -521,7 +695,9 @@ fn add_one(app: &mut Workspace, arg: &str) -> Result<(), String> {
                 Syntax::Glob => format!("{here}.**"),
                 Syntax::Regex => format!("/^{}\\./", regex::escape(&crate::trace::canon(&here))),
             };
-            return Err(format!("no signals directly in {here}: add {all} for all of it, or one of its scopes: {list}"));
+            return Err(format!(
+                "no signals directly in {here}: add {all} for all of it, or one of its scopes: {list}"
+            ));
         }
         return Err(no_match(app, arg));
     }
@@ -557,7 +733,8 @@ fn rm(app: &mut Workspace, arg: &str) -> Result<(), String> {
             }
         }
         let before = app.rows.len();
-        app.rows.retain(|r| r.sig().is_none_or(|s| !found.contains(&s.var)));
+        app.rows
+            .retain(|r| r.sig().is_none_or(|s| !found.contains(&s.var)));
         if app.rows.len() == before {
             return Err(format!("no matching rows: {arg}"));
         }
@@ -604,7 +781,6 @@ pub fn glob(pat: &str, path: &str) -> bool {
     let s = crate::trace::parts(path);
     segs(&p, &s)
 }
-
 
 #[cfg(test)]
 mod tests {

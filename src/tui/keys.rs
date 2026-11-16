@@ -14,7 +14,10 @@ pub struct Key {
 
 impl Key {
     pub fn of(k: KeyEvent) -> Self {
-        Key { code: k.code, ctrl: k.modifiers.contains(KeyModifiers::CONTROL) }
+        Key {
+            code: k.code,
+            ctrl: k.modifiers.contains(KeyModifiers::CONTROL),
+        }
     }
 
     /// As the `?` box and the menus show it: `x`, `Ctrl-d`, `Space`, `Enter`, `Tab`.
@@ -28,15 +31,25 @@ impl Key {
             KeyCode::Backspace => "Backspace".into(),
             c => format!("{c:?}"),
         };
-        if self.ctrl { format!("Ctrl-{name}") } else { name }
+        if self.ctrl {
+            format!("Ctrl-{name}")
+        } else {
+            name
+        }
     }
 
     pub const fn ch(c: char) -> Self {
-        Key { code: KeyCode::Char(c), ctrl: false }
+        Key {
+            code: KeyCode::Char(c),
+            ctrl: false,
+        }
     }
 
     pub const fn ctrl(c: char) -> Self {
-        Key { code: KeyCode::Char(c), ctrl: true }
+        Key {
+            code: KeyCode::Char(c),
+            ctrl: true,
+        }
     }
 
     pub const fn code(code: KeyCode) -> Self {
@@ -52,13 +65,20 @@ pub type Fixed<A> = [(&'static [(Key, A)], &'static str)];
 /// What `k` does in a `Fixed` table, if anything.
 pub fn fixed<A: Copy>(table: &Fixed<A>, k: KeyEvent) -> Option<A> {
     let k = Key::of(k);
-    table.iter().flat_map(|(keys, _)| keys.iter()).find(|(key, _)| *key == k).map(|&(_, a)| a)
+    table
+        .iter()
+        .flat_map(|(keys, _)| keys.iter())
+        .find(|(key, _)| *key == k)
+        .map(|&(_, a)| a)
 }
 
 /// A `Fixed` line's keys as the keys page shows them: `j k Down Up`.
 #[cfg(test)]
 pub fn fixed_keys<A>(keys: &[(Key, A)]) -> String {
-    keys.iter().map(|(k, _)| k.show()).collect::<Vec<_>>().join(" ")
+    keys.iter()
+        .map(|(k, _)| k.show())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 macro_rules! actions {
@@ -124,7 +144,10 @@ actions! {
 }
 
 /// `jump` takes the cursor's number after its key (`'2`); it stands for that digit in a sequence.
-const DIGIT: Key = Key { code: KeyCode::Null, ctrl: false };
+const DIGIT: Key = Key {
+    code: KeyCode::Null,
+    ctrl: false,
+};
 
 /// What the keys typed so far mean.
 #[derive(PartialEq, Debug)]
@@ -149,8 +172,15 @@ pub struct Keymap {
 pub enum Entry {
     /// What it does, the command (run, or with a trailing space put on the command line), and
     /// a longer word on what happens, if any.
-    Run { label: String, line: String, why: String },
-    Group { name: String, items: Vec<(Key, Entry)> },
+    Run {
+        label: String,
+        line: String,
+        why: String,
+    },
+    Group {
+        name: String,
+        items: Vec<(Key, Entry)>,
+    },
 }
 
 /// The leader menu's defaults, as a `[leader]` table in the config file would write them.
@@ -205,10 +235,21 @@ Q = ["quit without saving", ":q!", "unsaved changes are lost"]
 
 impl Default for Keymap {
     fn default() -> Self {
-        let keys = ACTIONS.iter().map(|&(a, _, k, ..)| seq(a, k).expect("the defaults parse")).collect();
-        let mut leader = Entry::Group { name: String::new(), items: Vec::new() };
+        let keys = ACTIONS
+            .iter()
+            .map(|&(a, _, k, ..)| seq(a, k).expect("the defaults parse"))
+            .collect();
+        let mut leader = Entry::Group {
+            name: String::new(),
+            items: Vec::new(),
+        };
         let mut warnings = Vec::new();
-        merge(&mut leader, &LEADER.parse().expect("the leader's defaults are TOML"), "leader", &mut warnings);
+        merge(
+            &mut leader,
+            &LEADER.parse().expect("the leader's defaults are TOML"),
+            "leader",
+            &mut warnings,
+        );
         assert!(warnings.is_empty(), "{warnings:?}");
         Keymap { keys, leader }
     }
@@ -217,30 +258,54 @@ impl Default for Keymap {
 /// `table` over the group `into`: an entry replaces the one on its key, a group merges into the
 /// group there, `""` removes it. A bad entry is skipped with a warning naming it by `at`.
 fn merge(into: &mut Entry, table: &toml::Table, at: &str, warnings: &mut Vec<String>) {
-    let Entry::Group { name, items } = into else { return };
+    let Entry::Group { name, items } = into else {
+        return;
+    };
     for (k, v) in table {
         if k == "name" {
             match v.as_str() {
                 Some(n) => *name = n.into(),
-                None => warnings.push(format!("config: {at}.name = {}? (a string)", theme::show(v))),
+                None => warnings.push(format!(
+                    "config: {at}.name = {}? (a string)",
+                    theme::show(v)
+                )),
             }
             continue;
         }
-        let key = match crate::tui::app::parse_keys(k).map(|ks| ks.into_iter().map(Key::of).collect::<Vec<_>>()).as_deref() {
+        let key = match crate::tui::app::parse_keys(k)
+            .map(|ks| ks.into_iter().map(Key::of).collect::<Vec<_>>())
+            .as_deref()
+        {
             Ok([key]) if !matches!(key.code, KeyCode::Esc | KeyCode::Backspace) => *key,
             _ => {
-                warnings.push(format!("config: {at}.{k}? (one key, not Esc or Backspace: \"x\", \"<C-x>\")"));
+                warnings.push(format!(
+                    "config: {at}.{k}? (one key, not Esc or Backspace: \"x\", \"<C-x>\")"
+                ));
                 continue;
             }
         };
         let i = items.iter().position(|(ik, _)| *ik == key);
-        let bad = |w: &mut Vec<String>| w.push(format!("config: {at}.{k} = {}? ([\"what it does\", \":command\"] and maybe what happens, a table for a group, or \"\" to remove)", theme::show(v)));
+        let bad = |w: &mut Vec<String>| {
+            w.push(format!("config: {at}.{k} = {}? ([\"what it does\", \":command\"] and maybe what happens, a table for a group, or \"\" to remove)", theme::show(v)))
+        };
         match v {
             toml::Value::String(t) if t.is_empty() => _ = i.map(|i| items.remove(i)),
             toml::Value::Array(a) => match a.as_slice() {
-                [toml::Value::String(label), toml::Value::String(line), why @ ..] if line.starts_with(':') && why.len() <= 1 && why.iter().all(|w| w.is_str()) => {
-                    let why = why.first().and_then(|w| w.as_str()).unwrap_or("").to_string();
-                    let e = Entry::Run { label: label.clone(), line: line.clone(), why };
+                [
+                    toml::Value::String(label),
+                    toml::Value::String(line),
+                    why @ ..,
+                ] if line.starts_with(':') && why.len() <= 1 && why.iter().all(|w| w.is_str()) => {
+                    let why = why
+                        .first()
+                        .and_then(|w| w.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let e = Entry::Run {
+                        label: label.clone(),
+                        line: line.clone(),
+                        why,
+                    };
                     match i {
                         Some(i) => items[i].1 = e,
                         None => items.push((key, e)),
@@ -252,7 +317,13 @@ fn merge(into: &mut Entry, table: &toml::Table, at: &str, warnings: &mut Vec<Str
                 let i = match i {
                     Some(i) if matches!(items[i].1, Entry::Group { .. }) => i,
                     _ => {
-                        let g = (key, Entry::Group { name: k.clone(), items: Vec::new() });
+                        let g = (
+                            key,
+                            Entry::Group {
+                                name: k.clone(),
+                                items: Vec::new(),
+                            },
+                        );
                         match i {
                             Some(i) => items[i] = g,
                             None => items.push(g),
@@ -278,7 +349,10 @@ impl Entry {
 }
 
 fn seq(a: Action, text: &str) -> Result<Vec<Key>, String> {
-    let mut keys: Vec<Key> = crate::tui::app::parse_keys(text)?.into_iter().map(Key::of).collect();
+    let mut keys: Vec<Key> = crate::tui::app::parse_keys(text)?
+        .into_iter()
+        .map(Key::of)
+        .collect();
     if a == Action::Jump {
         keys.push(DIGIT);
     }
@@ -308,23 +382,42 @@ impl Keymap {
         let names = || ACTIONS.iter().map(|a| a.1).collect::<Vec<_>>().join(", ");
         for (name, value) in table {
             let Some(i) = ACTIONS.iter().position(|a| a.1 == name) else {
-                warnings.push(format!("config: unknown key keys.{name} (actions: {})", names()));
+                warnings.push(format!(
+                    "config: unknown key keys.{name} (actions: {})",
+                    names()
+                ));
                 continue;
             };
             let a = ACTIONS[i].0;
-            let new = match value.as_str().ok_or_else(|| "a string".to_string()).and_then(|t| seq(a, t)) {
-                Ok(k) if k.is_empty() || k.len() > 2 + (a == Action::Jump) as usize => Err("one key or two, as \"x\", \"gx\", \"<C-x>\"".into()),
+            let new = match value
+                .as_str()
+                .ok_or_else(|| "a string".to_string())
+                .and_then(|t| seq(a, t))
+            {
+                Ok(k) if k.is_empty() || k.len() > 2 + (a == Action::Jump) as usize => {
+                    Err("one key or two, as \"x\", \"gx\", \"<C-x>\"".into())
+                }
                 // a count comes first, so a digit can't start a key
-                Ok(k) if matches!(k[0].code, KeyCode::Char('0'..='9')) && !k[0].ctrl => Err("not a digit: digits are counts".into()),
+                Ok(k) if matches!(k[0].code, KeyCode::Char('0'..='9')) && !k[0].ctrl => {
+                    Err("not a digit: digits are counts".into())
+                }
                 Ok(k) if matches!(k[0].code, KeyCode::Esc) => Err("not Esc: it cancels".into()),
                 r => r,
             };
             match new {
                 Ok(k) => match (0..ACTIONS.len()).find(|&j| j != i && clash(&map.keys[j], &k)) {
-                    Some(j) => warnings.push(format!("config: keys.{name} = {}? {} is {}'s key", theme::show(value), map.show(ACTIONS[j].0), ACTIONS[j].1)),
+                    Some(j) => warnings.push(format!(
+                        "config: keys.{name} = {}? {} is {}'s key",
+                        theme::show(value),
+                        map.show(ACTIONS[j].0),
+                        ACTIONS[j].1
+                    )),
                     None => map.keys[i] = k,
                 },
-                Err(e) => warnings.push(format!("config: keys.{name} = {}? ({e})", theme::show(value))),
+                Err(e) => warnings.push(format!(
+                    "config: keys.{name} = {}? ({e})",
+                    theme::show(value)
+                )),
             }
         }
         map
@@ -362,7 +455,17 @@ impl Keymap {
             .iter()
             .enumerate()
             .filter(|(_, k)| k.len() > typed.len() && clash(typed, k))
-            .map(|(i, k)| (k[typed.len()..].iter().filter(|&&k| k != DIGIT).map(|k| k.show()).collect::<Vec<_>>().join(" "), ACTIONS[i].0))
+            .map(|(i, k)| {
+                (
+                    k[typed.len()..]
+                        .iter()
+                        .filter(|&&k| k != DIGIT)
+                        .map(|k| k.show())
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                    ACTIONS[i].0,
+                )
+            })
             .collect();
         out.sort_by(|a, b| a.0.cmp(&b.0));
         out
@@ -385,16 +488,28 @@ impl Keymap {
 
     /// The actions a count repeats, with their keys, for which-key after a count.
     pub fn counted(&self) -> Vec<(String, Action)> {
-        ACTIONS.iter().filter(|a| a.4).map(|a| (self.show(a.0), a.0)).collect()
+        ACTIONS
+            .iter()
+            .filter(|a| a.4)
+            .map(|a| (self.show(a.0), a.0))
+            .collect()
     }
 
     /// An action's key as the `?` box and the menus show it: `x`, `gg`, `Ctrl-r`; `jump`'s without
     /// the number.
     pub fn show(&self, a: Action) -> String {
         let k = &self.keys[a as usize];
-        let parts: Vec<String> = k.iter().filter(|&&k| k != DIGIT).map(|k| k.show()).collect();
+        let parts: Vec<String> = k
+            .iter()
+            .filter(|&&k| k != DIGIT)
+            .map(|k| k.show())
+            .collect();
         // a named key in a sequence gets a space: `g Enter`, not `gEnter`
-        parts.join(if parts.iter().any(|p| p.chars().count() > 1) { " " } else { "" })
+        parts.join(if parts.iter().any(|p| p.chars().count() > 1) {
+            " "
+        } else {
+            ""
+        })
     }
 }
 
@@ -408,7 +523,10 @@ mod tests {
     fn fixed_tables() {
         use crate::tui::app::App;
         fn unique<A>(table: &Fixed<A>) {
-            let all: Vec<Key> = table.iter().flat_map(|(k, _)| k.iter().map(|(k, _)| *k)).collect();
+            let all: Vec<Key> = table
+                .iter()
+                .flat_map(|(k, _)| k.iter().map(|(k, _)| *k))
+                .collect();
             for (i, k) in all.iter().enumerate() {
                 assert!(!all[..i].contains(k), "{} is on two lines", k.show());
             }
@@ -416,11 +534,20 @@ mod tests {
         unique(App::BROWSER_KEYS);
         unique(App::PICKER_KEYS);
         let ev = |s: &str| crate::tui::app::parse_keys(s).unwrap()[0];
-        assert_eq!(fixed(App::BROWSER_KEYS, ev("G")), Some(crate::tui::browser::Browse::Last));
-        assert_eq!(fixed(App::BROWSER_KEYS, ev("<C-f>")), Some(crate::tui::browser::Browse::PageDown));
+        assert_eq!(
+            fixed(App::BROWSER_KEYS, ev("G")),
+            Some(crate::tui::browser::Browse::Last)
+        );
+        assert_eq!(
+            fixed(App::BROWSER_KEYS, ev("<C-f>")),
+            Some(crate::tui::browser::Browse::PageDown)
+        );
         assert_eq!(fixed(App::BROWSER_KEYS, ev("f")), None);
         assert_eq!(fixed(App::BROWSER_KEYS, ev("x")), None);
-        assert_eq!(fixed(App::PICKER_KEYS, ev("<C-s>")), Some(crate::tui::picker::Pick::Source));
+        assert_eq!(
+            fixed(App::PICKER_KEYS, ev("<C-s>")),
+            Some(crate::tui::picker::Pick::Source)
+        );
         assert_eq!(fixed(App::PICKER_KEYS, ev("s")), None);
     }
 
@@ -433,7 +560,11 @@ mod tests {
     }
 
     fn keys(text: &str) -> Vec<Key> {
-        crate::tui::app::parse_keys(text).unwrap().into_iter().map(Key::of).collect()
+        crate::tui::app::parse_keys(text)
+            .unwrap()
+            .into_iter()
+            .map(Key::of)
+            .collect()
     }
 
     #[test]
@@ -449,12 +580,25 @@ mod tests {
         assert_eq!(m.hit(&keys("<CR>")), Meaning::Action(Action::Fold));
         assert_eq!(m.hit(&keys("<C-r>")), Meaning::Action(Action::Redo));
         assert_eq!(m.hit(&keys("r")), Meaning::Action(Action::Radix));
-        assert_eq!((m.show(Action::Redo), m.show(Action::Start), m.show(Action::Jump), m.show(Action::Fold)), ("Ctrl-r".into(), "gg".into(), "'".into(), "Enter".into()));
+        assert_eq!(
+            (
+                m.show(Action::Redo),
+                m.show(Action::Start),
+                m.show(Action::Jump),
+                m.show(Action::Fold)
+            ),
+            ("Ctrl-r".into(), "gg".into(), "'".into(), "Enter".into())
+        );
         // every default is typeable: none is the start of another
         let d = &m.keys;
         for i in 0..d.len() {
             for j in 0..d.len() {
-                assert!(i == j || !clash(&d[i], &d[j]), "{} {}", ACTIONS[i].1, ACTIONS[j].1);
+                assert!(
+                    i == j || !clash(&d[i], &d[j]),
+                    "{} {}",
+                    ACTIONS[i].1,
+                    ACTIONS[j].1
+                );
             }
         }
     }
@@ -468,9 +612,23 @@ mod tests {
         m.set_leader(&t, &mut w);
         let k = |t: &str| keys(t);
         assert_eq!(m.leader.at(&k("u")), None);
-        assert_eq!(m.leader.at(&k("f")), Some(&Entry::Run { label: "find".into(), line: ":pick signals".into(), why: String::new() }));
+        assert_eq!(
+            m.leader.at(&k("f")),
+            Some(&Entry::Run {
+                label: "find".into(),
+                line: ":pick signals".into(),
+                why: String::new()
+            })
+        );
         assert!(matches!(m.leader.at(&k("a")), Some(Entry::Group { name, .. }) if name == "ai"));
-        assert_eq!(m.leader.at(&k("at")), Some(&Entry::Run { label: "steps".into(), line: ":trail".into(), why: String::new() }));
+        assert_eq!(
+            m.leader.at(&k("at")),
+            Some(&Entry::Run {
+                label: "steps".into(),
+                line: ":trail".into(),
+                why: String::new()
+            })
+        );
         // the rest of the agent group stays
         assert!(m.leader.at(&k("aF")).is_some());
         assert!(m.leader.at(&k("gs")).is_some());
@@ -511,8 +669,27 @@ mod tests {
     #[test]
     fn shown_keys_and_groups() {
         let show = |t: &str| keys(t)[0].show();
-        assert_eq!((show("<BS>"), show("<S-Tab>"), Key { code: KeyCode::Up, ctrl: false }.show()), ("Backspace".into(), "Shift-Tab".into(), "Up".into()));
-        assert_eq!((Keymap::group(Action::JumpBack), Keymap::group(Action::CopyTime), Keymap::group(Action::Remove), Keymap::group(Action::Start)), ("jump to", "copy", "remove", "go to"));
+        assert_eq!(
+            (
+                show("<BS>"),
+                show("<S-Tab>"),
+                Key {
+                    code: KeyCode::Up,
+                    ctrl: false
+                }
+                .show()
+            ),
+            ("Backspace".into(), "Shift-Tab".into(), "Up".into())
+        );
+        assert_eq!(
+            (
+                Keymap::group(Action::JumpBack),
+                Keymap::group(Action::CopyTime),
+                Keymap::group(Action::Remove),
+                Keymap::group(Action::Start)
+            ),
+            ("jump to", "copy", "remove", "go to")
+        );
         // a jump key followed by something that is no digit means nothing
         let mut w = Vec::new();
         let m = Keymap::from_table(&"jump = \"<C-j>\"".parse().unwrap(), &mut w);
@@ -524,7 +701,10 @@ mod tests {
         // a non-string name is named; a table over a command replaces it; a path through a command is none
         let mut m = Keymap::default();
         let mut w = Vec::new();
-        let t: toml::Table = "[f]\nname = 3\n[u]\nname = \"x\"\ny = [\"y\", \":q\"]\n[n]\nz = [\"z\", \":q\"]".parse().unwrap();
+        let t: toml::Table =
+            "[f]\nname = 3\n[u]\nname = \"x\"\ny = [\"y\", \":q\"]\n[n]\nz = [\"z\", \":q\"]"
+                .parse()
+                .unwrap();
         m.set_leader(&t, &mut w);
         assert_eq!(w, ["config: leader.f.name = 3? (a string)"]);
         let mut w = Vec::new();
@@ -533,13 +713,21 @@ mod tests {
         // a new group on a free key, and over a command key
         assert!(matches!(m.leader.at(&keys("uy")), Some(Entry::Run { .. })));
         assert!(matches!(m.leader.at(&keys("nz")), Some(Entry::Run { .. })));
-        let Entry::Group { items, .. } = &m.leader else { panic!() };
-        let run = items.iter().find(|(_, e)| matches!(e, Entry::Run { .. })).map(|(k, _)| *k);
+        let Entry::Group { items, .. } = &m.leader else {
+            panic!()
+        };
+        let run = items
+            .iter()
+            .find(|(_, e)| matches!(e, Entry::Run { .. }))
+            .map(|(k, _)| *k);
         if let Some(k) = run {
             assert_eq!(m.leader.at(&[k, k]), None);
             let mut m2 = m;
             let key = k.show();
-            m2.set_leader(&format!("[{key}]\nname = \"g\"").parse().unwrap(), &mut Vec::new());
+            m2.set_leader(
+                &format!("[{key}]\nname = \"g\"").parse().unwrap(),
+                &mut Vec::new(),
+            );
             assert!(matches!(m2.leader.at(&[k]), Some(Entry::Group { .. })));
         }
     }

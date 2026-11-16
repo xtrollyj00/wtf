@@ -20,18 +20,78 @@ pub struct Radix {
 const ANY: fn(u32) -> bool = |_| true;
 
 pub const RADIXES: &[Radix] = &[
-    Radix { name: "hex", format: |b, _| hex(b), parse: Some(parse_hex), fits: ANY, fixed: false },
-    Radix { name: "bin", format: |b, _| bin(b), parse: Some(parse_bin), fits: ANY, fixed: false },
-    Radix { name: "dec", format: |b, _| dec(b), parse: Some(parse_dec), fits: ANY, fixed: false },
-    Radix { name: "sdec", format: |b, _| sdec(b), parse: Some(parse_sdec), fits: ANY, fixed: false },
-    Radix { name: "oct", format: |b, _| grouped(b, 3, "0o"), parse: Some(parse_oct), fits: ANY, fixed: false },
-    Radix { name: "ascii", format: |b, _| ascii(b), parse: None, fits: |w| w >= 8, fixed: false },
-    Radix { name: "float", format: |b, _| float(b), parse: None, fits: |w| matches!(w, 16 | 32 | 64), fixed: false },
-    Radix { name: "q", format: |b, f| fixed(b, f, true), parse: None, fits: ANY, fixed: true },
-    Radix { name: "uq", format: |b, f| fixed(b, f, false), parse: None, fits: ANY, fixed: true },
+    Radix {
+        name: "hex",
+        format: |b, _| hex(b),
+        parse: Some(parse_hex),
+        fits: ANY,
+        fixed: false,
+    },
+    Radix {
+        name: "bin",
+        format: |b, _| bin(b),
+        parse: Some(parse_bin),
+        fits: ANY,
+        fixed: false,
+    },
+    Radix {
+        name: "dec",
+        format: |b, _| dec(b),
+        parse: Some(parse_dec),
+        fits: ANY,
+        fixed: false,
+    },
+    Radix {
+        name: "sdec",
+        format: |b, _| sdec(b),
+        parse: Some(parse_sdec),
+        fits: ANY,
+        fixed: false,
+    },
+    Radix {
+        name: "oct",
+        format: |b, _| grouped(b, 3, "0o"),
+        parse: Some(parse_oct),
+        fits: ANY,
+        fixed: false,
+    },
+    Radix {
+        name: "ascii",
+        format: |b, _| ascii(b),
+        parse: None,
+        fits: |w| w >= 8,
+        fixed: false,
+    },
+    Radix {
+        name: "float",
+        format: |b, _| float(b),
+        parse: None,
+        fits: |w| matches!(w, 16 | 32 | 64),
+        fixed: false,
+    },
+    Radix {
+        name: "q",
+        format: |b, f| fixed(b, f, true),
+        parse: None,
+        fits: ANY,
+        fixed: true,
+    },
+    Radix {
+        name: "uq",
+        format: |b, f| fixed(b, f, false),
+        parse: None,
+        fits: ANY,
+        fixed: true,
+    },
     // the names come from the var (`rows::label`); a value without one is shown in hex. It fits
     // signals with names, whatever their width (`fits`).
-    Radix { name: "enum", format: |b, _| hex(b), parse: None, fits: |_| false, fixed: false },
+    Radix {
+        name: "enum",
+        format: |b, _| hex(b),
+        parse: None,
+        fits: |_| false,
+        fixed: false,
+    },
 ];
 
 /// Bits of digits in a power-of-two base, leading zeros dropped.
@@ -94,7 +154,10 @@ fn parse_sdec(s: &str, width: u32) -> Option<String> {
     if m.len() > w || (m.len() == w && m != format!("1{}", "0".repeat(w - 1))) {
         return Some("1".repeat(w + 1));
     }
-    let inverted: Vec<u8> = format!("{m:0>w$}").bytes().map(|b| if b == b'0' { 1 } else { 0 }).collect();
+    let inverted: Vec<u8> = format!("{m:0>w$}")
+        .bytes()
+        .map(|b| if b == b'0' { 1 } else { 0 })
+        .collect();
     // add one
     let mut out = inverted;
     for b in out.iter_mut().rev() {
@@ -113,7 +176,11 @@ pub fn parse_name(text: &str) -> Option<(usize, u32, Option<u32>)> {
     if let Some(r) = RADIXES.iter().position(|r| !r.fixed && r.name == text) {
         return Some((r, 0, None));
     }
-    let (r, rest) = RADIXES.iter().enumerate().filter(|(_, r)| r.fixed).find_map(|(i, r)| Some((i, text.strip_prefix(r.name)?)))?;
+    let (r, rest) = RADIXES
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| r.fixed)
+        .find_map(|(i, r)| Some((i, text.strip_prefix(r.name)?)))?;
     let (m, n) = rest.split_once('.')?;
     let (m, n) = (m.parse::<u32>().ok()?, n.parse::<u32>().ok()?);
     Some((r, n, Some(m.checked_add(n)?)))
@@ -130,12 +197,20 @@ pub fn name(r: usize, frac: u32, width: u32) -> String {
 /// Whether radix `r` can show a signal of this width, whose values the file names or not; `need`
 /// is the width a fixed-point radix needs (`parse_name`).
 pub fn fits(r: usize, need: Option<u32>, width: u32, named: bool) -> bool {
-    need.is_none_or(|n| n == width) && if r == ENUM { named } else { (RADIXES[r].fits)(width) }
+    need.is_none_or(|n| n == width)
+        && if r == ENUM {
+            named
+        } else {
+            (RADIXES[r].fits)(width)
+        }
 }
 
 /// The radix `r` moves to from `r`: the next one that fits, without fixed point.
 pub fn next(r: usize, width: u32, named: bool) -> usize {
-    (1..=RADIXES.len()).map(|k| (r + k) % RADIXES.len()).find(|&n| !RADIXES[n].fixed && fits(n, None, width, named)).unwrap_or(r)
+    (1..=RADIXES.len())
+        .map(|k| (r + k) % RADIXES.len())
+        .find(|&n| !RADIXES[n].fixed && fits(n, None, width, named))
+        .unwrap_or(r)
 }
 
 /// Hex, the radix of values without a row (a record's fields).
@@ -149,7 +224,13 @@ pub const SDEC: usize = 3;
 /// The radix new rows start in: `enum` if the file names the signal's values, `sdec` if they are
 /// signed (spec §16), otherwise hex.
 pub fn default_for(named: bool, signed: bool) -> usize {
-    if named { ENUM } else if signed { SDEC } else { DEFAULT }
+    if named {
+        ENUM
+    } else if signed {
+        SDEC
+    } else {
+        DEFAULT
+    }
 }
 
 /// One output digit from a group of bits; unknown digits are X, U or Z.
@@ -185,7 +266,11 @@ fn grouped(bits: &str, n: usize, prefix: &str) -> String {
     let digits: String = padded
         .as_bytes()
         .chunks(n)
-        .map(|g| digit(std::str::from_utf8(g).unwrap(), |v| char::from_digit(v, 16).unwrap().to_ascii_uppercase()))
+        .map(|g| {
+            digit(std::str::from_utf8(g).unwrap(), |v| {
+                char::from_digit(v, 16).unwrap().to_ascii_uppercase()
+            })
+        })
         .collect();
     let trimmed = digits.trim_start_matches('0');
     format!("{prefix}{}", if trimmed.is_empty() { "0" } else { trimmed })
@@ -280,7 +365,11 @@ fn ascii(bits: &str) -> String {
             },
         })
         .collect();
-    let text: String = chars.iter().skip_while(|&&c| c == '\0').map(|&c| if c == '\0' { '.' } else { c }).collect();
+    let text: String = chars
+        .iter()
+        .skip_while(|&&c| c == '\0')
+        .map(|&c| if c == '\0' { '.' } else { c })
+        .collect();
     if text.is_empty() { ".".into() } else { text }
 }
 
@@ -293,7 +382,11 @@ fn float(bits: &str) -> String {
     // plain notation where it reads well, exponent notation for very large and small values
     fn show<T: std::fmt::Display + std::fmt::LowerExp + Into<f64> + Copy>(x: T) -> String {
         let a = x.into().abs();
-        if a.is_finite() && a != 0.0 && !(1e-4..1e7).contains(&a) { format!("{x:e}") } else { format!("{x}") }
+        if a.is_finite() && a != 0.0 && !(1e-4..1e7).contains(&a) {
+            format!("{x:e}")
+        } else {
+            format!("{x}")
+        }
     }
     match bits.len() {
         16 => show(half(v as u16)),
@@ -331,7 +424,11 @@ fn fixed(bits: &str, frac: u32, signed: bool) -> String {
     // f / 2^frac = f * 5^frac / 10^frac: exact decimal digits
     let digits = format!("{:0>frac$}", f * UBig::from(5u8).pow(frac));
     let digits = digits.trim_end_matches('0');
-    format!("{}{int}.{}", if negative { "-" } else { "" }, if digits.is_empty() { "0" } else { digits })
+    format!(
+        "{}{int}.{}",
+        if negative { "-" } else { "" },
+        if digits.is_empty() { "0" } else { digits }
+    )
 }
 
 #[cfg(test)]
@@ -364,13 +461,16 @@ mod tests {
         assert_eq!(sdec("10000000"), "-128");
         assert_eq!(sdec("1"), "-1");
         assert_eq!(sdec("01111111"), "127");
-        assert_eq!(sdec(&format!("1{}", "0".repeat(127))), i128::MIN.to_string());
+        assert_eq!(
+            sdec(&format!("1{}", "0".repeat(127))),
+            i128::MIN.to_string()
+        );
     }
 
     #[test]
     fn more_radixes() {
         assert_eq!(grouped("001111", 3, "0o"), "0o17");
-        assert_eq!(ascii("0000000001001000" ), "H");
+        assert_eq!(ascii("0000000001001000"), "H");
         assert_eq!(ascii("0100100001101001"), "Hi");
         assert_eq!(ascii("01001000000000010110100x"), "H.?");
         assert_eq!(ascii("00000000"), ".");
@@ -387,10 +487,19 @@ mod tests {
         assert_eq!(fixed("0101", 0, true), "5.0");
         assert_eq!(parse_name("q4.12"), Some((7, 12, Some(16))));
         assert_eq!(parse_name("uq0.8"), Some((8, 8, Some(8))));
-        assert_eq!((parse_name("dec"), parse_name("q4"), parse_name("xyz")), (Some((2, 0, None)), None, None));
+        assert_eq!(
+            (parse_name("dec"), parse_name("q4"), parse_name("xyz")),
+            (Some((2, 0, None)), None, None)
+        );
         assert_eq!(parse_name("q2.39"), Some((7, 39, Some(41))));
-        assert_eq!(fixed(&format!("1{}", "0".repeat(129)), 0, false), "680564733841876926926749214863536422912.0");
-        assert_eq!(fixed(&format!("{}1", "0".repeat(40)), 40, false), "0.0000000000009094947017729282379150390625");
+        assert_eq!(
+            fixed(&format!("1{}", "0".repeat(129)), 0, false),
+            "680564733841876926926749214863536422912.0"
+        );
+        assert_eq!(
+            fixed(&format!("{}1", "0".repeat(40)), 40, false),
+            "0.0000000000009094947017729282379150390625"
+        );
         assert_eq!(fixed(&"1".repeat(130), 2, true), "-0.25");
         assert_eq!(name(7, 12, 16), "q4.12");
         // r: float only for 16, 32 and 64 bits, fixed point never, enum only with names
@@ -399,7 +508,10 @@ mod tests {
         assert_eq!(next(6, 32, false), 0);
         assert_eq!(next(6, 32, true), ENUM);
         assert_eq!(next(ENUM, 32, true), 0);
-        assert_eq!((RADIXES[ENUM].name, parse_name("enum")), ("enum", Some((ENUM, 0, None))));
+        assert_eq!(
+            (RADIXES[ENUM].name, parse_name("enum")),
+            ("enum", Some((ENUM, 0, None)))
+        );
         assert_eq!(parse_oct("0o17", 8).as_deref(), Some("1111"));
     }
 
@@ -408,7 +520,10 @@ mod tests {
         assert_eq!(parse_hex("0x0040", 8).as_deref(), Some("1000000"));
         assert_eq!(parse_bin("0b1000000", 8).as_deref(), Some("1000000"));
         assert_eq!(parse_dec("64", 8).as_deref(), Some("1000000"));
-        assert_eq!(parse_dec(&u128::MAX.to_string(), 128), Some("1".repeat(128)));
+        assert_eq!(
+            parse_dec(&u128::MAX.to_string(), 128),
+            Some("1".repeat(128))
+        );
         assert_eq!(parse_hex("40", 8), None);
         assert_eq!(parse_dec("0x40", 8), None);
         assert_eq!(parse_sdec("-12", 8).as_deref(), Some("11110100"));

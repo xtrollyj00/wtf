@@ -9,7 +9,14 @@ use wtf_core::workspace::Step;
 
 /// The tools whose calls are steps: queries of the trace and changes to the workspace. Lookups
 /// (`help`, `info`, `signals`, `view`, ...) show nothing about the trace.
-const STEPS: [&str; 6] = ["find", "records", "values", "render", "command", "workspace"];
+const STEPS: [&str; 6] = [
+    "find",
+    "records",
+    "values",
+    "render",
+    "command",
+    "workspace",
+];
 
 /// The `_meta` key a tool's time rides under from the tool to `call_tool`, which takes it out.
 const TIME: &str = "wtf/time";
@@ -38,13 +45,36 @@ pub fn take_time(res: &mut CallToolResult) -> Option<Tick> {
 }
 
 /// The step a call of `tool` with `args` that answered `answer` makes, if it makes one.
-pub fn step(tool: &str, args: Option<&JsonObject>, answer: &str, error: bool, time: Option<Tick>) -> Option<Step> {
+pub fn step(
+    tool: &str,
+    args: Option<&JsonObject>,
+    answer: &str,
+    error: bool,
+    time: Option<Tick>,
+) -> Option<Step> {
     if !STEPS.contains(&tool) {
         return None;
     }
-    let arg = |k: &str| args.and_then(|a| a.get(k)).and_then(Value::as_str).unwrap_or_default();
-    let list = |k: &str| args.and_then(|a| a.get(k)).and_then(Value::as_array).map_or(String::new(), |l| l.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", "));
-    let count = |k: &str| args.and_then(|a| a.get(k)).and_then(Value::as_array).map_or(0, Vec::len);
+    let arg = |k: &str| {
+        args.and_then(|a| a.get(k))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+    };
+    let list = |k: &str| {
+        args.and_then(|a| a.get(k))
+            .and_then(Value::as_array)
+            .map_or(String::new(), |l| {
+                l.iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            })
+    };
+    let count = |k: &str| {
+        args.and_then(|a| a.get(k))
+            .and_then(Value::as_array)
+            .map_or(0, Vec::len)
+    };
     let ask = match tool {
         "command" => arg("line").to_string(),
         "find" => arg("expr").to_string(),
@@ -54,12 +84,23 @@ pub fn step(tool: &str, args: Option<&JsonObject>, answer: &str, error: bool, ti
         "values" => format!("{} from {} to {}", list("signals"), arg("from"), arg("to")),
         "render" if count("signals") == 0 => "the workspace".into(),
         "render" => list("signals"),
-        _ => format!("{} rows, {} cursors", count("rows"), args.and_then(|a| a.get("cursors")).and_then(Value::as_object).map_or(0, |c| c.len())),
+        _ => format!(
+            "{} rows, {} cursors",
+            count("rows"),
+            args.and_then(|a| a.get("cursors"))
+                .and_then(Value::as_object)
+                .map_or(0, |c| c.len())
+        ),
     };
     let time = if error { None } else { time };
     let first = match tool {
         // `name:` alone says nothing: with its first value, `data: 40ns 0x2A`
-        "values" => answer.lines().take(2).map(str::trim).collect::<Vec<_>>().join(" "),
+        "values" => answer
+            .lines()
+            .take(2)
+            .map(str::trim)
+            .collect::<Vec<_>>()
+            .join(" "),
         _ => answer.lines().next().unwrap_or_default().to_string(),
     };
     let answer = match (error, tool) {
@@ -68,5 +109,10 @@ pub fn step(tool: &str, args: Option<&JsonObject>, answer: &str, error: bool, ti
         (false, "workspace") => "declared".into(),
         _ => first,
     };
-    Some(Step { tool: tool.into(), ask, answer, time })
+    Some(Step {
+        tool: tool.into(),
+        ask,
+        answer,
+        time,
+    })
 }

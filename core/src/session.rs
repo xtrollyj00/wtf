@@ -1,10 +1,10 @@
 //! Session files (spec §11): loading, saving, and the layout `[+]` compares.
 
-use crate::workspace::Workspace;
-use crate::time;
-use std::path::Path;
 use crate::radix;
 use crate::rows::{self, Look, Row, Sig};
+use crate::time;
+use crate::workspace::Workspace;
+use std::path::Path;
 use toml::{Table, Value};
 
 pub const VERSION: i64 = 1;
@@ -27,10 +27,16 @@ pub fn agent_path(trace: &std::path::Path) -> std::path::PathBuf {
 /// A session's text as a table, if it reads and this wtf supports its version: the errors that
 /// refuse a whole session, checked before anything changes.
 pub fn read(text: &str) -> Result<Table, String> {
-    let mut t: Table = text.parse().map_err(|e: toml::de::Error| format!("session: {}", e.message()))?;
-    let version = t.remove("version").map_or(Ok(VERSION), |v| v.as_integer().ok_or("session: version must be a number"))?;
+    let mut t: Table = text
+        .parse()
+        .map_err(|e: toml::de::Error| format!("session: {}", e.message()))?;
+    let version = t.remove("version").map_or(Ok(VERSION), |v| {
+        v.as_integer().ok_or("session: version must be a number")
+    })?;
     if version > VERSION {
-        return Err(format!("session version {version} is newer than this wtf supports ({VERSION})"));
+        return Err(format!(
+            "session version {version} is newer than this wtf supports ({VERSION})"
+        ));
     }
     Ok(t)
 }
@@ -59,9 +65,15 @@ pub fn apply(app: &mut Workspace, text: &str) -> Result<Vec<String>, String> {
     // named signals first: rows may show them
     if let Some(Value::Array(signals)) = t.remove("signal") {
         for s in signals {
-            let (name, expr) = (s.get("name").and_then(Value::as_str), s.get("expr").and_then(Value::as_str));
+            let (name, expr) = (
+                s.get("name").and_then(Value::as_str),
+                s.get("expr").and_then(Value::as_str),
+            );
             match (name, expr) {
-                (Some(n), Some(e)) => app.define(n, e).map(drop).unwrap_or_else(|e| warn.push(format!("signal {n}: {e}"))),
+                (Some(n), Some(e)) => app
+                    .define(n, e)
+                    .map(drop)
+                    .unwrap_or_else(|e| warn.push(format!("signal {n}: {e}"))),
                 _ => warn.push("signal: needs a name and an expr".into()),
             }
         }
@@ -69,8 +81,13 @@ pub fn apply(app: &mut Workspace, text: &str) -> Result<Vec<String>, String> {
     // names for values (`:names`), before rows pick their radix
     if let Some(Value::Array(names)) = t.remove("names") {
         for n in names {
-            match (n.get("signal").and_then(Value::as_str), n.get("values").and_then(Value::as_str)) {
-                (Some(sig), Some(v)) => app.name_values(sig, v).unwrap_or_else(|e| warn.push(format!("names {sig}: {e}"))),
+            match (
+                n.get("signal").and_then(Value::as_str),
+                n.get("values").and_then(Value::as_str),
+            ) {
+                (Some(sig), Some(v)) => app
+                    .name_values(sig, v)
+                    .unwrap_or_else(|e| warn.push(format!("names {sig}: {e}"))),
                 _ => warn.push("names: needs a signal and values".into()),
             }
         }
@@ -80,35 +97,96 @@ pub fn apply(app: &mut Workspace, text: &str) -> Result<Vec<String>, String> {
     // a table of names (`fields`, `signals`), in its order; missing is empty
     let pairs = |e: &Value, k: &str| match e.get(k) {
         None => Some(Vec::new()),
-        Some(v) => v.as_table().map(|f| f.iter().map(|(k, v)| (k.clone(), v.as_str().unwrap_or_default().to_string())).collect()),
+        Some(v) => v.as_table().map(|f| {
+            f.iter()
+                .map(|(k, v)| (k.clone(), v.as_str().unwrap_or_default().to_string()))
+                .collect()
+        }),
     };
     if let Some(Value::Array(protocols)) = t.remove("protocol") {
         for p in protocols {
             let roles = match p.get("roles") {
                 None => None,
-                Some(r) => r.as_array().map(|r| r.iter().map(|r| r.as_str().unwrap_or_default().to_string()).collect::<Vec<_>>()),
+                Some(r) => r.as_array().map(|r| {
+                    r.iter()
+                        .map(|r| r.as_str().unwrap_or_default().to_string())
+                        .collect::<Vec<_>>()
+                }),
             };
             if p.get("clock").is_some() {
-                warn.push(format!("protocol {}: a protocol has no clock; its [[decode]] gives it", text(&p, "name").unwrap_or_default()));
+                warn.push(format!(
+                    "protocol {}: a protocol has no clock; its [[decode]] gives it",
+                    text(&p, "name").unwrap_or_default()
+                ));
                 continue;
             }
-            match (text(&p, "name"), text(&p, "when"), pairs(&p, "fields"), roles) {
-                (Some(name), Some(when), Some(fields), Some(roles)) => {
-                    let def = crate::stream::Sampler { name: name.clone(), when, fields, roles };
-                    app.add_protocol(def).map(drop).unwrap_or_else(|e| warn.push(format!("protocol {name}: {e}")));
+            // one from a file is that file and its name: nothing else belongs in the entry (§11)
+            if let (Some(name), Some(path)) = (text(&p, "name"), text(&p, "wasm")) {
+                if let Some(k) = ["when", "roles", "fields"]
+                    .into_iter()
+                    .find(|k| p.get(*k).is_some())
+                {
+                    warn.push(format!(
+                        "protocol {name}: wasm {path} keeps no {k}, its card is the file's"
+                    ));
+                    continue;
                 }
-                _ => warn.push("protocol: needs a name, roles as a list, a when and fields as a table".into()),
+                let def = crate::stream::Sampler {
+                    name: name.clone(),
+                    wasm: Some(path),
+                    ..Default::default()
+                };
+                app.add_protocol(def)
+                    .map(drop)
+                    .unwrap_or_else(|e| warn.push(format!("protocol {name}: {e}")));
+                continue;
+            }
+            match (
+                text(&p, "name"),
+                text(&p, "when"),
+                pairs(&p, "fields"),
+                roles,
+            ) {
+                (Some(name), Some(when), Some(fields), Some(roles)) => {
+                    let def = crate::stream::Sampler {
+                        name: name.clone(),
+                        when,
+                        fields,
+                        roles,
+                        wasm: None,
+                    };
+                    app.add_protocol(def)
+                        .map(drop)
+                        .unwrap_or_else(|e| warn.push(format!("protocol {name}: {e}")));
+                }
+                _ => warn.push(
+                    "protocol: needs a name, roles as a list, a when and fields as a table".into(),
+                ),
             }
         }
     }
     if let Some(Value::Array(decodes)) = t.remove("decode") {
         for d in decodes {
-            match (text(&d, "name"), text(&d, "protocol"), pairs(&d, "signals"), pairs(&d, "params")) {
+            match (
+                text(&d, "name"),
+                text(&d, "protocol"),
+                pairs(&d, "signals"),
+                pairs(&d, "params"),
+            ) {
                 (Some(name), Some(protocol), Some(signals), Some(params)) => {
                     let clock = text(&d, "clock").unwrap_or_default();
-                    app.add_decode(crate::stream::Decode { name, protocol, clock, signals, params }).map(drop).unwrap_or_else(|e| warn.push(format!("decode {e}")));
+                    app.add_decode(crate::stream::Decode {
+                        name,
+                        protocol,
+                        clock,
+                        signals,
+                        params,
+                    })
+                    .map(drop)
+                    .unwrap_or_else(|e| warn.push(format!("decode {e}")));
                 }
-                _ => warn.push("decode: needs a name, a protocol, signals and params as tables".into()),
+                _ => warn
+                    .push("decode: needs a name, a protocol, signals and params as tables".into()),
             }
         }
     }
@@ -135,7 +213,9 @@ pub fn apply(app: &mut Workspace, text: &str) -> Result<Vec<String>, String> {
             Value::Integer(i) => Ok(*i as f64),
             _ => Err("bad time".into()),
         };
-        r.map_err(|e| warn.push(e)).ok().map(|x| (x.round() as u64).min(end))
+        r.map_err(|e| warn.push(e))
+            .ok()
+            .map(|x| (x.round() as u64).min(end))
     };
     if let Some(Value::Table(mut view)) = t.remove("view") {
         if let Some(z) = view.remove("zoom") {
@@ -158,12 +238,16 @@ pub fn apply(app: &mut Workspace, text: &str) -> Result<Vec<String>, String> {
     if let Some(Value::Table(cursors)) = t.remove("cursors") {
         for (k, v) in cursors {
             match k.parse::<usize>() {
-                Ok(1) if v.is_table() => warn.push("cursors.1: the cursor moves and has no name or note; give it a time".into()),
+                Ok(1) if v.is_table() => warn.push(
+                    "cursors.1: the cursor moves and has no name or note; give it a time".into(),
+                ),
                 Ok(1) => app.view.cursor = time(&v, &mut warn).unwrap_or(0),
                 // a mark is a time, or a table with its time, name and note (spec §9)
                 Ok(n @ 2..=9) => match v {
                     Value::Table(mut m) => {
-                        let text = |m: &mut Table, key: &str, warn: &mut Vec<String>| match m.remove(key) {
+                        let text = |m: &mut Table, key: &str, warn: &mut Vec<String>| match m
+                            .remove(key)
+                        {
                             None => String::new(),
                             Some(Value::String(s)) => s,
                             Some(_) => {
@@ -171,7 +255,10 @@ pub fn apply(app: &mut Workspace, text: &str) -> Result<Vec<String>, String> {
                                 String::new()
                             }
                         };
-                        let (name, note) = (text(&mut m, "name", &mut warn), text(&mut m, "note", &mut warn));
+                        let (name, note) = (
+                            text(&mut m, "name", &mut warn),
+                            text(&mut m, "note", &mut warn),
+                        );
                         match m.remove("time") {
                             Some(t) => {
                                 app.marks[n - 1] = time(&t, &mut warn);
@@ -200,7 +287,14 @@ pub fn apply(app: &mut Workspace, text: &str) -> Result<Vec<String>, String> {
     Ok(warn)
 }
 
-fn rows_of(app: &mut Workspace, rows: Value, grouped: bool, out: &mut Vec<Row>, missing: &mut Vec<String>, warn: &mut Vec<String>) {
+fn rows_of(
+    app: &mut Workspace,
+    rows: Value,
+    grouped: bool,
+    out: &mut Vec<Row>,
+    missing: &mut Vec<String>,
+    warn: &mut Vec<String>,
+) {
     let Value::Array(rows) = rows else {
         warn.push("rows: must be a list".into());
         return;
@@ -209,7 +303,10 @@ fn rows_of(app: &mut Workspace, rows: Value, grouped: bool, out: &mut Vec<Row>, 
         let Value::Table(mut row) = row else { continue };
         if let Some(Value::String(path)) = row.remove("signal") {
             let levels: Vec<String> = match row.remove("open") {
-                Some(Value::Array(a)) => a.iter().filter_map(|n| n.as_str().map(str::to_string)).collect(),
+                Some(Value::Array(a)) => a
+                    .iter()
+                    .filter_map(|n| n.as_str().map(str::to_string))
+                    .collect(),
                 Some(_) => {
                     warn.push(format!("open of {path}: must be a list of names"));
                     Vec::new()
@@ -219,7 +316,14 @@ fn rows_of(app: &mut Workspace, rows: Value, grouped: bool, out: &mut Vec<Row>, 
             let fields = row.remove("fields");
             match app.var_named(&path) {
                 Some(var) if !out.iter().any(|r| r.sig().is_some_and(|s| s.var == var)) => {
-                    let look = look_keys(app, &mut row, var, &path, Look::of(&app.trace.vars[var]), warn);
+                    let look = look_keys(
+                        app,
+                        &mut row,
+                        var,
+                        &path,
+                        Look::of(&app.trace.vars[var]),
+                        warn,
+                    );
                     let mut open: Vec<usize> = Vec::new();
                     for name in levels {
                         match open_var(app, var, &name) {
@@ -228,7 +332,13 @@ fn rows_of(app: &mut Workspace, rows: Value, grouped: bool, out: &mut Vec<Row>, 
                             None => warn.push(format!("{path} has no {name} to open")),
                         }
                     }
-                    let mut sig = Sig { var, look, grouped, open, looks: Vec::new() };
+                    let mut sig = Sig {
+                        var,
+                        look,
+                        grouped,
+                        open,
+                        looks: Vec::new(),
+                    };
                     if let Some(f) = fields {
                         fields_of(app, &mut sig, f, &path, warn);
                     }
@@ -244,7 +354,10 @@ fn rows_of(app: &mut Workspace, rows: Value, grouped: bool, out: &mut Vec<Row>, 
                 }
             }
         } else if let Some(Value::String(name)) = row.remove("group") {
-            let collapsed = row.remove("collapsed").and_then(|c| c.as_bool()).unwrap_or(false);
+            let collapsed = row
+                .remove("collapsed")
+                .and_then(|c| c.as_bool())
+                .unwrap_or(false);
             // shortcut: groups have one level until subgroups exist (ROADMAP.md "Later"); nested ones are flattened.
             if grouped {
                 warn.push(format!("nested group flattened: {name}"));
@@ -263,7 +376,14 @@ fn rows_of(app: &mut Workspace, rows: Value, grouped: bool, out: &mut Vec<Row>, 
 
 /// A line's `radix` and `color` keys (a row's or a field's), checked against its signal: `base`
 /// where one is missing or wrong.
-fn look_keys(app: &Workspace, t: &mut Table, var: usize, path: &str, base: Look, warn: &mut Vec<String>) -> Look {
+fn look_keys(
+    app: &Workspace,
+    t: &mut Table,
+    var: usize,
+    path: &str,
+    base: Look,
+    warn: &mut Vec<String>,
+) -> Look {
     let mut l = base;
     if let Some(r) = t.remove("radix") {
         let name = r.as_str().unwrap_or("");
@@ -271,8 +391,13 @@ fn look_keys(app: &Workspace, t: &mut Table, var: usize, path: &str, base: Look,
         let (width, named) = (v.width.unwrap_or(0), v.names.is_some());
         match radix::parse_name(name) {
             None => warn.push(format!("unknown radix: {name}")),
-            Some((r, frac, need)) if radix::fits(r, need, width, named) => (l.radix, l.frac) = (r, frac),
-            Some((r, frac, need)) => warn.push(format!("radix {} doesn't fit {path}", radix::name(r, frac, need.unwrap_or(width)))),
+            Some((r, frac, need)) if radix::fits(r, need, width, named) => {
+                (l.radix, l.frac) = (r, frac)
+            }
+            Some((r, frac, need)) => warn.push(format!(
+                "radix {} doesn't fit {path}",
+                radix::name(r, frac, need.unwrap_or(width))
+            )),
         }
     }
     if let Some(c) = t.remove("color") {
@@ -328,14 +453,23 @@ fn signal_keys(app: &Workspace, s: &Sig) -> Vec<String> {
     let mut keys = vec![format!("signal = {}", quote(&var.path))];
     keys.extend(look_toml(app, s.var, &s.look, &Look::of(var)));
     if !s.open.is_empty() {
-        keys.push(format!("open = [{}]", s.open.iter().map(|&v| quote(&open_name(app, s.var, v))).collect::<Vec<_>>().join(", ")));
+        keys.push(format!(
+            "open = [{}]",
+            s.open
+                .iter()
+                .map(|&v| quote(&open_name(app, s.var, v)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
     }
     if !s.looks.is_empty() {
         let fields: Vec<String> = s
             .looks
             .iter()
             .map(|(v, l)| {
-                let keys = [format!("field = {}", quote(&open_name(app, s.var, *v)))].into_iter().chain(look_toml(app, *v, l, &app.line_default(s, *v)));
+                let keys = [format!("field = {}", quote(&open_name(app, s.var, *v)))]
+                    .into_iter()
+                    .chain(look_toml(app, *v, l, &app.line_default(s, *v)));
                 format!("{{ {} }}", keys.collect::<Vec<_>>().join(", "))
             })
             .collect();
@@ -349,7 +483,10 @@ fn look_toml(app: &Workspace, var: usize, l: &Look, base: &Look) -> Vec<String> 
     let v = &app.trace.vars[var];
     let mut keys = Vec::new();
     if v.width != Some(1) && (l.radix, l.frac) != (base.radix, base.frac) {
-        keys.push(format!("radix = {}", quote(&radix::name(l.radix, l.frac, v.width.unwrap_or(0)))));
+        keys.push(format!(
+            "radix = {}",
+            quote(&radix::name(l.radix, l.frac, v.width.unwrap_or(0)))
+        ));
     }
     if let Some(c) = l.color {
         keys.push(format!("color = {}", quote(rows::COLORS[c])));
@@ -376,7 +513,12 @@ pub fn open_var(app: &Workspace, row: usize, name: &str) -> Option<usize> {
 
 /// What `[+]` compares (spec §5 "Undo"): the rows and the marks, as the session writes them.
 pub fn layout_toml(app: &Workspace) -> String {
-    let marks: String = app.cursor_list().into_iter().filter(|c| c.0 > 0).map(|(i, t)| format!("{i} {t} {:?}\n", app.labels[i])).collect();
+    let marks: String = app
+        .cursor_list()
+        .into_iter()
+        .filter(|c| c.0 > 0)
+        .map(|(i, t)| format!("{i} {t} {:?}\n", app.labels[i]))
+        .collect();
     rows_toml(app) + &marks
 }
 
@@ -386,19 +528,53 @@ pub fn rows_toml(app: &Workspace) -> String {
     let rows = &app.rows;
     let mut out = String::new();
     for (name, expr) in &app.signals {
-        out += &format!("\n[[signal]]\nname = {}\nexpr = {}\n", quote(name), quote(expr));
+        out += &format!(
+            "\n[[signal]]\nname = {}\nexpr = {}\n",
+            quote(name),
+            quote(expr)
+        );
     }
     for (path, spec) in &app.value_names {
-        out += &format!("\n[[names]]\nsignal = {}\nvalues = {}\n", quote(path), quote(spec));
+        out += &format!(
+            "\n[[names]]\nsignal = {}\nvalues = {}\n",
+            quote(path),
+            quote(spec)
+        );
     }
-    let table = |pairs: &[(String, String)]| pairs.iter().map(|(k, v)| format!("{k} = {}", quote(v))).collect::<Vec<_>>().join(", ");
+    let table = |pairs: &[(String, String)]| {
+        pairs
+            .iter()
+            .map(|(k, v)| format!("{k} = {}", quote(v)))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
     for p in &app.protocols {
         out += &format!("\n[[protocol]]\nname = {}\n", quote(&p.name));
-        out += &format!("roles = [{}]\n", p.roles.iter().map(|r| quote(r)).collect::<Vec<_>>().join(", "));
-        out += &format!("when = {}\nfields = {{ {} }}\n", quote(&p.when), table(&p.fields));
+        // a protocol from a file is that file: read back, it loads it again (spec §11)
+        if let Some(path) = &p.wasm {
+            out += &format!("wasm = {}\n", quote(path));
+            continue;
+        }
+        out += &format!(
+            "roles = [{}]\n",
+            p.roles
+                .iter()
+                .map(|r| quote(r))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        out += &format!(
+            "when = {}\nfields = {{ {} }}\n",
+            quote(&p.when),
+            table(&p.fields)
+        );
     }
     for d in &app.decodes {
-        out += &format!("\n[[decode]]\nname = {}\nprotocol = {}\n", quote(&d.name), quote(&d.protocol));
+        out += &format!(
+            "\n[[decode]]\nname = {}\nprotocol = {}\n",
+            quote(&d.name),
+            quote(&d.protocol)
+        );
         if !d.clock.is_empty() {
             out += &format!("clock = {}\n", quote(&d.clock));
         }
@@ -456,7 +632,8 @@ pub fn to_link_toml(app: &Workspace) -> String {
 /// A shared session without its trail, which comes last: what a window following an agent
 /// compares, so a new step alone doesn't touch the user's view (spec §15 "Following").
 pub fn without_trail(text: &str) -> &str {
-    text.split_once("\n[[trail]]\n").map_or(text, |(view, _)| view)
+    text.split_once("\n[[trail]]\n")
+        .map_or(text, |(view, _)| view)
 }
 
 /// The steps a shared session holds.
@@ -469,14 +646,30 @@ pub fn read_trail(app: &Workspace, text: &str) -> Vec<crate::workspace::Step> {
 }
 
 /// `[[trail]]` tables as steps, into `out`.
-fn steps(app: &Workspace, v: Option<Value>, out: &mut Vec<crate::workspace::Step>, warn: &mut Vec<String>) {
+fn steps(
+    app: &Workspace,
+    v: Option<Value>,
+    out: &mut Vec<crate::workspace::Step>,
+    warn: &mut Vec<String>,
+) {
     let (fpt, end) = (app.trace.fs_per_tick, app.trace.end());
-    for s in v.as_ref().and_then(Value::as_array).map_or(&[][..], |a| a.as_slice()) {
+    for s in v
+        .as_ref()
+        .and_then(Value::as_array)
+        .map_or(&[][..], |a| a.as_slice())
+    {
         let text = |k: &str| s.get(k).and_then(Value::as_str).map(String::from);
         match (text("tool"), text("ask"), text("answer")) {
             (Some(tool), Some(ask), Some(answer)) => {
-                let time = text("time").and_then(|t| time::parse(&t, fpt).ok()).map(|t| (t.max(0.0).round() as u64).min(end));
-                out.push(crate::workspace::Step { tool, ask, answer, time });
+                let time = text("time")
+                    .and_then(|t| time::parse(&t, fpt).ok())
+                    .map(|t| (t.max(0.0).round() as u64).min(end));
+                out.push(crate::workspace::Step {
+                    tool,
+                    ask,
+                    answer,
+                    time,
+                });
             }
             _ => warn.push("trail: a step needs a tool, an ask and an answer".into()),
         }
@@ -489,8 +682,15 @@ fn trail_toml(app: &Workspace) -> String {
     app.trail
         .iter()
         .map(|s| {
-            let time = s.time.map_or(String::new(), |t| format!("time = {}\n", quote(&time::format_exact(t, fpt))));
-            format!("\n[[trail]]\ntool = {}\nask = {}\nanswer = {}\n{time}", quote(&s.tool), quote(&s.ask), quote(&s.answer))
+            let time = s.time.map_or(String::new(), |t| {
+                format!("time = {}\n", quote(&time::format_exact(t, fpt)))
+            });
+            format!(
+                "\n[[trail]]\ntool = {}\nask = {}\nanswer = {}\n{time}",
+                quote(&s.tool),
+                quote(&s.ask),
+                quote(&s.answer)
+            )
         })
         .collect()
 }
@@ -499,7 +699,11 @@ fn toml(app: &Workspace, shared: bool) -> String {
     let fpt = app.trace.fs_per_tick;
     let v = &app.view;
     // below one tick per column the zoom is a fraction of a tick, written as plain ticks
-    let zoom = if v.cols == 1 { time::format_exact(v.ticks, fpt) } else { (1.0 / v.cols as f64).to_string() };
+    let zoom = if v.cols == 1 {
+        time::format_exact(v.ticks, fpt)
+    } else {
+        (1.0 / v.cols as f64).to_string()
+    };
     let cursors: String = app
         .cursor_list()
         .iter()
@@ -509,7 +713,10 @@ fn toml(app: &Workspace, shared: bool) -> String {
             match l.is_empty() {
                 true => format!("{} = {t}\n", i + 1),
                 false => {
-                    let keys = [("name", &l.name), ("note", &l.note)].into_iter().filter(|(_, v)| !v.is_empty()).map(|(k, v)| format!(", {k} = {}", quote(v)));
+                    let keys = [("name", &l.name), ("note", &l.note)]
+                        .into_iter()
+                        .filter(|(_, v)| !v.is_empty())
+                        .map(|(k, v)| format!(", {k} = {}", quote(v)));
                     format!("{} = {{ time = {t}{} }}\n", i + 1, keys.collect::<String>())
                 }
             }
@@ -517,11 +724,26 @@ fn toml(app: &Workspace, shared: bool) -> String {
         .collect();
     format!(
         "# wtf session\nversion = {VERSION}\n{}{}\n[view]\nzoom = {}\ntime = {}\n{}\n[cursors]\n{cursors}{}",
-        app.scope.as_ref().map_or(String::new(), |s| format!("scope = {}\n", quote(s))),
-        app.unit.map_or(String::new(), |u| format!("unit = {}\n", quote(time::unit_name(u)))),
+        app.scope
+            .as_ref()
+            .map_or(String::new(), |s| format!("scope = {}\n", quote(s))),
+        app.unit.map_or(String::new(), |u| format!(
+            "unit = {}\n",
+            quote(time::unit_name(u))
+        )),
         quote(&zoom),
         quote(&time::format_exact(v.start, fpt)),
-        if shared { format!("to = {}\n", quote(&time::format_exact(v.last_visible().min(app.trace.end()), fpt))) } else { String::new() },
+        if shared {
+            format!(
+                "to = {}\n",
+                quote(&time::format_exact(
+                    v.last_visible().min(app.trace.end()),
+                    fpt
+                ))
+            )
+        } else {
+            String::new()
+        },
         rows_toml(app)
     )
 }

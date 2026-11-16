@@ -1,13 +1,13 @@
 //! App state and the keys of each mode (spec §2, §3, §4 "Command line", §5).
 
-use wtf_core::{command, query, session};
 use crate::draw::gl;
+use crate::tui::keys::{Action as A, Entry, Key, Keymap, Meaning};
 use crate::tui::panel::Panel;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use wtf_core::rows::{self, Row};
 use wtf_core::time;
 use wtf_core::workspace::{Msg, Workspace};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use crate::tui::keys::{Action as A, Entry, Key, Keymap, Meaning};
+use wtf_core::{command, query, session};
 
 mod mouse;
 pub use mouse::{Drag, Held, Hit, Item, Menu, Target};
@@ -190,7 +190,9 @@ const NOTES: usize = 200;
 pub type Stamp = Option<(std::time::SystemTime, u64)>;
 
 pub fn stamp(path: &std::path::Path) -> Stamp {
-    std::fs::metadata(path).ok().and_then(|m| Some((m.modified().ok()?, m.len())))
+    std::fs::metadata(path)
+        .ok()
+        .and_then(|m| Some((m.modified().ok()?, m.len())))
 }
 
 /// The `e` float (spec §2): what is examined and when, and its lines, (field name, value); a
@@ -290,7 +292,10 @@ impl App {
         self.mode = Mode::Normal;
         // the agent's: its next step may take the status line
         (self.msg, self.agent_msg) = (Some(msg.clone()), Some(msg.clone()));
-        let who = self.follow.as_ref().map_or("agent".into(), |f| f.id.clone());
+        let who = self
+            .follow
+            .as_ref()
+            .map_or("agent".into(), |f| f.id.clone());
         self.log(&msg, Some(who));
         Ok(msg.0)
     }
@@ -299,7 +304,8 @@ impl App {
     /// shows it, its steps in `:trail` (spec §15 "Present").
     pub fn show_agent_file(&mut self) -> Result<(), String> {
         let path = session::agent_path(&self.ws.trace_path);
-        let text = std::fs::read_to_string(&path).map_err(|_| format!("no agent session for this trace ({})", path.display()))?;
+        let text = std::fs::read_to_string(&path)
+            .map_err(|_| format!("no agent session for this trace ({})", path.display()))?;
         let (msg, err) = self.ws.present(&text, false)?;
         self.mode = Mode::Normal;
         let steps = match self.ws.trail.len() {
@@ -338,21 +344,50 @@ impl App {
             }
             // the agents' reference, one source for both (spec §15)
             "help" => {
-                let topics = || crate::mcp::help::TOPICS.iter().map(|t| t.0).collect::<Vec<_>>().join(" ");
-                let text = crate::mcp::help::answer(Some(arg), wtf_core::pattern::Syntax::Glob).map_err(|_| format!("no help topic {}; topics: {}", arg.trim(), topics()))?;
+                let topics = || {
+                    crate::mcp::help::TOPICS
+                        .iter()
+                        .map(|t| t.0)
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                };
+                let text = crate::mcp::help::answer(Some(arg), wtf_core::pattern::Syntax::Glob)
+                    .map_err(|_| format!("no help topic {}; topics: {}", arg.trim(), topics()))?;
                 let items = text.lines().map(|l| (None, l.to_string())).collect();
                 let name = format!("help {} {}", gl().dot, arg.trim().to_lowercase());
-                self.records = Some(Records { name, title: String::new(), items, hl: 0, top: 0, page: 1 });
+                self.records = Some(Records {
+                    name,
+                    title: String::new(),
+                    items,
+                    hl: 0,
+                    top: 0,
+                    page: 1,
+                });
                 None
             }
             // the agent's steps, newest last; Enter jumps to a step's time (spec §15 "Trail")
             "trail" => {
                 if self.ws.trail.is_empty() {
-                    return Err("no trail yet: the steps of an agent working on this trace show here".into());
+                    return Err(
+                        "no trail yet: the steps of an agent working on this trace show here"
+                            .into(),
+                    );
                 }
-                let items: Vec<_> = self.ws.trail.iter().map(|s| (s.time, Self::step_line(s))).collect();
+                let items: Vec<_> = self
+                    .ws
+                    .trail
+                    .iter()
+                    .map(|s| (s.time, Self::step_line(s)))
+                    .collect();
                 let (title, hl) = (format!("{} steps", items.len()), items.len() - 1);
-                self.records = Some(Records { name: "trail".into(), title, items, hl, top: 0, page: 1 });
+                self.records = Some(Records {
+                    name: "trail".into(),
+                    title,
+                    items,
+                    hl,
+                    top: 0,
+                    page: 1,
+                });
                 None
             }
             // every message, with its time and who caused it (spec §4 "Notifications")
@@ -370,7 +405,9 @@ impl App {
                 self.quit = true;
                 None
             }
-            "q" if self.ws.modified() => return Err("unsaved session (:w to save, :q! to quit)".into()),
+            "q" if self.ws.modified() => {
+                return Err("unsaved session (:w to save, :q! to quit)".into());
+            }
             "q" | "q!" => {
                 self.quit = true;
                 None
@@ -386,7 +423,12 @@ impl App {
             "names" if arg.trim().is_empty() => return self.open_names(),
             "decodes" => return self.open_decodes(),
             // the window picks the unit that fits; `unit` is for agents' answers (spec §15)
-            "unit" => return Err("unit sets the time unit of an agent's answers; the window picks what fits".into()),
+            "unit" => {
+                return Err(
+                    "unit sets the time unit of an agent's answers; the window picks what fits"
+                        .into(),
+                );
+            }
             _ => command::run(&mut self.ws, line)?,
         };
         if msg.is_some() {
@@ -405,7 +447,6 @@ impl App {
         Ok(())
     }
 
-
     /// The agents on this trace and their sessions now (spec §15 "Joining"): says who joined and
     /// left and each new step, takes the trail of the agent followed (or else of the one that made
     /// the step), and shows the followed agent's changes. Returns true when there is something new
@@ -422,7 +463,10 @@ impl App {
         let mut whose: Vec<String> = Vec::new();
         let mut steps: Vec<Option<(String, String, String)>> = Vec::new();
         for id in is.iter().filter(|id| !was.contains(id)) {
-            said.push((format!("agent {id} joined (:follow shows its workspace)"), false));
+            said.push((
+                format!("agent {id} joined (:follow shows its workspace)"),
+                false,
+            ));
             whose.push(id.clone());
             steps.push(None);
         }
@@ -438,12 +482,18 @@ impl App {
         }
         let several = self.agents.len() > 1;
         for (id, text) in self.agents.clone() {
-            let before = old.iter().find(|a| a.0 == id).map_or(String::new(), |a| a.1.clone());
+            let before = old
+                .iter()
+                .find(|a| a.0 == id)
+                .map_or(String::new(), |a| a.1.clone());
             if text == before {
                 continue;
             }
             let followed = self.follow.as_ref().is_some_and(|f| f.id == id);
-            if followed && session::without_trail(&text) != session::without_trail(&self.follow.as_ref().unwrap().shown) {
+            if followed
+                && session::without_trail(&text)
+                    != session::without_trail(&self.follow.as_ref().unwrap().shown)
+            {
                 let r = self.present(&text).map(drop);
                 self.report(r);
             }
@@ -451,12 +501,22 @@ impl App {
                 f.shown = text.clone();
             }
             let trail = session::read_trail(&self.ws, &text);
-            if trail != session::read_trail(&self.ws, &before) && !trail.is_empty() && (followed || self.follow.is_none()) {
+            if trail != session::read_trail(&self.ws, &before)
+                && !trail.is_empty()
+                && (followed || self.follow.is_none())
+            {
                 self.ws.trail = trail;
                 // an agent just joined says so; its steps before are in `:trail`
                 if let Some(s) = self.ws.trail.last().filter(|_| was.contains(&id)) {
-                    let who = if several { format!("agent {id}") } else { "agent".into() };
-                    said.push((format!("{who}: {}", Self::step_line(s)), s.answer.starts_with("error: ")));
+                    let who = if several {
+                        format!("agent {id}")
+                    } else {
+                        "agent".into()
+                    };
+                    said.push((
+                        format!("{who}: {}", Self::step_line(s)),
+                        s.answer.starts_with("error: "),
+                    ));
                     whose.push(id.clone());
                     steps.push(Some((s.tool.clone(), s.ask.clone(), s.answer.clone())));
                 }
@@ -485,23 +545,48 @@ impl App {
             // back to the user's own view, or what the agent presented: one undo step, u shows
             // what was followed
             self.ws.present(&f.own, false)?;
-            let back = if f.presented { "the agent's present is back" } else { "your view is back" };
-            self.msg = Some((format!("not following {}; {back} (u: what you followed)", f.id), false));
+            let back = if f.presented {
+                "the agent's present is back"
+            } else {
+                "your view is back"
+            };
+            self.msg = Some((
+                format!("not following {}; {back} (u: what you followed)", f.id),
+                false,
+            ));
             return Ok(());
         }
         let agents = crate::live::on_trace("agent", &self.ws.trace_path);
         let id = match (arg, agents.as_slice()) {
             (_, []) => return Err("no agent is working on this trace".into()),
             ("", [one]) => one.clone(),
-            ("", _) => return Err(format!("several agents work on this trace: :follow <id> ({})", agents.join(", "))),
+            ("", _) => {
+                return Err(format!(
+                    "several agents work on this trace: :follow <id> ({})",
+                    agents.join(", ")
+                ));
+            }
             (id, _) if agents.iter().any(|a| a == id) => id.to_string(),
-            (id, _) => return Err(format!("no agent {id} on this trace (agents: {})", agents.join(", "))),
+            (id, _) => {
+                return Err(format!(
+                    "no agent {id} on this trace (agents: {})",
+                    agents.join(", ")
+                ));
+            }
         };
         let (_, text) = crate::live::get(&id)?;
         // following another agent keeps the view from before the first
-        let (own, presented) = self.follow.take().map_or_else(|| (session::to_shared_toml(&self.ws), false), |f| (f.own, f.presented));
+        let (own, presented) = self.follow.take().map_or_else(
+            || (session::to_shared_toml(&self.ws), false),
+            |f| (f.own, f.presented),
+        );
         self.present(&text)?;
-        self.follow = Some(Follow { id: id.clone(), shown: text.clone(), own, presented });
+        self.follow = Some(Follow {
+            id: id.clone(),
+            shown: text.clone(),
+            own,
+            presented,
+        });
         if let Some(a) = self.agents.iter_mut().find(|a| a.0 == id) {
             a.1 = text;
         } else {
@@ -519,7 +604,9 @@ impl App {
             return false;
         }
         match self.changed {
-            Some((s, t)) if s == now && at.duration_since(t) >= std::time::Duration::from_secs(1) => {
+            Some((s, t))
+                if s == now && at.duration_since(t) >= std::time::Duration::from_secs(1) =>
+            {
                 self.changed = None;
                 let r = self.reload();
                 self.report(r);
@@ -560,7 +647,9 @@ impl App {
         if self.help || self.examine.is_some() {
             let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
             match k.code {
-                KeyCode::Esc | KeyCode::Char('q') => (self.help, self.examine, self.scroll) = (false, None, 0),
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    (self.help, self.examine, self.scroll) = (false, None, 0)
+                }
                 KeyCode::Char('?') if self.help => (self.help, self.scroll) = (false, 0),
                 KeyCode::Char('e') if !self.help => (self.examine, self.scroll) = (None, 0),
                 KeyCode::Char('j') | KeyCode::Down => self.scroll += 1,
@@ -608,21 +697,44 @@ impl App {
         }
     }
 
-
     /// A new group's name: the longest start its signals' names share (`s_axi_aw` for
     /// `s_axi_awvalid` and `s_axi_awready`), without a trailing `_` or `.`; else `group`.
     fn group_name(&self) -> String {
-        let leaves: Vec<String> = self.ws.rows[self.ws.selection()].iter().filter_map(Row::sig).map(|s| rows::child_name(&self.ws.trace.vars[s.var].path)).collect();
+        let leaves: Vec<String> = self.ws.rows[self.ws.selection()]
+            .iter()
+            .filter_map(Row::sig)
+            .map(|s| rows::child_name(&self.ws.trace.vars[s.var].path))
+            .collect();
         let first = leaves.first().map_or("", String::as_str);
-        let len = leaves.iter().fold(first.len(), |n, l| first.chars().zip(l.chars()).take(n).take_while(|(a, b)| a == b).count());
-        let name = first.chars().take(len).collect::<String>().trim_end_matches(['_', '.']).to_string();
-        if leaves.len() > 1 && name.chars().count() > 1 { name } else { "group".into() }
+        let len = leaves.iter().fold(first.len(), |n, l| {
+            first
+                .chars()
+                .zip(l.chars())
+                .take(n)
+                .take_while(|(a, b)| a == b)
+                .count()
+        });
+        let name = first
+            .chars()
+            .take(len)
+            .collect::<String>()
+            .trim_end_matches(['_', '.'])
+            .to_string();
+        if leaves.len() > 1 && name.chars().count() > 1 {
+            name
+        } else {
+            "group".into()
+        }
     }
 
     /// Start typing the selected header's name in place, the first character replacing it.
     fn start_naming(&mut self) {
         if let Some(Row::Group { name, .. }) = self.ws.rows.get(self.ws.sel) {
-            self.naming = Some(Naming { header: self.ws.sel, was: name.clone(), fresh: true });
+            self.naming = Some(Naming {
+                header: self.ws.sel,
+                was: name.clone(),
+                fresh: true,
+            });
         }
     }
 
@@ -630,7 +742,9 @@ impl App {
     /// `Enter` keeps it, one undo step; `Esc` puts back the name it had.
     fn naming_key(&mut self, k: KeyEvent) {
         let Some(n) = &mut self.naming else { return };
-        let Some(Row::Group { name, .. }) = self.ws.rows.get_mut(n.header) else { return self.naming = None };
+        let Some(Row::Group { name, .. }) = self.ws.rows.get_mut(n.header) else {
+            return self.naming = None;
+        };
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
         match k.code {
             KeyCode::Char('u') if ctrl => {
@@ -651,7 +765,12 @@ impl App {
                 *name = n.was.clone();
                 self.naming = None;
             }
-            KeyCode::Enter if name.trim().is_empty() => self.msg = Some(("a group needs a name; Esc keeps the one it had".into(), true)),
+            KeyCode::Enter if name.trim().is_empty() => {
+                self.msg = Some((
+                    "a group needs a name; Esc keeps the one it had".into(),
+                    true,
+                ))
+            }
             KeyCode::Enter => {
                 // one undo step, from the name it had
                 let typed = name.trim().to_string();
@@ -698,15 +817,30 @@ impl App {
         let text = match what {
             't' => time::format(self.ws.view.cursor, fpt),
             'y' => {
-                let Some(Row::Signal(s)) = self.ws.rows.get(self.ws.sel) else { return Err("select a signal to copy its value".into()) };
+                let Some(Row::Signal(s)) = self.ws.rows.get(self.ws.sel) else {
+                    return Err("select a signal to copy its value".into());
+                };
                 if let Some((st, i)) = self.ws.record_at(s.var) {
                     let r = &st.records[i];
-                    let fields: Vec<String> = st.fields_text(i, fpt).into_iter().map(|(n, v)| format!("{n}={v}")).collect();
-                    format!("{} #{i} {}{}{} {}", st.name, time::format(r.start, fpt), gl().dash, time::format(r.end, fpt), fields.join(" "))
+                    let fields: Vec<String> = st
+                        .fields_text(i, fpt)
+                        .into_iter()
+                        .map(|(n, v)| format!("{n}={v}"))
+                        .collect();
+                    format!(
+                        "{} #{i} {}{}{} {}",
+                        st.name,
+                        time::format(r.start, fpt),
+                        gl().dash,
+                        time::format(r.end, fpt),
+                        fields.join(" ")
+                    )
                 } else {
                     let (var, bit) = self.ws.probe(s, self.ws.bit);
                     match self.ws.trace.value_of(var, bit, self.ws.view.cursor) {
-                        Some(v) if self.ws.stream_of(var).is_none() => rows::label(&self.ws.trace.vars[var], &self.ws.look(s, var), &v),
+                        Some(v) if self.ws.stream_of(var).is_none() => {
+                            rows::label(&self.ws.trace.vars[var], &self.ws.look(s, var), &v)
+                        }
                         _ => return Err("no value here".into()),
                     }
                 }
@@ -727,15 +861,33 @@ impl App {
         };
         if let Some((st, i)) = self.ws.record_at(s.var) {
             let r = &st.records[i];
-            let at = format!("{} {} {}  {}", time::format(r.start, fpt), gl().dash, time::format(r.end, fpt), time::format(r.end - r.start, fpt));
+            let at = format!(
+                "{} {} {}  {}",
+                time::format(r.start, fpt),
+                gl().dash,
+                time::format(r.end, fpt),
+                time::format(r.end - r.start, fpt)
+            );
             let mut lines = Vec::new();
             for (name, v) in st.fields_text(i, fpt) {
                 for (k, part) in wrap(&v).into_iter().enumerate() {
                     // a long value's further lines under its first
-                    lines.push((if k == 0 { name.to_string() } else { " ".to_string() }, part));
+                    lines.push((
+                        if k == 0 {
+                            name.to_string()
+                        } else {
+                            " ".to_string()
+                        },
+                        part,
+                    ));
                 }
             }
-            return self.examine = Some(Examine { title: format!("{} {}", st.name, st.label(i, fpt)), at, lines, of: (s.var, None) });
+            return self.examine = Some(Examine {
+                title: format!("{} {}", st.name, st.label(i, fpt)),
+                at,
+                lines,
+                of: (s.var, None),
+            });
         }
         let (var, bit) = self.ws.probe(s, self.ws.bit);
         let name = self.ws.trace.probe_path((var, bit));
@@ -745,12 +897,18 @@ impl App {
             Some(v) => wrap(&rows::label(&self.ws.trace.vars[var], &line.look, &v)),
             None => vec!["no value here".into()],
         };
-        let mut lines: Vec<(String, String)> = value.into_iter().map(|v| (String::new(), v)).collect();
+        let mut lines: Vec<(String, String)> =
+            value.into_iter().map(|v| (String::new(), v)).collect();
         if bit.is_none() && self.ws.trace.is_composite(var) {
             lines.push(Default::default());
             lines.extend(self.fields(s, var));
         }
-        self.examine = Some(Examine { title: name, at: time::format(self.ws.view.cursor, fpt), lines, of: (var, bit) });
+        self.examine = Some(Examine {
+            title: name,
+            at: time::format(self.ws.view.cursor, fpt),
+            lines,
+            of: (var, bit),
+        });
     }
 
     /// A struct's or array's fields at the cursor, a line each, nested ones indented under their
@@ -766,7 +924,9 @@ impl App {
                 }
                 // in the look its line has under the row
                 let v = &t.vars[f.var];
-                let value = t.value_at(f.var, self.ws.view.cursor).map_or("-".into(), |x| rows::label(v, &self.ws.look(s, f.var), &x));
+                let value = t
+                    .value_at(f.var, self.ws.view.cursor)
+                    .map_or("-".into(), |x| rows::label(v, &self.ws.look(s, f.var), &x));
                 (name, value)
             })
             .collect()
@@ -776,7 +936,20 @@ impl App {
     fn search(&mut self, text: &str, forward: bool, n: u64) -> Result<(), String> {
         const MAX: u64 = 100_000;
         let q = self.ws.search(text, forward, n)?;
-        let count = |to| query::find(&self.ws.trace, &q, &query::Search { from: 0, to, forward: true, merge: false, runs: usize::MAX, matches: MAX });
+        let count = |to| {
+            query::find(
+                &self.ws.trace,
+                &q,
+                &query::Search {
+                    from: 0,
+                    to,
+                    forward: true,
+                    merge: false,
+                    runs: usize::MAX,
+                    matches: MAX,
+                },
+            )
+        };
         let key = format!("{q:?}");
         if self.matches.as_ref().is_none_or(|m| m.0 != key) {
             let all = count(None);
@@ -784,10 +957,17 @@ impl App {
         }
         let at = count(Some(self.ws.view.cursor));
         let (_, total, more) = self.matches.as_ref().unwrap();
-        let i = if at.more { format!("{MAX}+") } else { at.total.to_string() };
+        let i = if at.more {
+            format!("{MAX}+")
+        } else {
+            at.total.to_string()
+        };
         let mut msg = format!("match {i} of {total}{}", if *more { "+" } else { "" });
         // a clocked search's matches can become records (spec §5 "Protocol form")
-        if let Some(k) = (self.hints && q.clock.is_some() && *total > 0).then(|| crate::tui::render::leader_key(self, ":protocol search")).flatten() {
+        if let Some(k) = (self.hints && q.clock.is_some() && *total > 0)
+            .then(|| crate::tui::render::leader_key(self, ":protocol search"))
+            .flatten()
+        {
             msg += &format!("; {k}: records of them");
         }
         self.msg = Some((msg, false));
@@ -797,24 +977,26 @@ impl App {
     /// Move the selection by `d` screen lines (bit lines of expanded buses included).
     fn move_sel(&mut self, d: isize) {
         let lines = self.ws.lines();
-        let Some(p) = lines.iter().position(|&l| l == (self.ws.sel, self.ws.bit)) else { return };
+        let Some(p) = lines.iter().position(|&l| l == (self.ws.sel, self.ws.bit)) else {
+            return;
+        };
         (self.ws.sel, self.ws.bit) = lines[p.saturating_add_signed(d).min(lines.len() - 1)];
     }
-
 
     /// Select the rows `b` as a `V` range, ending on its last row on screen (a collapsed group's
     /// rows are not).
     pub fn select_block(&mut self, b: std::ops::Range<usize>) {
-        let last = rows::visible(&self.ws.rows).into_iter().rfind(|v| b.contains(v)).unwrap_or(b.start);
+        let last = rows::visible(&self.ws.rows)
+            .into_iter()
+            .rfind(|v| b.contains(v))
+            .unwrap_or(b.start);
         (self.ws.anchor, self.ws.sel, self.ws.bit) = (Some(b.start), last, None);
     }
-
 
     /// The signal panel is shown, the command line open over it or not (spec §2: it is no mode).
     pub fn panel_shown(&self) -> bool {
         self.adding
     }
-
 
     /// Counts and two-key sequences. Returns the first key of a sequence (if one is pending)
     /// and the count, or None while a count is being typed.
@@ -824,13 +1006,17 @@ impl App {
             && let Some(d) = c.to_digit(10)
             && (d > 0 || self.count.is_some())
         {
-            self.count = Some(self.count.unwrap_or(0).saturating_mul(10).saturating_add(d as u64));
+            self.count = Some(
+                self.count
+                    .unwrap_or(0)
+                    .saturating_mul(10)
+                    .saturating_add(d as u64),
+            );
             return None;
         }
         self.msg = None;
         Some((pending, self.count.take().unwrap_or(1)))
     }
-
 
     /// Esc and other non-character keys cancel a count or a pending sequence.
     fn cancel(&mut self) {
@@ -840,11 +1026,9 @@ impl App {
         self.pending = None;
     }
 
-
     fn open_command(&mut self) {
         self.open_line(Mode::Command);
     }
-
 
     fn open_line(&mut self, mode: Mode) {
         self.mode = mode;
@@ -853,13 +1037,11 @@ impl App {
         self.hist_pos = None;
     }
 
-
     pub(crate) fn report(&mut self, r: Result<(), String>) {
         if let Err(e) = r {
             self.msg = Some((e, true));
         }
     }
-
 
     /// Normal mode: time, rows and the keys that change the rows, all at once (spec §2, §3); the
     /// keys are the keymap's (spec §19 "Keys").
@@ -877,7 +1059,12 @@ impl App {
             && let Some(d) = c.to_digit(10)
             && (d > 0 || self.count.is_some())
         {
-            self.count = Some(self.count.unwrap_or(0).saturating_mul(10).saturating_add(d as u64));
+            self.count = Some(
+                self.count
+                    .unwrap_or(0)
+                    .saturating_mul(10)
+                    .saturating_add(d as u64),
+            );
             self.wait();
             return;
         }
@@ -932,15 +1119,27 @@ impl App {
 
     /// Which-key's time come: true when it starts showing, to draw again.
     pub fn which_tick(&mut self, now: std::time::Instant) -> bool {
-        let due = !self.which_key && self.typed_at.is_some_and(|t| now.duration_since(t) >= self.which_delay);
+        let due = !self.which_key
+            && self
+                .typed_at
+                .is_some_and(|t| now.duration_since(t) >= self.which_delay);
         self.which_key |= due;
         due
     }
 
     /// Put a message in `notes`, as said by `who` (an agent's id, none for the user).
     fn log(&mut self, (text, err): &Msg, who: Option<String>) {
-        let wall = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-        self.notes.push(Note { text: text.clone(), err: *err, who, step: None, wall, at: std::time::Instant::now() });
+        let wall = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        self.notes.push(Note {
+            text: text.clone(),
+            err: *err,
+            who,
+            step: None,
+            wall,
+            at: std::time::Instant::now(),
+        });
         if self.notes.len() > NOTES {
             self.notes.remove(0);
             self.dismissed = self.dismissed.saturating_sub(1);
@@ -964,7 +1163,11 @@ impl App {
 
     /// The notes the corner shows at `now`: not dismissed, not gone, the newest first.
     pub fn shown_notes(&self, now: std::time::Instant) -> Vec<&Note> {
-        self.notes[self.dismissed.min(self.notes.len())..].iter().rev().filter(|n| now.duration_since(n.at) < note_life(n.err)).collect()
+        self.notes[self.dismissed.min(self.notes.len())..]
+            .iter()
+            .rev()
+            .filter(|n| now.duration_since(n.at) < note_life(n.err))
+            .collect()
     }
 
     /// The corner while notes show: true every quarter second, to draw them gone, and every 40 ms
@@ -975,8 +1178,14 @@ impl App {
         if shown.is_empty() && self.noted.is_none() {
             return false;
         }
-        let every = if shown.iter().any(|n| note_fade(n, now) > 0.0) { 40 } else { 250 };
-        let due = self.noted.is_none_or(|t| now.duration_since(t) >= std::time::Duration::from_millis(every));
+        let every = if shown.iter().any(|n| note_fade(n, now) > 0.0) {
+            40
+        } else {
+            250
+        };
+        let due = self
+            .noted
+            .is_none_or(|t| now.duration_since(t) >= std::time::Duration::from_millis(every));
         if due {
             self.noted = (!self.shown_notes(now).is_empty()).then_some(now);
         }
@@ -986,7 +1195,12 @@ impl App {
     /// The picker's highlight has rested long enough for its preview to read the signal: true
     /// once, to draw it.
     pub fn picker_tick(&self, now: std::time::Instant) -> bool {
-        self.picker.as_ref().and_then(|p| p.rest).is_some_and(|(_, since, drawn)| !drawn && now.duration_since(since) >= self.preview_wait)
+        self.picker
+            .as_ref()
+            .and_then(|p| p.rest)
+            .is_some_and(|(_, since, drawn)| {
+                !drawn && now.duration_since(since) >= self.preview_wait
+            })
     }
 
     /// A notification under the pointer doesn't fade: it is put back to full colour, a second
@@ -994,11 +1208,17 @@ impl App {
     pub fn hold_notes(&mut self, now: std::time::Instant) {
         let Some((x, y)) = self.pointer else { return };
         for (r, at) in &mut self.hit.notes {
-            if !(r.x as usize..r.right() as usize).contains(&x) || !(r.y as usize..r.bottom() as usize).contains(&y) {
+            if !(r.x as usize..r.right() as usize).contains(&x)
+                || !(r.y as usize..r.bottom() as usize).contains(&y)
+            {
                 continue;
             }
-            let Some(n) = self.notes.iter_mut().find(|n| n.at == *at) else { continue };
-            let held = now.checked_sub(note_life(n.err).saturating_sub(NOTE_FADE + std::time::Duration::from_secs(1)));
+            let Some(n) = self.notes.iter_mut().find(|n| n.at == *at) else {
+                continue;
+            };
+            let held = now.checked_sub(
+                note_life(n.err).saturating_sub(NOTE_FADE + std::time::Duration::from_secs(1)),
+            );
             if let Some(h) = held.filter(|&h| h > n.at) {
                 (n.at, *at) = (h, h);
             }
@@ -1014,17 +1234,29 @@ impl App {
     pub fn pending(&self) -> String {
         let keys = |ks: &[Key]| ks.iter().map(|k| k.show()).collect::<Vec<_>>();
         if let Some(path) = &self.leader {
-            return [vec![self.keymap.show(A::Leader)], keys(path)].concat().join(" ");
+            return [vec![self.keymap.show(A::Leader)], keys(path)]
+                .concat()
+                .join(" ");
         }
         let typed = keys(&self.typed);
-        let sep = if typed.iter().any(|k| k.chars().count() > 1) { " " } else { "" };
-        format!("{}{}", self.count.map_or(String::new(), |n| n.to_string()), typed.join(sep))
+        let sep = if typed.iter().any(|k| k.chars().count() > 1) {
+            " "
+        } else {
+            ""
+        };
+        format!(
+            "{}{}",
+            self.count.map_or(String::new(), |n| n.to_string()),
+            typed.join(sep)
+        )
     }
 
     /// The leader menu has the keys: an entry runs, a group opens, `Backspace` goes up, `Esc` and
     /// any other key close it (spec §2 "Leader").
     fn leader_key(&mut self, k: KeyEvent) {
-        let Some(path) = self.leader.as_mut() else { return };
+        let Some(path) = self.leader.as_mut() else {
+            return;
+        };
         match k.code {
             KeyCode::Backspace => {
                 if path.pop().is_none() {
@@ -1073,7 +1305,11 @@ impl App {
                 let cols = if right { half * n_i } else { -half * n_i };
                 v.scroll(cols);
                 let d = cols.unsigned_abs().saturating_mul(v.ticks) / v.cols;
-                v.set_cursor(if right { v.cursor.saturating_add(d) } else { v.cursor.saturating_sub(d) });
+                v.set_cursor(if right {
+                    v.cursor.saturating_add(d)
+                } else {
+                    v.cursor.saturating_sub(d)
+                });
             }
             A::PageDown => self.move_sel(n_i.saturating_mul(self.page as i64) as isize),
             A::PageUp => self.move_sel(-(n_i.saturating_mul(self.page as i64) as isize)),
@@ -1082,13 +1318,23 @@ impl App {
                 self.report(r);
             }
             // the keys that change the rows need a row
-            A::MoveDown | A::MoveUp | A::Remove | A::Range | A::Radix | A::Group | A::Ungroup | A::Rename if self.ws.rows.is_empty() => {}
+            A::MoveDown
+            | A::MoveUp
+            | A::Remove
+            | A::Range
+            | A::Radix
+            | A::Group
+            | A::Ungroup
+            | A::Rename
+                if self.ws.rows.is_empty() => {}
             // a `V` range moves whole, past the next row on screen (spec §3)
             A::MoveDown | A::MoveUp if self.ws.anchor.is_some() => {
                 let r = self.ws.selection();
                 let mut b = rows::block(&self.ws.rows, r.start, r.end - 1);
                 for _ in 0..n_i {
-                    let Some(n) = rows::step(&mut self.ws.rows, b.clone(), a == A::MoveDown) else { break };
+                    let Some(n) = rows::step(&mut self.ws.rows, b.clone(), a == A::MoveDown) else {
+                        break;
+                    };
                     b = n;
                 }
                 self.select_block(b);
@@ -1129,7 +1375,13 @@ impl App {
                 let r = self.ws.put(self.removed.clone(), a == A::Put);
                 self.report(r);
             }
-            A::Range => self.ws.anchor = if self.ws.anchor.is_some() { None } else { Some(self.ws.sel) },
+            A::Range => {
+                self.ws.anchor = if self.ws.anchor.is_some() {
+                    None
+                } else {
+                    Some(self.ws.sel)
+                }
+            }
             A::Radix => {
                 let r = self.ws.set_radix(None);
                 self.report(r);
@@ -1151,7 +1403,11 @@ impl App {
                 let mut t = self.ws.view.cursor;
                 for _ in 0..n {
                     let next = vars.iter().filter_map(|&(v, b)| {
-                        if fwd { self.ws.trace.next_change_of(v, b, t) } else { self.ws.trace.prev_change_of(v, b, t) }
+                        if fwd {
+                            self.ws.trace.next_change_of(v, b, t)
+                        } else {
+                            self.ws.trace.prev_change_of(v, b, t)
+                        }
                     });
                     match if fwd { next.min() } else { next.max() } {
                         Some(x) => t = x,
@@ -1214,7 +1470,6 @@ impl App {
         }
     }
 
-
     /// The signal panel, open (spec §5 "Signal panel").
     fn panel_key(&mut self, k: KeyEvent) {
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
@@ -1248,7 +1503,9 @@ impl App {
                 // the range first, then the marks, then the panel
                 self.cancel();
                 self.msg = None;
-                if self.panel.anchor.take().is_none() && std::mem::take(&mut self.panel.marked).is_empty() {
+                if self.panel.anchor.take().is_none()
+                    && std::mem::take(&mut self.panel.marked).is_empty()
+                {
                     self.adding = false;
                 }
                 return;
@@ -1286,7 +1543,9 @@ impl App {
             KeyCode::Char(c) if !ctrl => c,
             _ => return self.cancel(),
         };
-        let Some((pending, n)) = self.counted(c) else { return };
+        let Some((pending, n)) = self.counted(c) else {
+            return;
+        };
         if let Some(p) = pending {
             if (p, c) == ('g', 'g') {
                 self.panel.step(isize::MIN / 2);
@@ -1299,9 +1558,19 @@ impl App {
             'k' => self.panel.step(-n),
             'l' => self.panel.open(true),
             'h' => self.panel.open(false),
-            'V' => self.panel.anchor = if self.panel.anchor.is_some() { None } else { Some(self.panel.sel) },
+            'V' => {
+                self.panel.anchor = if self.panel.anchor.is_some() {
+                    None
+                } else {
+                    Some(self.panel.sel)
+                }
+            }
             'n' | 'N' if self.panel.matches.is_empty() => {
-                let msg = if self.panel.pattern.is_empty() { "no search yet".into() } else { format!("not found: {}", self.panel.pattern) };
+                let msg = if self.panel.pattern.is_empty() {
+                    "no search yet".into()
+                } else {
+                    format!("not found: {}", self.panel.pattern)
+                };
                 self.msg = Some((msg, true));
             }
             'g' => self.pending = Some('g'),
@@ -1323,11 +1592,14 @@ impl App {
         }
     }
 
-
     /// Space: mark or unmark the highlighted signal, or the signals directly in a scope.
     /// With a `V` range, its signals; the range ends.
     fn toggle_mark(&mut self) {
-        let vars = if self.panel.anchor.is_some() { self.panel.range_vars() } else { self.panel.vars_here() };
+        let vars = if self.panel.anchor.is_some() {
+            self.panel.range_vars()
+        } else {
+            self.panel.vars_here()
+        };
         self.panel.anchor = None;
         let vars: Vec<usize> = vars.into_iter().filter(|&v| !self.ws.shown(v)).collect();
         let marked = &mut self.panel.marked;
@@ -1344,7 +1616,6 @@ impl App {
         }
     }
 
-
     /// The marked signals and those in the `V` range, not shown yet; marks and range are cleared.
     fn picked(&mut self) -> Vec<usize> {
         let mut vars = std::mem::take(&mut self.panel.marked);
@@ -1358,17 +1629,23 @@ impl App {
         vars
     }
 
-
     /// `Ctrl-a`: mark every signal the search matches.
     fn mark_matches(&mut self) {
-        let vars: Vec<usize> = self.panel.matches.iter().filter_map(|&i| self.panel.nodes[i].var).collect();
-        let new: Vec<usize> = vars.into_iter().filter(|&v| !self.ws.shown(v) && !self.panel.marked.contains(&v)).collect();
+        let vars: Vec<usize> = self
+            .panel
+            .matches
+            .iter()
+            .filter_map(|&i| self.panel.nodes[i].var)
+            .collect();
+        let new: Vec<usize> = vars
+            .into_iter()
+            .filter(|&v| !self.ws.shown(v) && !self.panel.marked.contains(&v))
+            .collect();
         if new.is_empty() {
             self.msg = Some(("nothing to mark".into(), true));
         }
         self.panel.marked.extend(new);
     }
-
 
     /// `Ctrl-g`: the marked signals and the `V` range (or the highlighted signal or scope) as a new group, named after
     /// the scope they share. The command line then offers `:rename` with that name: Enter keeps
@@ -1383,14 +1660,20 @@ impl App {
             self.msg = Some(("nothing to add: already shown".into(), true));
             return;
         }
-        let paths: Vec<&str> = vars.iter().map(|&v| self.ws.trace.vars[v].path.as_str()).collect();
-        let name = wtf_core::command::group_name(&self.ws, &wtf_core::command::common_scope(&paths), vars[0]);
+        let paths: Vec<&str> = vars
+            .iter()
+            .map(|&v| self.ws.trace.vars[v].path.as_str())
+            .collect();
+        let name = wtf_core::command::group_name(
+            &self.ws,
+            &wtf_core::command::common_scope(&paths),
+            vars[0],
+        );
         self.ws.add_group(&name, &vars);
         self.open_command();
         self.line = format!("rename {name}");
         self.col = usize::MAX;
     }
-
 
     /// Enter in the panel with nothing marked: a signal becomes a row, a scope a group.
     fn add_current(&mut self) {
@@ -1408,7 +1691,6 @@ impl App {
         }
     }
 
-
     /// The command line, and the search line, which works the same without completions.
     fn command_key(&mut self, k: KeyEvent) {
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
@@ -1418,7 +1700,11 @@ impl App {
             KeyCode::Enter => {
                 self.mode = Mode::Normal;
                 let line = std::mem::take(&mut self.line);
-                let hist = if search { &mut self.searches } else { &mut self.history };
+                let hist = if search {
+                    &mut self.searches
+                } else {
+                    &mut self.history
+                };
                 if !line.trim().is_empty() {
                     hist.retain(|h| *h != line);
                     hist.push(line.clone());
@@ -1452,8 +1738,17 @@ impl App {
                 // the word before the cursor, and the spaces after it
                 let c = self.cursor();
                 let before: Vec<char> = self.line.chars().take(c).collect();
-                let spaces = before.iter().rev().take_while(|ch| ch.is_whitespace()).count();
-                let word = before.iter().rev().skip(spaces).take_while(|ch| !ch.is_whitespace()).count();
+                let spaces = before
+                    .iter()
+                    .rev()
+                    .take_while(|ch| ch.is_whitespace())
+                    .count();
+                let word = before
+                    .iter()
+                    .rev()
+                    .skip(spaces)
+                    .take_while(|ch| !ch.is_whitespace())
+                    .count();
                 self.edit(c - spaces - word..c, "");
             }
             KeyCode::Char('u') if ctrl => {
@@ -1466,7 +1761,9 @@ impl App {
             KeyCode::Char('n') if ctrl => self.move_hl(false),
             KeyCode::Tab if search => {}
             KeyCode::Tab => {
-                if let Some(line) = crate::tui::commands::complete(&self.line, self).take(&self.line, self.hl) {
+                if let Some(line) =
+                    crate::tui::commands::complete(&self.line, self).take(&self.line, self.hl)
+                {
                     self.line = line;
                     self.col = usize::MAX;
                     self.hl = 0;
@@ -1480,16 +1777,19 @@ impl App {
         }
     }
 
-
     /// The cursor in the command or search line, in characters.
     pub fn cursor(&self) -> usize {
         self.col.min(self.line.chars().count())
     }
 
-
     /// Replace the characters in `r` (clamped to the line) with `text`; the cursor goes after it.
     fn edit(&mut self, r: std::ops::Range<usize>, text: &str) {
-        let byte = |c: usize| self.line.char_indices().nth(c).map_or(self.line.len(), |(i, _)| i);
+        let byte = |c: usize| {
+            self.line
+                .char_indices()
+                .nth(c)
+                .map_or(self.line.len(), |(i, _)| i)
+        };
         let (a, b) = (byte(r.start), byte(r.end));
         self.line.replace_range(a..b, text);
         self.col = r.start + text.chars().count();
@@ -1497,12 +1797,15 @@ impl App {
         self.hist_pos = None;
     }
 
-
     /// Up / down: walk earlier commands on an empty (or recalled) line, otherwise the completion list.
     fn move_hl(&mut self, up: bool) {
         let search = self.mode == Mode::Search;
         if self.line.is_empty() || self.hist_pos.is_some() || search {
-            let hist = if search { &self.searches } else { &self.history };
+            let hist = if search {
+                &self.searches
+            } else {
+                &self.history
+            };
             let len = hist.len();
             if len == 0 {
                 return;
@@ -1520,19 +1823,36 @@ impl App {
         }
         let n = crate::tui::commands::complete(&self.line, self).items.len();
         if n > 0 {
-            self.hl = if up { (self.hl + n - 1) % n } else { (self.hl + 1) % n };
+            self.hl = if up {
+                (self.hl + n - 1) % n
+            } else {
+                (self.hl + 1) % n
+            };
         }
     }
 }
 
-
 /// A long value in lines: text by 16 words (a frame's bytes), digits by 64.
 fn wrap(v: &str) -> Vec<String> {
     let lines: Vec<String> = match v.contains(' ') {
-        true => v.split(' ').collect::<Vec<_>>().chunks(16).map(|c| c.join(" ")).collect(),
-        false => v.chars().collect::<Vec<_>>().chunks(64).map(|c| c.iter().collect()).collect(),
+        true => v
+            .split(' ')
+            .collect::<Vec<_>>()
+            .chunks(16)
+            .map(|c| c.join(" "))
+            .collect(),
+        false => v
+            .chars()
+            .collect::<Vec<_>>()
+            .chunks(64)
+            .map(|c| c.iter().collect())
+            .collect(),
     };
-    if lines.is_empty() { vec![String::new()] } else { lines }
+    if lines.is_empty() {
+        vec![String::new()]
+    } else {
+        lines
+    }
 }
 
 /// `secs` since the epoch as the local clock shows it, `14:03:05`.
@@ -1553,7 +1873,10 @@ pub fn parse_keys(s: &str) -> Result<Vec<KeyEvent>, String> {
     let mut rest = s;
     let mut out = Vec::new();
     while let Some(c) = rest.chars().next() {
-        let name = rest.strip_prefix('<').and_then(|r| r.split_once('>')).map(|(n, _)| n);
+        let name = rest
+            .strip_prefix('<')
+            .and_then(|r| r.split_once('>'))
+            .map(|(n, _)| n);
         let named = match name.map(|n| n.to_ascii_lowercase()).as_deref() {
             Some("esc") => Some(key(KeyCode::Esc, none)),
             Some("cr" | "enter") => Some(key(KeyCode::Enter, none)),
@@ -1567,9 +1890,17 @@ pub fn parse_keys(s: &str) -> Result<Vec<KeyEvent>, String> {
             Some("right") => Some(key(KeyCode::Right, none)),
             Some("up") => Some(key(KeyCode::Up, none)),
             Some("down") => Some(key(KeyCode::Down, none)),
-            Some(n) if n.len() == 3 && n.starts_with("c-") => Some(key(KeyCode::Char(n.chars().nth(2).unwrap()), KeyModifiers::CONTROL)),
-            Some(n) if !n.is_empty() && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') => {
-                return Err(format!("unknown key <{}> (keys: <Esc> <CR> <Tab> <S-Tab> <BS> <Space> <C-Space> <Left> <Right> <Up> <Down> <lt> <C-x>; < itself is <lt>)", name.unwrap()));
+            Some(n) if n.len() == 3 && n.starts_with("c-") => Some(key(
+                KeyCode::Char(n.chars().nth(2).unwrap()),
+                KeyModifiers::CONTROL,
+            )),
+            Some(n)
+                if !n.is_empty() && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') =>
+            {
+                return Err(format!(
+                    "unknown key <{}> (keys: <Esc> <CR> <Tab> <S-Tab> <BS> <Space> <C-Space> <Left> <Right> <Up> <Down> <lt> <C-x>; < itself is <lt>)",
+                    name.unwrap()
+                ));
             }
             _ => None,
         };
@@ -1583,7 +1914,10 @@ pub fn parse_keys(s: &str) -> Result<Vec<KeyEvent>, String> {
             '\x1b' => key(KeyCode::Esc, none),
             '\x08' => key(KeyCode::Backspace, none),
             '\t' => key(KeyCode::Tab, none),
-            c if c < ' ' => key(KeyCode::Char((c as u8 + b'a' - 1) as char), KeyModifiers::CONTROL),
+            c if c < ' ' => key(
+                KeyCode::Char((c as u8 + b'a' - 1) as char),
+                KeyModifiers::CONTROL,
+            ),
             c => key(KeyCode::Char(c), none),
         });
         rest = &rest[c.len_utf8()..];
@@ -1608,7 +1942,12 @@ mod tests {
     }
 
     fn wheel(kind: MouseEventKind, x: u16, y: u16) -> MouseEvent {
-        MouseEvent { kind, column: x, row: y, modifiers: KeyModifiers::NONE }
+        MouseEvent {
+            kind,
+            column: x,
+            row: y,
+            modifiers: KeyModifiers::NONE,
+        }
     }
 
     #[test]
@@ -1646,9 +1985,19 @@ mod tests {
         app.mouse(wheel(MouseEventKind::Down(MouseButton::Left), 0, 0));
         assert!(app.messages.is_none());
         // Enter on an agent's step opens the trail
-        app.ws.trail = vec![wtf_core::workspace::Step { tool: "find".into(), ask: "x".into(), answer: "1 matches".into(), time: Some(20) }];
+        app.ws.trail = vec![wtf_core::workspace::Step {
+            tool: "find".into(),
+            ask: "x".into(),
+            answer: "1 matches".into(),
+            time: Some(20),
+        }];
         app.keys(":messages\n<CR>").unwrap();
-        assert!(app.messages.is_none() && app.picker.is_some(), "{:?} {:?}", app.msg, app.messages);
+        assert!(
+            app.messages.is_none() && app.picker.is_some(),
+            "{:?} {:?}",
+            app.msg,
+            app.messages
+        );
         app.keys("<Esc>:messages\nG").unwrap();
         assert_eq!(app.messages, Some(3));
         app.keys("<Esc>").unwrap();
