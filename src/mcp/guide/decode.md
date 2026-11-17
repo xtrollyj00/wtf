@@ -24,8 +24,9 @@ Recipes
 Details
 - The answer lists the streams made (`bus.wr`, `bus.rd`, ...) with their counts, and the
   violations (`bus.errors`, `bus.wr.unmatched`).
-- A lost response shifts every later AXI pairing by one (delays grow, `no request` at the end):
-  `timeout=1us` on `axilite` / `axi4` makes a request unanswered that long `no response`.
+- A lost response shifts every later AXI pairing by one: `axilite` reports the response left
+  without a request as `b_early` / `r_early` in `errors`, `axi4` as `no request`; `timeout=1us`
+  makes a request unanswered that long `no response`.
 - A value runs to the next `key=`, so it can have spaces; in quotes it runs to the closing one
   (`when="x=1"`).
 - A `protocol` makes a record per clock cycle where `when` holds (`help expressions`), its
@@ -34,11 +35,14 @@ Details
   fields and `when` can name it (`f3=insn[14:12] ok=f3 == 0`).
 - `pair` matches by order, or by `id=` / `req_id=` and `resp_id=`. `check` gives each record a
   `rule` field.
-- `axis` reads a signal it isn't given as a default (`tready` 1, `tkeep` the bytes of `tdata`,
-  `tlast` 1), so `decode rx axis clock=clk tvalid=v tready=r tdata=d` makes `rx.beat`,
-  `rx.frame` and `rx.errors`; a violation carries the `rule`, what it saw (`detail`) and its
-  `severity` (error or warning), as `axilite`'s does. `records rx.errors where severity == warning`
-  keeps the warnings; the window draws them apart from the errors.
+- `axis` and `axilite` read a role they aren't given as a default (`axis`: `tready` 1, `tkeep`
+  the bytes of `tdata`; `axilite`: `wstrb` all ones, `*prot` 0, `*resp` OKAY), so
+  `decode rx axis clock=clk tvalid=v tready=r tdata=d` makes `rx.beat`, `rx.frame` and
+  `rx.errors`; a violation carries the `rule`, what it saw (`detail`) and its `severity` (error or
+  warning), and `records rx.errors where severity == warning` keeps the warnings.
+- `axilite` takes `aresetn`, optional, and `reset_active=high` for an active-high reset: a valid
+  in reset, or in its first cycle out, is `<chan>_reset`. A SLVERR or DECERR response is a
+  warning, an EXOKAY one an error (Lite has no exclusives).
 - `decode <name> off` removes a decode, its streams and the rows showing them; one another decode
   reads stays, naming it. `decode` again under a name replaces it.
 - A protocol in the config dir's `protocols/` decodes as a built-in does (`protocols` lists them);
