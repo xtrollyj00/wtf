@@ -63,6 +63,26 @@ fn row(start: u64, end: u64, fields: &[&str]) -> (u64, u64, Vec<String>) {
     (start, end, fields.iter().map(|f| f.to_string()).collect())
 }
 
+/// The ten `<chan>_unknown` warnings axilite.vcd's valids and readys make: every one is x from 2ns
+/// to the first edge at 10ns, so the one cycle that samples them breaks `unknown` alone.
+fn unknown_rows() -> Vec<(u64, u64, Vec<String>)> {
+    let mut rows = Vec::new();
+    for c in ["aw", "w", "b", "ar", "r"] {
+        for side in ["valid", "ready"] {
+            rows.push(row(
+                10,
+                20,
+                &[
+                    &format!("{c}_unknown"),
+                    &format!("{c}{side} is x or z out of reset"),
+                    "warning",
+                ],
+            ));
+        }
+    }
+    rows
+}
+
 /// axis.vcd: clk rises at 5, 15 ...; cycle k is driven at 5 + 10k. Frame A: beats 0xA0, 0xA1 (after
 /// a stall that holds it), 0xA2 (tkeep 0b0011), 10 bytes; B: 0xB0; C: 0xC0, 0xC1; then 0xD0 is
 /// dropped before its ready (105ns), 0xE0 changes to 0xE1 while stalled (125ns), and E: 0xE1.
@@ -493,7 +513,9 @@ fn axilite_payload_changed_while_stalled() {
     ws.add_decode(decode("s", "axilite", "aclk", &[], &[("prefix", "s_axi_")]))
         .unwrap();
     assert_eq!(
-        table(stream(&ws, "s.errors"))[0],
+        // axilite.vcd's x's are the ten `<chan>_unknown` warnings at 10..20ns: this is the tenth
+        // row on
+        table(stream(&ws, "s.errors"))[10],
         row(
             90,
             100,
@@ -506,9 +528,144 @@ fn axilite_payload_changed_while_stalled() {
     );
 }
 
+/// The faults of axilite_errors.vcd, one per rule: an awvalid through the reset and its release
+/// cycle, one dropped before awready, a wdata changed while stalled, an EXOKAY read, a B and an R
+/// before their requests. The warnings are the other half, pinned in
+/// `tests/mcp.rs::axilite_warnings_filter_by_severity`.
+///
+/// Two shapes the fixture is built around: the stray B is the last B (one response too many makes
+/// every later one early too), and the x wdata is in the last cycle (no cycle follows to make the
+/// stalled valid a dropped one).
+#[test]
+fn axilite_error_rules() {
+    let mut ws = open("axilite_errors.vcd");
+    // aresetn is bound by the prefix, at the port's polarity: nothing else is given
+    ws.add_decode(decode("s", "axilite", "aclk", &[], &[("prefix", "s_axi_")]))
+        .unwrap();
+    let errors: Vec<_> = table(stream(&ws, "s.errors"))
+        .into_iter()
+        .filter(|(_, _, fields)| fields[2] == "error")
+        .collect();
+    assert_eq!(
+        errors,
+        [
+            row(10, 20, &["aw_reset", "awvalid in reset", "error"]),
+            row(
+                20,
+                30,
+                &[
+                    "aw_reset",
+                    "awvalid in the cycle reset is released",
+                    "error"
+                ]
+            ),
+            row(
+                50,
+                60,
+                &["aw_dropped", "awvalid fell before awready", "error"]
+            ),
+            row(
+                90,
+                100,
+                &["w_changed", "wdata changed while wvalid stalled", "error"]
+            ),
+            row(150, 160, &["r_exokay", "rresp is EXOKAY", "error"]),
+            row(
+                160,
+                170,
+                &["b_early", "response 2 before write 2's AW and W", "error"]
+            ),
+            row(
+                190,
+                200,
+                &["r_early", "response 4 before read 4's AR", "error"]
+            ),
+        ]
+    );
+}
+
+/// axilite.vcd: every valid and ready is x from 2ns to the first edge at 10ns, so the cycle they
+/// are sampled in breaks `<chan>_unknown` alone — a valid of x is no valid that fell. A payload of
+/// x while its valid is high breaks `<chan>_payload_unknown`; x under a reset is neither.
+#[test]
+fn axilite_unknown_out_of_reset() {
+    let mut ws = open("axilite.vcd");
+    ws.add_decode(decode("s", "axilite", "aclk", &[], &[("prefix", "s_axi_")]))
+        .unwrap();
+    // the clock's first edge is at 10ns, so one cycle samples the x's: all ten are warnings,
+    // the two rules that really break come after them
+    let errors = table(stream(&ws, "s.errors"));
+    assert_eq!(errors.len(), 13);
+    assert_eq!(
+        errors[..10]
+            .iter()
+            .map(|(_, _, f)| f[2].as_str())
+            .collect::<Vec<_>>(),
+        ["warning"; 10]
+    );
+    assert_eq!((errors[0].0, errors[0].1), (10, 20));
+    // a payload of x is the second rule, and it names the signal, not the valid
+    let dir = Dir::new("axi-unknown");
+    let path = dir.0.join("unknown.vcd");
+    let text = std::fs::read_to_string(fixture("vcd").with_file_name("axilite.vcd")).unwrap();
+    let text = text.replacen("b100010001000100010001000100010 '", "bx '", 1);
+    std::fs::write(&path, text).unwrap();
+    let mut ws = Workspace::open(&path).unwrap();
+    ws.add_decode(decode("s", "axilite", "aclk", &[], &[("prefix", "s_axi_")]))
+        .unwrap();
+    assert_eq!(
+        table(stream(&ws, "s.errors"))[10],
+        row(
+            60,
+            70,
+            &[
+                "w_payload_unknown",
+                "wdata is x or z while wvalid",
+                "warning"
+            ]
+        )
+    );
+    // x in reset is no unknown: the reset is what the port says about it, and the cycle the x's
+    // are in is inside the reset
+    let mut text = std::fs::read_to_string(fixture("vcd").with_file_name("axilite.vcd")).unwrap();
+    text = text.replacen(
+        "$var wire 2 2 s_axi_rresp [1:0] $end\n",
+        "$var wire 2 2 s_axi_rresp [1:0] $end\n$var wire 1 3 s_axi_aresetn $end\n",
+        1,
+    );
+    text = text.replacen("#0\n1!\n", "#0\n1!\n03\n", 1);
+    text = text.replacen("#22\n", "#22\n13\n", 1);
+    let path = dir.0.join("reset.vcd");
+    std::fs::write(&path, text).unwrap();
+    let mut ws = Workspace::open(&path).unwrap();
+    ws.add_decode(decode("s", "axilite", "aclk", &[], &[("prefix", "s_axi_")]))
+        .unwrap();
+    assert_eq!(
+        table(stream(&ws, "s.errors")),
+        [
+            row(
+                180,
+                190,
+                &["r_resp", "rresp is SLVERR or DECERR", "warning"]
+            ),
+            row(
+                210,
+                220,
+                &["aw_dropped", "awvalid fell before awready", "error"]
+            ),
+            row(
+                230,
+                240,
+                &["b_early", "response 3 before write 3's AW and W", "error"]
+            )
+        ]
+    );
+}
+
 /// AXI-Lite in axilite.vcd: two writes (the second's W before its AW), two reads (the second
-/// SLVERR), an AW valid dropped before its ready, a B without a request, every valid X in reset,
-/// then six polling reads from 260ns.
+/// SLVERR), an AW valid dropped before its ready, a B with no write to answer (b_early), every
+/// valid and ready X before the first edge (ten unknown warnings), then six polling reads from
+/// 260ns.
 #[test]
 fn axilite_transactions_and_errors() {
     let mut ws = open("axilite.vcd");
@@ -525,35 +682,40 @@ fn axilite_transactions_and_errors() {
             .iter()
             .map(|f| f.name.as_str())
             .collect::<Vec<_>>(),
-        ["delay", "addr", "data", "strb", "resp"]
+        ["delay", "addr", "prot", "data", "strb", "resp"]
     );
     let want = [
-        row(30, 50, &["10", "16", "286331153", "15", "0"]),
-        row(60, 120, &["20", "20", "572662306", "3", "0"]),
+        row(30, 50, &["10", "16", "0", "286331153", "15", "0"]),
+        row(60, 120, &["20", "20", "0", "572662306", "3", "0"]),
     ];
     assert_eq!(table(wr), want);
     let want = [
-        row(130, 160, &["20", "16", "286331153", "0"]),
-        row(170, 190, &["10", "32", "3735928559", "2"]),
+        row(130, 160, &["20", "16", "0", "286331153", "0"]),
+        row(170, 190, &["10", "32", "0", "3735928559", "2"]),
     ];
     let rd = table(stream(&ws, "s.rd"));
     assert_eq!((&rd[..2], rd.len()), (&want[..], 8));
-    // only the injected ones: X -> 0 in reset is no dropped valid
-    assert_eq!(
-        table(stream(&ws, "s.errors")),
-        [
-            row(180, 190, &["r_resp", "rresp is not OKAY", "error"]),
-            row(
-                210,
-                220,
-                &["aw_dropped", "awvalid fell before awready", "error"]
-            )
-        ]
-    );
-    assert_eq!(
-        table(stream(&ws, "s.wr.unmatched")),
-        [row(230, 240, &["no request"])]
-    );
+    // the port's valids and readys are x from 2ns to the first edge at 10ns, so the one cycle
+    // that samples them breaks `unknown` alone: x is no valid that fell
+    let mut errors = unknown_rows();
+    errors.push(row(
+        180,
+        190,
+        &["r_resp", "rresp is SLVERR or DECERR", "warning"],
+    ));
+    errors.push(row(
+        210,
+        220,
+        &["aw_dropped", "awvalid fell before awready", "error"],
+    ));
+    // both writes answered, so the B at 230ns is the third response and no write's
+    errors.push(row(
+        230,
+        240,
+        &["b_early", "response 3 before write 3's AW and W", "error"],
+    ));
+    assert_eq!(table(stream(&ws, "s.errors")), errors);
+    assert!(stream(&ws, "s.wr.unmatched").records.is_empty());
     assert!(stream(&ws, "s.rd.unmatched").records.is_empty());
     // the session makes it again
     let text = wtf_core::session::to_toml(&ws);
@@ -574,7 +736,165 @@ fn axilite_transactions_and_errors() {
     );
 }
 
-/// `timeout=`: the write answered after 20ns is no response under 15ns, and its B no request.
+/// axilite.vcd with `wstrb`, `bresp` and `rresp` named so the prefix doesn't bind them: the spec's
+/// defaults fill them — every write byte a data byte, every response OKAY.
+#[test]
+fn axilite_defaults_for_absent_roles() {
+    let dir = Dir::new("axi-defaults");
+    let path = dir.0.join("defaults.vcd");
+    let text = std::fs::read_to_string(fixture("vcd").with_file_name("axilite.vcd")).unwrap();
+    // a name ending in the role's would still bind, by the path it ends
+    let text = text
+        .replacen("s_axi_wstrb", "s_axi_wstrb_old", 1)
+        .replacen("s_axi_bresp", "s_axi_bresp_old", 1)
+        .replacen("s_axi_rresp", "s_axi_rresp_old", 1);
+    std::fs::write(&path, text).unwrap();
+    let mut ws = Workspace::open(&path).unwrap();
+    ws.add_decode(decode("s", "axilite", "aclk", &[], &[("prefix", "s_axi_")]))
+        .unwrap();
+    // strb all ones, prot 0, resp OKAY: the fields are there, the SLVERR is not
+    assert_eq!(
+        table(stream(&ws, "s.wr")),
+        [
+            row(30, 50, &["10", "16", "0", "286331153", "15", "0"]),
+            row(60, 120, &["20", "20", "0", "572662306", "15", "0"]),
+        ]
+    );
+    let want = [
+        row(130, 160, &["20", "16", "0", "286331153", "0"]),
+        row(170, 190, &["10", "32", "0", "3735928559", "0"]),
+    ];
+    let rd = table(stream(&ws, "s.rd"));
+    assert_eq!((&rd[..2], rd.len()), (&want[..], 8));
+    let mut errors = unknown_rows();
+    errors.push(row(
+        210,
+        220,
+        &["aw_dropped", "awvalid fell before awready", "error"],
+    ));
+    errors.push(row(
+        230,
+        240,
+        &["b_early", "response 3 before write 3's AW and W", "error"],
+    ));
+    assert_eq!(table(stream(&ws, "s.errors")), errors);
+}
+
+/// axilite.vcd with bresp 2'b01 at the first write's B (back to 0 once it is answered) and rresp
+/// 2'b01 at the first read's R: EXOKAY is exclusive access, which AXI4-Lite has none of.
+#[test]
+fn axilite_exokay_is_an_error() {
+    let dir = Dir::new("axi-exokay");
+    let path = dir.0.join("exokay.vcd");
+    let text = std::fs::read_to_string(fixture("vcd").with_file_name("axilite.vcd")).unwrap();
+    let text = text.replacen("1)\n1*\nb0 +\n", "1)\n1*\nb01 +\n", 1);
+    let text = text.replacen("#92\n1#\n", "#92\n1#\nb0 +\n", 1);
+    let text = text.replacen(
+        "1/\nb10001000100010001000100010001 1\nb0 2\n",
+        "1/\nb10001000100010001000100010001 1\nb01 2\n",
+        1,
+    );
+    std::fs::write(&path, text).unwrap();
+    let mut ws = Workspace::open(&path).unwrap();
+    ws.add_decode(decode("s", "axilite", "aclk", &[], &[("prefix", "s_axi_")]))
+        .unwrap();
+    let mut errors = unknown_rows();
+    errors.extend([
+        row(40, 50, &["b_exokay", "bresp is EXOKAY", "error"]),
+        row(150, 160, &["r_exokay", "rresp is EXOKAY", "error"]),
+        row(
+            180,
+            190,
+            &["r_resp", "rresp is SLVERR or DECERR", "warning"],
+        ),
+        row(
+            210,
+            220,
+            &["aw_dropped", "awvalid fell before awready", "error"],
+        ),
+        row(
+            230,
+            240,
+            &["b_early", "response 3 before write 3's AW and W", "error"],
+        ),
+    ]);
+    assert_eq!(table(stream(&ws, "s.errors")), errors);
+}
+
+/// A port with a reset (`aresetn`, active low): a valid in it, and in the cycle it is released
+/// in, is an error, and no handshake is recorded; out of it the handshakes are as ever.
+#[test]
+fn axilite_reset_takes_no_records() {
+    let mut ws = open("axilite_reset.vcd");
+    ws.add_decode(decode("s", "axilite", "clk", &[], &[("prefix", "s_axi_")]))
+        .unwrap();
+    assert_eq!(
+        table(stream(&ws, "s.errors")),
+        [
+            row(5, 15, &["aw_reset", "awvalid in reset", "error"]),
+            row(
+                15,
+                25,
+                &[
+                    "aw_reset",
+                    "awvalid in the cycle reset is released",
+                    "error"
+                ]
+            )
+        ]
+    );
+    // only the handshake after it counts: addr and the protection the port doesn't give
+    assert_eq!(table(stream(&ws, "s.aw")), [row(25, 35, &["160", "0"])]);
+    // read as active high, the same signal holds the other cycles: the reset is from #15 on
+    let mut ws = open("axilite_reset.vcd");
+    ws.add_decode(decode(
+        "s",
+        "axilite",
+        "clk",
+        &[],
+        &[("prefix", "s_axi_"), ("reset_active", "high")],
+    ))
+    .unwrap();
+    assert_eq!(
+        table(stream(&ws, "s.errors")),
+        [
+            row(15, 25, &["aw_reset", "awvalid in reset", "error"]),
+            row(25, 35, &["aw_reset", "awvalid in reset", "error"])
+        ]
+    );
+    // the same signal holds the other cycles, so the handshake is the early one
+    assert_eq!(table(stream(&ws, "s.aw")), [row(5, 15, &["160", "0"])]);
+    // a polarity it can't read is refused
+    let mut ws = open("axilite_reset.vcd");
+    let err = ws
+        .add_decode(decode(
+            "s",
+            "axilite",
+            "clk",
+            &[],
+            &[("prefix", "s_axi_"), ("reset_active", "on")],
+        ))
+        .unwrap_err();
+    assert_eq!(err, "s: reset_active: low or high, not on");
+    // AXI4's reset is active low, with no param to say otherwise
+    let mut ws = open("axilite_reset.vcd");
+    let err = ws
+        .add_decode(decode(
+            "m",
+            "axi4",
+            "clk",
+            &[],
+            &[("prefix", "s_axi_"), ("reset_active", "high")],
+        ))
+        .unwrap_err();
+    assert_eq!(
+        err,
+        "m: wlast: unknown signal: top.s_axi_wlast (nearest: top.s_axi_wdata); \
+         axi4 has no param reset_active (params: prefix, timeout)"
+    );
+}
+
+/// `timeout=`: the write answered after 20ns is no response under 15ns, and its B is `b_early`.
 #[test]
 fn axilite_timeout() {
     let mut ws = open("axilite.vcd");
@@ -588,15 +908,16 @@ fn axilite_timeout() {
     .unwrap();
     assert_eq!(
         table(stream(&ws, "s.wr")),
-        [row(30, 50, &["10", "16", "286331153", "15", "0"])]
+        [row(30, 50, &["10", "16", "0", "286331153", "15", "0"])]
     );
     let kinds: Vec<(u64, String)> = table(stream(&ws, "s.wr.unmatched"))
         .into_iter()
         .map(|r| (r.0, r.2[0].clone()))
         .collect();
+    // the write answered after 20ns; its B, and the stray one at 230ns, are `b_early` in errors
     assert_eq!(
         kinds.iter().map(|k| k.1.as_str()).collect::<Vec<_>>(),
-        ["no response", "no request", "no request"]
+        ["no response"]
     );
     assert_eq!(kinds[0].0, 60);
     // long enough: as without
@@ -638,6 +959,136 @@ fn axilite_timeout() {
         ))
         .unwrap_err();
     assert!(err.contains("has no param timeout"), "{err}");
+}
+
+/// A response with no request to answer is `b_early`/`r_early` (A2.3), not the join's `no request`:
+/// the response says what it is, and the write it does not answer keeps its record.
+#[test]
+fn axilite_b_early() {
+    let mut ws = open("axilite.vcd");
+    ws.add_decode(decode("s", "axilite", "aclk", &[], &[("prefix", "s_axi_")]))
+        .unwrap();
+    let errors = table(stream(&ws, "s.errors"));
+    assert_eq!(
+        &errors[errors.len() - 1..],
+        [row(
+            230,
+            240,
+            &["b_early", "response 3 before write 3's AW and W", "error"]
+        )]
+    );
+    // the early B answers nothing: both writes are still joined, and nothing is unmatched
+    assert_eq!(table(stream(&ws, "s.wr")).len(), 2);
+    assert!(stream(&ws, "s.wr.unmatched").records.is_empty());
+    assert!(stream(&ws, "s.rd.unmatched").records.is_empty());
+}
+
+/// axilite.vcd with one more R, after the eighth read's: a response whose read has no AR is
+/// `r_early`, and the eight reads stay as they were.
+#[test]
+fn axilite_r_early() {
+    let dir = Dir::new("axi-r-early");
+    let path = dir.0.join("early.vcd");
+    let text = std::fs::read_to_string(fixture("vcd").with_file_name("axilite.vcd")).unwrap();
+    let text = format!("{text}#452\n1/\n10\n#455\n0!\n#465\n1!\n#472\n0/\n00\n");
+    std::fs::write(&path, text).unwrap();
+    let mut ws = Workspace::open(&path).unwrap();
+    ws.add_decode(decode("s", "axilite", "aclk", &[], &[("prefix", "s_axi_")]))
+        .unwrap();
+    let errors = table(stream(&ws, "s.errors"));
+    assert_eq!(
+        &errors[errors.len() - 1..],
+        [row(
+            450,
+            465,
+            &["r_early", "response 9 before read 9's AR", "error"]
+        )]
+    );
+    assert_eq!(table(stream(&ws, "s.rd")).len(), 8);
+    assert!(stream(&ws, "s.rd.unmatched").records.is_empty());
+}
+
+/// axilite.vcd with bvalid and bready in the cycle of the first write's AW and W: the B comes
+/// before its own request's handshakes, so it is `b_early`. The join calls it `no request` too, so
+/// the next B answers that write: one response early, one pair shifted, nothing lost.
+#[test]
+fn axilite_b_early_same_cycle() {
+    let dir = Dir::new("axi-b-early");
+    let path = dir.0.join("same-cycle.vcd");
+    let text = std::fs::read_to_string(fixture("vcd").with_file_name("axilite.vcd")).unwrap();
+    let text = text
+        .replacen("#32\n1\"\n1#\n", "#32\n1)\n1*\n1\"\n1#\n", 1)
+        .replacen(
+            "#42\n0\"\n0#\n0%\n0&\n1)\n1*\n",
+            "#42\n0\"\n0#\n0%\n0&\n0)\n0*\n",
+            1,
+        )
+        // no late B: the one early response, and no other
+        .replacen("#232\n1)\n1*\n", "#232\n", 1)
+        .replacen("#242\n0)\n0*\n", "#242\n", 1);
+    std::fs::write(&path, text).unwrap();
+    let mut ws = Workspace::open(&path).unwrap();
+    ws.add_decode(decode("s", "axilite", "aclk", &[], &[("prefix", "s_axi_")]))
+        .unwrap();
+    let errors = table(stream(&ws, "s.errors"));
+    let early: Vec<_> = errors.iter().filter(|r| r.2[0] == "b_early").collect();
+    assert_eq!(
+        early,
+        [&row(
+            30,
+            40,
+            &["b_early", "response 1 before write 1's AW and W", "error"]
+        )]
+    );
+    // the write is still joined, from its AW and W to the next B; its own request's W (the
+    // second write's) waits unanswered
+    assert_eq!(
+        table(stream(&ws, "s.wr")),
+        [row(30, 120, &["80", "16", "0", "286331153", "15", "0"])]
+    );
+    assert_eq!(
+        table(stream(&ws, "s.wr.unmatched")),
+        [row(60, 100, &["no response"])]
+    );
+}
+
+/// No unmatched row says `no request` any more: a response with no request is an `errors` row
+/// (`b_early`, `r_early`), so what the joins leave there is a request never answered.
+#[test]
+fn axilite_unmatched_without_no_request() {
+    let kinds = |ws: &Workspace, side: &str| {
+        table(stream(ws, side))
+            .into_iter()
+            .map(|r| r.2[0].clone())
+            .collect::<Vec<_>>()
+    };
+    let mut ws = open("axilite.vcd");
+    ws.add_decode(decode("s", "axilite", "aclk", &[], &[("prefix", "s_axi_")]))
+        .unwrap();
+    assert!(kinds(&ws, "s.wr.unmatched").is_empty());
+    assert!(kinds(&ws, "s.rd.unmatched").is_empty());
+    assert!(
+        table(stream(&ws, "s.errors"))
+            .iter()
+            .any(|r| r.2[0] == "b_early")
+    );
+    // under a timeout the unanswered write is what is left
+    let mut ws = open("axilite.vcd");
+    ws.add_decode(decode(
+        "s",
+        "axilite",
+        "aclk",
+        &[],
+        &[("prefix", "s_axi_"), ("timeout", "15ns")],
+    ))
+    .unwrap();
+    // one write and one read were answered too late
+    assert_eq!(kinds(&ws, "s.wr.unmatched"), ["no response"]);
+    assert_eq!(kinds(&ws, "s.rd.unmatched"), ["no response"]);
+    for kind in [kinds(&ws, "s.wr.unmatched"), kinds(&ws, "s.rd.unmatched")].concat() {
+        assert!(kind.starts_with("no "), "{kind}");
+        assert_ne!(kind, "no request");
+    }
 }
 
 /// The names of an instance checked without decoding (the decode form, spec §5): the same
@@ -1370,8 +1821,60 @@ fn axilite_one_side() {
     let mut ws = Workspace::open(&vcd).unwrap();
     ws.add_decode(decode("m", "axilite", "aclk", &[], &[("prefix", "m_axi_")]))
         .unwrap();
-    assert_eq!(table(stream(&ws, "m.rd")), [row(5, 25, &["10", "4", "10"])]);
+    assert_eq!(
+        table(stream(&ws, "m.rd")),
+        [row(5, 25, &["10", "4", "0", "10", "0"])]
+    );
     assert!(!ws.streams.iter().any(|s| s.name == "m.wr"));
+}
+
+/// The roles of IHI 0022L Table B2.2 are required; the five it lets a slave leave out are
+/// optional with the value the spec gives them, and `aresetn` too, with no value to give.
+#[test]
+fn axilite_required_roles() {
+    let def = wtf_core::protocol::get("axilite").unwrap();
+    let (required, optional) = def.roles();
+    assert_eq!(
+        required,
+        [
+            "awvalid", "awready", "awaddr", "wvalid", "wready", "wdata", "bvalid", "bready",
+            "arvalid", "arready", "araddr", "rvalid", "rready", "rdata"
+        ]
+    );
+    assert_eq!(
+        optional,
+        ["awprot", "wstrb", "bresp", "arprot", "rresp", "aresetn"]
+    );
+    assert_eq!(
+        def.defaults(),
+        [
+            "awprot 000",
+            "wstrb bytes of wdata",
+            "bresp 00",
+            "arprot 000",
+            "rresp 00"
+        ]
+    );
+    assert_eq!(def.params(), ["timeout", "reset_active"]);
+    // half a side is no port, even with the other side's optional roles there
+    let write: Vec<(&str, &str)> = [
+        ("awvalid", "s_axi_awvalid"),
+        ("awready", "s_axi_awready"),
+        ("awaddr", "s_axi_awaddr"),
+        ("wvalid", "s_axi_wvalid"),
+        ("wready", "s_axi_wready"),
+        ("wdata", "s_axi_wdata"),
+        ("bvalid", "s_axi_bvalid"),
+    ]
+    .to_vec();
+    let mut ws = open("axilite.vcd");
+    let err = ws
+        .add_decode(decode("x", "axilite", "aclk", &write, &[]))
+        .unwrap_err();
+    assert_eq!(
+        err,
+        "x: no signal for bready (the file has: decode x axilite clock=top.aclk prefix=top.s_axi_)"
+    );
 }
 
 /// SPI's cs active high and UART's line idle low: the fixtures with that pin inverted decode as
@@ -1756,7 +2259,7 @@ fn results_and_sets() {
     ))
     .unwrap();
     assert!(!names(&ws, ws.results("s")).contains(&"s.rd".to_string()));
-    // wr and rd share addr, data, resp, delay; strb is wr's alone
+    // wr and rd share addr, prot, data, resp, delay; strb is wr's alone
     let set = wtf_core::stream::Set::new(vec![
         &ws.streams[ws.stream_set("s.wr").unwrap()[0]],
         &ws.streams[ws.stream_set("s.rd").unwrap()[0]],
@@ -1766,7 +2269,7 @@ fn results_and_sets() {
             .iter()
             .map(|c| c.name.as_str())
             .collect::<Vec<_>>(),
-        ["delay", "addr", "data", "strb", "resp"]
+        ["delay", "addr", "prot", "data", "strb", "resp"]
     );
     let (all, total) = set.select(0, u64::MAX, None, ws.trace.fs_per_tick).unwrap();
     assert_eq!((all.len(), total), (10, 10));

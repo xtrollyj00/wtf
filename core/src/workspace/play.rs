@@ -18,6 +18,7 @@ fn default_value(role: &protocol::RoleDef, given: &protocol::Given) -> Option<Va
     match role.default? {
         Default::Zero => Some(Val::Bits("0".repeat(w))),
         Default::Ones => Some(Val::Bits("1".repeat(w))),
+        Default::Bits(b) => Some(Val::Bits(b.to_string())),
         Default::Bytes(src) => Some(Val::Bits("1".repeat(width(src)?.div_ceil(8) as usize))),
         Default::Same(_) => None,
     }

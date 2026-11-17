@@ -30,6 +30,8 @@ pub enum Default {
     Zero,
     /// All ones.
     Ones,
+    /// A literal: its bits are the value and the width (AXI4-Lite's `awprot`, `2'b000`).
+    Bits(&'static str),
     /// One bit per whole byte of another given role (AXI4-Stream `tkeep`, spec §3.1.2).
     Bytes(&'static str),
     /// The same value as another role.
@@ -42,6 +44,7 @@ impl Default {
         match self {
             Default::Zero => "0".into(),
             Default::Ones => "1".into(),
+            Default::Bits(b) => (*b).into(),
             Default::Bytes(src) => format!("bytes of {src}"),
             Default::Same(src) => format!("same as {src}"),
         }

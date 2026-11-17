@@ -3514,7 +3514,7 @@ mod tests {
         keys(&mut app, "ll");
         let screen = snapshot(&mut app, 110, Some(16));
         assert!(
-            screen.contains("stream        n    delay") && app.browser.as_ref().unwrap().left == 2,
+            screen.contains("stream    n    delay") && app.browser.as_ref().unwrap().left == 2,
             "{screen}"
         );
         keys(&mut app, "h\x1b");

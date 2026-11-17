@@ -835,7 +835,7 @@ mod tests {
         // spec §5 "Records": `s` sorts by the next column, blanks last; `S` reverses
         let mut app = axi();
         let ncols = b(&app).fixed() + b(&app).set(&app.ws).columns.len();
-        assert_eq!((b(&app).sort, ncols), ((2, false), 13));
+        assert_eq!((b(&app).sort, ncols), ((2, false), 14));
         for col in (2..ncols).chain(0..2) {
             let br = b(&app);
             assert_eq!(br.sort.0, col);
@@ -868,8 +868,11 @@ mod tests {
         // `=` on a fixed column says to sort by a field first
         app.keys("=").unwrap();
         assert!(!b(&app).group && msg(&app).starts_with("= groups by the sorted column"));
-        // group by resp (column 8): Enter keeps one value's records; a second time narrows further
-        app.keys("ssssss=").unwrap();
+        // group by resp (column 9, after phase 2's prot): Enter keeps one value's records; a
+        // second time narrows further. The violations are left out: their resp is blank, and
+        // blank is the one value a filter cannot write
+        app.keys("<Esc>:records s_axi.wr s_axi.rd\n").unwrap();
+        app.keys("sssssss=").unwrap();
         assert!(b(&app).group);
         let screen = crate::snapshot(&mut app, 120, Some(30));
         assert!(
@@ -909,7 +912,7 @@ mod tests {
         app.keys("<Esc>").unwrap();
         // group by rule: the commonest value is blank, which a filter cannot write
         app.keys("<Esc>:records s_axi\n").unwrap();
-        app.keys("sssssss=\n").unwrap();
+        app.keys("ssssssss=\n").unwrap();
         assert!(
             b(&app).group && msg(&app).ends_with("this value can't be written in a filter"),
             "{}",
@@ -926,7 +929,8 @@ mod tests {
         assert!((1..13).contains(&page), "{page}");
         app.keys("G").unwrap();
         crate::snapshot(&mut app, 120, Some(12));
-        assert_eq!((b(&app).hl, b(&app).top), (12, 13 - page));
+        // 23 records now: last row 22, and the top scrolls it into view
+        assert_eq!((b(&app).hl, b(&app).top), (22, 23 - page));
         app.keys("g").unwrap();
         crate::snapshot(&mut app, 120, Some(12));
         assert_eq!((b(&app).hl, b(&app).top), (0, 0));
