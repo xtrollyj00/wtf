@@ -5,9 +5,9 @@ use crate::decode::join_schema;
 use crate::protocol::axi::{self, Chan, Handshakes};
 use crate::protocol::{
     Def, Default, Desc, Field, Given, Out, Params, Protocol, RoleDef, Roles, Severity, StreamDesc,
+    reset_low,
 };
 use crate::time::Tick;
-use crate::trace::Val;
 
 /// The channels, in the order their streams are made, and the rules each one can break: Lite has no
 /// exclusive access, so `resp` and `exokay` split the response's two bits between them.
@@ -266,9 +266,10 @@ pub const DEF: Def = Def {
 
 /// What a side's stream is, and what its unmatched stream means.
 const WR: &str = "writes: AW and W in either order, then B; delay from the later of AW and W to B";
-const NO_WR: &str = "a write never answered, or not within `timeout` (no response), a W without an AW (no aw) or the reverse (no w)";
+const NO_WR: &str = "a write never answered, or not within `timeout` (no response), its B after that (no request), a W without an AW (no aw) or the reverse (no w)";
 const RD: &str = "reads: AR, then R; delay from AR to R";
-const NO_RD: &str = "an AR never answered, or not within `timeout` (no response)";
+const NO_RD: &str =
+    "an AR never answered, or not within `timeout` (no response), its R after that (no request)";
 
 /// The instance's channels, the streams it makes, and the timeout.
 struct Axilite {
@@ -283,19 +284,8 @@ fn make(given: &Given, params: &Params, fpt: Option<u128>) -> Result<Box<dyn Pro
 
 impl Axilite {
     fn new(given: &Given, params: &Params, fpt: Option<u128>) -> Result<Self, String> {
-        // the spec's reset is active low (2.8.2)
-        let mut reset_low = true;
-        for (k, v) in params {
-            match (k.as_str(), v.as_str()) {
-                ("reset_active", "low") => reset_low = true,
-                ("reset_active", "high") => reset_low = false,
-                ("reset_active", other) => {
-                    return Err(format!("reset_active: low or high, not {other}"));
-                }
-                _ => {}
-            }
-        }
-        let h = Handshakes::new(given, CHANS, RULES, DEF.roles, reset_low);
+        // the spec's reset is active low (A2.1.2)
+        let h = Handshakes::new(given, CHANS, RULES, DEF.roles, reset_low(params)?);
         let field = |name: &str| Field {
             name: name.into(),
             width: None,
@@ -375,15 +365,6 @@ impl Protocol for Axilite {
                     .unwrap_or_default(),
             );
         }
-        // a response without a request is `b_early` or `r_early` in errors, so the join's
-        // `no request` rows would say it twice
-        out.retain(|o| {
-            !matches!(
-                o,
-                Out::Record { fields, .. }
-                    if matches!(fields.first(), Some(Some(Val::Text(k))) if k == "no request")
-            )
-        });
         out
     }
 }

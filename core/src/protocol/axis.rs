@@ -4,7 +4,7 @@
 use crate::decode::data_bytes;
 use crate::protocol::{
     Def, Default, Desc, Field, Given, Out, Params, Protocol, RoleDef, Roles, Rule, Severity,
-    StreamDesc, bit_of,
+    StreamDesc, bit_of, reset_low,
 };
 use crate::time::Tick;
 use crate::trace::Val;
@@ -181,17 +181,7 @@ pub struct Axis {
 
 impl Axis {
     fn new(given: &Given, params: &Params) -> Result<Self, String> {
-        let mut reset_low = true;
-        for (k, v) in params {
-            match (k.as_str(), v.as_str()) {
-                ("reset_active", "low") => reset_low = true,
-                ("reset_active", "high") => reset_low = false,
-                ("reset_active", other) => {
-                    return Err(format!("reset_active: low or high, not {other}"));
-                }
-                _ => {}
-            }
-        }
+        let reset_low = reset_low(params)?;
         let width = |r: &str| given.iter().find(|g| g.0 == r).and_then(|g| g.1);
         let has = |r: &str| given.iter().any(|g| g.0 == r);
         let field = |r: &str, w: Option<u32>| Field {

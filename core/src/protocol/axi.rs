@@ -51,8 +51,11 @@ struct Present {
     fields: Vec<Field>,
     records: Vec<stream::Record>,
     /// The handshakes recorded so far: a response's ordinal, which its request's must have
-    /// reached (A2.3).
+    /// reached (A2.3). An early response is not one: it answers no request.
     beats: u64,
+    /// The starts of the early responses' handshakes: the join's `no request` rows that `errors`
+    /// already says.
+    early: Vec<Tick>,
     // the cycle before, for the rules that look back
     then_valid: Option<bool>,
     then_ready: Option<bool>,
@@ -60,24 +63,26 @@ struct Present {
 }
 
 impl Present {
-    /// The channel has that rule: `changed` and `payload_unknown` need a payload, `resp` and
-    /// `exokay` a response role, and `early` is the port's (AXI4-Lite's `b` and `r`, not AXI4's).
+    /// The channel has that rule: it lists it, and `changed` and `payload_unknown` need a
+    /// payload, `resp` and `exokay` a response role. A rule the port does not list never fires
+    /// (AXI4 has no `unknown`).
     fn has(&self, suffix: &str) -> bool {
-        match suffix {
-            "changed" | "payload_unknown" => !self.payload.is_empty(),
-            "resp" | "exokay" => self.resp.is_some(),
-            "early" => self.chan.rules.iter().any(|r| r.ends_with(suffix)),
-            _ => true,
-        }
+        self.rule(suffix).is_some()
+            && match suffix {
+                "changed" | "payload_unknown" => !self.payload.is_empty(),
+                "resp" | "exokay" => self.resp.is_some(),
+                _ => true,
+            }
     }
 
-    /// The rule's name on this channel (`aw_dropped` for `dropped`), when it lists it.
-    fn rule(&self, kind: &RuleKind) -> Option<&'static str> {
-        self.chan
-            .rules
-            .iter()
-            .find(|r| r.ends_with(kind.suffix))
-            .copied()
+    /// The rule's name on this channel (`aw_dropped` for `dropped`), when it lists it: the whole
+    /// name, so `unknown` is not `payload_unknown`.
+    fn rule(&self, suffix: &str) -> Option<&'static str> {
+        self.chan.rules.iter().copied().find(|r| {
+            r.strip_prefix(self.chan.name)
+                .and_then(|r| r.strip_prefix('_'))
+                == Some(suffix)
+        })
     }
 }
 
@@ -133,6 +138,7 @@ impl Handshakes {
                     fields,
                     records: Vec::new(),
                     beats: 0,
+                    early: Vec::new(),
                     then_valid: None,
                     then_ready: None,
                     then,
@@ -197,7 +203,7 @@ impl Handshakes {
             .collect();
         for p in &self.chans {
             for kind in rules.iter().filter(|k| p.has(k.suffix)) {
-                if let Some(rule) = p.rule(kind) {
+                if let Some(rule) = p.rule(kind.suffix) {
                     about.push(format!(
                         "  {rule}: {} ({}, spec {})",
                         kind.about,
@@ -274,7 +280,7 @@ impl Handshakes {
             // an x or z says nothing: it is not also a valid that fell, nor a payload that moved
             // (A2.3 asks for every signal to be defined when it is sampled, and out of reset)
             for role in [&p.valid, &p.ready] {
-                if roles.get(role).is_some_and(unknown) {
+                if p.has("unknown") && roles.get(role).is_some_and(unknown) {
                     out.push(violation(
                         rules,
                         p,
@@ -287,6 +293,7 @@ impl Handshakes {
             }
             // a payload of x is one row per cycle, not one per signal: the first one names it
             if valid == Some(true)
+                && p.has("payload_unknown")
                 && let Some((_, role)) = p
                     .payload
                     .iter()
@@ -366,34 +373,34 @@ impl Handshakes {
                 }
             }
             // a response before its request's handshakes: a B needs an AW and a W, an R an AR,
-            // recorded before this cycle (A2.3)
-            if valid == Some(true) && ready == Some(true) && p.has("early") {
-                match p.chan.name {
-                    "b" if b >= aw.min(w) => out.push(violation(
-                        rules,
-                        p,
-                        "early",
-                        start,
-                        end,
-                        format!(
-                            "response {} before write {}'s AW and W",
-                            b + 1,
-                            aw.min(w) + 1
-                        ),
-                    )),
-                    "r" if r >= ar => out.push(violation(
-                        rules,
-                        p,
-                        "early",
-                        start,
-                        end,
-                        format!("response {} before read {}'s AR", r + 1, ar + 1),
-                    )),
-                    _ => {}
-                }
+            // recorded before this cycle (A2.3.2). It is checked when the response begins, so a
+            // valid raised too early is one even when its handshake waits for them
+            let early = p.has("early")
+                && match p.chan.name {
+                    "b" => b >= aw.min(w),
+                    "r" => r >= ar,
+                    _ => false,
+                };
+            if early && valid == Some(true) && !stalled {
+                let detail = if p.chan.name == "b" {
+                    format!(
+                        "response {} before write {}'s AW and W",
+                        b + 1,
+                        aw.min(w) + 1
+                    )
+                } else {
+                    format!("response {} before read {}'s AR", r + 1, ar + 1)
+                };
+                out.push(violation(rules, p, "early", start, end, detail));
             }
             if valid == Some(true) && ready == Some(true) {
-                p.beats += 1;
+                // a response still early at its handshake answers no request: not counted, so
+                // the next one answers the oldest request, as the join pairs them
+                if early {
+                    p.early.push(start);
+                } else {
+                    p.beats += 1;
+                }
                 p.records.push(stream::Record {
                     start,
                     end,
@@ -435,13 +442,20 @@ impl Handshakes {
                 inputs: Vec::new(),
             })
         };
+        let early: &[Tick] = self.present(response).map_or(&[], |p| &p.early);
         let response = stream(response)?;
         let requests: Vec<(&str, Stream)> = requests
             .iter()
             .map(|&c| stream(c).map(|s| (c, s)))
             .collect::<Result<_, String>>()?;
         let reqs: Vec<(&str, &Stream)> = requests.iter().map(|(c, s)| (*c, s)).collect();
-        let (done, rest) = decode::join(name, &reqs, &response, None, timeout)?;
+        let (done, mut rest) = decode::join(name, &reqs, &response, None, timeout)?;
+        // an early response is `b_early` or `r_early` in errors, so its `no request` row would say
+        // it twice; a late one, after `timeout`, is said here alone
+        rest.records.retain(|q| {
+            !(early.contains(&q.start)
+                && matches!(q.fields.first(), Some(Some(Val::Text(k))) if k == "no request"))
+        });
         let mut out = from_stream(name, &done);
         out.extend(from_stream(unmatched, &rest));
         Ok(out)
@@ -462,7 +476,7 @@ fn violation(
     Out::Violation {
         // every rule a port fires is in the channel's list: a missing one is a bug
         rule: kind
-            .and_then(|k| p.rule(k))
+            .and_then(|k| p.rule(k.suffix))
             .expect("the channel lists its rules"),
         start,
         end,

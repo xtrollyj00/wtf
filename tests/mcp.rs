@@ -2041,7 +2041,7 @@ fn protocols_describe_themselves() {
         "        r_resp: a SLVERR or DECERR response (warning, spec A3.3)\n",
         "        r_exokay: an EXOKAY response: Lite has no exclusive access (error, spec A3.3)\n",
         "      writes: AW and W in either order, then B; delay from the later of AW and W to B\n",
-        "      a write never answered, or not within `timeout` (no response), a W without an AW (no aw) or the reverse (no w)",
+        "      a write never answered, or not within `timeout` (no response), its B after that (no request), a W without an AW (no aw) or the reverse (no w)",
         "        b_early: a response before its request's handshakes (error, spec A2.3.2)\n",
         "example: decode bus axilite clock=aclk prefix=s_axi_",
     ] {

@@ -20,6 +20,23 @@ pub type Given<'a> = [(&'a str, Option<u32>)];
 /// An instance's params, (name, value).
 pub type Params = [(String, String)];
 
+/// `reset_active=`: whether the instance's reset is active low, the default of both AXI (A2.1.2)
+/// and AXI-Stream (2.8.2).
+pub fn reset_low(params: &Params) -> Result<bool, String> {
+    let mut low = true;
+    for (k, v) in params {
+        match (k.as_str(), v.as_str()) {
+            ("reset_active", "low") => low = true,
+            ("reset_active", "high") => low = false,
+            ("reset_active", other) => {
+                return Err(format!("reset_active: low or high, not {other}"));
+            }
+            _ => {}
+        }
+    }
+    Ok(low)
+}
+
 /// The protocols written in Rust.
 pub const BUILTINS: &[&str] = &["axis", "axilite", "axi4", "spi", "uart"];
 

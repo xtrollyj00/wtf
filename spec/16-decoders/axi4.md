@@ -28,7 +28,7 @@ Streams:
 | `<name>.wr.unmatched` | a B without a write (no request), a write never answered, or not within `timeout` (no response), a W burst without an AW (no aw) or the reverse (no wburst) |
 | `<name>.rd` | reads: AR, then the R burst with its ID; `delay` (latency) from AR to the first R beat |
 | `<name>.rd.unmatched` | an R burst without an AR (no request), an AR never answered, or not within `timeout` (no response) |
-| `<name>.errors` | a record per cycle where a rule holds, `rule` naming the channel and what it saw, for `aw`, `w`, `b`, `ar` and `r`: `<chan>_dropped` (a valid fell before its ready), `<chan>_changed` (the payload moved while stalled), `<chan>_resp` (a response not OKAY); `detail` says what it saw, and `severity` is `error` for all three (the spec forbids them: A3.2.1 and A6.1) |
+| `<name>.errors` | a record per cycle where a rule holds, `rule` naming the channel and what it saw, for `aw`, `w`, `b`, `ar` and `r`: `<chan>_dropped` (a valid fell before its ready), `<chan>_changed` (the payload moved while stalled), `<chan>_resp` (a response not OKAY); `detail` says what it saw, and `severity` is `error` for all three (the spec forbids them: A3.2.1 and A6.1); a valid or ready of x or z breaks none of them |
 
 Params: `timeout` as AXI4-Lite's. The sides, the one-sided port and the error an incomplete side
 gives are AXI4-Lite's too (16.2).

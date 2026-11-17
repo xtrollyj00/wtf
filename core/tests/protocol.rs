@@ -533,9 +533,8 @@ fn axilite_payload_changed_while_stalled() {
 /// before their requests. The warnings are the other half, pinned in
 /// `tests/mcp.rs::axilite_warnings_filter_by_severity`.
 ///
-/// Two shapes the fixture is built around: the stray B is the last B (one response too many makes
-/// every later one early too), and the x wdata is in the last cycle (no cycle follows to make the
-/// stalled valid a dropped one).
+/// Two shapes the fixture is built around: the stray B is the last B, and the x wdata is in the
+/// last cycle: no cycle follows to make the stalled valid a dropped one.
 #[test]
 fn axilite_error_rules() {
     let mut ws = open("axilite_errors.vcd");
@@ -894,7 +893,8 @@ fn axilite_reset_takes_no_records() {
     );
 }
 
-/// `timeout=`: the write answered after 20ns is no response under 15ns, and its B is `b_early`.
+/// `timeout=`: the write answered after 20ns is no response under 15ns, and its B, at 110ns, no
+/// request: late, not early, so `errors` does not say it.
 #[test]
 fn axilite_timeout() {
     let mut ws = open("axilite.vcd");
@@ -914,12 +914,20 @@ fn axilite_timeout() {
         .into_iter()
         .map(|r| (r.0, r.2[0].clone()))
         .collect();
-    // the write answered after 20ns; its B, and the stray one at 230ns, are `b_early` in errors
+    // the write answered after 20ns, and its late B; the stray one at 230ns is `b_early` in
+    // errors alone
     assert_eq!(
-        kinds.iter().map(|k| k.1.as_str()).collect::<Vec<_>>(),
-        ["no response"]
+        kinds,
+        [
+            (60, "no response".to_string()),
+            (110, "no request".to_string())
+        ]
     );
-    assert_eq!(kinds[0].0, 60);
+    assert!(
+        !table(stream(&ws, "s.errors"))
+            .iter()
+            .any(|r| r.0 == 110 && r.2[0] == "b_early")
+    );
     // long enough: as without
     let mut long = open("axilite.vcd");
     long.add_decode(decode(
@@ -1052,10 +1060,10 @@ fn axilite_b_early_same_cycle() {
     );
 }
 
-/// No unmatched row says `no request` any more: a response with no request is an `errors` row
-/// (`b_early`, `r_early`), so what the joins leave there is a request never answered.
+/// An unmatched row says `no request` only for a late response: one with no request before it is
+/// an `errors` row (`b_early`, `r_early`), said once.
 #[test]
-fn axilite_unmatched_without_no_request() {
+fn axilite_no_request_only_when_late() {
     let kinds = |ws: &Workspace, side: &str| {
         table(stream(ws, side))
             .into_iter()
@@ -1082,13 +1090,85 @@ fn axilite_unmatched_without_no_request() {
         &[("prefix", "s_axi_"), ("timeout", "15ns")],
     ))
     .unwrap();
-    // one write and one read were answered too late
-    assert_eq!(kinds(&ws, "s.wr.unmatched"), ["no response"]);
-    assert_eq!(kinds(&ws, "s.rd.unmatched"), ["no response"]);
-    for kind in [kinds(&ws, "s.wr.unmatched"), kinds(&ws, "s.rd.unmatched")].concat() {
-        assert!(kind.starts_with("no "), "{kind}");
-        assert_ne!(kind, "no request");
-    }
+    // one write and one read were answered too late: each request and its late response
+    assert_eq!(kinds(&ws, "s.wr.unmatched"), ["no response", "no request"]);
+    assert_eq!(kinds(&ws, "s.rd.unmatched"), ["no response", "no request"]);
+}
+
+/// axilite.vcd with a stray R at 110ns, before the first AR: it is `r_early` once, and the eight
+/// reads after it pair as they did, none of them early.
+#[test]
+fn axilite_stray_response_once() {
+    let dir = Dir::new("axi-stray");
+    let path = dir.0.join("stray.vcd");
+    let text = std::fs::read_to_string(fixture("vcd").with_file_name("axilite.vcd")).unwrap();
+    let text = text
+        .replacen("#112\n1*\n", "#112\n1*\n1/\n10\n", 1)
+        .replacen("#122\n0)\n0*\n", "#122\n0)\n0*\n0/\n00\n", 1);
+    std::fs::write(&path, text).unwrap();
+    let mut ws = Workspace::open(&path).unwrap();
+    ws.add_decode(decode("s", "axilite", "aclk", &[], &[("prefix", "s_axi_")]))
+        .unwrap();
+    let early: Vec<_> = table(stream(&ws, "s.errors"))
+        .into_iter()
+        .filter(|r| r.2[0] == "r_early")
+        .collect();
+    assert_eq!(
+        early,
+        [row(
+            110,
+            120,
+            &["r_early", "response 1 before read 1's AR", "error"]
+        )]
+    );
+    // errors and the join agree: every read pairs, and the stray R is not said twice
+    let mut plain = open("axilite.vcd");
+    plain
+        .add_decode(decode("s", "axilite", "aclk", &[], &[("prefix", "s_axi_")]))
+        .unwrap();
+    assert_eq!(table(stream(&ws, "s.rd")), table(stream(&plain, "s.rd")));
+    assert!(stream(&ws, "s.rd.unmatched").records.is_empty());
+}
+
+/// axilite.vcd with the second write's bvalid raised at 90ns, in the cycle of its AW handshake,
+/// and held to the bready at 110ns: a BVALID before its write's handshakes is `b_early` (A2.3.2.1)
+/// though its handshake comes after them, and the B still answers the write.
+#[test]
+fn axilite_bvalid_before_request() {
+    let dir = Dir::new("axi-bvalid-early");
+    let path = dir.0.join("bvalid.vcd");
+    let text = std::fs::read_to_string(fixture("vcd").with_file_name("axilite.vcd")).unwrap();
+    let text = text.replacen("#92\n1#\n", "#92\n1#\n1)\n", 1).replacen(
+        "#102\n0\"\n0#\n1)\n",
+        "#102\n0\"\n0#\n",
+        1,
+    );
+    std::fs::write(&path, text).unwrap();
+    let mut ws = Workspace::open(&path).unwrap();
+    ws.add_decode(decode("s", "axilite", "aclk", &[], &[("prefix", "s_axi_")]))
+        .unwrap();
+    let early: Vec<_> = table(stream(&ws, "s.errors"))
+        .into_iter()
+        .filter(|r| r.2[0] == "b_early")
+        .collect();
+    assert_eq!(
+        early,
+        [
+            row(
+                90,
+                100,
+                &["b_early", "response 2 before write 2's AW and W", "error"]
+            ),
+            row(
+                230,
+                240,
+                &["b_early", "response 3 before write 3's AW and W", "error"]
+            ),
+        ]
+    );
+    // the B is the write's own: both writes pair, nothing is unmatched
+    assert_eq!(table(stream(&ws, "s.wr")).len(), 2);
+    assert!(stream(&ws, "s.wr.unmatched").records.is_empty());
 }
 
 /// The names of an instance checked without decoding (the decode form, spec §5): the same
@@ -1562,6 +1642,28 @@ fn axi4_bursts_by_id() {
             .collect::<Vec<_>>(),
         [("256", "2"), ("512", "0")]
     );
+}
+
+/// axi4.vcd with awvalid x from 22ns, sampled at the edge between write 1's AW and write 2's:
+/// AXI4 lists no `unknown` rule, so the x fires none, and the decode is as it was (it panicked).
+#[test]
+fn axi4_unknown_valid() {
+    let dir = Dir::new("axi4-unknown");
+    let path = dir.0.join("unknown.vcd");
+    let text = std::fs::read_to_string(fixture("vcd").with_file_name("axi4.vcd")).unwrap();
+    let text = text.replacen("#22\n0\"\n", "#22\nx\"\n", 1);
+    assert!(text.contains("#22\nx\"\n"));
+    std::fs::write(&path, text).unwrap();
+    let mut ws = Workspace::open(&path).unwrap();
+    ws.add_decode(decode("m", "axi4", "aclk", &[], &[("prefix", "m_axi_")]))
+        .unwrap();
+    let mut plain = open("axi4.vcd");
+    plain
+        .add_decode(decode("m", "axi4", "aclk", &[], &[("prefix", "m_axi_")]))
+        .unwrap();
+    for s in ["m.aw", "m.errors", "m.wr"] {
+        assert_eq!(table(stream(&ws, s)), table(stream(&plain, s)), "{s}");
+    }
 }
 
 /// Each AXI4 stream says the streams it was made from (spec §16: `from`).
