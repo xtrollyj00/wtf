@@ -2,47 +2,131 @@
 //! handshakes joined into a transaction.
 
 use crate::decode::join_schema;
-use crate::protocol::axi::{self, Chan, ChanRules, Handshakes};
+use crate::protocol::axi::{self, Chan, Handshakes};
 use crate::protocol::{
-    Def, Desc, Field, Given, Out, Params, Protocol, RoleDef, Roles, Severity, StreamDesc,
+    Def, Default, Desc, Field, Given, Out, Params, Protocol, RoleDef, Roles, Severity, StreamDesc,
+    reset_low,
 };
 use crate::time::Tick;
 
-/// The channels, in the order their streams are made.
+/// The channels, in the order their streams are made, and the rules each one can break: Lite has no
+/// exclusive access, so `resp` and `exokay` split the response's two bits between them.
 pub const CHANS: &[Chan] = &[
     Chan {
         name: "aw",
         payload: &[("addr", "awaddr"), ("prot", "awprot")],
-        rules: ["aw_dropped", "aw_changed", "aw_resp"],
+        rules: &[
+            "aw_dropped",
+            "aw_changed",
+            "aw_reset",
+            "aw_unknown",
+            "aw_payload_unknown",
+        ],
     },
     Chan {
         name: "w",
         payload: &[("data", "wdata"), ("strb", "wstrb")],
-        rules: ["w_dropped", "w_changed", "w_resp"],
+        rules: &[
+            "w_dropped",
+            "w_changed",
+            "w_reset",
+            "w_unknown",
+            "w_payload_unknown",
+        ],
     },
     Chan {
         name: "b",
         payload: &[("resp", "bresp")],
-        rules: ["b_dropped", "b_changed", "b_resp"],
+        rules: &[
+            "b_dropped",
+            "b_changed",
+            "b_resp",
+            "b_exokay",
+            "b_reset",
+            "b_unknown",
+            "b_payload_unknown",
+            "b_early",
+        ],
     },
     Chan {
         name: "ar",
         payload: &[("addr", "araddr"), ("prot", "arprot")],
-        rules: ["ar_dropped", "ar_changed", "ar_resp"],
+        rules: &[
+            "ar_dropped",
+            "ar_changed",
+            "ar_reset",
+            "ar_unknown",
+            "ar_payload_unknown",
+        ],
     },
     Chan {
         name: "r",
         payload: &[("data", "rdata"), ("resp", "rresp")],
-        rules: ["r_dropped", "r_changed", "r_resp"],
+        rules: &[
+            "r_dropped",
+            "r_changed",
+            "r_resp",
+            "r_exokay",
+            "r_reset",
+            "r_unknown",
+            "r_payload_unknown",
+            "r_early",
+        ],
     },
 ];
 
-/// The spec forbids a handshake error and a SLVERR alike.
-pub const RULES: ChanRules = ChanRules {
-    dropped: Severity::Error,
-    changed: Severity::Error,
-    resp: Severity::Error,
-};
+/// What the spec says of each rule, and how sure that is: it forbids a handshake error and an
+/// EXOKAY alike, but a SLVERR is only the slave saying so.
+pub const RULES: &[axi::RuleKind] = &[
+    axi::RuleKind {
+        suffix: "dropped",
+        about: "a valid fell before its ready: it stays until the handshake",
+        spec: "A2.3",
+        severity: Severity::Error,
+    },
+    axi::RuleKind {
+        suffix: "changed",
+        about: "a payload signal changed while its valid was stalled",
+        spec: "A2.3",
+        severity: Severity::Error,
+    },
+    axi::RuleKind {
+        suffix: "resp",
+        about: "a SLVERR or DECERR response",
+        spec: "A3.3",
+        severity: Severity::Warning,
+    },
+    axi::RuleKind {
+        suffix: "exokay",
+        about: "an EXOKAY response: Lite has no exclusive access",
+        spec: "A3.3",
+        severity: Severity::Error,
+    },
+    axi::RuleKind {
+        suffix: "reset",
+        about: "a valid while the interface is in reset, or in its first cycle out",
+        spec: "A2.1.2",
+        severity: Severity::Error,
+    },
+    axi::RuleKind {
+        suffix: "unknown",
+        about: "a valid or ready is x or z out of reset",
+        spec: "A2.3",
+        severity: Severity::Warning,
+    },
+    axi::RuleKind {
+        suffix: "payload_unknown",
+        about: "a payload signal is x or z while its valid",
+        spec: "A2.3",
+        severity: Severity::Warning,
+    },
+    axi::RuleKind {
+        suffix: "early",
+        about: "a response before its request's handshakes",
+        spec: "A2.3.2",
+        severity: Severity::Error,
+    },
+];
 
 pub const DEF: Def = Def {
     about: "AXI4-Lite: write and read transactions with their delay, handshake errors, error responses",
@@ -142,44 +226,50 @@ pub const DEF: Def = Def {
         RoleDef {
             name: "awprot",
             required: false,
-            default: None,
-            about: "the write's protection, unrecorded without it",
+            default: Some(Default::Bits("000")),
+            about: "the write's protection (not given: 0)",
         },
         RoleDef {
             name: "wstrb",
             required: false,
-            default: None,
-            about: "which write bytes are data",
+            default: Some(Default::Bytes("wdata")),
+            about: "which write bytes are data (not given: all)",
         },
         RoleDef {
             name: "bresp",
             required: false,
-            default: None,
-            about: "the write's response: OKAY or not",
+            default: Some(Default::Bits("00")),
+            about: "the write's response: OKAY or not (not given: OKAY)",
         },
         RoleDef {
             name: "arprot",
             required: false,
-            default: None,
-            about: "the read's protection",
+            default: Some(Default::Bits("000")),
+            about: "the read's protection (not given: 0)",
         },
         RoleDef {
             name: "rresp",
             required: false,
+            default: Some(Default::Bits("00")),
+            about: "the read's response: OKAY or not (not given: OKAY)",
+        },
+        RoleDef {
+            name: "aresetn",
+            required: false,
             default: None,
-            about: "the read's response: OKAY or not",
+            about: "the reset, active low (reset_active=high: active high)",
         },
     ],
-    params: &["timeout"],
+    params: &["timeout", "reset_active"],
     make,
 };
 
 /// What a side's stream is, and what its unmatched stream means.
 const WR: &str = "writes: AW and W in either order, then B; delay from the later of AW and W to B";
-const NO_WR: &str = "a B without a write (no request), a write never answered, or not within `timeout` (no response), a W without an AW (no aw) or the reverse (no w)";
+const NO_WR: &str = "a write never answered, or not within `timeout` (no response), its B after that (no request), a W without an AW (no aw) or the reverse (no w)";
 const RD: &str = "reads: AR, then R; delay from AR to R";
 const NO_RD: &str =
-    "an R without an AR (no request), an AR never answered, or not within `timeout` (no response)";
+    "an AR never answered, or not within `timeout` (no response), its R after that (no request)";
 
 /// The instance's channels, the streams it makes, and the timeout.
 struct Axilite {
@@ -194,7 +284,8 @@ fn make(given: &Given, params: &Params, fpt: Option<u128>) -> Result<Box<dyn Pro
 
 impl Axilite {
     fn new(given: &Given, params: &Params, fpt: Option<u128>) -> Result<Self, String> {
-        let h = Handshakes::new(given, CHANS, RULES);
+        // the spec's reset is active low (A2.1.2)
+        let h = Handshakes::new(given, CHANS, RULES, DEF.roles, reset_low(params)?);
         let field = |name: &str| Field {
             name: name.into(),
             width: None,

@@ -2,7 +2,7 @@
 //! paired by ID with their latency, error responses (spec §16 "AXI4").
 
 use crate::decode::{self, Decoder};
-use crate::protocol::axi::{self, Chan, ChanRules, Handshakes};
+use crate::protocol::axi::{self, Chan, Handshakes, RuleKind};
 use crate::protocol::{
     Def, Desc, Given, Out, Params, Protocol, RoleDef, Roles, Severity, StreamDesc,
 };
@@ -22,17 +22,17 @@ const CHANS: &[Chan] = &[
             ("burst", "awburst"),
             ("prot", "awprot"),
         ],
-        rules: ["aw_dropped", "aw_changed", "aw_resp"],
+        rules: &["aw_dropped", "aw_changed", "aw_resp"],
     },
     Chan {
         name: "w",
         payload: &[("data", "wdata"), ("strb", "wstrb"), ("last", "wlast")],
-        rules: ["w_dropped", "w_changed", "w_resp"],
+        rules: &["w_dropped", "w_changed", "w_resp"],
     },
     Chan {
         name: "b",
         payload: &[("id", "bid"), ("resp", "bresp")],
-        rules: ["b_dropped", "b_changed", "b_resp"],
+        rules: &["b_dropped", "b_changed", "b_resp"],
     },
     Chan {
         name: "ar",
@@ -44,7 +44,7 @@ const CHANS: &[Chan] = &[
             ("burst", "arburst"),
             ("prot", "arprot"),
         ],
-        rules: ["ar_dropped", "ar_changed", "ar_resp"],
+        rules: &["ar_dropped", "ar_changed", "ar_resp"],
     },
     Chan {
         name: "r",
@@ -54,15 +54,32 @@ const CHANS: &[Chan] = &[
             ("resp", "rresp"),
             ("last", "rlast"),
         ],
-        rules: ["r_dropped", "r_changed", "r_resp"],
+        rules: &["r_dropped", "r_changed", "r_resp"],
     },
 ];
 
-const RULES: ChanRules = ChanRules {
-    dropped: Severity::Error,
-    changed: Severity::Error,
-    resp: Severity::Error,
-};
+/// The rules of IHI 0022, all three of them errors. A response that is not OKAY counts EXOKAY with
+/// them: AXI4 allows it for exclusive access, which wtf does not decode.
+const RULES: &[RuleKind] = &[
+    RuleKind {
+        suffix: "dropped",
+        about: "a valid fell before its ready: it stays until the handshake",
+        spec: "A3.2.1",
+        severity: Severity::Error,
+    },
+    RuleKind {
+        suffix: "changed",
+        about: "a payload signal changed while its valid was stalled",
+        spec: "A3.2.1",
+        severity: Severity::Error,
+    },
+    RuleKind {
+        suffix: "resp",
+        about: "a response that is not OKAY",
+        spec: "A6.1",
+        severity: Severity::Error,
+    },
+];
 
 /// A side of the port: its channel's bursts, the channel that answers them, and what
 /// `protocols axi4` says of its three streams.
@@ -283,7 +300,7 @@ struct Axi4 {
 impl Axi4 {
     fn new(given: &Given, params: &Params, fs_per_tick: Option<u128>) -> Result<Self, String> {
         let timeout = axi::timeout(params, fs_per_tick)?;
-        let channels = Handshakes::new(given, CHANS, RULES);
+        let channels = Handshakes::new(given, CHANS, RULES, DEF.roles, true);
         let mut streams: Vec<StreamDesc> =
             CHANS.iter().filter_map(|c| channels.desc(c.name)).collect();
         streams.push(channels.errors());

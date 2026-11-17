@@ -7,7 +7,7 @@ expression: "crate::snapshot(&mut a, 100, Some(30))"
      │ name       s                                                                           │
      │ protocol   axilite  AXI4-Lite: write and read transactions with their delay, handshak  │
      │ clock      aclk                                                                        │
-     │▌prefix     m_axi_   plays 0 of 19 roles                                                │
+     │▌prefix     m_axi_   plays 0 of 20 roles                                                │
      │ awvalid                                                                                │
      │ awready                                                                                │
      │ awaddr                                                                                 │

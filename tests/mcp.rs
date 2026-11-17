@@ -1719,21 +1719,21 @@ fn decode_with_command() {
             "command",
             json!({"line": "decode bus axilite clock=aclk prefix=s_axi_"})
         ),
-        "bus: records bus.wr 2, bus.rd 8; violations bus.errors 2, bus.wr.unmatched 1, bus.rd.unmatched 0; made from bus.aw 2, bus.w 2, bus.b 3, bus.ar 8, bus.r 8\n`records <stream>` lists one, `records <name>` its records and violations in order; `protocols axilite` says what each stream and field is; `pair` matches a stream with another (`help decode`)"
+        "bus: records bus.wr 2, bus.rd 8; violations bus.errors 13, bus.wr.unmatched 0, bus.rd.unmatched 0; made from bus.aw 2, bus.w 2, bus.b 3, bus.ar 8, bus.r 8\n`records <stream>` lists one, `records <name>` its records and violations in order; `protocols axilite` says what each stream and field is; `pair` matches a stream with another (`help decode`)"
     );
     assert!(s.ok("view", json!({})).contains("aclk"), "the rows stay");
     // a decode's name: its results and violations in order of start, a column per field, empty
     // where a stream has none; a filter keeps the streams having its fields
     assert_eq!(
         s.ok("records", json!({"stream": "bus", "count": 3})),
-        "3 of 13\nstream\tn\tstart\tend\tdelay\taddr\tdata\tstrb\tresp\trule\tdetail\tseverity\tkind\nbus.wr\t0\t30ns\t50ns\t10ns\t0x10\t0x11111111\t0xF\t0x0\t\t\t\t\nbus.wr\t1\t60ns\t120ns\t20ns\t0x14\t0x22222222\t0x3\t0x0\t\t\t\t\nbus.rd\t0\t130ns\t160ns\t20ns\t0x10\t0x11111111\t\t0x0\t\t\t\t"
+        "3 of 23\nstream\tn\tstart\tend\tdelay\taddr\tprot\tdata\tstrb\tresp\trule\tdetail\tseverity\tkind\nbus.errors\t0\t10ns\t20ns\t\t\t\t\t\t\taw_unknown\tawvalid is x or z out of reset\twarning\t\nbus.errors\t1\t10ns\t20ns\t\t\t\t\t\t\taw_unknown\tawready is x or z out of reset\twarning\t\nbus.errors\t2\t10ns\t20ns\t\t\t\t\t\t\tw_unknown\twvalid is x or z out of reset\twarning\t"
     );
     assert_eq!(
         s.ok(
             "records",
             json!({"stream": "bus", "where": "strb != 0xF", "count_only": true})
         ),
-        "1 matching records, of 13, first 60ns, last 60ns"
+        "1 matching records, of 23, first 60ns, last 60ns"
     );
     assert_eq!(
         s.ok(
@@ -1756,21 +1756,21 @@ fn decode_with_command() {
     );
     assert_eq!(
         s.ok("records", json!({"stream": "bus.wr"})),
-        "2 of 2\nn\tstart\tend\tdelay\taddr\tdata\tstrb\tresp\n0\t30ns\t50ns\t10ns\t0x10\t0x11111111\t0xF\t0x0\n1\t60ns\t120ns\t20ns\t0x14\t0x22222222\t0x3\t0x0"
+        "2 of 2\nn\tstart\tend\tdelay\taddr\tprot\tdata\tstrb\tresp\n0\t30ns\t50ns\t10ns\t0x10\t0x0\t0x11111111\t0xF\t0x0\n1\t60ns\t120ns\t20ns\t0x14\t0x0\t0x22222222\t0x3\t0x0"
     );
     assert_eq!(
         s.ok("records", json!({"stream": "bus.errors"})),
-        "2 of 2\nn\tstart\tend\trule\tdetail\tseverity\n0\t180ns\t190ns\tr_resp\trresp is not OKAY\terror\n1\t210ns\t220ns\taw_dropped\tawvalid fell before awready\terror"
+        "13 of 13\nn\tstart\tend\trule\tdetail\tseverity\n0\t10ns\t20ns\taw_unknown\tawvalid is x or z out of reset\twarning\n1\t10ns\t20ns\taw_unknown\tawready is x or z out of reset\twarning\n2\t10ns\t20ns\tw_unknown\twvalid is x or z out of reset\twarning\n3\t10ns\t20ns\tw_unknown\twready is x or z out of reset\twarning\n4\t10ns\t20ns\tb_unknown\tbvalid is x or z out of reset\twarning\n5\t10ns\t20ns\tb_unknown\tbready is x or z out of reset\twarning\n6\t10ns\t20ns\tar_unknown\tarvalid is x or z out of reset\twarning\n7\t10ns\t20ns\tar_unknown\tarready is x or z out of reset\twarning\n8\t10ns\t20ns\tr_unknown\trvalid is x or z out of reset\twarning\n9\t10ns\t20ns\tr_unknown\trready is x or z out of reset\twarning\n10\t180ns\t190ns\tr_resp\trresp is SLVERR or DECERR\twarning\n11\t210ns\t220ns\taw_dropped\tawvalid fell before awready\terror\n12\t230ns\t240ns\tb_early\tresponse 3 before write 3's AW and W\terror"
     );
     // a radix for every number field (not the delay, a time), or one field's
     let wr = |radix: &str| json!({"stream": "bus.wr", "radix": radix, "count": 1});
     assert_eq!(
         s.ok("records", wr("dec")),
-        "1 of 2\nn\tstart\tend\tdelay\taddr\tdata\tstrb\tresp\n0\t30ns\t50ns\t10ns\t16\t286331153\t15\t0"
+        "1 of 2\nn\tstart\tend\tdelay\taddr\tprot\tdata\tstrb\tresp\n0\t30ns\t50ns\t10ns\t16\t0\t286331153\t15\t0"
     );
     assert_eq!(
         s.ok("records", wr("addr:dec, strb:bin")),
-        "1 of 2\nn\tstart\tend\tdelay\taddr\tdata\tstrb\tresp\n0\t30ns\t50ns\t10ns\t16\t0x11111111\t0b1111\t0x0"
+        "1 of 2\nn\tstart\tend\tdelay\taddr\tprot\tdata\tstrb\tresp\n0\t30ns\t50ns\t10ns\t16\t0x0\t0x11111111\t0b1111\t0x0"
     );
     assert_eq!(
         s.tool("records", wr("delay:dec")),
@@ -1778,14 +1778,14 @@ fn decode_with_command() {
     );
     assert_eq!(
         s.tool("records", wr("adr:dec")),
-        Err("bus.wr: no field adr (fields: delay, addr, data, strb, resp)".into())
+        Err("bus.wr: no field adr (fields: delay, addr, prot, data, strb, resp)".into())
     );
     // `where` picks records by their fields, on each record only (never `z` between them)
     let rd =
         |w: &str, count_only| json!({"stream": "bus.rd", "where": w, "count_only": count_only});
     assert_eq!(
         s.ok("records", rd("resp != 0", false)),
-        "1 of 1 matching, of 8\nn\tstart\tend\tdelay\taddr\tdata\tresp\n1\t170ns\t190ns\t10ns\t0x20\t0xDEADBEEF\t0x2"
+        "1 of 1 matching, of 8\nn\tstart\tend\tdelay\taddr\tprot\tdata\tresp\n1\t170ns\t190ns\t10ns\t0x20\t0x0\t0xDEADBEEF\t0x2"
     );
     assert_eq!(
         s.ok("records", rd("resp != 0", true)),
@@ -1800,12 +1800,12 @@ fn decode_with_command() {
             "records",
             json!({"stream": "bus.errors", "where": "rule == aw_dropped && past(rule) == r_resp"})
         ),
-        "1 of 1 matching, of 2\nn\tstart\tend\trule\tdetail\tseverity\n1\t210ns\t220ns\taw_dropped\tawvalid fell before awready\terror"
+        "1 of 1 matching, of 13\nn\tstart\tend\trule\tdetail\tseverity\n11\t210ns\t220ns\taw_dropped\tawvalid fell before awready\terror"
     );
     assert_eq!(
         s.tool("records", rd("adr == 1", false)),
         Err(
-            "bus.rd: no field adr (fields: delay, addr, data, resp, and n, the record's number)"
+            "bus.rd: no field adr (fields: delay, addr, prot, data, resp, and n, the record's number)"
                 .into()
         )
     );
@@ -1827,7 +1827,7 @@ fn decode_with_command() {
     let wr = json!({"stream": "bus.wr", "where": "delay == 20ns", "unit": "ps"});
     assert_eq!(
         s.ok("records", wr),
-        "1 of 1 matching, of 2\nn\tstart\tend\tdelay\taddr\tdata\tstrb\tresp\n1\t60000ps\t120000ps\t20000ps\t0x14\t0x22222222\t0x3\t0x0"
+        "1 of 1 matching, of 2\nn\tstart\tend\tdelay\taddr\tprot\tdata\tstrb\tresp\n1\t60000ps\t120000ps\t20000ps\t0x14\t0x0\t0x22222222\t0x3\t0x0"
     );
     // ordered, as unsigned numbers; a time with a time
     assert_eq!(
@@ -1892,6 +1892,126 @@ fn decode_with_command() {
     );
 }
 
+/// Every fault of axilite_errors.vcd reaches an agent in fault order, and a response with no
+/// request is a rule of the card, not the join's `no request` row.
+#[test]
+fn axilite_errors_conformance() {
+    let dir = Dir::new("axilite-errors");
+    let mut s = Server::start(&dir.0);
+    s.ok(
+        "open",
+        json!({"trace": std::fs::canonicalize("tests/data/axilite_errors.vcd").unwrap()}),
+    );
+    // the clock by its name and the prefix play every role, aresetn and the optional payloads at
+    // their defaults: one write pairs, three reads pair, the stray B and the extra R are rules
+    assert!(
+        s.ok(
+            "command",
+            json!({"line": "decode bus axilite clock=aclk prefix=s_axi_"})
+        )
+        .starts_with("bus: records bus.wr 1, bus.rd 3; violations bus.errors 11, bus.wr.unmatched 0, bus.rd.unmatched 0; made from bus.aw 1, bus.w 1, bus.b 2, bus.ar 3, bus.r 4\n")
+    );
+    assert_eq!(
+        s.ok("records", json!({"stream": "bus.errors"})),
+        "11 of 11\nn\tstart\tend\trule\tdetail\tseverity\n\
+         0\t10ns\t20ns\taw_reset\tawvalid in reset\terror\n\
+         1\t20ns\t30ns\taw_reset\tawvalid in the cycle reset is released\terror\n\
+         2\t50ns\t60ns\taw_dropped\tawvalid fell before awready\terror\n\
+         3\t90ns\t100ns\tw_changed\twdata changed while wvalid stalled\terror\n\
+         4\t110ns\t120ns\tb_resp\tbresp is SLVERR or DECERR\twarning\n\
+         5\t130ns\t140ns\tr_resp\trresp is SLVERR or DECERR\twarning\n\
+         6\t150ns\t160ns\tr_exokay\trresp is EXOKAY\terror\n\
+         7\t160ns\t170ns\tb_early\tresponse 2 before write 2's AW and W\terror\n\
+         8\t190ns\t200ns\tr_early\tresponse 4 before read 4's AR\terror\n\
+         9\t200ns\t210ns\tar_unknown\tarvalid is x or z out of reset\twarning\n\
+         10\t220ns\t230ns\tw_payload_unknown\twdata is x or z while wvalid\twarning"
+    );
+    // no `no request`: what has no request is `b_early` or `r_early` in errors (phase 5)
+    assert_eq!(
+        s.ok("records", json!({"stream": "bus.wr.unmatched"})),
+        "no records: no violations"
+    );
+    assert_eq!(
+        s.ok("records", json!({"stream": "bus.rd.unmatched"})),
+        "no records: no violations"
+    );
+    // the optional payloads read their defaults: wstrb all ones, awprot zero
+    assert_eq!(
+        s.ok("records", json!({"stream": "bus.wr"})),
+        "1 of 1\nn\tstart\tend\tdelay\taddr\tprot\tdata\tstrb\tresp\n0\t70ns\t120ns\t10ns\t0x20\t0x0\t0x22\t0xF\t0x2"
+    );
+}
+
+/// The warnings of axilite_errors.vcd are the four that say nothing rather than a bug: a response
+/// that is not OKAY, and the x an out-of-reset port may drive (spec §16 "Results").
+#[test]
+fn axilite_warnings_filter_by_severity() {
+    let dir = Dir::new("axilite-severity");
+    let mut s = Server::start(&dir.0);
+    s.ok(
+        "open",
+        json!({"trace": std::fs::canonicalize("tests/data/axilite_errors.vcd").unwrap()}),
+    );
+    s.ok(
+        "command",
+        json!({"line": "decode bus axilite clock=aclk prefix=s_axi_"}),
+    );
+    let rules = |text: &str| -> Vec<String> {
+        text.lines()
+            .skip(2)
+            .map(|l| l.split('\t').nth(3).unwrap().to_string())
+            .collect()
+    };
+    let w = s.ok(
+        "records",
+        json!({"stream": "bus.errors", "where": "severity == warning"}),
+    );
+    assert!(w.starts_with("4 of 4 matching, of 11\n"), "{w}");
+    assert_eq!(
+        rules(&w),
+        ["b_resp", "r_resp", "ar_unknown", "w_payload_unknown"]
+    );
+    let e = s.ok(
+        "records",
+        json!({"stream": "bus.errors", "where": "severity == error"}),
+    );
+    assert!(e.starts_with("7 of 7 matching, of 11\n"), "{e}");
+    assert_eq!(
+        rules(&e),
+        [
+            "aw_reset",
+            "aw_reset",
+            "aw_dropped",
+            "w_changed",
+            "r_exokay",
+            "b_early",
+            "r_early"
+        ]
+    );
+}
+
+/// `protocols axilite` says what a port may leave out and what it is then, and names every rule
+/// with its severity and clause, so an agent can tell `error` from `warning` before it decodes.
+#[test]
+fn axilite_protocols_describes_defaults_reset_rules() {
+    let dir = Dir::new("axilite-card");
+    let mut s = Server::start(&dir.0);
+    let card = s.ok("protocols", json!({"name": "axilite"}));
+    for line in [
+        "  awprot wstrb bresp arprot rresp aresetn (optional)\n",
+        "  when not given: awprot 000, wstrb bytes of wdata, bresp 00, arprot 000, rresp 00\n",
+        "  timeout reset_active\n",
+        "        aw_reset: a valid while the interface is in reset, or in its first cycle out (error, spec A2.1.2)\n",
+        "        b_exokay: an EXOKAY response: Lite has no exclusive access (error, spec A3.3)\n",
+        "        aw_unknown: a valid or ready is x or z out of reset (warning, spec A2.3)\n",
+        "        w_payload_unknown: a payload signal is x or z while its valid (warning, spec A2.3)\n",
+        "        b_early: a response before its request's handshakes (error, spec A2.3.2)\n",
+        "        r_early: a response before its request's handshakes (error, spec A2.3.2)\n",
+    ] {
+        assert!(card.contains(line), "{line}\n{card}");
+    }
+}
+
 /// `protocols` lists what can be decoded and describes each, before a trace is open too.
 #[test]
 fn protocols_describe_themselves() {
@@ -1907,20 +2027,32 @@ fn protocols_describe_themselves() {
     }
     let axil = s.ok("protocols", json!({"name": "axilite"}));
     for line in [
-        "  awprot wstrb bresp arprot rresp (optional)",
+        "  awprot wstrb bresp arprot rresp aresetn (optional)",
+        "  when not given: awprot 000, wstrb bytes of wdata, bresp 00, arprot 000, rresp 00\n",
         "  <name>.wr: delay addr prot data strb resp\n",
         "  <name>.wr.unmatched: kind (violations)",
         "  <name>.rd.unmatched: kind (violations)",
         // what each stream is: what it samples, its rules with their severity and clause, a note
         // for the rest
         "  <name>.aw: addr prot\n      a record per cycle where awvalid && awready; addr = awaddr, prot = awprot\n",
-        "        aw_dropped: a valid fell before its ready: it stays until the handshake (error, spec A3.2.1)\n",
-        "        r_resp: a response that is not OKAY (error, spec A6.1)\n",
+        "        aw_dropped: a valid fell before its ready: it stays until the handshake (error, spec A2.3)\n",
+        "        aw_unknown: a valid or ready is x or z out of reset (warning, spec A2.3)\n",
+        "        w_payload_unknown: a payload signal is x or z while its valid (warning, spec A2.3)\n",
+        "        r_resp: a SLVERR or DECERR response (warning, spec A3.3)\n",
+        "        r_exokay: an EXOKAY response: Lite has no exclusive access (error, spec A3.3)\n",
         "      writes: AW and W in either order, then B; delay from the later of AW and W to B\n",
-        "      a B without a write (no request), a write never answered, or not within `timeout` (no response)",
+        "      a write never answered, or not within `timeout` (no response), its B after that (no request), a W without an AW (no aw) or the reverse (no w)",
+        "        b_early: a response before its request's handshakes (error, spec A2.3.2)\n",
         "example: decode bus axilite clock=aclk prefix=s_axi_",
     ] {
         assert!(axil.contains(line), "{line}\n{axil}");
+    }
+    // the card binds every role at 32 bits, the reset too: each channel lists its reset rule
+    for chan in ["aw", "w", "b", "ar", "r"] {
+        let line = format!(
+            "        {chan}_reset: a valid while the interface is in reset, or in its first cycle out (error, spec A2.1.2)\n"
+        );
+        assert!(axil.contains(&line), "{line}\n{axil}");
     }
     let axi4 = s.ok("protocols", json!({"name": "axi4"}));
     for line in [

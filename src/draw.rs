@@ -778,13 +778,15 @@ pub fn rows(
             )
         })
         .unzip();
-    // a stream's field, as the stream's own var: between records it has no value to show
+    // a stream's field, as the stream's own var: between records it has no value to show; by its
+    // field names, as `bus.wr.unmatched` is a stream of its own, not a field of `bus.wr`
     let field_of = |var: usize| {
         let s = ws.streams.iter().find(|s| {
             ws.trace.vars[var]
                 .path
                 .strip_prefix(s.name.as_str())
-                .is_some_and(|f| f.starts_with('.'))
+                .and_then(|f| f.strip_prefix('.'))
+                .is_some_and(|f| s.schema.iter().any(|x| x.name == f))
         })?;
         ws.trace.by_path.get(&s.name).copied()
     };

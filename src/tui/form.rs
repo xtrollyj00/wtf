@@ -1601,10 +1601,11 @@ mod tests {
             "{s}"
         );
         // too short for every field: scrolled to the one filled in, and back
-        a.keys("<S-Tab><S-Tab><S-Tab><S-Tab><S-Tab>").unwrap();
+        a.keys("<S-Tab><S-Tab><S-Tab><S-Tab><S-Tab><S-Tab>")
+            .unwrap();
         let s = crate::snapshot(&mut a, 100, Some(14));
         assert!(s.contains("▌timeout") && !s.contains(" name "), "{s}");
-        a.keys("\t").unwrap();
+        a.keys("\t\t").unwrap();
         assert!(crate::snapshot(&mut a, 100, Some(14)).contains("▌name"));
     }
 
