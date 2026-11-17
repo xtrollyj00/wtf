@@ -3165,6 +3165,21 @@ mod tests {
         assert!(!fgs.contains(&Some(draw::pal().line)));
     }
 
+    /// `bus.wr.unmatched` is a stream of its own, not a field of `bus.wr`: its record shows where
+    /// `bus.wr` has none.
+    #[test]
+    fn unmatched_draws_outside_its_side() {
+        let t = trace::Trace::open("tests/data/axilite.vcd".as_ref()).unwrap();
+        let mut app = App::new(workspace::Workspace::new(t, "axilite".into()));
+        keys(
+            &mut app,
+            ":decode bus axilite clock=aclk prefix=s_axi_ timeout=15ns\n:add bus.wr.unmatched\n:70ns\n",
+        );
+        assert!(app.msg.is_none(), "{:?}", app.msg);
+        let screen = snapshot(&mut app, 160, None);
+        assert!(screen.contains("#0 no response"), "{screen}");
+    }
+
     #[test]
     fn palettes() {
         let t = trace::Trace::open("tests/data/axilite.vcd".as_ref()).unwrap();
