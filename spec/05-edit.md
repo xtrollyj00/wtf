@@ -174,7 +174,8 @@ using it.
   prefix's last part (`s_axi`). Typed, the text matches as the picker's query does (`awv` matches
   `top.s_axi_awvalid`), signals ending in the role first. Nothing is filled in without `→`, and
   nothing is guessed beyond a name's exact ending. `Ctrl-Space` opens the signals picker on the
-  role's name, over the form, which stays in sight under it; its `Enter` fills the field in; on the
+  role's name, over the form, which stays in sight under it, the picker's title naming the field
+  it fills (`fill awvalid`); its `Enter` fills the field in; on the
   protocol, it goes to the next one.
 - **From a selection**: opened on a `V` range (`Space d D`, or the menu's `Decode as` ▸, which
   names the protocol), the range's signals fill the empty roles they play, and the clock: a
@@ -380,8 +381,8 @@ On the rows (section 3), as in vim's indenting:
 - `>` groups the selected row or `V` range under a name it gives (the start the signals' names
   share, `s_axi_aw` for `s_axi_awvalid` and `s_axi_awready`; else `group`), and the name is typed
   in place on the header: the status line shows `NAME` and what the keys do, the first character
-  replaces the name, `Backspace` and `Ctrl-u` edit it, `Enter` keeps it and `Esc` leaves the
-  name it had, as a mouse click does, which then does what it does. `R` types a new name for the group the selected row is in the same way. Grouping
+  replaces the name, `Backspace` and `Ctrl-u` edit it, `Enter` keeps it, as a mouse click does (an
+  empty name: the one it had), which then does what it does, and `Esc` leaves the name it had. `R` types a new name for the group the selected row is in the same way. Grouping
   and naming are an undo step each. `:group <name>` and `:rename <name>` do it in one line.
 - `<` takes the selected signals out of their group, placed right after it (a group left empty
   goes); on a header, it dissolves the group, its signals staying where they are, as `:ungroup`.
