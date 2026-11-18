@@ -13,45 +13,10 @@ use wtf_core::trace::{Changes, Trace, Val};
 use wtf_core::view::View;
 use wtf_core::workspace::{Kind, Sub, Workspace};
 
+use crate::theme::Palette;
+
 /// The name and value columns' widest, without `name_width` / `value_width` in the config file.
 pub const COLUMNS: (usize, usize) = (30, 20);
-
-pub struct Palette {
-    /// 1-bit lines and edges.
-    pub line: Color,
-    /// Bus and stream outlines; their labels are in the text's colour.
-    pub bus: Color,
-    /// Fill for a 1-bit signal toggling faster than a column.
-    pub fill: Color,
-    pub unknown: Color,
-    pub highz: Color,
-    /// A violation the protocol's spec only advises against (spec §16 severity).
-    pub warning: Color,
-    /// The accent: the cursor's head on the time axis, the selected name.
-    pub cursor: Color,
-    pub cursor_text: Color,
-    /// Behind the cursor's column: a tint, so the waveform under it stays as it is.
-    pub column: Color,
-    /// The other cursors' columns, fainter.
-    pub cursor_dim: Color,
-    /// Behind a mark's number and name on the ruler.
-    pub mark: Color,
-    /// Background behind both lines of the selected signal.
-    pub selected: Color,
-    /// Background of the boxes over the waveforms: the signal panel, help, completions.
-    pub panel: Color,
-    pub hatch: Color,
-    /// Scope prefixes, column separators and time axis labels.
-    pub dim: Color,
-    /// The shades of the signal colours, in the order of `rows::COLORS`.
-    pub hues: [Color; 8],
-    /// The screen's background and text; Reset keeps the terminal's.
-    pub background: Color,
-    pub text: Color,
-    /// Without colour (`NO_COLOR`): the cursor column and the selected name are reversed, and
-    /// marks are drawn with their glyph (spec §14 "Colours").
-    pub mono: bool,
-}
 
 /// Truecolor when the terminal says it supports it, otherwise the nearest 256-colour shades.
 /// COLORTERM is often lost over ssh, so known truecolor terminals are also recognised by TERM.
@@ -63,43 +28,6 @@ pub fn truecolor() -> bool {
         || ["ghostty", "kitty", "wezterm", "alacritty", "foot"]
             .iter()
             .any(|t| term.contains(t))
-}
-
-impl Palette {
-    /// `NO_COLOR`: the terminal's own colours everywhere.
-    pub fn mono() -> Palette {
-        let r = Color::Reset;
-        Palette {
-            line: r,
-            bus: r,
-            fill: r,
-            unknown: r,
-            highz: r,
-            warning: r,
-            cursor: r,
-            cursor_text: r,
-            column: r,
-            cursor_dim: r,
-            mark: r,
-            selected: r,
-            panel: r,
-            hatch: r,
-            dim: r,
-            hues: [r; 8],
-            background: r,
-            text: r,
-            mono: true,
-        }
-    }
-
-    /// Reversed where there is no colour: the cursor column, the selected name.
-    pub fn accent(&self) -> Modifier {
-        if self.mono {
-            Modifier::REVERSED
-        } else {
-            Modifier::empty()
-        }
-    }
 }
 
 thread_local! {
@@ -443,14 +371,16 @@ pub fn severity_color(sev: Severity) -> Color {
     }
 }
 
-/// How a violations stream's record at `t` draws: its severity's colour, red without one;
-/// `None` for any other stream.
-fn violation(stream: Option<&Stream>, t: Tick) -> Option<Style> {
+/// A violations stream's colour at `t`: its severity's colour, red without one; `None` for any
+/// other stream. One rule for draw and the browser (spec §16 severity).
+pub fn violation_color(stream: Option<&Stream>, t: Tick) -> Option<Color> {
     let s = stream.filter(|s| s.violations)?;
-    Some(
-        s.severity_at(t)
-            .map_or_else(red, |sev| Style::new().fg(severity_color(sev))),
-    )
+    Some(s.severity_at(t).map_or(pal().unknown, severity_color))
+}
+
+/// How a violations stream's record at `t` draws: `violation_color` as a style.
+fn violation(stream: Option<&Stream>, t: Tick) -> Option<Style> {
+    violation_color(stream, t).map(|c| Style::new().fg(c))
 }
 pub fn green() -> Style {
     Style::new().fg(pal().highz)
@@ -780,8 +710,8 @@ pub fn rows(
         .unzip();
     // a stream's field, as the stream's own var: between records it has no value to show; by its
     // field names, as `bus.wr.unmatched` is a stream of its own, not a field of `bus.wr`
-    let field_of = |var: usize| {
-        let s = ws.streams.iter().find(|s| {
+    let field_of = |ws: &Workspace, var: usize| {
+        let s = ws.streams().iter().find(|s| {
             ws.trace.vars[var]
                 .path
                 .strip_prefix(s.name.as_str())
@@ -799,7 +729,7 @@ pub fn rows(
             let v = ws
                 .trace
                 .value_of(var, l.bit, ws.view.cursor)
-                .filter(|_| !gap(&ws.trace, field_of(var), ws.view.cursor))?;
+                .filter(|_| !gap(&ws.trace, field_of(ws, var), ws.view.cursor))?;
             let stream = ws.stream_of(var);
             let st = violation(stream, ws.view.cursor).unwrap_or_else(|| state_style(&v));
             Some((label(&ws.trace, stream, &line_sig(ws, s, var), &v), st))
@@ -1002,7 +932,7 @@ pub fn rows(
                     l.bit,
                     bits,
                     ws.stream_of(l.var),
-                    field_of(l.var),
+                    field_of(ws, l.var),
                     ww,
                 )
             }
@@ -1170,13 +1100,19 @@ fn ruler(ws: &Workspace, buf: &mut Buffer, wx: usize, ww: usize, y: usize) {
     let mut tabs: Vec<(usize, String, Style)> = Vec::new();
     let mut free = 0;
     for (k, g) in groups.iter().enumerate() {
-        if let Some(i) = g.mark.filter(|&i| !ws.labels[i].name.is_empty()) {
+        if let Some(i) = g
+            .mark
+            .filter(|&i| ws.marks()[i].as_ref().is_some_and(|m| !m.name.is_empty()))
+        {
             let (from, to) = match g.slot {
                 Slot::Right => (free, g.lo),
                 _ => (g.hi + 1, groups.get(k + 1).map_or(ww, |n| n.lo)),
             };
             let room = to.saturating_sub(from).saturating_sub(2);
-            let name = &ws.labels[i].name;
+            let name: String = ws.marks()[i]
+                .as_ref()
+                .map(|m| m.name.clone())
+                .unwrap_or_default();
             let fit: Option<String> = match name.chars().count() {
                 n if n <= room => Some(name.clone()),
                 _ if room >= 3 => Some(name.chars().take(room - 1).chain([gl().cut]).collect()),
@@ -1564,5 +1500,45 @@ mod tests {
     fn severity_colour() {
         assert_eq!(severity_color(Severity::Error), pal().unknown);
         assert_eq!(severity_color(Severity::Warning), pal().warning);
+    }
+
+    /// One rule for draw and the browser: nothing for a stream that is not violations, its
+    /// severity's colour where it has one, red where it does not.
+    #[test]
+    fn violation_color_rule() {
+        use wtf_core::stream::{Field, Record};
+        let stream = |violations, sev: Option<&str>| Stream {
+            name: "rx.errors".into(),
+            schema: vec![Field {
+                name: "severity".into(),
+                width: None,
+                time: false,
+                signed: false,
+            }],
+            records: vec![Record {
+                start: 0,
+                end: 10,
+                fields: vec![sev.map(|s| Val::Text(s.into()))],
+            }],
+            violations,
+            inputs: Vec::new(),
+        };
+        assert_eq!(violation_color(None, 0), None);
+        assert_eq!(
+            violation_color(Some(&stream(false, Some("error"))), 5),
+            None
+        );
+        assert_eq!(
+            violation_color(Some(&stream(true, Some("error"))), 5),
+            Some(pal().unknown)
+        );
+        assert_eq!(
+            violation_color(Some(&stream(true, Some("warning"))), 5),
+            Some(pal().warning)
+        );
+        // between records there is no severity, and red is the fallback the browser had
+        let fallback = violation_color(Some(&stream(true, None)), 20);
+        assert_eq!(fallback, Some(pal().unknown));
+        assert_eq!(fallback, Some(red().fg.unwrap()));
     }
 }

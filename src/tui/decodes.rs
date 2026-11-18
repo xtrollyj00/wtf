@@ -3,14 +3,14 @@
 //! decode form or removed.
 
 use crate::draw::{gl, pal, put};
-use crate::tui::app::{App, Target};
+use crate::tui::app::{App, Overlay, Target};
 use crate::tui::keys::{self, Fixed, Key};
 use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use std::time::Instant;
-use wtf_core::workspace::Workspace;
+use wtf_core::workspace::{Msg, Workspace};
 
 pub struct Decodes {
     /// The highlighted decode, the first on screen and how many fit, as last drawn.
@@ -37,7 +37,7 @@ pub enum Dec {
 /// or streams it takes), and its
 /// results' and violations' records.
 fn line(ws: &Workspace, i: usize) -> (String, String, String, String) {
-    let d = &ws.decodes[i];
+    let d = &ws.decodes()[i];
     let signals = || {
         d.signals
             .iter()
@@ -61,7 +61,7 @@ fn line(ws: &Workspace, i: usize) -> (String, String, String, String) {
     let of = |violations: bool| {
         streams
             .iter()
-            .map(|&s| &ws.streams[s])
+            .map(|&s| &ws.streams()[s])
             .filter(|s| s.violations == violations && (!violations || !s.records.is_empty()))
             .map(|s| format!("{} {}", short(&s.name), s.records.len()))
             .collect::<Vec<_>>()
@@ -105,30 +105,32 @@ impl App {
 
     /// `:decodes`: the list, or why there is none.
     pub fn open_decodes(&mut self) -> Result<(), String> {
-        if self.ws.decodes.is_empty() {
+        if self.ws.decodes().is_empty() {
             return Err(
                 "no decodes yet: Space d d decodes an interface found, Space d D with a form"
                     .into(),
             );
         }
-        self.decodes = Some(Decodes {
+        self.overlay = Some(Overlay::Decodes(Decodes {
             hl: 0,
             top: 0,
             page: 1,
             d: false,
-        });
+        }));
         Ok(())
     }
 
     /// The list has the keys; they are fixed.
     pub fn decodes_key(&mut self, k: KeyEvent) {
-        let Some(l) = &mut self.decodes else { return };
+        let Some(Overlay::Decodes(l)) = &mut self.overlay else {
+            return;
+        };
         let act = keys::fixed(Self::DECODES_KEYS, k);
         let second_d = std::mem::take(&mut l.d) && act == Some(Dec::Remove);
-        let last = self.ws.decodes.len().saturating_sub(1);
+        let last = self.ws.decodes().len().saturating_sub(1);
         let name = self
             .ws
-            .decodes
+            .decodes()
             .get(l.hl)
             .map(|d| d.name.clone())
             .unwrap_or_default();
@@ -136,26 +138,26 @@ impl App {
             None => return,
             Some(Dec::Down) => return l.hl = (l.hl + 1).min(last),
             Some(Dec::Up) => return l.hl = l.hl.saturating_sub(1),
-            Some(Dec::Close) => return self.decodes = None,
+            Some(Dec::Close) => return self.overlay = None,
             Some(Dec::Remove) if !second_d => return l.d = true,
             Some(Dec::Remove) => self.run(&format!("decode {name} off")).map(|()| {
-                if self.ws.decodes.is_empty() {
-                    self.decodes = None;
-                } else if let Some(l) = &mut self.decodes {
-                    l.hl = l.hl.min(self.ws.decodes.len() - 1);
+                if self.ws.decodes().is_empty() {
+                    self.overlay = None;
+                } else if let Some(Overlay::Decodes(l)) = &mut self.overlay {
+                    l.hl = l.hl.min(self.ws.decodes().len() - 1);
                 }
             }),
             Some(Dec::Records) => {
-                self.decodes = None;
+                self.overlay = None;
                 self.open_browser(&name)
             }
             Some(Dec::Rows) => self.show_decode(&name).map(|added| {
                 if !added {
-                    self.msg = Some((format!("{name}: its results are shown already"), false));
+                    self.msg = Some(Msg::Info(format!("{name}: its results are shown already")));
                 }
             }),
             Some(Dec::Edit) => {
-                self.decodes = None;
+                self.overlay = None;
                 self.edit_decode(&name)
             }
         };
@@ -169,12 +171,14 @@ impl App {
             .hit
             .boxed
             .is_some_and(|r| r.contains((x as u16, y as u16).into()));
-        let last = self.ws.decodes.len().saturating_sub(1);
-        let Some(l) = &mut self.decodes else { return };
+        let last = self.ws.decodes().len().saturating_sub(1);
+        let Some(Overlay::Decodes(l)) = &mut self.overlay else {
+            return;
+        };
         match m.kind {
             MouseEventKind::ScrollDown => l.hl = (l.hl + 1).min(last),
             MouseEventKind::ScrollUp => l.hl = l.hl.saturating_sub(1),
-            MouseEventKind::Down(_) if !inside => self.decodes = None,
+            MouseEventKind::Down(_) if !inside => self.overlay = None,
             MouseEventKind::Down(MouseButton::Left) => {
                 let Some(&(_, k)) = self.hit.records.iter().find(|(ly, _)| *ly == y) else {
                     return;
@@ -192,8 +196,10 @@ impl App {
 /// Draws the list: a card over the waveforms, a line per decode in columns, the highlighted one
 /// marked.
 pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
-    let Some(l) = &mut app.decodes else { return };
-    let n = app.ws.decodes.len();
+    let Some(Overlay::Decodes(l)) = &mut app.overlay else {
+        return;
+    };
+    let n = app.ws.decodes().len();
     let (bw, bh) = (
         w.saturating_sub(8).min(110),
         (n + 2).min(body.saturating_sub(2)),
@@ -287,7 +293,10 @@ mod tests {
     }
 
     fn hl(a: &App) -> usize {
-        a.decodes.as_ref().expect("the list").hl
+        let Some(Overlay::Decodes(l)) = &a.overlay else {
+            panic!("no list")
+        };
+        l.hl
     }
 
     /// The list (spec §5 "Decodes"): a line per decode; `Enter` its records, `a` its results as
@@ -308,23 +317,23 @@ mod tests {
         insta::assert_snapshot!("decodes", crate::snapshot(&mut a, 100, Some(12)));
         // a key the list has none for does nothing; a screen too small for it leaves it out
         a.keys("z").unwrap();
-        assert!(a.decodes.is_some());
+        assert!(matches!(a.overlay, Some(Overlay::Decodes(_))));
         assert!(!crate::snapshot(&mut a, 40, Some(10)).contains("lat"));
         a.keys("jjk").unwrap();
         assert_eq!(hl(&a), 0);
         // dd on s: lat reads it; d then another key does nothing
         a.keys("dd").unwrap();
         assert_eq!(
-            a.msg.as_ref().map(|m| m.0.as_str()),
+            a.msg.as_ref().map(|m| m.text()),
             Some("s is read by lat: remove it first")
         );
         a.keys("djd").unwrap();
-        assert_eq!((hl(&a), a.ws.decodes.len()), (1, 2));
+        assert_eq!((hl(&a), a.ws.decodes().len()), (1, 2));
         assert!(
             crate::snapshot(&mut a, 100, Some(12)).contains("d again removes it  Esc keeps it")
         );
         a.keys("d").unwrap();
-        assert_eq!((a.ws.decodes.len(), hl(&a)), (1, 0));
+        assert_eq!((a.ws.decodes().len(), hl(&a)), (1, 0));
         // a: its results as a group, once
         a.keys("a").unwrap();
         assert!(
@@ -334,17 +343,24 @@ mod tests {
         );
         a.keys("a").unwrap();
         assert_eq!(
-            a.msg.as_ref().map(|m| m.0.as_str()),
+            a.msg.as_ref().map(|m| m.text()),
             Some("s: its results are shown already")
         );
         // Enter: its records
         a.keys("\n").unwrap();
-        assert!(a.decodes.is_none() && a.browser.is_some());
+        assert!(
+            !matches!(a.overlay, Some(Overlay::Decodes(_)))
+                && matches!(a.overlay, Some(Overlay::Browser(_)))
+        );
         a.keys("\x1b:decodes\nq").unwrap();
-        assert!(a.decodes.is_none());
+        assert!(!matches!(a.overlay, Some(Overlay::Decodes(_))));
         // the last removed: the list closes, its rows go
         a.keys(":decodes\ndd").unwrap();
-        assert!(a.decodes.is_none() && a.ws.decodes.is_empty() && a.ws.rows.is_empty());
+        assert!(
+            !matches!(a.overlay, Some(Overlay::Decodes(_)))
+                && a.ws.decodes().is_empty()
+                && a.ws.rows.is_empty()
+        );
     }
 
     /// `e` opens the decode form on it, its name not taken; `Enter` decodes it again in place,
@@ -353,7 +369,9 @@ mod tests {
     fn edits() {
         let mut a = app();
         a.keys(":decodes\nae").unwrap();
-        let f = a.form.as_ref().expect("the form");
+        let Some(Overlay::Form(f)) = &a.overlay else {
+            panic!("no form")
+        };
         assert_eq!(
             (f.editing.as_deref(), f.at, f.check.clone()),
             (Some("s"), 1, Ok(()))
@@ -361,16 +379,18 @@ mod tests {
         assert!(crate::snapshot(&mut a, 100, Some(16)).contains("edit decode s"));
         let rows = a.ws.rows.len();
         a.keys("\n").unwrap();
-        assert!(a.form.is_none());
+        assert!(!matches!(a.overlay, Some(Overlay::Form(_))));
         assert_eq!(
-            (a.ws.rows.len(), a.msg.as_ref().map(|m| m.0.as_str())),
+            (a.ws.rows.len(), a.msg.as_ref().map(|m| m.text())),
             (rows, Some("s: decoded again"))
         );
         // a clock that isn't one: the form stays, the old decode too
         a.keys(":decodes\ne\t<C-u>nope\n").unwrap();
-        assert!(a.form.is_some() && a.ws.decodes[0].clock == "top.aclk");
+        assert!(
+            matches!(a.overlay, Some(Overlay::Form(_))) && a.ws.decodes()[0].clock == "top.aclk"
+        );
         let _ = a.keys("\x1b");
-        assert!(a.form.is_none());
+        assert!(!matches!(a.overlay, Some(Overlay::Form(_))));
         assert_eq!(a.edit_decode("nope"), Err("no decode nope".into()));
     }
 
@@ -382,13 +402,18 @@ mod tests {
         a.keys(":protocol pa roles=valid,ready when=valid && ready a=valid\n:protocol pb roles=valid,ready when=valid && ready b=valid\n").unwrap();
         a.keys(":decode x pa clock=aclk valid=s_axi_wvalid ready=s_axi_wready\n:decode f frame input=x last=a\n").unwrap();
         a.edit_decode("x").unwrap();
-        let f = a.form.as_mut().expect("the form");
+        let Some(Overlay::Form(f)) = &mut a.overlay else {
+            panic!("no form")
+        };
         f.fields[1].value = "pb".into();
         a.keys("\n").unwrap();
-        let (text, error) = a.msg.clone().expect("a message");
+        let m = a.msg.clone().expect("a message");
         assert!(
-            error && text.starts_with("x: decoded again, but its readers failed: "),
-            "{text}"
+            m.is_warn()
+                && m.text()
+                    .starts_with("x: decoded again, but its readers failed: "),
+            "{}",
+            m.text()
         );
     }
 
@@ -415,9 +440,12 @@ mod tests {
         a.mouse_at(ev(MouseEventKind::Down(MouseButton::Left), x, y), t0);
         assert_eq!(hl(&a), 1);
         a.mouse_at(ev(MouseEventKind::Down(MouseButton::Left), x, y), t0);
-        assert!(a.decodes.is_none() && a.browser.is_some());
+        assert!(
+            !matches!(a.overlay, Some(Overlay::Decodes(_)))
+                && matches!(a.overlay, Some(Overlay::Browser(_)))
+        );
         a.keys("\x1b:decodes\n").unwrap();
         a.mouse_at(ev(MouseEventKind::Down(MouseButton::Left), 0, 0), t0);
-        assert!(a.decodes.is_none());
+        assert!(!matches!(a.overlay, Some(Overlay::Decodes(_))));
     }
 }

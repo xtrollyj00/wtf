@@ -223,8 +223,9 @@ pub fn request(id: &str, req: Request) -> Result<String, String> {
     }
 }
 
-/// The answer to `GET`: the session in words, `---`, then as session TOML.
-pub fn get_answer(described: &str, toml: &str) -> String {
+/// The answer to `GET` on the link: the session in words, `---`, then as session TOML (spec §15
+/// "Joining").
+pub fn link_answer(described: &str, toml: &str) -> String {
     format!("{described}\n---\n{toml}")
 }
 

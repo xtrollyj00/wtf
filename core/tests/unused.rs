@@ -66,7 +66,7 @@ fn present_shows_only_what_the_session_names() {
     let clk = ws.trace.by_path["top.clk"];
     let session = wtf_core::session::to_toml(&with(&["top.clk"]));
     ws.present(&session, false).unwrap();
-    assert!(ws.streams.is_empty() && ws.protocols.is_empty() && ws.signals.is_empty());
+    assert!(ws.streams().is_empty() && ws.protocols().is_empty() && ws.signals.is_empty());
     assert!(!has(&ws, "p") && !has(&ws, "p.d") && !has(&ws, "hi"));
     assert_eq!(ws.rows[0].sig().unwrap().var, clk);
 }

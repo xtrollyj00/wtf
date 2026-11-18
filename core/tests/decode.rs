@@ -2,7 +2,7 @@
 
 mod common;
 use common::*;
-use wtf_core::decode;
+use wtf_core::decode::{self, Decoder};
 use wtf_core::stream::Stream;
 use wtf_core::workspace::Workspace;
 
@@ -20,7 +20,9 @@ fn beats() -> (Workspace, Stream) {
 fn frames(params: &[(&str, &str)]) -> Vec<(u64, u64, Vec<u64>)> {
     let (ws, s) = beats();
     let params: Vec<(String, String)> = params.iter().map(|&(k, v)| (k.into(), v.into())).collect();
-    let d = decode::make("frame", &s.schema, &params, ws.trace.fs_per_tick).unwrap();
+    let d = decode::Frame::new(&s.schema, &params, ws.trace.fs_per_tick)
+        .map(|f| Box::new(f) as Box<dyn Decoder>)
+        .unwrap();
     let f = decode::run("v.frame", &s, d);
     assert_eq!(f.name, "v.frame");
     let num = |v: &Option<wtf_core::trace::Val>| match v {
@@ -88,7 +90,10 @@ fn frame_schema_and_errors() {
             .map(|&(k, v)| (k.to_string(), v.to_string()))
             .collect::<Vec<_>>()
     };
-    let make = |ps: &[(&str, &str)]| decode::make("frame", &s.schema, &p(ps), ws.trace.fs_per_tick);
+    let make = |ps: &[(&str, &str)]| {
+        decode::Frame::new(&s.schema, &p(ps), ws.trace.fs_per_tick)
+            .map(|f| Box::new(f) as Box<dyn Decoder>)
+    };
     let names = |ps: &[(&str, &str)]| {
         make(ps)
             .ok()
@@ -121,9 +126,10 @@ fn frame_schema_and_errors() {
         ]),
         "frame: no field tlast (fields: d, rdy); frame: gap: bad time: -1 (a number and a unit, 20ns or 1.5us; a plain number is file ticks); frame: gap: bad time: soon (a number and a unit, 20ns or 1.5us; a plain number is file ticks); frame: no parameter size (last, gap, select, key, bytes, data)"
     );
+    assert!(ws.sources().get("axi9").is_none());
     assert_eq!(
-        decode::make("axi9", &s.schema, &[], None).err().unwrap(),
-        "unknown decoder: axi9 (decoders: frame)"
+        wtf_core::protocol::unknown("axi9", ws.sources()),
+        "unknown protocol: axi9 (protocols: axis, axilite, axi4, spi, uart, frame, pair, check; `protocols <name>` describes one)"
     );
     // an empty stream makes no frames
     let empty = Stream {
@@ -237,4 +243,50 @@ fn join_in_order() {
         done.records.iter().map(|r| r.start).collect::<Vec<_>>(),
         [10]
     );
+}
+
+/// An on-stream instance checked without decoding (the decode form, spec §5): each mistake in
+/// its own words, the instance's name first.
+#[test]
+fn on_stream_checks() {
+    use wtf_core::stream::Decode;
+    let mut ws = Workspace::open(&fixture("vcd").with_file_name("axilite.vcd")).unwrap();
+    let d = |name: &str, protocol: &str, clock: &str, signals: &[(&str, &str)], params: &[(&str, &str)]| Decode {
+        name: name.into(),
+        protocol: protocol.into(),
+        clock: clock.into(),
+        signals: signals.iter().map(|&(k, v)| (k.into(), v.into())).collect(),
+        params: params.iter().map(|&(k, v)| (k.into(), v.into())).collect(),
+    };
+    ws.add_decode(d("s", "axilite", "aclk", &[], &[("prefix", "s_axi_")]))
+        .unwrap();
+    let streams = [("request", "s.aw"), ("response", "s.b")];
+    for (decode, error) in [
+        (d("f", "frame", "", &[], &[("gap", "1ns")]), "f: no stream for input"),
+        (
+            d("p", "pair", "", &streams, &[("tag", "id")]),
+            "p: pair: no parameter tag (id, req_id, resp_id)",
+        ),
+        (
+            d("p", "pair", "", &streams, &[("req_id", "id")]),
+            "p: pair: req_id and resp_id go together",
+        ),
+        (
+            d("p", "pair", "", &streams, &[("id", "nope")]),
+            "p: pair: s.aw has no field nope; pair: s.b has no field nope",
+        ),
+        (
+            d("c", "check", "aclk", &[], &[]),
+            "c: check: no rules (params = { rule = \"expression\" })",
+        ),
+        (
+            d("c", "check", "aclk", &[("input", "s.wr")], &[("bad", "1")]),
+            "c: check has no role input; check takes no signals",
+        ),
+    ] {
+        assert_eq!(
+            ws.check_decode(&decode).map_err(|r| r.to_string()),
+            Err(error.to_string())
+        );
+    }
 }

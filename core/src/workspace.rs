@@ -10,7 +10,7 @@ use crate::search;
 use crate::session;
 use crate::stream::{self, Decode, Sampler, Stream};
 use crate::time::{self, Tick};
-use crate::trace::{Trace, Val};
+use crate::trace::{Names, Trace, Val};
 use crate::view::View;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -21,8 +21,26 @@ mod play;
 pub mod reason;
 pub mod unknown;
 
-/// A message for the user: the text, and whether it is an error or a warning.
-pub type Msg = (String, bool);
+/// A message for the user (spec §7): info, or a warning that parts didn't fit.
+#[derive(Clone, PartialEq, Debug)]
+pub enum Msg {
+    Info(String),
+    Warn(String),
+}
+
+impl Msg {
+    /// The message's text.
+    pub fn text(&self) -> &str {
+        match self {
+            Msg::Info(t) | Msg::Warn(t) => t,
+        }
+    }
+
+    /// Whether it warns that parts didn't fit.
+    pub fn is_warn(&self) -> bool {
+        matches!(self, Msg::Warn(_))
+    }
+}
 
 /// A line under a row (`Workspace::subs`): a var, or a bit of a bus, and how deep it is nested.
 #[derive(Clone, PartialEq, Debug)]
@@ -62,9 +80,7 @@ pub struct Workspace {
     pub view: View,
     /// Marks by number, index 1 - 8 for cursors 2 - 9 (spec §9). Cursor 1 is the cursor, whose
     /// time is `view.cursor`, so index 0 stays None.
-    pub marks: [Option<Tick>; 9],
-    /// Each mark's name and note, by the same index (spec §9).
-    pub labels: [Label; 9],
+    marks: [Option<Mark>; 9],
     /// The agent's steps (spec §15 "Trail"), oldest first, at most `TRAIL`: the workspace's own in
     /// an agent's, the followed (or last active) agent's in a window.
     pub trail: Vec<Step>,
@@ -88,12 +104,12 @@ pub struct Workspace {
     pub value_names: Vec<(String, String)>,
     /// Protocols and their instances in the order defined, sampled again on `:e`, and the streams
     /// they make (spec §16).
-    pub protocols: Vec<Sampler>,
-    pub decodes: Vec<Decode>,
-    pub streams: Vec<Stream>,
+    protocols: Vec<Sampler>,
+    decodes: Vec<Decode>,
+    streams: Vec<Stream>,
     /// Protocols loaded from files (spec §16): the process's, not the session's, so `:e` reads no
     /// file and a new workspace on the same trace decodes with them too.
-    pub loaded: Vec<Arc<protocol::Loaded>>,
+    loaded: Vec<Arc<protocol::Loaded>>,
     /// How a `[[protocol]] wasm=` entry gets its protocol (spec §11): the binary sets it, which
     /// has the host; a workspace core's tests build leaves it None.
     pub loader: Option<protocol::Loader>,
@@ -114,21 +130,31 @@ pub struct Workspace {
     redo: Vec<Layout>,
 }
 
-/// A mark's name and note (spec §9): what the agent (or the user) says happens there. Empty when
-/// it has none.
-#[derive(Clone, Default, PartialEq, Debug)]
-pub struct Label {
+/// A mark: cursor 2-9's time and what the agent (or the user) says happens there (spec §9).
+#[derive(Clone, PartialEq, Debug)]
+pub struct Mark {
+    pub time: Tick,
     pub name: String,
     pub note: String,
 }
 
-impl Label {
+impl Mark {
     /// One line each, whitespace collapsed: the ruler and the status line show them.
-    pub fn new(name: &str, note: &str) -> Label {
+    pub fn new(time: Tick, name: &str, note: &str) -> Mark {
         let line = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
-        Label {
+        Mark {
+            time,
             name: line(name),
             note: line(note),
+        }
+    }
+
+    /// What the interfaces show for cursor `n` (an index): its name, or `mark n` without one.
+    pub fn title(n: usize, name: &str) -> String {
+        if name.is_empty() {
+            format!("mark {}", n + 1)
+        } else {
+            name.to_string()
         }
     }
 
@@ -187,7 +213,7 @@ pub fn names_line(path: &str, names: &[(String, String)]) -> String {
 }
 
 /// What `Workspace::record` compares against.
-pub struct Mark {
+pub struct Checkpoint {
     before: Layout,
     counts: (usize, usize, u32),
 }
@@ -198,8 +224,7 @@ pub struct Mark {
 #[derive(Clone)]
 struct Layout {
     rows: Vec<Row>,
-    marks: [Option<Tick>; 9],
-    labels: [Label; 9],
+    marks: [Option<Mark>; 9],
     sel: usize,
     /// The named signals (`:signal`), so defining and removing one are undo steps.
     signals: Vec<(String, String)>,
@@ -212,7 +237,6 @@ impl Layout {
     fn same(&self, other: &Layout) -> bool {
         rows::same_layout(&self.rows, &other.rows)
             && self.marks == other.marks
-            && self.labels == other.labels
             && self.signals == other.signals
     }
 }
@@ -238,8 +262,7 @@ impl Workspace {
             saved: String::new(),
             reloads: 0,
             view,
-            marks: [None; 9],
-            labels: Default::default(),
+            marks: std::array::from_fn(|_| None),
             trail: Vec::new(),
             back: None,
             unit: None,
@@ -273,9 +296,92 @@ impl Workspace {
         }
     }
 
+    /// The marks by number (index 1 - 8 is cursors 2 - 9; index 0 stays None).
+    pub fn marks(&self) -> &[Option<Mark>; 9] {
+        &self.marks
+    }
+
+    /// The decodes in the order defined.
+    pub fn decodes(&self) -> &[Decode] {
+        &self.decodes
+    }
+
+    /// Reorder the decodes (tests reload an out-of-order session).
+    #[doc(hidden)]
+    pub fn decodes_mut(&mut self) -> &mut [Decode] {
+        &mut self.decodes
+    }
+
+    /// The streams the decodes made.
+    pub fn streams(&self) -> &[Stream] {
+        &self.streams
+    }
+
+    /// The session's protocols in the order defined.
+    pub fn protocols(&self) -> &[Sampler] {
+        &self.protocols
+    }
+
+    /// Protocols loaded from files (the process's, not the session's).
+    pub fn loaded(&self) -> &[Arc<protocol::Loaded>] {
+        &self.loaded
+    }
+
+    /// Replace the file-loaded protocols (startup hands them over; `:e` keeps them).
+    pub fn set_loaded(&mut self, loaded: Vec<Arc<protocol::Loaded>>) {
+        self.loaded = loaded;
+    }
+
+    /// Push one file-loaded protocol without defining it (tests and the WASM hand-over;
+    /// `workspace::decoding`'s `add_loaded(loaded, path)` is the defining path).
+    pub fn push_loaded(&mut self, p: Arc<protocol::Loaded>) {
+        self.loaded.push(p);
+    }
+
+    /// Forget every mark (a session without them replaces the workspace's).
+    pub fn clear_marks(&mut self) {
+        self.marks = std::array::from_fn(|_| None);
+    }
+
+    /// Put mark `i` (an index, 1 - 8) at `t`, keeping its name and note; a new one has none.
+    /// Callers validate the index (`:cursor` 1-9 with 0 jumping, session 2-9).
+    pub fn put_mark(&mut self, i: usize, t: Tick) {
+        debug_assert!((1..9).contains(&i), "marks are 2-9 (index 1-8)");
+        match self.marks[i].as_mut() {
+            Some(m) => m.time = t,
+            None => self.marks[i] = Some(Mark::new(t, "", "")),
+        }
+    }
+
+    /// Name mark `i` (an index, 1 - 8); a missing mark stays missing (callers check first).
+    pub fn label_mark(&mut self, i: usize, name: &str, note: &str) {
+        debug_assert!((1..9).contains(&i), "marks are 2-9 (index 1-8)");
+        if let Some(m) = self.marks[i].as_mut() {
+            let t = m.time;
+            *m = Mark::new(t, name, note);
+        }
+    }
+
+    /// Take the marks out (MCP render restores them after); `restore_marks` puts them back.
+    pub fn take_marks(&mut self) -> [Option<Mark>; 9] {
+        std::mem::replace(&mut self.marks, std::array::from_fn(|_| None))
+    }
+
+    /// Put back marks `take_marks` took.
+    pub fn restore_marks(&mut self, marks: [Option<Mark>; 9]) {
+        self.marks = marks;
+    }
+
+    /// Clamp every mark to `end` (`:e` shortens the trace; private: only `reload()` calls it).
+    fn clamp_marks(&mut self, end: Tick) {
+        for m in self.marks.iter_mut().flatten() {
+            m.time = m.time.min(end);
+        }
+    }
+
     /// The state an undo step would restore, taken before a change (`record`).
-    pub fn mark(&self) -> Mark {
-        Mark {
+    pub fn checkpoint(&self) -> Checkpoint {
+        Checkpoint {
             before: self.layout(),
             counts: (self.undo.len(), self.redo.len(), self.reloads),
         }
@@ -284,8 +390,7 @@ impl Workspace {
     fn layout(&self) -> Layout {
         Layout {
             rows: self.rows.clone(),
-            marks: self.marks,
-            labels: self.labels.clone(),
+            marks: self.marks.clone(),
             sel: self.sel,
             signals: self.signals.clone(),
             value_names: self.value_names.clone(),
@@ -307,17 +412,16 @@ impl Workspace {
                 }
             }
         }
-        (self.rows, self.marks, self.labels, self.sel, self.signals) =
-            (l.rows, l.marks, l.labels, l.sel, l.signals);
+        (self.rows, self.marks, self.sel, self.signals) = (l.rows, l.marks, l.sel, l.signals);
         now
     }
 
-    /// Record one undo step if the rows or the marks changed since `mark` (unless that was an
+    /// Record one undo step if the rows or the marks changed since `checkpoint` (unless that was an
     /// undo, redo or reload itself).
-    pub fn record(&mut self, m: Mark) {
-        let undid = (self.undo.len(), self.redo.len(), self.reloads) != m.counts;
-        if !undid && !m.before.same(&self.layout()) {
-            self.undo.push(m.before);
+    pub fn record(&mut self, cp: Checkpoint) {
+        let undid = (self.undo.len(), self.redo.len(), self.reloads) != cp.counts;
+        if !undid && !cp.before.same(&self.layout()) {
+            self.undo.push(cp.before);
             self.redo.clear();
         }
         self.drop_unused();
@@ -378,9 +482,79 @@ impl Workspace {
 
     /// Run `f` as one undo step.
     pub fn undoable<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> R {
-        let m = self.mark();
+        let cp = self.checkpoint();
         let r = f(self);
-        self.record(m);
+        self.record(cp);
+        r
+    }
+
+    /// Run `f`; if it fails, put back what it defined, so a failed `workspace` declaration changes
+    /// nothing and a retry starts clean (spec §15): the rows and marks, named signals and value
+    /// names, protocols and decodes, the scope and the unit. The trace can't be copied: value
+    /// names go back to the ones saved (an FST enum table's among them), decodes only added are
+    /// dropped with their streams, and anything else changed is made again from the definitions,
+    /// as `:e` makes it.
+    pub fn attempt<T>(
+        &mut self,
+        f: impl FnOnce(&mut Self) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let layout = self.layout();
+        let (protocols, decodes, loaded) = (
+            self.protocols.clone(),
+            self.decodes.clone(),
+            self.loaded.clone(),
+        );
+        let streams = self.streams.len();
+        // the names vars' values have now, the file's own among them: a failure puts these back
+        let names: Vec<(String, Names)> = self
+            .trace
+            .vars
+            .iter()
+            .filter_map(|v| Some((v.path.clone(), v.names.clone()?)))
+            .collect();
+        let (scope, unit) = (self.scope.clone(), self.unit);
+        let r = f(self);
+        if r.is_ok() {
+            return r;
+        }
+        // the scope first: the names made again resolve under it
+        (self.scope, self.unit) = (scope, unit);
+        // value names given since go back to the ones the var had, those there were come back;
+        // before `restore`, which puts back the rows' radixes `name_values` changes
+        let value_names = layout.value_names.clone();
+        let given: Vec<String> = self
+            .value_names
+            .iter()
+            .filter(|v| !value_names.contains(v))
+            .map(|v| v.0.clone())
+            .collect();
+        for path in given {
+            let had = names.iter().find(|n| n.0 == path).map(|n| n.1.clone());
+            if let Some(&v) = self.trace.by_path.get(&path) {
+                self.trace.vars[v].names = had;
+            }
+        }
+        let lost: Vec<(String, String)> = value_names
+            .iter()
+            .filter(|v| !self.value_names.contains(v))
+            .cloned()
+            .collect();
+        for (path, spec) in lost {
+            let _ = self.name_values(&path, &spec);
+        }
+        self.restore(layout);
+        self.value_names = value_names;
+        self.loaded = loaded;
+        // only added to, as a declaration with a bad entry is: its streams came after the old
+        // ones, which stay as they are; one replaced or removed: all made again
+        if self.protocols.starts_with(&protocols) && self.decodes.starts_with(&decodes) {
+            self.protocols.truncate(protocols.len());
+            self.decodes.truncate(decodes.len());
+            self.streams.truncate(streams);
+        } else {
+            self.remake_decoding(protocols, decodes);
+        }
+        self.drop_unused();
         r
     }
 
@@ -487,7 +661,18 @@ impl Workspace {
                 .iter()
                 .any(|v| v.path.starts_with(&format!("{name}.")))
         {
-            return Err(format!("no scope {name}"));
+            // the nearest scopes (`Design::nearest` gives signals too), so the next try is a pick
+            let design = self.trace.design();
+            let near: Vec<&str> = design
+                .nearest(name, 20)
+                .into_iter()
+                .filter(|p| design.nodes.iter().any(|n| n.var.is_none() && n.path == *p))
+                .take(3)
+                .collect();
+            return Err(match near.is_empty() {
+                true => format!("no scope {name}"),
+                false => format!("no scope {name} (nearest: {})", near.join(", ")),
+            });
         }
         self.scope = (!name.is_empty()).then(|| name.to_string());
         Ok(())
@@ -975,8 +1160,8 @@ impl Workspace {
         session::read(text)?;
         let before = self.layout();
         let saved = std::mem::take(&mut self.saved);
-        (self.marks, self.view.cursor, self.back) = ([None; 9], 0, None);
-        self.labels = Default::default();
+        self.clear_marks();
+        (self.view.cursor, self.back) = (0, None);
         // the session is all that is shown: named signals and decoding it leaves out go (§15)
         if !keep_decoding {
             self.signals.clear();
@@ -999,9 +1184,9 @@ impl Workspace {
             self.cursor_list().len()
         );
         Ok(if warn.is_empty() {
-            (msg, false)
+            Msg::Info(msg)
         } else {
-            (format!("{msg}; {}", warn.join("; ")), true)
+            Msg::Warn(format!("{msg}; {}", warn.join("; ")))
         })
     }
 
@@ -1030,6 +1215,25 @@ impl Workspace {
         }
     }
 
+    /// Sample the protocols and decodes again from their definitions (`:e`, a failed `attempt`).
+    /// One that fails is kept, to try again on the next `:e`, and listed with its error.
+    fn remake_decoding(&mut self, protocols: Vec<Sampler>, decodes: Vec<Decode>) -> Vec<String> {
+        self.streams.clear();
+        // the decodes cleared first: a protocol added would make its instances again
+        self.decodes.clear();
+        self.protocols.clear();
+        let mut missing = Vec::new();
+        for (p, e) in self.again(protocols, |ws, p| ws.add_protocol(p).map(drop)) {
+            missing.push(format!("{} ({e})", p.name));
+            self.protocols.push(p);
+        }
+        for (d, e) in self.again(decodes, |ws, d| ws.add_decode(d).map(drop)) {
+            missing.push(format!("{} ({e})", d.name));
+            self.decodes.push(d);
+        }
+        missing
+    }
+
     /// `:e`: reopen the trace, keeping the layout and the view, and make computed signals again
     /// from the new values. Signals no longer in the file (or that can't be made) are dropped and
     /// listed. If the file can't be read, nothing changes.
@@ -1048,19 +1252,8 @@ impl Workspace {
                 missing.push(format!("names of {path} ({e})"));
             }
         }
-        self.streams.clear();
-        // taken first: a protocol added would make its instances again
-        let decodes = std::mem::take(&mut self.decodes);
-        // one that fails is kept, to try again on the next `:e`
-        let protocols = std::mem::take(&mut self.protocols);
-        for (p, e) in self.again(protocols, |ws, p| ws.add_protocol(p).map(drop)) {
-            missing.push(format!("{} ({e})", p.name));
-            self.protocols.push(p);
-        }
-        for (d, e) in self.again(decodes, |ws, d| ws.add_decode(d).map(drop)) {
-            missing.push(format!("{} ({e})", d.name));
-            self.decodes.push(d);
-        }
+        let (protocols, decodes) = (self.protocols.clone(), self.decodes.clone());
+        missing.extend(self.remake_decoding(protocols, decodes));
         let mut rows: Vec<Row> = Vec::new();
         for r in old_rows {
             match r {
@@ -1089,21 +1282,15 @@ impl Workspace {
         let end = self.trace.end();
         self.view.end = end;
         self.view.cursor = self.view.cursor.min(end);
-        self.marks
-            .iter_mut()
-            .flatten()
-            .for_each(|c| *c = (*c).min(end));
+        self.clamp_marks(end);
         self.view.start = self.view.start.min(end);
         self.undo.clear();
         self.redo.clear();
         self.reloads += 1;
         self.fix_sel();
         Ok(match missing.is_empty() {
-            true => ("reloaded".into(), false),
-            false => (
-                format!("reloaded; not in trace: {}", missing.join(", ")),
-                true,
-            ),
+            true => Msg::Info("reloaded".into()),
+            false => Msg::Warn(format!("reloaded; not in trace: {}", missing.join(", "))),
         })
     }
 
@@ -1382,7 +1569,7 @@ impl Workspace {
     /// The cursor and the marks as (index, time), by number (index 0 is cursor 1).
     pub fn cursor_list(&self) -> Vec<(usize, Tick)> {
         std::iter::once((0, self.view.cursor))
-            .chain((1..9).filter_map(|i| self.marks[i].map(|t| (i, t))))
+            .chain((1..9).filter_map(|i| self.marks[i].as_ref().map(|m| (i, m.time))))
             .collect()
     }
 
@@ -1393,11 +1580,15 @@ impl Workspace {
         self.trail.drain(..over);
     }
 
-    /// The lowest numbered mark at the cursor with a name or a note, as (index, label).
-    pub fn label_at_cursor(&self) -> Option<(usize, &Label)> {
+    /// The lowest numbered mark at the cursor with a name or a note, as (index, mark).
+    pub fn label_at_cursor(&self) -> Option<(usize, &Mark)> {
         (1..9)
-            .find(|&i| self.marks[i] == Some(self.view.cursor) && !self.labels[i].is_empty())
-            .map(|i| (i, &self.labels[i]))
+            .find(|&i| {
+                self.marks[i]
+                    .as_ref()
+                    .is_some_and(|m| m.time == self.view.cursor && !m.is_empty())
+            })
+            .map(|i| (i, self.marks[i].as_ref().expect("found above")))
     }
 
     /// `m` / `Nm`: mark `n` (an index, 1 - 8), or the lowest free one, at the cursor.
@@ -1411,10 +1602,7 @@ impl Workspace {
                 .ok_or("all 8 marks in use")?,
         };
         // a mark moved keeps its name; a new one has none
-        if self.marks[i].is_none() {
-            self.labels[i] = Label::default();
-        }
-        self.marks[i] = Some(self.view.cursor);
+        self.put_mark(i, self.view.cursor);
         Ok(())
     }
 
@@ -1425,11 +1613,14 @@ impl Workspace {
             Some(i) if self.marks.get(i).is_some_and(Option::is_some) => i,
             Some(i) => return Err(format!("no cursor {}", i + 1)),
             None => (1..9)
-                .find(|&i| self.marks[i] == Some(self.view.cursor))
+                .find(|&i| {
+                    self.marks[i]
+                        .as_ref()
+                        .is_some_and(|m| m.time == self.view.cursor)
+                })
                 .ok_or("no mark under the cursor")?,
         };
         self.marks[i] = None;
-        self.labels[i] = Label::default();
         Ok(())
     }
 
@@ -1455,7 +1646,7 @@ impl Workspace {
 
     /// `'N`: jump to mark `n` (an index); `'1`, the cursor, centers the screen on it.
     pub fn goto_mark(&mut self, n: usize) -> Result<(), String> {
-        match self.marks.get(n).copied().flatten() {
+        match self.marks.get(n).and_then(|m| m.as_ref().map(|m| m.time)) {
             Some(t) => self.jump(t, true),
             None if n == 0 => self.view.center(self.view.cursor),
             None => return Err(format!("no cursor {}", n + 1)),
@@ -1465,7 +1656,11 @@ impl Workspace {
 
     /// `Tab` / `Shift-Tab`: jump to the next / previous mark in time, wrapping around.
     pub fn next_mark(&mut self, forward: bool) -> Result<(), String> {
-        let mut times: Vec<Tick> = self.marks.iter().flatten().copied().collect();
+        let mut times: Vec<Tick> = self
+            .marks
+            .iter()
+            .filter_map(|m| m.as_ref().map(|m| m.time))
+            .collect();
         times.sort();
         let now = self.view.cursor;
         let t = match forward {

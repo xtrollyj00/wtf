@@ -8,6 +8,12 @@ description = "wtf's core: traces, rows, cursors, sessions, the `:` commands and
 
 [dependencies]
 toml = { version = "1.1.8", features = ["preserve_order"] }
+serde = { version = "1", features = ["derive"] }
 wellen = "0.25"
 regex = "1.13.1"
 dashu-int = "0.6.2"
+# the MCP tool schema derives the session model; keep this on rmcp's re-export's version
+schemars = { version = "1", features = ["derive"], optional = true }
+
+[features]
+schema = ["dep:schemars"]

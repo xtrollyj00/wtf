@@ -34,19 +34,23 @@ TOML, so it is easy to read, edit, diff and generate from testbench scripts, and
 libraries parse it.
 
 ```toml
-# session
+# wtf session
 version = 1
 scope = "top"           # optional: names resolve under it first (:scope)
 unit = "ns"             # optional: the time unit an agent sets (command unit ns); absent when it is automatic
 
 [view]
 zoom = "8ns"
-time = "0ns"            # left edge of the view
+time = "0ns"            # left edge of the view (`to` ends it in a shared session)
 
 [cursors]
 1 = "120ns"
 2 = "160ns"
-3 = { time = "200ns", name = "first bad write", note = "AW came before W" }   # a mark with a name (section 9)
+
+[cursors.3]             # a mark with a name (section 9)
+time = "200ns"
+name = "first bad write"
+note = "AW came before W"
 
 [[signal]]
 name = "op"
@@ -57,18 +61,31 @@ signal = "top.cpu.clk"
 
 [[rows]]
 group = "cpu"
-rows = [
-  { signal = "top.cpu.state", radix = "dec", color = "orange", open = ["state"] },
-  { signal = "top.cpu.pc" },
-  { signal = "top.cpu.pkts", open = ["pkts", "pkts[1]", "pkts[1].pair"], fields = [{ field = "pkts[1].pair.hi", radix = "dec", color = "red" }] },
-]
+
+[[rows.rows]]
+signal = "top.cpu.state"
+radix = "dec"
+color = "orange"
+open = ["state"]
+
+[[rows.rows]]
+signal = "top.cpu.pc"
+
+[[rows.rows]]
+signal = "top.cpu.pkts"
+open = ["pkts", "pkts[1]", "pkts[1].pair"]
+
+[[rows.rows.fields]]
+field = "pkts[1].pair.hi"
+radix = "dec"
+color = "red"
 
 [[rows]]
 group = "stream"
 collapsed = true
-rows = [
-  { signal = "top.stream.data" },
-]
+
+[[rows.rows]]
+signal = "top.stream.data"
 ```
 
 - `scope` is the `:scope` names resolve under first, set before anything else is read.
@@ -102,10 +119,10 @@ rows = [
   them. Rows can also show unnamed slices and concatenations by their full form
   (`signal = "top.cpu.data[7:4]"`, `signal = "{top.a,top.b}"`); a one-bit slice is named as the
   bit (`top.cpu.data[1]`, not `[1:1]`).
-- `[[rows]]` entries are shown in file order. An entry is either a signal (`signal`, optional `radix`,
-  `color`, `open` and `fields`, written only where they differ from the defaults)
-  or a group (`group`, optional `collapsed`, and its own `rows`). The same shape inside groups
-  leaves room for subgroups later.
+- `[[rows]]` entries are shown in file order: a signal (`signal`, then `radix`, `color`,
+  `open`, `fields` where they differ from the defaults) or a group (`group`, optional
+  `collapsed`, and its own rows as `[[rows.rows]]` subtables). A field always names its
+  `radix`; its table lives in a `[[rows.rows.fields]]` subtable.
 - `open` lists what is open under a row (section 6): the row's own name opens a bus into its
   bits, a stream into its fields, a struct, record or array one level (`open = ["state"]`); its
   levels are named from the row's name on (`pkts`, `pkts[1]`, `pkts[1].pair`), parents before
@@ -114,15 +131,20 @@ rows = [
 - `fields` lists the lines under a row with a radix or colour of their own (section 6): each
   `field`, named as `open` names levels (`pkts[1].pair.hi`), with `radix` and `color` keys as a
   row has. A field the row doesn't have is skipped with a warning.
+- `[cursors]` maps each number to a time; a mark with a name or note (section 9) is a
+  `[cursors.N]` subtable with `time` and the non-empty ones of `name`/`note`.
+- `[[trail]]` entries (`tool`, `ask`, `answer`, optional `time`) are the agent's steps, last
+  in a session another window takes from an agent (section 15 "Trail"); `view.to` ends the
+  visible range in a shared session. A saved session has neither.
+- Key order follows the file's tables (insertion order); wtf rewrites sessions in this shape
+  on save (before 1.0.0 the bytes change without migration: re-save).
 - Times are strings with units, as in commands. A plain number means file ticks. wtf writes times
   exactly: in the largest unit that keeps them at 1 or more, with every decimal needed
   (`16.432us`, `2.595000001us`), read back to the same tick. A zoom finer than one tick per column
   is written as a fraction of a tick.
-- `[cursors]` maps each number to a time; a mark with a name or note (section 9) is an inline
-  table, `3 = { time = "200ns", name = "first bad write", note = "..." }`.
-- `[[trail]]` entries (`tool`, `ask`, `answer`, optional `time`) are the agent's steps, last in a
-  session another window takes from an agent (section 15 "Trail"); a saved session has none.
-- Unknown keys are skipped with a warning, so files with extra settings still load.
+- Unknown keys, at the top or in any entry (`[[signal]]`, `[[decode]]`, `[[trail]]`, ...), are
+  skipped with a warning, so files with extra settings still load. A `rows` or `trail` that
+  isn't a list is skipped with a warning too; the steps a window holds then stay.
 
 ## 12. Command line
 

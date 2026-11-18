@@ -316,19 +316,129 @@ pub struct Loaded {
 /// protocol's name; the path is the one the session spells.
 pub type Loader = Arc<dyn Fn(&str) -> Result<Arc<Loaded>, String> + Send + Sync>;
 
-/// A protocol to make, and where it came from: a built-in, or one loaded from a file.
+/// How an on-stream protocol runs: `add_decode` and `check_decode` dispatch on the card's
+/// `kind`, never on the protocol's name (spec §16).
+#[derive(Clone, Copy, PartialEq)]
+pub enum StreamKind {
+    Frame,
+    Pair,
+    Check,
+}
+
+/// A generic protocol on streams (spec §16): its card. The runners live in `decode` and
+/// `workspace::decoding`, selected by `kind`.
+pub struct StreamDef {
+    pub about: &'static str,
+    /// The rest of `protocols <name>`: roles, params, fields and example, kept as prose.
+    pub rest: &'static str,
+    /// Takes `clock=`: only `check` does.
+    pub clocked: bool,
+    /// The streams it reads, named in `signals`: `input`, or `request` and `response`.
+    pub roles: &'static [&'static str],
+    /// The params besides clock and roles: `last=`, `gap=`, or `id=`; `check` takes any rule.
+    pub params: &'static [&'static str],
+    pub kind: StreamKind,
+}
+
+/// The generic protocols on streams: `frame` groups a stream's records, `pair` answers each
+/// request, `check` reports the cycles where a rule holds.
+pub const STREAM_DEFS: &[(&str, StreamDef)] = &[
+    (
+        "frame",
+        StreamDef {
+            about: "records of a stream grouped into frames, by a last flag, a gap or a select",
+            rest: "roles: input (a stream)
+params: last=<field> (a frame ends at a record where it is 1), gap=<time> (before a longer gap),
+  select=<field> (when it changes), key=<field> (a frame per value of it, side by side),
+  bytes=<field|n> (len: a field's 1 bits, or n per record), data=<field> (data: the bytes as hex text)
+fields: beats, the select field, the key field, len (with bytes), data (with data), complete (0: the input ended first)
+example: decode f frame input=rx.beat last=tlast bytes=tkeep data=tdata",
+            clocked: false,
+            roles: &["input"],
+            params: &["last", "gap", "select", "key", "bytes", "data"],
+            kind: StreamKind::Frame,
+        },
+    ),
+    (
+        "pair",
+        StreamDef {
+            about: "each response with its request, by order or by an id field, with the delay",
+            rest: "roles: request, response (streams)
+params: id=<field> (the same in both), or req_id=<field> resp_id=<field>; none: by order
+fields: delay (from the request to its response), req_<each request field>, resp_<each response field>
+also <name>.unmatched (violations): kind = no request | no response
+example: decode p pair request=cmd response=rsp id=tag",
+            clocked: false,
+            roles: &["request", "response"],
+            params: &["id", "req_id", "resp_id"],
+            kind: StreamKind::Pair,
+        },
+    ),
+    (
+        "check",
+        StreamDef {
+            about: "a violation record per clock cycle where a rule holds",
+            rest: "roles: none; needs clock=
+params: <rule>=<expression>, any number; with rose() fell() stable() past()
+fields: rule (the name of the rule that held); empty: no violations
+example: decode stall check clock=clk waiting=valid && !ready dropped=fell(valid) && !past(ready)",
+            clocked: true,
+            roles: &[],
+            params: &[],
+            kind: StreamKind::Check,
+        },
+    ),
+];
+
+/// A protocol to make, and where it came from: a built-in, one loaded from a file, the
+/// session's (sampled, never made here), or a generic one on streams.
 #[derive(Clone)]
 pub enum Any {
     Builtin(Def),
     Loaded(Arc<Loaded>),
+    Sampled(Sampler),
+    OnStreams(&'static StreamDef),
 }
 
 impl Any {
-    /// Its card: what it needs, and what it makes.
-    pub fn def(&self) -> &Def {
+    /// Its card, for a protocol on signals: a built-in's or a loaded file's. A session
+    /// sampler and an on-stream protocol have their own shapes (`roles`, `params`).
+    pub fn def(&self) -> Option<&Def> {
         match self {
-            Any::Builtin(def) => def,
-            Any::Loaded(l) => &l.def,
+            Any::Builtin(def) => Some(def),
+            Any::Loaded(l) => Some(&l.def),
+            Any::Sampled(_) | Any::OnStreams(_) => None,
+        }
+    }
+
+    /// The role names a `:decode` line gives, required then optional: a signal protocol's
+    /// roles, a session sampler's roles, or the streams an on-stream protocol reads.
+    pub fn roles(&self) -> (Vec<&str>, Vec<&str>) {
+        match self {
+            Any::Builtin(def) => def.roles(),
+            Any::Loaded(l) => l.def.roles(),
+            Any::Sampled(p) => (p.roles.iter().map(String::as_str).collect(), Vec::new()),
+            Any::OnStreams(d) => (d.roles.to_vec(), Vec::new()),
+        }
+    }
+
+    /// The param names besides `clock`, `prefix` and the roles.
+    pub fn params(&self) -> Vec<&str> {
+        match self {
+            Any::Builtin(def) => def.params().to_vec(),
+            Any::Loaded(l) => l.def.params().to_vec(),
+            Any::Sampled(_) => Vec::new(),
+            Any::OnStreams(d) => d.params.to_vec(),
+        }
+    }
+
+    /// Takes `clock=`: a clocked signal protocol, a session sampler, or `check`.
+    pub fn clocked(&self) -> bool {
+        match self {
+            Any::Builtin(def) => def.clocked(),
+            Any::Loaded(l) => l.def.clocked(),
+            Any::Sampled(_) => true,
+            Any::OnStreams(d) => d.clocked,
         }
     }
 
@@ -342,14 +452,17 @@ impl Any {
         match self {
             Any::Builtin(def) => (def.make)(given, params, fs_per_tick),
             Any::Loaded(l) => (l.make)(given, params, fs_per_tick),
+            Any::Sampled(p) => Err(format!("{} is sampled, not made", p.name)),
+            Any::OnStreams(_) => Err("an on-stream protocol is run, not made".into()),
         }
     }
 
     /// Its streams, worked out with every role given.
     pub fn streams(&self) -> Vec<About<String>> {
-        made_streams(self.def(), |given, params, fpt| {
-            self.make(given, params, fpt)
-        })
+        match self.def() {
+            Some(def) => made_streams(def, |given, params, fpt| self.make(given, params, fpt)),
+            None => Vec::new(),
+        }
     }
 }
 
@@ -396,8 +509,8 @@ fn made_streams(
     }
 }
 
-/// Where a decode's protocol may come from (spec §16): a built-in, one loaded from a file, or the
-/// session's `[[protocol]]`, which is sampled rather than made.
+/// Where a decode's protocol may come from (spec §16): a built-in, one loaded from a file, the
+/// session's (sampled, never made), or a generic one on streams.
 #[derive(Clone, Copy, Default)]
 pub struct Sources<'a> {
     pub session: &'a [Sampler],
@@ -405,25 +518,50 @@ pub struct Sources<'a> {
 }
 
 impl<'a> Sources<'a> {
-    /// A protocol to make, by name: a built-in first, so a loaded file cannot take its name, then
-    /// one loaded from a file. The session's are sampled (`decode_user`), never made here.
+    /// A protocol to decode with, by name: a built-in first, so a loaded file cannot take its
+    /// name, then one loaded from a file, then the session's (sampled, never made here), then
+    /// the generic ones on streams. A session `wasm=` entry answers its file's card while the
+    /// file is loaded, and nothing once it isn't.
     pub fn get(&self, name: &str) -> Option<Any> {
-        get(name).map(Any::Builtin).or_else(|| {
-            self.loaded
-                .iter()
-                .find(|l| l.name == name)
-                .map(|l| Any::Loaded(l.clone()))
-        })
+        get(name)
+            .map(Any::Builtin)
+            .or_else(|| {
+                self.loaded
+                    .iter()
+                    .find(|l| l.name == name)
+                    .map(|l| Any::Loaded(l.clone()))
+            })
+            .or_else(|| {
+                self.session
+                    .iter()
+                    .find(|p| p.name == name && p.wasm.is_none())
+                    .map(|p| Any::Sampled(p.clone()))
+            })
+            .or_else(|| {
+                STREAM_DEFS
+                    .iter()
+                    .find(|(n, _)| *n == name)
+                    .map(|(_, def)| Any::OnStreams(def))
+            })
     }
 
-    /// Every protocol a decode can take: the built-ins, the loaded, the session's. `frame`, `pair`
-    /// and `check` work on streams and rules, not signals, and are names of their own.
+    /// Every protocol a decode can take, in the order `protocols` lists them: the built-ins, the
+    /// generic ones on streams (`frame`, `pair`, `check`), the loaded, the session's.
     pub fn names(&self) -> Vec<&'a str> {
         BUILTINS
             .iter()
             .copied()
+            .chain(STREAM_DEFS.iter().map(|g| g.0))
             .chain(self.loaded.iter().map(|l| l.name))
             .chain(self.session.iter().map(|p| p.name.as_str()))
+            .collect()
+    }
+
+    /// `names` without those on streams, whose roles are streams: the protocols signals play.
+    pub fn on_signals(&self) -> Vec<&'a str> {
+        self.names()
+            .into_iter()
+            .filter(|n| !STREAM_DEFS.iter().any(|g| g.0 == *n))
             .collect()
     }
 }
@@ -444,42 +582,11 @@ pub fn intern(s: &str) -> &'static str {
     }
 }
 
-/// Names `[[decode]]` takes that aren't user protocols: the ones above, and the generic protocols
-/// put on streams (`Workspace::add_decode`).
+/// Names a session `[[protocol]]` may not take: a built-in's, or a generic protocol's on
+/// streams (`Workspace::add_decode`).
 pub fn reserved(name: &str) -> bool {
-    get(name).is_some() || matches!(name, "frame" | "pair" | "check")
+    get(name).is_some() || STREAM_DEFS.iter().any(|(n, _)| *n == name)
 }
-
-/// The generic protocols on streams: name, one line, and the rest of `protocols <name>`.
-pub const ON_STREAMS: &[(&str, &str, &str)] = &[
-    (
-        "frame",
-        "records of a stream grouped into frames, by a last flag, a gap or a select",
-        "roles: input (a stream)
-params: last=<field> (a frame ends at a record where it is 1), gap=<time> (before a longer gap),
-  select=<field> (when it changes), key=<field> (a frame per value of it, side by side),
-  bytes=<field|n> (len: a field's 1 bits, or n per record), data=<field> (data: the bytes as hex text)
-fields: beats, the select field, the key field, len (with bytes), data (with data), complete (0: the input ended first)
-example: decode f frame input=rx.beat last=tlast bytes=tkeep data=tdata",
-    ),
-    (
-        "pair",
-        "each response with its request, by order or by an id field, with the delay",
-        "roles: request, response (streams)
-params: id=<field> (the same in both), or req_id=<field> resp_id=<field>; none: by order
-fields: delay (from the request to its response), req_<each request field>, resp_<each response field>
-also <name>.unmatched (violations): kind = no request | no response
-example: decode p pair request=cmd response=rsp id=tag",
-    ),
-    (
-        "check",
-        "a violation record per clock cycle where a rule holds",
-        "roles: none; needs clock=
-params: <rule>=<expression>, any number; with rose() fell() stable() past()
-fields: rule (the name of the rule that held); empty: no violations
-example: decode stall check clock=clk waiting=valid && !ready dropped=fell(valid) && !past(ready)",
-    ),
-];
 
 /// `protocols`: what can be decoded, one line each, with the protocols loaded from files and the
 /// session's own.
@@ -492,9 +599,9 @@ pub fn list(sources: Sources<'_>) -> String {
     );
     out.push("on streams: decode <name> <protocol> ...".into());
     out.extend(
-        ON_STREAMS
+        STREAM_DEFS
             .iter()
-            .map(|(n, about, _)| format!("  {n:<8} {about}")),
+            .map(|(n, d)| format!("  {n:<8} {}", d.about)),
     );
     if !sources.loaded.is_empty() {
         out.push("loaded from files: decode <name> <protocol> ...".into());
@@ -533,38 +640,44 @@ fn sampler_line(p: &Sampler) -> String {
 
 /// `protocols <name>`: its roles, params, and the streams it makes with their fields.
 pub fn describe(name: &str, sources: Sources<'_>) -> Result<String, String> {
-    if let Some(p) = sources.get(name) {
-        return Ok(describe_any(name, &p));
+    match sources.get(name) {
+        Some(any) => Ok(describe_any(name, &any)),
+        // an unloaded wasm= file: get filters it, but it still describes
+        None => match sources.session.iter().find(|p| p.name == name) {
+            Some(p) => Ok(describe_any(name, &Any::Sampled(p.clone()))),
+            None => Err(unknown(name, sources)),
+        },
     }
-    if let Some((_, about, rest)) = ON_STREAMS.iter().find(|g| g.0 == name) {
-        return Ok(format!("{name}: {about}\n{rest}"));
-    }
-    if let Some(p) = sources.session.iter().find(|p| p.name == name) {
-        let fields: Vec<String> = p
-            .fields
-            .iter()
-            .map(|(f, sig)| format!("{f}={sig}"))
-            .collect();
-        let mut out = vec![
-            format!("{name}: in this session, {}", sampler_line(p)),
-            format!("fields: {}", fields.join(" ")),
-        ];
-        out.push(format!(
-            "example: decode x {name} clock=<clk> {}",
-            p.roles
-                .iter()
-                .map(|r| format!("{r}=<signal>"))
-                .collect::<Vec<_>>()
-                .join(" ")
-        ));
-        return Ok(out.join("\n"));
-    }
-    Err(unknown(name, sources))
 }
 
-/// The card of a protocol to make: a built-in's and a loaded file's alike.
+/// The card of a protocol: a signal protocol's roles and streams, a session sampler's fields,
+/// or an on-stream protocol's prose.
 fn describe_any(name: &str, p: &Any) -> String {
-    let def = p.def();
+    match p {
+        Any::OnStreams(d) => return format!("{name}: {}\n{}", d.about, d.rest),
+        Any::Sampled(p) => {
+            let fields: Vec<String> = p
+                .fields
+                .iter()
+                .map(|(f, sig)| format!("{f}={sig}"))
+                .collect();
+            let mut out = vec![
+                format!("{name}: in this session, {}", sampler_line(p)),
+                format!("fields: {}", fields.join(" ")),
+            ];
+            out.push(format!(
+                "example: decode x {name} clock=<clk> {}",
+                p.roles
+                    .iter()
+                    .map(|r| format!("{r}=<signal>"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ));
+            return out.join("\n");
+        }
+        Any::Builtin(_) | Any::Loaded(_) => {}
+    }
+    let def = p.def().expect("a signal protocol has a card");
     let (required, optional) = def.roles();
     let mut out = vec![
         format!("{name}: {}", def.about()),
@@ -610,31 +723,28 @@ fn describe_any(name: &str, p: &Any) -> String {
 
 /// The error for a protocol that isn't one, naming those there are.
 pub fn unknown(name: &str, sources: Sources<'_>) -> String {
-    let names: Vec<&str> = BUILTINS
-        .iter()
-        .copied()
-        .chain(ON_STREAMS.iter().map(|g| g.0))
-        .chain(sources.loaded.iter().map(|l| l.name))
-        .chain(sources.session.iter().map(|p| p.name.as_str()))
-        .collect();
     format!(
         "unknown protocol: {name} (protocols: {}; `protocols <name>` describes one)",
-        names.join(", ")
+        sources.names().join(", ")
     )
 }
 
 /// A short card on a protocol, for the command line's docs (spec §4): its line, roles and
 /// streams, a line each.
 pub fn brief(name: &str, sources: Sources<'_>) -> Option<String> {
-    if let Some(p) = sources.get(name) {
-        let def = p.def();
+    // an unloaded wasm= file: get filters it, but it still briefs
+    let any = match sources.get(name) {
+        Some(any) => any,
+        None => Any::Sampled(sources.session.iter().find(|p| p.name == name)?.clone()),
+    };
+    if let Some(def) = any.def() {
         let clock = if def.clocked() { " clock=<clk>" } else { "" };
         let (required, optional) = def.roles();
         let mut roles = required.join(" ");
         if !optional.is_empty() {
             roles += &format!(" ({} optional)", optional.join(" "));
         }
-        let streams: Vec<String> = p.streams().into_iter().map(|s| s.0).collect();
+        let streams: Vec<String> = any.streams().into_iter().map(|s| s.0).collect();
         let params = if def.params().is_empty() {
             String::new()
         } else {
@@ -646,18 +756,20 @@ pub fn brief(name: &str, sources: Sources<'_>) -> Option<String> {
             streams.join(" ")
         ));
     }
-    if let Some((_, about, _)) = ON_STREAMS.iter().find(|g| g.0 == name) {
-        return Some(format!("decode <name> {name} ...\n\n{about}"));
+    match any {
+        Any::Sampled(p) => {
+            let roles: Vec<String> = p.roles.iter().map(|r| format!("{r}=<signal>")).collect();
+            let fields: Vec<&str> = p.fields.iter().map(|f| f.0.as_str()).collect();
+            Some(format!(
+                "decode <name> {name} clock=<clk> {}\n\nA record where {}\nFields: {}",
+                roles.join(" "),
+                p.when,
+                fields.join(" ")
+            ))
+        }
+        Any::OnStreams(d) => Some(format!("decode <name> {name} ...\n\n{}", d.about)),
+        Any::Builtin(_) | Any::Loaded(_) => unreachable!("a signal protocol has a card"),
     }
-    let p = sources.session.iter().find(|p| p.name == name)?;
-    let roles: Vec<String> = p.roles.iter().map(|r| format!("{r}=<signal>")).collect();
-    let fields: Vec<&str> = p.fields.iter().map(|f| f.0.as_str()).collect();
-    Some(format!(
-        "decode <name> {name} clock=<clk> {}\n\nA record where {}\nFields: {}",
-        roles.join(" "),
-        p.when,
-        fields.join(" ")
-    ))
 }
 
 /// A stream of a built-in, for `protocols <name>`: its name, fields, for violations what they

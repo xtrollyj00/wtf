@@ -48,7 +48,7 @@ impl Workspace {
         d: &Decode,
         any: protocol::Any,
     ) -> Result<usize, String> {
-        let def = any.def();
+        let def = any.def().expect("decode_protocol takes a signal protocol");
         let required = self.required(d, def);
         let (_, optional) = def.roles();
         let mut errors = Vec::new();

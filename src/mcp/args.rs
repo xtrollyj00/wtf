@@ -91,57 +91,13 @@ pub struct ViewArgs {
     pub unit: Option<String>,
 }
 
+/// The workspace in the session's own shape (spec §11): `signal`, `protocol`, `decode`, `names`,
+/// `rows`, `cursors`, `view`, `scope`, `unit`. Every name, radix, time and key is checked first
+/// and all the errors come back at once.
 #[derive(Deserialize, schemars::JsonSchema)]
 pub struct WorkspaceArgs {
-    /// The scope names resolve under first (`help names`); not given: it stays.
-    pub scope: Option<String>,
-    /// Computed signals, `["op = cmd[7:0]"]`.
-    #[serde(default)]
-    pub signals: Vec<String>,
-    /// Sampled protocols, as `protocol` makes them (`help decode`).
-    #[serde(default)]
-    pub protocols: Vec<ProtocolSpec>,
-    /// Decodes, as `decode` makes them (`help decode`).
-    #[serde(default)]
-    pub decode: Vec<DecodeSpec>,
-    /// The rows, top to bottom: `"name:radix:colour"`, a group or a struct's open levels (`help workspace`).
-    pub rows: Vec<RowSpec>,
-    /// Cursors by number, `{"1": "80ns", "2": "390ns"}`: 1 the cursor, 2 - 9 marks; a mark may be
-    /// `{"time": "390ns", "name": "first bad write", "note": "..."}`.
-    #[serde(default)]
-    pub cursors: std::collections::BTreeMap<String, CursorSpec>,
-    /// The visible range, `["60ns", "480ns"]`; default the whole trace.
-    pub range: Option<[String; 2]>,
-}
-
-#[derive(Deserialize, schemars::JsonSchema)]
-pub struct ProtocolSpec {
-    /// The protocol's name, e.g. `cmd`, for `decode`.
-    pub name: String,
-    /// The names its expressions use, which `decode` puts on signals: `["valid", "ready", "data"]`.
-    pub roles: Vec<String>,
-    /// When to make a record, on the roles: `valid && ready`; the clock is the decode's.
-    pub when: String,
-    /// Fields in order, on the roles: `["op = data[7:0]"]`.
-    #[serde(default)]
-    pub fields: Vec<String>,
-}
-
-#[derive(Deserialize, schemars::JsonSchema)]
-pub struct DecodeSpec {
-    /// The stream it makes, `rx` (a built-in makes several: `rx.frame`).
-    pub name: String,
-    /// The protocol: `axis`, `axilite`, `frame`, `pair`, `check`, ... (`protocols`).
-    pub protocol: String,
-    /// The clock it samples at (not for `spi`, `uart`, `frame`, `pair`).
-    #[serde(default)]
-    pub clock: String,
-    /// Each role's signal, `["tvalid = rx_tvalid"]`; streams for `frame` / `pair`.
-    #[serde(default)]
-    pub signals: Vec<String>,
-    /// Params, `["prefix = rx_"]`, `["last = tlast"]`, a check's rules.
-    #[serde(default)]
-    pub params: Vec<String>,
+    #[serde(flatten)]
+    pub file: wtf_core::session::File,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -172,28 +128,6 @@ pub struct RecordsArgs {
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
-#[serde(untagged)]
-pub enum RowSpec {
-    Signal(String),
-    Group {
-        group: String,
-        rows: Vec<String>,
-        #[serde(default)]
-        collapsed: bool,
-    },
-    /// A struct, record, array, stream or bus with levels open, and lines under it with a radix
-    /// or colour of their own, written as a row's: `{"signal": "pkt", "open": ["pkt", "pkt.pair"],
-    /// "fields": ["pkt.pair.hi:dec:red"]}`.
-    Open {
-        signal: String,
-        #[serde(default)]
-        open: Vec<String>,
-        #[serde(default)]
-        fields: Vec<String>,
-    },
-}
-
-#[derive(Deserialize, schemars::JsonSchema)]
 pub struct UserViewArgs {
     /// Also copy the user's rows, cursors and visible range into the workspace, to build on them;
     /// they replace the workspace's (one `undo` step).
@@ -206,18 +140,4 @@ pub struct CommandArgs {
     /// A `:` command without the colon: `decode ...`, `add top.cpu /_valid$/`, `cursor 2 80ns`
     /// (`help commands`).
     pub line: String,
-}
-
-/// A cursor: its time, or a mark's time with a name and a note (spec §9).
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-#[serde(untagged)]
-pub enum CursorSpec {
-    Time(String),
-    Mark {
-        time: String,
-        #[serde(default)]
-        name: String,
-        #[serde(default)]
-        note: String,
-    },
 }

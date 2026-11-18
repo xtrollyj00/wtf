@@ -4,6 +4,8 @@
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher};
 
+use crate::tui::picker::Source;
+
 pub struct Command {
     pub name: &'static str,
     pub usage: &'static str,
@@ -378,17 +380,17 @@ fn arguments(c: &Command, line: &str, app: &crate::tui::app::App) -> Completion 
             "stream",
             fuzzy(
                 word,
-                ws.decodes
+                ws.decodes()
                     .iter()
                     .map(|d| d.name.as_str())
-                    .chain(ws.streams.iter().map(|s| s.name.as_str())),
+                    .chain(ws.streams().iter().map(|s| s.name.as_str())),
             )
             .into_iter()
             .map(|s| item(s, ""))
             .collect(),
         ),
         ("help", 1) => {
-            let topics = crate::mcp::help::TOPICS;
+            let topics = crate::guide::TOPICS;
             (
                 "topic",
                 fuzzy(word, topics.iter().map(|t| t.0))
@@ -424,7 +426,7 @@ fn arguments(c: &Command, line: &str, app: &crate::tui::app::App) -> Completion 
             let st = line
                 .split_whitespace()
                 .nth(1)
-                .and_then(|n| ws.streams.iter().find(|s| s.name == n));
+                .and_then(|n| ws.streams().iter().find(|s| s.name == n));
             let skip = word.len() - word.trim_start_matches(['!', '(', '~']).len();
             let fields: Vec<&str> = st
                 .map(|s| s.schema.iter().map(|f| f.name.as_str()).collect())
@@ -480,13 +482,16 @@ fn arguments(c: &Command, line: &str, app: &crate::tui::app::App) -> Completion 
         ("cursor", 1) => {
             let marks: Vec<Item> = (0..9)
                 .map(|i| {
-                    let what = match (i, ws.marks[i]) {
+                    let what = match (i, ws.marks()[i].as_ref().map(|m| m.time)) {
                         (0, _) => "the cursor".to_string(),
                         (_, None) => "not put".into(),
                         (_, Some(t)) => format!(
                             "{} {}",
                             wtf_core::time::format(t, ws.trace.fs_per_tick),
-                            ws.labels[i].name
+                            ws.marks()[i]
+                                .as_ref()
+                                .map(|m| m.name.as_str())
+                                .unwrap_or("")
                         ),
                     };
                     item(format!("{} ", i + 1), what)
@@ -516,13 +521,14 @@ fn arguments(c: &Command, line: &str, app: &crate::tui::app::App) -> Completion 
             // the marks put, as '2
             let marks: Vec<Item> = (1..9)
                 .filter_map(|i| {
-                    ws.marks[i].map(|t| {
+                    ws.marks()[i].as_ref().map(|m| {
+                        let t = m.time;
                         item(
                             format!("'{} ", i + 1),
                             format!(
                                 "{} {}",
                                 wtf_core::time::format(t, ws.trace.fs_per_tick),
-                                ws.labels[i].name
+                                m.name
                             ),
                         )
                     })
@@ -545,7 +551,7 @@ fn arguments(c: &Command, line: &str, app: &crate::tui::app::App) -> Completion 
         ),
         ("pick", 1) => (
             "source",
-            fuzzy(word, crate::tui::picker::SOURCES)
+            fuzzy(word, Source::ALL.map(Source::name))
                 .into_iter()
                 .map(|s| {
                     item(
@@ -561,7 +567,7 @@ fn arguments(c: &Command, line: &str, app: &crate::tui::app::App) -> Completion 
         ),
         ("pick", 2) if line.split_whitespace().nth(1) == Some("records") => (
             "stream",
-            fuzzy(word, ws.streams.iter().map(|s| s.name.as_str()))
+            fuzzy(word, ws.streams().iter().map(|s| s.name.as_str()))
                 .into_iter()
                 .map(|s| item(s, ""))
                 .collect(),
@@ -645,21 +651,33 @@ fn arguments(c: &Command, line: &str, app: &crate::tui::app::App) -> Completion 
                 }
                 None => {
                     let roles: Vec<String> = match ws.sources().get(proto) {
-                        Some(any) => {
-                            let def = any.def();
-                            let (required, optional) = def.roles();
-                            ["clock", "prefix"]
-                                .iter()
-                                .copied()
-                                .filter(|r| *r != "clock" || def.clocked())
-                                .chain(required)
-                                .chain(optional)
-                                .chain(def.params().iter().copied())
+                        Some(any) => match any.def() {
+                            Some(def) => {
+                                let (required, optional) = def.roles();
+                                ["clock", "prefix"]
+                                    .iter()
+                                    .copied()
+                                    .filter(|r| *r != "clock" || def.clocked())
+                                    .chain(required)
+                                    .chain(optional)
+                                    .chain(def.params().iter().copied())
+                                    .map(String::from)
+                                    .collect()
+                            }
+                            // a session sampler or an on-stream protocol: no prefix,
+                            // and a clock only where one is read
+                            None => ["clock"]
+                                .into_iter()
+                                .filter(|_| any.clocked())
+                                .chain(any.roles().0)
+                                .chain(any.params())
                                 .map(String::from)
-                                .collect()
-                        }
+                                .collect(),
+                        },
+                        // a word typed past a listed name completes to nothing, as the
+                        // session-miss did; an unloaded session file falls back to the session
                         None => ws
-                            .protocols
+                            .protocols()
                             .iter()
                             .find(|p| p.name == proto)
                             .map(|p| p.roles.clone())
@@ -738,23 +756,24 @@ fn protocols(word: &str, ws: &wtf_core::workspace::Workspace) -> Vec<Item> {
     use wtf_core::protocol;
     let sources = ws.sources();
     let about = |n: &str| -> String {
-        sources
-            .get(n)
-            .map(|p| p.def().about().to_string())
-            .or_else(|| {
-                protocol::ON_STREAMS
-                    .iter()
-                    .find(|g| g.0 == n)
-                    .map(|g| g.1.to_string())
-            })
-            .unwrap_or_else(|| "in this session".into())
+        match sources.get(n) {
+            Some(any) => match any.def() {
+                Some(def) => def.about().to_string(),
+                // a session sampler reads like the session's own; the on-stream
+                // protocols carry their own about
+                None => match any {
+                    protocol::Any::Sampled(_) => "in this session".into(),
+                    protocol::Any::OnStreams(d) => d.about.to_string(),
+                    protocol::Any::Builtin(_) | protocol::Any::Loaded(_) => {
+                        unreachable!("a signal protocol has a card")
+                    }
+                },
+            },
+            None => "in this session".into(),
+        }
     };
     let found = protocol::detect(&ws.trace);
-    let names: Vec<&str> = protocol::ON_STREAMS
-        .iter()
-        .map(|g| g.0)
-        .chain(sources.names())
-        .collect();
+    let names: Vec<&str> = sources.names();
     let (mut items, mut rest) = (Vec::new(), Vec::new());
     for n in fuzzy(word, names) {
         let doc = protocol::brief(n, sources).unwrap_or_default()
@@ -773,8 +792,13 @@ fn protocols(word: &str, ws: &wtf_core::workspace::Workspace) -> Vec<Item> {
             });
         }
         let then = match sources.get(n) {
-            Some(p) if p.def().clocked() => "clock=<clk> prefix=<prefix>",
-            Some(_) => "prefix=<prefix>",
+            Some(p) => match p.def() {
+                Some(def) if def.clocked() => "clock=<clk> prefix=<prefix>",
+                Some(_) => "prefix=<prefix>",
+                // a session sampler and `check` read a clock; `frame` and `pair` name streams
+                None if p.clocked() => "clock=<clk>",
+                None => "",
+            },
             None => "",
         };
         rest.push(Item {

@@ -135,16 +135,18 @@ Describe the workspace in words: rows, cursors with the time between them, visib
 
 ### `workspace`
 
-Set up the whole workspace in one call: rows, cursors, range, decodes (`help workspace`). Answers as `view` does.
+Set up the whole workspace in one call: rows, cursors, view, decodes (`help workspace`). Answers as `view` does.
 
 | Argument | Means |
 |---|---|
 | `cursors` | Cursors by number, `{"1": "80ns", "2": "390ns"}`: 1 the cursor, 2 - 9 marks; a mark may be `{"time": "390ns", "name": "first bad write", "note": "..."}`. |
 | `decode` | Decodes, as `decode` makes them (`help decode`). |
-| `protocols` | Sampled protocols, as `protocol` makes them (`help decode`). |
-| `range` | The visible range, `["60ns", "480ns"]`; default the whole trace. |
-| `rows` (required) | The rows, top to bottom: `"name:radix:colour"`, a group or a struct's open levels (`help workspace`). |
+| `names` | Value names, `[{"signal": "state", "values": "0=zero"}]`. |
+| `protocol` | Sampled protocols, as `protocol` makes them (`help decode`). |
+| `rows` | The rows, top to bottom: `{"signal": "awaddr", "radix": "hex", "color": "red"}`, a group or a struct's open levels (`help workspace`). |
 | `scope` | The scope names resolve under first (`help names`); not given: it stays. |
-| `signals` | Computed signals, `["op = cmd[7:0]"]`. |
+| `signal` | Computed signals, `[{"name": "op", "expr": "cmd[7:0]"}]`. |
+| `unit` | The workspace's time unit (`help times`); not given: it stays. |
+| `view` | The visible range, `{"time": "60ns", "to": "480ns"}`; default the whole trace. |
 
 The `help` topics they point to are the [reference](@/reference.md).

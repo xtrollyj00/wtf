@@ -2,7 +2,7 @@
 
 mod common;
 use common::*;
-use wtf_core::workspace::{Kind, Workspace};
+use wtf_core::workspace::{Kind, Msg, Workspace};
 
 #[test]
 fn kind_of_a_var() {
@@ -112,10 +112,10 @@ fn undo_steps() {
     ws.undoable(|ws| wtf_core::command::run(ws, "add top.cpu.busy"))
         .unwrap();
     assert_eq!(ws.redo(), Err("already at newest change".into()));
-    // mark / record: what the terminal UI does around a key
-    let m = ws.mark();
+    // checkpoint / record: what the terminal UI does around a key
+    let cp = ws.checkpoint();
     wtf_core::command::run(&mut ws, "rm top.clk").unwrap();
-    ws.record(m);
+    ws.record(cp);
     ws.undo().unwrap();
     assert_eq!(names(&ws), ["clk", "busy"]);
 }
@@ -188,7 +188,7 @@ fn far_jumps_center() {
     // 4 columns per tick: 20 ticks across 80 columns
     wtf_core::command::run(&mut ws, "zoom 0.25").unwrap();
     assert_eq!((ws.view.start, ws.view.last_visible()), (0, 19));
-    ws.marks[1] = Some(70);
+    ws.put_mark(1, 70);
     ws.view.set_cursor(5);
     assert_eq!(ws.view.start, 0, "a move on screen doesn't scroll");
     // off screen: centered on the mark
@@ -241,9 +241,9 @@ fn presents_a_session() {
     let mut ws = with(&["top.clk"]);
     ws.saved = wtf_core::session::layout_toml(&ws);
     let text = "[cursors]\n2 = \"30ns\"\n[[rows]]\nsignal = \"top.cpu.data\"\n[[rows]]\nsignal = \"top.nope\"\n";
-    let (msg, warned) = ws.present(text, false).unwrap();
+    let msg = ws.present(text, false).unwrap();
     assert_eq!(
-        (msg.as_str(), warned),
+        (msg.text(), msg.is_warn()),
         (
             "agent: presented 1 signals, 2 cursors; not in trace: top.nope",
             true
@@ -275,8 +275,12 @@ fn presents_a_session() {
             .contains("newer than this wtf supports")
     );
     assert_eq!(
-        (ws.marks[1], ws.labels[1].name.as_str(), ws.streams.len()),
-        (Some(30), "mine", 1)
+        (
+            ws.marks()[1].as_ref().map(|m| m.time),
+            ws.marks()[1].as_ref().map(|m| m.name.as_str()),
+            ws.streams().len()
+        ),
+        (Some(30), Some("mine"), 1)
     );
 }
 
@@ -291,7 +295,7 @@ fn reloads() {
     }
     ws.undoable(|ws| wtf_core::command::run(ws, "add top.rst"))
         .unwrap();
-    assert_eq!(ws.reload(), Ok(("reloaded".into(), false)));
+    assert_eq!(ws.reload(), Ok(Msg::Info("reloaded".into())));
     assert_eq!(names(&ws), ["clk", "state", "rst"]);
     // a reload isn't undone, and clears undo
     assert!(ws.undo().is_err());
@@ -307,18 +311,23 @@ fn reloads() {
         .map(|l| format!("{l}\n"))
         .collect();
     std::fs::write(&trace, short).unwrap();
-    let (msg, _) = ws.reload().unwrap();
+    let msg = ws.reload().unwrap();
     assert_eq!(
-        msg,
+        msg.text(),
         "reloaded; not in trace: d (d: busy: unknown signal: top.dma.state (nearest: top.state, top.cpu.state)), dp (dp: state: unknown signal: top.dma.state (nearest: top.state, top.cpu.state)), top.dma.state"
     );
     assert_eq!(names(&ws), ["clk", "rst"]);
-    assert_eq!((ws.trace.end(), ws.marks[1]), (55, Some(55)));
+    assert_eq!(
+        (ws.trace.end(), ws.marks()[1].as_ref().map(|m| m.time)),
+        (55, Some(55))
+    );
     // the instance that failed is kept, and made again once it can be
-    assert_eq!((ws.decodes.len(), ws.protocols.len()), (2, 1));
+    assert_eq!((ws.decodes().len(), ws.protocols().len()), (2, 1));
     std::fs::write(&trace, &text).unwrap();
-    assert_eq!(ws.reload(), Ok(("reloaded".into(), false)));
-    assert!(ws.streams.iter().any(|s| s.name == "d") && ws.streams.iter().any(|s| s.name == "dp"));
+    assert_eq!(ws.reload(), Ok(Msg::Info("reloaded".into())));
+    assert!(
+        ws.streams().iter().any(|s| s.name == "d") && ws.streams().iter().any(|s| s.name == "dp")
+    );
     // a file that can't be read changes nothing
     std::fs::remove_file(&trace).unwrap();
     assert!(ws.reload().is_err());
@@ -835,9 +844,8 @@ fn named_signals() {
     std::fs::write(&trace, text).unwrap();
     assert_eq!(
         ws.reload(),
-        Ok((
-            "reloaded; not in trace: pair (unknown signal: busy), pair".into(),
-            true
+        Ok(Msg::Warn(
+            "reloaded; not in trace: pair (unknown signal: busy), pair".into()
         ))
     );
     assert_eq!(names(&ws), ["hi"]);
@@ -899,9 +907,9 @@ fn reloads_in_any_order() {
         ["lo", "hi"]
     );
     // the pair before the check it reads, as a session written by hand may list them
-    ws.decodes.reverse();
-    assert_eq!(ws.reload(), Ok(("reloaded".into(), false)));
-    assert!(ws.streams.iter().any(|s| s.name == "f"));
+    ws.decodes_mut().reverse();
+    assert_eq!(ws.reload(), Ok(Msg::Info("reloaded".into())));
+    assert!(ws.streams().iter().any(|s| s.name == "f"));
 }
 
 /// `:e` reports only what still can't be made after its passes: a named signal over one the rerun
@@ -930,9 +938,9 @@ fn reloads_and_reports_whats_left() {
             .collect::<String>(),
     )
     .unwrap();
-    let (msg, _) = ws.reload().unwrap();
+    let msg = ws.reload().unwrap();
     assert_eq!(
-        msg,
+        msg.text(),
         "reloaded; not in trace: ds (unknown signal: top.dma.state[0] (nearest: top.state, top.cpu.state)), dd (unknown signal: ds[0])"
     );
     assert!(
@@ -970,18 +978,31 @@ fn undo_covers_marks() {
     assert!(ws.modified());
     ws.undo().unwrap();
     assert_eq!(
-        (ws.marks[1], ws.labels[1].name.as_str(), ws.view.cursor),
-        (Some(30), "first", 50)
+        (
+            ws.marks()[1].as_ref().map(|m| m.time),
+            ws.marks()[1].as_ref().map(|m| m.name.as_str()),
+            ws.view.cursor
+        ),
+        (Some(30), Some("first"), 50)
     );
     ws.undo().unwrap();
-    assert_eq!((ws.marks[1], ws.labels[1].name.as_str()), (Some(30), ""));
+    assert_eq!(
+        (
+            ws.marks()[1].as_ref().map(|m| m.time),
+            ws.marks()[1].as_ref().map(|m| m.name.as_str())
+        ),
+        (Some(30), Some(""))
+    );
     ws.undo().unwrap();
-    assert_eq!(ws.marks[1], None);
+    assert_eq!(ws.marks()[1].as_ref().map(|m| m.time), None);
     ws.redo().unwrap();
     ws.redo().unwrap();
     assert_eq!(
-        (ws.marks[1], ws.labels[1].name.as_str()),
-        (Some(30), "first")
+        (
+            ws.marks()[1].as_ref().map(|m| m.time),
+            ws.marks()[1].as_ref().map(|m| m.name.as_str())
+        ),
+        (Some(30), Some("first"))
     );
     // a present replaces the marks; undoing it brings them back
     let mut agent = with(&["top.cpu.data"]);
@@ -989,13 +1010,21 @@ fn undo_covers_marks() {
     ws.present(&wtf_core::session::to_shared_toml(&agent), false)
         .unwrap();
     assert_eq!(
-        (ws.marks[1], ws.marks[2], ws.labels[2].name.as_str()),
-        (None, Some(60), "bug")
+        (
+            ws.marks()[1].as_ref().map(|m| m.time),
+            ws.marks()[2].as_ref().map(|m| m.time),
+            ws.marks()[2].as_ref().map(|m| m.name.as_str())
+        ),
+        (None, Some(60), Some("bug"))
     );
     ws.undo().unwrap();
     assert_eq!(
-        (ws.marks[1], ws.marks[2], ws.labels[1].name.as_str()),
-        (Some(30), None, "first")
+        (
+            ws.marks()[1].as_ref().map(|m| m.time),
+            ws.marks()[2].as_ref().map(|m| m.time),
+            ws.marks()[1].as_ref().map(|m| m.name.as_str())
+        ),
+        (Some(30), None, Some("first"))
     );
 }
 
@@ -1030,4 +1059,60 @@ fn canonical_names_after_a_drop() {
     assert!(ws.resolve("Y").is_ok());
     ws.drop_unused();
     assert!(ws.resolve("Y").is_ok());
+}
+
+/// A failed `attempt` puts back what it defined (spec §15: a failed declaration changes nothing).
+#[test]
+fn attempt_fails_whole() {
+    let mut ws = with(&["top.clk"]);
+    ws.define("low", "top.cpu.data[3:0]").unwrap();
+    let vars = ws.trace.vars.len();
+    let r: Result<(), String> = ws.attempt(|ws| {
+        ws.define("low", "top.cpu.data[7:4]")?;
+        ws.define("high", "top.cpu.data[7:4]")?;
+        ws.set_scope("top")?;
+        Err("late".into())
+    });
+    assert_eq!(r, Err("late".into()));
+    assert_eq!(
+        ws.signals,
+        [("low".to_string(), "top.cpu.data[3:0]".to_string())]
+    );
+    assert_eq!(ws.scope, None);
+    // `low` resolves as it did, `high` is gone, and nothing the attempt made is left over
+    assert!(ws.resolve("low").is_ok() && !ws.trace.by_path.contains_key("high"));
+    assert!(ws.trace.vars.len() <= vars);
+}
+
+/// A failed `attempt` that only added a decode drops it and its streams, and leaves the decodes
+/// there were as they are, not decoded again (spec §15: one retry fixes it, quickly).
+#[test]
+fn attempt_drops_added_decodes() {
+    use wtf_core::stream::Decode;
+    let mut ws = Workspace::open(&fixture("vcd").with_file_name("axilite.vcd")).unwrap();
+    let d = |name: &str| Decode {
+        name: name.into(),
+        protocol: "axilite".into(),
+        clock: "aclk".into(),
+        signals: vec![],
+        params: vec![("prefix".into(), "s_axi_".into())],
+    };
+    ws.add_decode(d("s")).unwrap();
+    let names =
+        |ws: &Workspace| -> Vec<String> { ws.streams().iter().map(|s| s.name.clone()).collect() };
+    let (before, records) = (names(&ws), ws.streams()[0].records.as_ptr());
+    let r: Result<(), String> = ws.attempt(|ws| {
+        ws.add_decode(d("t"))?;
+        Err("late".into())
+    });
+    assert_eq!(r, Err("late".into()));
+    assert_eq!(
+        ws.decodes()
+            .iter()
+            .map(|d| d.name.as_str())
+            .collect::<Vec<_>>(),
+        ["s"]
+    );
+    assert_eq!(names(&ws), before);
+    assert_eq!(ws.streams()[0].records.as_ptr(), records);
 }

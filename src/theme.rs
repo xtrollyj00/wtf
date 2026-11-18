@@ -1,10 +1,83 @@
 //! Themes (spec §19 "Themes"): palettes written in TOML. The built-in ones are the files in
 //! themes/, compiled in; a user's are read from the config directory's themes/.
 
-use crate::draw::Palette;
-use ratatui::style::Color;
+use ratatui::style::{Color, Modifier};
 use std::path::Path;
 use wtf_core::rows::{self, COLORS};
+
+pub struct Palette {
+    /// 1-bit lines and edges.
+    pub line: Color,
+    /// Bus and stream outlines; their labels are in the text's colour.
+    pub bus: Color,
+    /// Fill for a 1-bit signal toggling faster than a column.
+    pub fill: Color,
+    pub unknown: Color,
+    pub highz: Color,
+    /// A violation the protocol's spec only advises against (spec §16 severity).
+    pub warning: Color,
+    /// The accent: the cursor's head on the time axis, the selected name.
+    pub cursor: Color,
+    pub cursor_text: Color,
+    /// Behind the cursor's column: a tint, so the waveform under it stays as it is.
+    pub column: Color,
+    /// The other cursors' columns, fainter.
+    pub cursor_dim: Color,
+    /// Behind a mark's number and name on the ruler.
+    pub mark: Color,
+    /// Background behind both lines of the selected signal.
+    pub selected: Color,
+    /// Background of the boxes over the waveforms: the signal panel, help, completions.
+    pub panel: Color,
+    pub hatch: Color,
+    /// Scope prefixes, column separators and time axis labels.
+    pub dim: Color,
+    /// The shades of the signal colours, in the order of `rows::COLORS`.
+    pub hues: [Color; 8],
+    /// The screen's background and text; Reset keeps the terminal's.
+    pub background: Color,
+    pub text: Color,
+    /// Without colour (`NO_COLOR`): the cursor column and the selected name are reversed, and
+    /// marks are drawn with their glyph (spec §14 "Colours").
+    pub mono: bool,
+}
+
+impl Palette {
+    /// `NO_COLOR`: the terminal's own colours everywhere.
+    pub fn mono() -> Palette {
+        let r = Color::Reset;
+        Palette {
+            line: r,
+            bus: r,
+            fill: r,
+            unknown: r,
+            highz: r,
+            warning: r,
+            cursor: r,
+            cursor_text: r,
+            column: r,
+            cursor_dim: r,
+            mark: r,
+            selected: r,
+            panel: r,
+            hatch: r,
+            dim: r,
+            hues: [r; 8],
+            background: r,
+            text: r,
+            mono: true,
+        }
+    }
+
+    /// Reversed where there is no colour: the cursor column, the selected name.
+    pub fn accent(&self) -> Modifier {
+        if self.mono {
+            Modifier::REVERSED
+        } else {
+            Modifier::empty()
+        }
+    }
+}
 
 /// To add a theme: its file in themes/, and a line here.
 pub const BUILTIN: [(&str, &str); 2] = [

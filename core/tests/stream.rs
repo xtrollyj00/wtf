@@ -4,7 +4,7 @@ mod common;
 use common::*;
 use wtf_core::stream::{Field, Stream};
 use wtf_core::trace::Val;
-use wtf_core::workspace::Workspace;
+use wtf_core::workspace::{Msg, Workspace};
 
 /// handshake.vcd: clk rises at 5, 15 ...; valid / ready / data change at rising edges. Valid 15 - 45
 /// with ready from 35 (data 0x11), valid 65 - 85 without ready (data 0x22, 0x23 from 75), valid and
@@ -206,14 +206,14 @@ fn streams_are_signals() {
     );
     assert_eq!(
         (
-            ws.streams.len(),
-            ws.protocols.len(),
-            ws.streams[1].records.len()
+            ws.streams().len(),
+            ws.protocols().len(),
+            ws.streams()[1].records.len()
         ),
         (2, 2, 2)
     );
     // :e samples them again; the rows stay
-    assert_eq!(ws.reload(), Ok(("reloaded".into(), false)));
+    assert_eq!(ws.reload(), Ok(Msg::Info("reloaded".into())));
     assert_eq!(names(&ws), ["rx.beat", "rx.beat.tdata"]);
     assert_eq!(
         ws.trace.value_at(var(&ws, "rx.beat.tdata"), 110),
@@ -260,7 +260,7 @@ fn stream_errors() {
         sample(&mut ws, "top", "valid", &[("clk", "data")]),
         Err("top: top.clk is a signal of the file".into())
     );
-    assert_eq!((ws.trace.vars.len(), ws.streams.len()), (n, 0));
+    assert_eq!((ws.trace.vars.len(), ws.streams().len()), (n, 0));
 }
 
 #[test]
@@ -276,7 +276,7 @@ fn sessions_keep_streams() {
     wtf_core::command::run(&mut ws, "add rx.low rx").unwrap();
     // fields in their order, before the rows that show them
     let toml = wtf_core::session::to_toml(&ws);
-    assert!(toml.contains("[[protocol]]\nname = \"rx_p\"\nroles = [\"valid\", \"ready\", \"data\"]\nwhen = \"valid && ready\"\nfields = { tdata = \"data\", low = \"data[3:0]\" }\n"), "{toml}");
+    assert!(toml.contains("[[protocol]]\nname = \"rx_p\"\nwhen = \"valid && ready\"\nroles = [\"valid\", \"ready\", \"data\"]\n\n[protocol.fields]\ntdata = \"data\"\nlow = \"data[3:0]\"\n"), "{toml}");
     let mut other = handshake();
     assert_eq!(wtf_core::session::apply(&mut other, &toml), Ok(vec![]));
     assert_eq!(
@@ -284,7 +284,7 @@ fn sessions_keep_streams() {
         (names(&ws), toml)
     );
     assert_eq!(
-        other.streams[0]
+        other.streams()[0]
             .schema
             .iter()
             .map(|f| f.name.as_str())
@@ -342,7 +342,7 @@ fn protocols_put_on_signals() {
     let mut ws = handshake();
     // a protocol with roles is a type: no stream until an instance puts it on signals
     assert_eq!(ws.add_protocol(cmd()), Ok(()));
-    assert!(ws.streams.is_empty());
+    assert!(ws.streams().is_empty());
     let c0 = ws
         .add_decode(decode(
             "c0",
@@ -351,7 +351,7 @@ fn protocols_put_on_signals() {
             &[("valid", "top.valid"), ("ready", "ready"), ("cmd", "data")],
         ))
         .unwrap();
-    let c0s = &ws.streams[0];
+    let c0s = &ws.streams()[0];
     assert_eq!(
         (
             var(&ws, "c0"),
@@ -394,7 +394,7 @@ fn protocols_put_on_signals() {
         &[("v", "valid"), ("r", "ready")],
     ))
     .unwrap();
-    assert_eq!(starts(&ws.streams[1]), [85]);
+    assert_eq!(starts(&ws.streams()[1]), [85]);
     // roles played by signals of each other's names: `ready` is top.valid, 1 at 15ns where
     // top.ready is 0
     let mut both = cmd();
@@ -412,7 +412,7 @@ fn protocols_put_on_signals() {
         &[("valid", "ready"), ("ready", "valid")],
     ))
     .unwrap();
-    let sw = ws.streams.last().unwrap();
+    let sw = ws.streams().last().unwrap();
     assert_eq!(
         (sw.records[0].start, &sw.records[0].fields[0]),
         (15, &bits("1"))
@@ -422,17 +422,20 @@ fn protocols_put_on_signals() {
     // sessions keep protocols and instances; :e samples them again
     wtf_core::command::run(&mut ws, "add c0.op").unwrap();
     let toml = wtf_core::session::to_toml(&ws);
-    assert!(toml.contains("[[protocol]]\nname = \"cmd\"\nroles = [\"valid\", \"ready\", \"cmd\"]\nwhen = \"valid && ready\"\nfields = { op = \"cmd[3:0]\", arg = \"cmd[7:4]\" }\n"), "{toml}");
-    assert!(toml.contains("[[decode]]\nname = \"c0\"\nprotocol = \"cmd\"\nclock = \"top.clk\"\nsignals = { valid = \"top.valid\", ready = \"top.ready\", cmd = \"top.data\" }\n"), "{toml}");
-    assert!(toml.contains("[[decode]]\nname = \"err\"\nprotocol = \"drop\"\nclock = \"top.clk\"\nsignals = { v = \"top.valid\", r = \"top.ready\" }\n"), "{toml}");
+    assert!(toml.contains("[[protocol]]\nname = \"cmd\"\nwhen = \"valid && ready\"\nroles = [\"valid\", \"ready\", \"cmd\"]\n\n[protocol.fields]\nop = \"cmd[3:0]\"\narg = \"cmd[7:4]\"\n"), "{toml}");
+    assert!(toml.contains("[[decode]]\nname = \"c0\"\nprotocol = \"cmd\"\nclock = \"top.clk\"\n\n[decode.signals]\nvalid = \"top.valid\"\nready = \"top.ready\"\ncmd = \"top.data\"\n"), "{toml}");
+    assert!(toml.contains("[[decode]]\nname = \"err\"\nprotocol = \"drop\"\nclock = \"top.clk\"\n\n[decode.signals]\nv = \"top.valid\"\nr = \"top.ready\"\n"), "{toml}");
     let mut other = handshake();
     assert_eq!(wtf_core::session::apply(&mut other, &toml), Ok(vec![]));
     assert_eq!(
         (names(&other), wtf_core::session::to_toml(&other)),
         (names(&ws), toml)
     );
-    assert_eq!(ws.reload(), Ok(("reloaded".into(), false)));
-    assert_eq!((ws.streams.len(), starts(&ws.streams[1])), (3, vec![85]));
+    assert_eq!(ws.reload(), Ok(Msg::Info("reloaded".into())));
+    assert_eq!(
+        (ws.streams().len(), starts(&ws.streams()[1])),
+        (3, vec![85])
+    );
     // a type defined again samples its instances again, at once, and those made after them
     let pq = wtf_core::stream::Decode {
         name: "pq".into(),
@@ -446,7 +449,7 @@ fn protocols_put_on_signals() {
     };
     ws.add_decode(pq).unwrap();
     let schema = |ws: &Workspace, n: &str| {
-        ws.streams
+        ws.streams()
             .iter()
             .find(|s| s.name == n)
             .unwrap()
@@ -460,7 +463,7 @@ fn protocols_put_on_signals() {
     wider.fields = vec![("all".into(), "cmd".into())];
     assert_eq!(ws.add_protocol(wider), Ok(()));
     assert_eq!(
-        ws.streams[0]
+        ws.streams()[0]
             .schema
             .iter()
             .map(|f| f.name.as_str())
@@ -482,7 +485,7 @@ fn protocols_put_on_signals() {
     );
     // the type is defined all the same
     assert_eq!(
-        ws.protocols
+        ws.protocols()
             .iter()
             .find(|p| p.name == "cmd")
             .map(|p| p.when.as_str()),
@@ -515,7 +518,7 @@ fn instance_errors_at_once() {
         ws.add_protocol(odd),
         Err("cmd: not a role name: a b".into())
     );
-    assert_eq!((ws.decodes.len(), ws.streams.len()), (0, 0));
+    assert_eq!((ws.decodes().len(), ws.streams().len()), (0, 0));
     // in a session they are warnings
     let warn = wtf_core::session::apply(
         &mut ws,

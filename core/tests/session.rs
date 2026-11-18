@@ -26,7 +26,7 @@ fn round_trip() {
     let text = session::to_toml(&ws);
     assert!(text.starts_with("# wtf session\nversion = 1\n"), "{text}");
     assert!(
-        text.contains("radix = \"dec\", color = \"red\"")
+        text.contains("radix = \"dec\"\ncolor = \"red\"")
             && text.contains("open = [\"state\"]")
             && text.contains("[cursors]\n1 = \"35ns\"\n2 = \"35ns\"\n3 = \"50ns\"\n"),
         "{text}"
@@ -38,15 +38,24 @@ fn round_trip() {
     wtf_core::command::run(&mut back, "cursor 3 name=done note=\"last \"").unwrap();
     let text = session::to_toml(&back);
     assert!(
-        text.contains("2 = \"35ns\"\n3 = { time = \"50ns\", name = \"done\", note = \"last\" }\n"),
+        text.contains(
+            "2 = \"35ns\"\n\n[cursors.3]\ntime = \"50ns\"\nname = \"done\"\nnote = \"last\"\n"
+        ),
         "{text}"
     );
     let mut again = open();
     assert_eq!(session::apply(&mut again, &text), Ok(vec![]));
     assert_eq!(session::to_toml(&again), text);
+    // the marks' times, not their names: `back` was renamed above
+    let times = |ws: &wtf_core::workspace::Workspace| {
+        ws.marks()
+            .iter()
+            .map(|m| m.as_ref().map(|m| m.time))
+            .collect::<Vec<_>>()
+    };
     assert_eq!(
-        (&back.rows, back.marks, back.view.cursor),
-        (&ws.rows, ws.marks, 35)
+        (&back.rows, times(&back), back.view.cursor),
+        (&ws.rows, times(&ws), 35)
     );
     assert_eq!(back.scope.as_deref(), Some("top.cpu"));
     assert!(text.contains("unit = \"ps\"\n"), "{text}");
@@ -154,7 +163,12 @@ fn field_looks() {
         text.contains(
             r#"color = "red"
 open = ["pkt", "pkt.pair"]
-fields = [{ field = "pkt.pair.hi", radix = "dec", color = "blue" }]"#
+
+[[rows.fields]]
+field = "pkt.pair.hi"
+radix = "dec"
+color = "blue"
+"#
         ),
         "{text}"
     );
@@ -244,12 +258,43 @@ fn refuses_what_it_cant_read() {
         session::apply(&mut ws, "rows = 3"),
         Ok(vec!["rows: must be a list".to_string()])
     );
+    // a trail that isn't a list warns as `rows` does, and the session still loads
+    assert_eq!(
+        session::apply(&mut ws, "trail = \"oops\""),
+        Ok(vec!["trail: must be a list".to_string()])
+    );
     // a time as plain ticks, and one that isn't a time
     assert_eq!(
         session::apply(&mut ws, "[cursors]\n1 = 30\n2 = true"),
         Ok(vec!["bad time".to_string()])
     );
-    assert_eq!((ws.view.cursor, ws.marks[1]), (30, None));
+    assert_eq!(
+        (ws.view.cursor, ws.marks()[1].as_ref().map(|m| m.time)),
+        (30, None)
+    );
+}
+
+/// A key an entry doesn't take warns as one of the file's does (spec §11); the entry still loads.
+#[test]
+fn unknown_entry_keys_warn() {
+    let mut ws = open();
+    let text = r#"
+        [[signal]]
+        name = "low"
+        expr = "top.cpu.data[3:0]"
+        colour = "red"
+        [[trail]]
+        tool = "find"
+        ask = "top.cpu.busy"
+        answer = "1 matches"
+        when = "now"
+    "#;
+    assert_eq!(
+        session::apply(&mut ws, text).unwrap(),
+        ["unknown key: signal.colour", "unknown key: trail.when"]
+    );
+    assert!(ws.signals.iter().any(|s| s.0 == "low"));
+    assert_eq!(ws.trail.len(), 1);
 }
 
 #[test]
@@ -263,8 +308,11 @@ fn files() {
     let mut ws = with(&["top.clk"]);
     ws.session_path = session::default_path(&trace);
     assert!(ws.modified());
-    let (msg, _) = wtf_core::command::save(&mut ws, "").unwrap();
-    assert_eq!(msg, format!("written: {}", ws.session_path.display()));
+    let msg = wtf_core::command::save(&mut ws, "").unwrap();
+    assert_eq!(
+        msg.text(),
+        format!("written: {}", ws.session_path.display())
+    );
     assert!(!ws.modified());
     // :w <file> makes that the session file in use
     let other = dir.0.join("other.toml");
@@ -281,10 +329,10 @@ fn files() {
 #[test]
 fn wasm_protocol_round_trip() {
     let mut ws = open();
-    ws.loaded.push(loaded("probe", &[]));
+    ws.push_loaded(loaded("probe", &[]));
     let text = "\n[[protocol]]\nname = \"probe\"\nwasm = \"dir/probe.wasm\"\n";
     assert_eq!(session::apply(&mut ws, text), Ok(vec![]));
-    let p = ws.protocols.iter().find(|p| p.name == "probe").unwrap();
+    let p = ws.protocols().iter().find(|p| p.name == "probe").unwrap();
     assert_eq!(
         (p.wasm.as_deref(), p.when.as_str(), p.roles.len()),
         (Some("dir/probe.wasm"), "", 0)
@@ -312,5 +360,82 @@ fn wasm_protocol_without_the_load() {
     assert!(
         session::to_toml(&ws)
             .contains("[[protocol]]\nname = \"probe\"\nwasm = \"dir/probe.wasm\"\n")
+    );
+}
+
+/// The trail is last, so a link's view is the shared file without it (spec §11).
+#[test]
+fn trail_comes_last() {
+    let mut ws = open();
+    let text =
+        "[cursors]\n1 = \"20ns\"\n\n[[trail]]\ntool = \"find\"\nask = \"q\"\nanswer = \"a\"\n";
+    assert_eq!(session::apply(&mut ws, text), Ok(vec![]));
+    assert_eq!(ws.trail.len(), 1);
+    let link = session::to_link_toml(&ws);
+    assert_eq!(session::without_trail(&link), session::to_shared_toml(&ws));
+    assert!(
+        link.contains("\n[[trail]]\ntool = \"find\"\nask = \"q\"\nanswer = \"a\"\n"),
+        "{link}"
+    );
+}
+
+/// Splitting the trail off skips a `"""` string that holds the same line.
+#[test]
+fn trail_split_skips_strings() {
+    let text = "version = 1\n\n[cursors.3]\ntime = \"20ns\"\nnote = \"\"\"\na\n[[trail]]\nb\"\"\"\n\n[[trail]]\ntool = \"find\"\nask = \"q\"\nanswer = \"a\"\n";
+    assert_eq!(
+        session::without_trail(text),
+        "version = 1\n\n[cursors.3]\ntime = \"20ns\"\nnote = \"\"\"\na\n[[trail]]\nb\"\"\"\n"
+    );
+    assert_eq!(session::read_trail(&open(), text).len(), 1);
+}
+
+/// A note with `"""` in one line is written as a literal string: the trail still splits off.
+#[test]
+fn trail_split_one_line_quotes() {
+    let mut ws = open();
+    let text = "[cursors.3]\ntime = \"20ns\"\nnote = 'say \"\"\" here'\n\n[[trail]]\ntool = \"find\"\nask = \"q\"\nanswer = \"a\"\n";
+    assert_eq!(session::apply(&mut ws, text), Ok(vec![]));
+    let link = session::to_link_toml(&ws);
+    assert!(link.contains("say \"\"\" here"), "{link}");
+    assert_eq!(session::without_trail(&link), session::to_shared_toml(&ws));
+}
+
+/// A row that is neither a signal nor a group is dropped, and says so.
+#[test]
+fn row_with_bad_signal_warns() {
+    let mut ws = open();
+    let warn = session::apply(&mut ws, "[[rows]]\nsignal = 3\n").unwrap();
+    assert_eq!(warn, ["rows: entry without signal or group"]);
+    assert!(ws.rows.is_empty());
+}
+
+/// A hand-written file describes without failing: junk rows skip, unparseable times clear, and
+/// the cursor is listed even when the file names none.
+#[test]
+fn describe_skips_gracefully() {
+    use toml::Value;
+    let ws = open();
+    assert!(!ws.modified()); // a fresh window: the layout has no version line
+    let mut f = session::File::default();
+    f.rows
+        .push(session::model::Row::Other(Value::String("x".into())));
+    f.cursors.insert("2".into(), Value::String("soon".into()));
+    f.cursors.insert("x".into(), Value::String("1ns".into()));
+    let names: Vec<String> = Vec::new();
+    let show = |t: u64| format!("{t}");
+    let text = session::describe(
+        &f,
+        &session::Describe {
+            names: &names,
+            sel: 999,
+            show: &show,
+            visible: (String::from("0"), String::from("0")),
+            trace: &ws.trace,
+        },
+    );
+    assert_eq!(
+        text,
+        "rows (> selected):\ncursors, in time:\n  1: 0\nvisible: 0 - 0\n"
     );
 }

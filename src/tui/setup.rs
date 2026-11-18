@@ -1,7 +1,8 @@
 //! The first start (spec §19 "First start"): which glyph set the terminal's font draws, then dark
 //! or light, each picked from samples drawn as wtf draws a trace. The answers go to the config file.
 
-use crate::draw::{self, Glyphs, Palette, gl, pal, put};
+use crate::draw::{self, Glyphs, gl, pal, put};
+use crate::theme::Palette;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;

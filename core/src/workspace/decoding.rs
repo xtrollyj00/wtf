@@ -214,7 +214,11 @@ impl Workspace {
     pub fn add_decode(&mut self, mut d: Decode) -> Result<usize, String> {
         // kept by full path: a short name may only have been unique thanks to the rows shown, and
         // a session makes its instances before its rows
-        if !matches!(d.protocol.as_str(), "frame" | "pair") {
+        // frame and pair read streams, not signals: no path expansion for their roles
+        let any = self.sources().get(&d.protocol);
+        if let Some(protocol::Any::OnStreams(_)) = any {
+            // a stream protocol's roles name streams, and those are named as decoded
+        } else {
             for (_, sig) in &mut d.signals {
                 *sig = self.full_path(sig).unwrap_or(sig.clone());
             }
@@ -223,12 +227,12 @@ impl Workspace {
             d.clock = self.full_path(&d.clock).unwrap_or(d.clock);
         }
         // a prefix too, through its first role: `s_axi_` + `awvalid` is `top.s_axi_awvalid`
-        let any = self.sources().get(&d.protocol);
-        if let (Some(p), Some((_, prefix))) =
-            (any.as_ref(), d.params.iter_mut().find(|p| p.0 == "prefix"))
-        {
+        if let (Some(def), Some((_, prefix))) = (
+            any.as_ref().and_then(|a| a.def()),
+            d.params.iter_mut().find(|p| p.0 == "prefix"),
+        ) {
             // the first role there is: a read-only port has no awvalid
-            let full = p.def().roles().0.into_iter().find_map(|role| {
+            let full = def.roles().0.into_iter().find_map(|role| {
                 self.resolve(&format!("{prefix}{role}"))
                     .ok()
                     .map(|p| (role, self.trace.vars[p.0].path.clone()))
@@ -238,10 +242,12 @@ impl Workspace {
             }
         }
         let var = match any {
+            Some(protocol::Any::OnStreams(def)) if def.kind == protocol::StreamKind::Check => {
+                self.decode_check(&d, def)
+            }
+            Some(protocol::Any::OnStreams(def)) => self.decode_streams(&d, def),
+            Some(protocol::Any::Sampled(_)) | None => self.decode_user(&d),
             Some(any) => self.decode_protocol(&d, any),
-            None if matches!(d.protocol.as_str(), "frame" | "pair") => self.decode_streams(&d),
-            None if d.protocol == "check" => self.decode_check(&d),
-            None => self.decode_user(&d),
         }
         .map_err(|e| format!("{}: {e}", d.name))?;
         match self.decodes.iter_mut().find(|x| x.name == d.name) {
@@ -374,40 +380,50 @@ impl Workspace {
     pub fn check_decode(&mut self, d: &Decode) -> Result<(), Reasons> {
         let mut errors: Vec<Reason> = Vec::new();
         let any = self.sources().get(&d.protocol);
-        let clocked = if let Some(any) = any {
-            let def = any.def();
-            let required = self.required(d, def);
-            let (_, optional) = def.roles();
-            self.bind(d, &required, &optional, def.params(), &mut errors);
-            def.clocked()
-        } else if let Some(p) = self
-            .protocols
-            .iter()
-            .find(|p| p.name == d.protocol)
-            .cloned()
-        {
-            match &p.wasm {
-                // its card is the file's, not a sampler: with no file there is no role to check
-                // against, and no clock to ask for (spec §11)
-                Some(path) => {
+        let clocked = match &any {
+            Some(a) => match a.def() {
+                Some(def) => {
+                    let required = self.required(d, def);
+                    let (_, optional) = def.roles();
+                    self.bind(d, &required, &optional, def.params(), &mut errors);
+                    def.clocked()
+                }
+                None => match a {
+                    protocol::Any::Sampled(_) => {
+                        let (required, optional) = a.roles();
+                        self.bind(d, &required, &optional, &[], &mut errors);
+                        true
+                    }
+                    protocol::Any::OnStreams(def) => {
+                        errors.extend(self.stream_errors(d, def));
+                        def.clocked
+                    }
+                    protocol::Any::Builtin(_) | protocol::Any::Loaded(_) => {
+                        unreachable!("a signal protocol has a card")
+                    }
+                },
+            },
+            None => {
+                // its card is the file's; with the file not loaded there is nothing to check
+                // against (spec §11)
+                let wasm = self
+                    .protocols
+                    .iter()
+                    .find(|p| p.name == d.protocol)
+                    .and_then(|p| p.wasm.clone());
+                if let Some(path) = wasm {
                     errors.push(Reason {
                         on: vec!["protocol".into()],
                         why: Why::Said(format!("wasm {path} is not loaded")),
                     });
-                    false
+                } else {
+                    errors.push(Reason {
+                        on: vec!["protocol".into()],
+                        why: Why::Said(protocol::unknown(&d.protocol, self.sources())),
+                    });
                 }
-                None => {
-                    let roles: Vec<&str> = p.roles.iter().map(String::as_str).collect();
-                    self.bind(d, &roles, &[], &[], &mut errors);
-                    true
-                }
+                false
             }
-        } else {
-            errors.push(Reason {
-                on: vec!["protocol".into()],
-                why: Why::Said(protocol::unknown(&d.protocol, self.sources())),
-            });
-            false
         };
         self.roles.clear();
         if clocked && d.clock.is_empty() {
@@ -428,6 +444,92 @@ impl Workspace {
                 list: errors,
             }),
         }
+    }
+
+    /// The mistakes in an on-stream instance's names and params, without running it: its streams
+    /// exist, its roles and params are the card's, and `frame`'s params and `pair`'s id fields fit
+    /// the streams named. `check_decode` and `add_decode` both say these. Rule expressions still
+    /// fail at `add_decode` time.
+    fn stream_errors(&self, d: &Decode, def: &protocol::StreamDef) -> Vec<Reason> {
+        let mut errors = Vec::new();
+        let said = |on: &str, text: String| Reason {
+            on: vec![on.to_string()],
+            why: Why::Said(text),
+        };
+        for r in def.roles {
+            match d.signals.iter().find(|s| s.0 == *r) {
+                None => errors.push(said(r, format!("no stream for {r}"))),
+                Some((_, s)) => {
+                    if !self.streams.iter().any(|x| x.name == *s) {
+                        errors.push(said(r, format!("{r}: unknown stream: {s}")));
+                    }
+                }
+            }
+        }
+        for (s, _) in &d.signals {
+            if !def.roles.contains(&s.as_str()) {
+                errors.push(said(s, format!("{} has no role {s}", d.protocol)));
+            }
+        }
+        match def.kind {
+            protocol::StreamKind::Frame => {
+                let input = d.signals.iter().find(|s| s.0 == def.roles[0]).map(|s| &s.1);
+                if let Some(st) = input.and_then(|s| self.streams.iter().find(|x| x.name == *s))
+                    && let Err(e) =
+                        decode::Frame::new(&st.schema, &d.params, self.trace.fs_per_tick)
+                {
+                    errors.push(said("protocol", e));
+                }
+            }
+            protocol::StreamKind::Pair => {
+                for (k, _) in &d.params {
+                    if !["id", "req_id", "resp_id"].contains(&k.as_str()) {
+                        errors.push(said(
+                            k,
+                            format!("pair: no parameter {k} (id, req_id, resp_id)"),
+                        ));
+                    }
+                }
+                let ids = pair_ids(&d.params);
+                if ids.0.is_some() != ids.1.is_some() {
+                    errors.push(said(
+                        "protocol",
+                        "pair: req_id and resp_id go together".into(),
+                    ));
+                }
+                // the id fields exist, when both streams and ids are named
+                let stream = |r: &str| {
+                    d.signals
+                        .iter()
+                        .find(|s| s.0 == r)
+                        .and_then(|(_, s)| self.streams.iter().find(|x| x.name == *s))
+                };
+                if let (Some(req), Some(resp), (Some(rq), Some(rp))) =
+                    (stream("request"), stream("response"), ids)
+                {
+                    for (st, f) in [(req, rq), (resp, rp)] {
+                        if !st.schema.iter().any(|x| x.name == f) {
+                            errors.push(said(
+                                "protocol",
+                                format!("pair: {} has no field {f}", st.name),
+                            ));
+                        }
+                    }
+                }
+            }
+            protocol::StreamKind::Check => {
+                if d.params.is_empty() {
+                    errors.push(said(
+                        "protocol",
+                        "check: no rules (params = { rule = \"expression\" })".into(),
+                    ));
+                }
+                if !d.signals.is_empty() {
+                    errors.push(said("protocol", "check takes no signals".into()));
+                }
+            }
+        }
+        errors
     }
 
     /// A built-in protocol's required roles for this instance: a side none of whose roles is
@@ -722,7 +824,7 @@ impl Workspace {
     pub fn playable(&self, signals: &[usize]) -> Vec<(String, usize)> {
         let names: Vec<String> = self
             .sources()
-            .names()
+            .on_signals()
             .into_iter()
             .map(str::to_string)
             .collect();
@@ -741,14 +843,14 @@ impl Workspace {
     /// A protocol's roles, required then optional, and whether it samples at a clock.
     fn roles_of(&self, protocol: &str) -> (Vec<String>, bool) {
         if let Some(any) = self.sources().get(protocol) {
-            let (required, optional) = any.def().roles();
+            let (required, optional) = any.roles();
             (
                 required
                     .into_iter()
                     .chain(optional)
                     .map(str::to_string)
                     .collect(),
-                any.def().clocked(),
+                any.clocked(),
             )
         } else if let Some(p) = self.protocols.iter().find(|p| p.name == protocol) {
             (p.roles.clone(), true)
@@ -944,84 +1046,55 @@ impl Workspace {
     }
 
     /// `frame` on a stream (role `input`), or `pair` on two (`request`, `response`), named in
-    /// `signals`; the decoder's `params`.
-    fn decode_streams(&mut self, d: &Decode) -> Result<usize, String> {
-        let roles: &[&str] = if d.protocol == "frame" {
-            &["input"]
-        } else {
-            &["request", "response"]
-        };
-        let mut errors = Vec::new();
-        let mut inputs = Vec::new();
-        for r in roles {
-            match d.signals.iter().find(|s| s.0 == *r) {
-                None => errors.push(format!("no stream for {r}")),
-                Some((_, s)) => match self.streams.iter().position(|x| x.name == *s) {
-                    Some(i) => inputs.push(i),
-                    None => errors.push(format!("{r}: unknown stream: {s}")),
-                },
+    /// `signals`; the decoder's `params`. The card says which.
+    fn decode_streams(&mut self, d: &Decode, def: &protocol::StreamDef) -> Result<usize, String> {
+        let errors = self.stream_errors(d, def);
+        if !errors.is_empty() {
+            return Err(Reasons {
+                name: None,
+                list: errors,
             }
+            .to_string());
         }
-        errors.extend(
+        // `stream_errors` found each role's stream
+        let input = |r: &str| {
             d.signals
                 .iter()
-                .filter(|s| !roles.contains(&s.0.as_str()))
-                .map(|s| format!("{} has no role {}", d.protocol, s.0)),
-        );
-        let fpt = self.trace.fs_per_tick;
-        if d.protocol == "frame" {
-            let decoder = inputs
-                .first()
-                .map(|&i| decode::make("frame", &self.streams[i].schema, &d.params, fpt));
-            match decoder {
-                Some(Err(e)) => errors.push(e),
-                Some(Ok(dec)) if errors.is_empty() => {
-                    return self.add_signals(decode::run(&d.name, &self.streams[inputs[0]], dec));
-                }
-                _ => {}
-            }
-            return Err(errors.join("; "));
+                .find(|s| s.0 == r)
+                .and_then(|(_, s)| self.streams.iter().position(|x| x.name == *s))
+                .expect("checked by stream_errors")
+        };
+        if def.kind == protocol::StreamKind::Frame {
+            let i = input(def.roles[0]);
+            let dec =
+                decode::Frame::new(&self.streams[i].schema, &d.params, self.trace.fs_per_tick)?;
+            return self.add_signals(decode::run(&d.name, &self.streams[i], Box::new(dec)));
         }
-        let (mut req, mut resp) = (None, None);
-        for (k, v) in &d.params {
-            match k.as_str() {
-                "id" => (req, resp) = (Some(v.as_str()), Some(v.as_str())),
-                "req_id" => req = Some(v.as_str()),
-                "resp_id" => resp = Some(v.as_str()),
-                _ => errors.push(format!("pair: no parameter {k} (id, req_id, resp_id)")),
-            }
-        }
-        if req.is_some() != resp.is_some() {
-            errors.push("pair: req_id and resp_id go together".into());
-        }
-        if !errors.is_empty() {
-            return Err(errors.join("; "));
-        }
-        let (pairs, unmatched) = decode::pair(
-            &d.name,
-            &self.streams[inputs[0]],
-            &self.streams[inputs[1]],
-            req.zip(resp),
-        )?;
+        let (req, resp) = (input(def.roles[0]), input(def.roles[1]));
+        let (rq, rp) = pair_ids(&d.params);
+        let (pairs, unmatched) =
+            decode::pair(&d.name, &self.streams[req], &self.streams[resp], rq.zip(rp))?;
         let var = self.add_signals(pairs)?;
         self.add_signals(unmatched)?;
         Ok(var)
     }
 
-    /// `check` as an instance: its params are the rules (name, expression), at its clock.
-    fn decode_check(&mut self, d: &Decode) -> Result<usize, String> {
-        let mut errors = Vec::new();
+    /// `check` as an instance: its params are the rules (name, expression), at its clock. Its
+    /// mistakes are said as `check_decode` says them.
+    fn decode_check(&mut self, d: &Decode, def: &protocol::StreamDef) -> Result<usize, String> {
+        let mut errors = self.stream_errors(d, def);
         if d.clock.is_empty() {
-            errors.push("no clock".to_string());
-        }
-        if d.params.is_empty() {
-            errors.push("check: no rules (params = { rule = \"expression\" })".into());
-        }
-        if !d.signals.is_empty() {
-            errors.push("check takes no signals".into());
+            errors.push(Reason {
+                on: vec!["clock".into()],
+                why: Why::NoClock,
+            });
         }
         if !errors.is_empty() {
-            return Err(errors.join("; "));
+            return Err(Reasons {
+                name: None,
+                list: errors,
+            }
+            .to_string());
         }
         let s = self.check(&d.name, &d.clock, &d.params)?;
         self.add_signals(s)
@@ -1119,6 +1192,21 @@ impl Workspace {
         }
         Ok(vars[0])
     }
+}
+
+/// `pair`'s id fields from its params: `id` names both, `req_id` / `resp_id` one each; other keys
+/// are `stream_errors`' to report.
+fn pair_ids(params: &[(String, String)]) -> (Option<&str>, Option<&str>) {
+    let mut ids = (None, None);
+    for (k, v) in params {
+        match k.as_str() {
+            "id" => ids = (Some(v.as_str()), Some(v.as_str())),
+            "req_id" => ids.0 = Some(v.as_str()),
+            "resp_id" => ids.1 = Some(v.as_str()),
+            _ => {}
+        }
+    }
+    ids
 }
 
 /// A protocol's own names: its name, its roles' and fields', and that it has roles. A built-in

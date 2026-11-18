@@ -5,7 +5,7 @@ mod common;
 use common::*;
 use wtf_core::stream::{Decode, Sampler, Stream};
 use wtf_core::trace::Val;
-use wtf_core::workspace::Workspace;
+use wtf_core::workspace::{Msg, Workspace};
 
 fn open(name: &str) -> Workspace {
     Workspace::open(&fixture("vcd").with_file_name(name)).unwrap()
@@ -40,7 +40,7 @@ const AXIS: &[(&str, &str)] = &[
 ];
 
 fn stream<'a>(ws: &'a Workspace, name: &str) -> &'a Stream {
-    ws.streams
+    ws.streams()
         .iter()
         .find(|s| s.name == name)
         .unwrap_or_else(|| panic!("no stream {name}"))
@@ -159,7 +159,7 @@ fn axis_stream_provenance() {
     let mut ws = open("axis.vcd");
     let names = |ws: &Workspace, v: Vec<usize>| {
         v.into_iter()
-            .map(|i| ws.streams[i].name.clone())
+            .map(|i| ws.streams()[i].name.clone())
             .collect::<Vec<_>>()
     };
     // the line the TUI runs, and the sets its answer names
@@ -167,9 +167,8 @@ fn axis_stream_provenance() {
         "decode rx axis clock=clk tvalid=tvalid tready=tready tdata=tdata tlast=tlast tkeep=tkeep";
     assert_eq!(
         wtf_core::command::run(&mut ws, line),
-        Ok(Some((
-            "rx: records rx.frame 4; violations rx.errors 2; made from rx.beat 7".into(),
-            false
+        Ok(Some(Msg::Info(
+            "rx: records rx.frame 4; violations rx.errors 2; made from rx.beat 7".into()
         )))
     );
     assert_eq!(names(&ws, ws.results("rx")), ["rx.frame", "rx.errors"]);
@@ -195,11 +194,11 @@ fn axis_stream_provenance() {
     );
     assert_eq!(
         wtf_core::command::run(&mut ws, "decode f off"),
-        Ok(Some(("f: removed".into(), false)))
+        Ok(Some(Msg::Info("f: removed".into())))
     );
     assert_eq!(
         wtf_core::command::run(&mut ws, "decode rx off"),
-        Ok(Some(("rx: removed".into(), false)))
+        Ok(Some(Msg::Info("rx: removed".into())))
     );
 }
 
@@ -281,9 +280,9 @@ fn generic_check() {
         ws.add_decode(decode("c", "check", "", &[("x", "tvalid")], &[]))
             .err()
             .unwrap(),
-        "c: no clock; check: no rules (params = { rule = \"expression\" }); check takes no signals"
+        "c: check has no role x; check: no rules (params = { rule = \"expression\" }); check takes no signals; no clock"
     );
-    assert!(wtf_core::session::to_toml(&ws).contains("[[decode]]\nname = \"c\"\nprotocol = \"check\"\nclock = \"top.clk\"\nparams = { short = \"tvalid && tlast && tkeep != 0xF\" }\n"));
+    assert!(wtf_core::session::to_toml(&ws).contains("[[decode]]\nname = \"c\"\nprotocol = \"check\"\nclock = \"top.clk\"\n\n[decode.params]\nshort = \"tvalid && tlast && tkeep != 0xF\"\n"));
 }
 
 #[test]
@@ -322,7 +321,7 @@ fn builtin_instance_errors() {
         ws.add_protocol(p),
         Err("axis is a built-in protocol".into())
     );
-    assert!(ws.streams.is_empty() && ws.decodes.is_empty());
+    assert!(ws.streams().is_empty() && ws.decodes().is_empty());
 }
 
 /// reqresp.vcd: requests (req_valid, req_id) 1 at 15ns, 2 at 25, 3 at 45; responses (resp_valid,
@@ -401,11 +400,11 @@ fn pairs_by_id_and_by_order() {
     ws.search("p.delay == 10ns", true, 1).unwrap();
     assert_eq!(ws.view.cursor, 25);
     let toml = wtf_core::session::to_toml(&ws);
-    assert!(toml.contains("[[decode]]\nname = \"p\"\nprotocol = \"pair\"\nsignals = { request = \"req\", response = \"resp\" }\nparams = { id = \"id\" }\n"), "{toml}");
+    assert!(toml.contains("[[decode]]\nname = \"p\"\nprotocol = \"pair\"\n\n[decode.signals]\nrequest = \"req\"\nresponse = \"resp\"\n\n[decode.params]\nid = \"id\"\n"), "{toml}");
     let mut other = open("reqresp.vcd");
     assert_eq!(wtf_core::session::apply(&mut other, &toml), Ok(vec![]));
     assert_eq!(table(stream(&other, "p.unmatched")).len(), 2);
-    assert_eq!(ws.reload(), Ok(("reloaded".into(), false)));
+    assert_eq!(ws.reload(), Ok(Msg::Info("reloaded".into())));
     assert_eq!(table(stream(&ws, "o")).len(), 3);
 }
 
@@ -486,10 +485,10 @@ fn instance_names_signals_in_full() {
     ))
     .unwrap();
     assert_eq!(
-        ws.decodes[0].signals,
+        ws.decodes()[0].signals,
         pairs(&[("b", "top.cpu.busy"), ("s", "top.cpu.state")])
     );
-    assert_eq!(ws.decodes[0].clock, "top.clk");
+    assert_eq!(ws.decodes()[0].clock, "top.clk");
     let text = wtf_core::session::to_toml(&ws);
     let mut back = open("simple.vcd");
     assert_eq!(
@@ -672,7 +671,7 @@ fn axilite_transactions_and_errors() {
     ws.add_decode(decode("s", "axilite", "aclk", &[], &[("prefix", "s_axi_")]))
         .unwrap();
     assert_eq!(
-        (ws.decodes[0].clock.as_str(), &ws.decodes[0].params),
+        (ws.decodes()[0].clock.as_str(), &ws.decodes()[0].params),
         ("top.aclk", &pairs(&[("prefix", "top.s_axi_")]))
     );
     let wr = stream(&ws, "s.wr");
@@ -1264,13 +1263,80 @@ fn check_decode_names_only() {
         "{e}"
     );
     assert_eq!(r.fields(), ["ready", "go"]);
-    assert!(ws.streams.is_empty() && ws.decodes.is_empty() && ws.trace.vars.len() == vars);
+    assert!(ws.streams().is_empty() && ws.decodes().is_empty() && ws.trace.vars.len() == vars);
     assert!(
         !ws.trace
             .vars
             .iter()
             .any(|v| v.path.contains("s_axi_") && ws.trace.loaded(ws.trace.by_path[&v.path])),
         "no value read"
+    );
+}
+
+/// An on-stream instance is checked against its card (the decode form, spec §5), like a signal
+/// protocol's: its streams exist, its roles and params are the card's, and `frame`'s params fit
+/// the stream it names.
+#[test]
+fn check_decode_validates_on_stream_instances() {
+    let mut ws = open("axilite.vcd");
+    ws.add_decode(decode("s", "axilite", "aclk", &[], &[("prefix", "s_axi_")]))
+        .unwrap();
+    // a stream it names that isn't decoded
+    let r = ws
+        .check_decode(&decode(
+            "f",
+            "frame",
+            "",
+            &[("input", "s.nope")],
+            &[("gap", "1ns")],
+        ))
+        .unwrap_err();
+    let e = r.to_string();
+    assert!(e.contains("f: input: unknown stream: s.nope"), "{e}");
+    let on = r.fields();
+    assert!(on.contains(&"input"), "{on:?}");
+    // over a decoded stream, a param that isn't the card's
+    let r = ws
+        .check_decode(&decode(
+            "f",
+            "frame",
+            "",
+            &[("input", "s.wr")],
+            &[("gap", "1ns"), ("ids", "id")],
+        ))
+        .unwrap_err();
+    let e = r.to_string();
+    assert!(
+        e.contains("frame: no parameter ids (last, gap, select, key, bytes, data)"),
+        "{e}"
+    );
+    let on = r.fields();
+    assert!(on.contains(&"protocol"), "{on:?}");
+    // a role it hasn't is the same mistake as a signal protocol's
+    let r = ws
+        .check_decode(&decode(
+            "f",
+            "frame",
+            "",
+            &[("input", "s.wr"), ("request", "s.wr")],
+            &[],
+        ))
+        .unwrap_err();
+    assert!(
+        r.to_string().contains("frame has no role request"),
+        "{}",
+        r.to_string()
+    );
+    // over a decoded stream, with params that fit, it checks clean
+    assert_eq!(
+        ws.check_decode(&decode(
+            "f",
+            "frame",
+            "",
+            &[("input", "s.wr")],
+            &[("gap", "0")]
+        )),
+        Ok(())
     );
 }
 
@@ -1350,7 +1416,7 @@ fn check_protocol_names_only() {
         (r.to_string().as_str(), r.fields()),
         ("axis is a built-in protocol", vec!["name"])
     );
-    assert!(ws.protocols.is_empty() && ws.trace.vars.len() == vars);
+    assert!(ws.protocols().is_empty() && ws.trace.vars.len() == vars);
     assert!(
         !ws.trace
             .vars
@@ -1466,13 +1532,13 @@ fn remove_and_redecode() {
         Err("no decode nope (decodes: s, lat)".into())
     );
     wtf_core::command::run(&mut ws, "decode lat off").unwrap();
-    let mark = ws.mark();
+    let cp = ws.checkpoint();
     assert_eq!(
         wtf_core::command::run(&mut ws, "decode s off"),
-        Ok(Some(("s: removed".into(), false)))
+        Ok(Some(Msg::Info("s: removed".into())))
     );
-    ws.record(mark);
-    assert!(ws.decodes.is_empty() && ws.streams.is_empty());
+    ws.record(cp);
+    assert!(ws.decodes().is_empty() && ws.streams().is_empty());
     assert_eq!(ws.rows.len(), 1, "s.wr's row gone, aclk's kept");
     // the rows come back with undo
     ws.undo().unwrap();
@@ -1517,16 +1583,16 @@ fn remove_and_redecode() {
     assert!(paths.contains(&"x") && !paths.contains(&"x.a"), "{paths:?}");
     assert_eq!(
         (
-            ws.decodes.len(),
-            ws.streams.len(),
-            ws.streams[0].schema[0].name.as_str()
+            ws.decodes().len(),
+            ws.streams().len(),
+            ws.streams()[0].schema[0].name.as_str()
         ),
         (1, 1, "b")
     );
     // a failing one leaves the old
     assert!(ws.redecode(decode("x", "pb", "nope", &w, &[])).is_err());
     assert_eq!(
-        (ws.decodes[0].clock.as_str(), ws.streams.len()),
+        (ws.decodes()[0].clock.as_str(), ws.streams().len()),
         ("top.aclk", 1)
     );
     // not made yet: made
@@ -1534,7 +1600,7 @@ fn remove_and_redecode() {
         ws.redecode(decode("y", "pa", "aclk", &w, &[])),
         Ok(String::new())
     );
-    assert_eq!(ws.decodes.len(), 2);
+    assert_eq!(ws.decodes().len(), 2);
 }
 
 /// AXI4 in axi4.vcd: write 1 (two beats to 0x100) and write 2 (one beat to 0x200, SLVERR), whose B
@@ -1883,7 +1949,7 @@ fn axilite_one_side() {
         .unwrap();
     assert_eq!(table(stream(&ws, "w.wr")).len(), 2);
     assert!(
-        !ws.streams
+        !ws.streams()
             .iter()
             .any(|s| s.name.starts_with("w.ar") || s.name.starts_with("w.rd"))
     );
@@ -1927,7 +1993,7 @@ fn axilite_one_side() {
         table(stream(&ws, "m.rd")),
         [row(5, 25, &["10", "4", "0", "10", "0"])]
     );
-    assert!(!ws.streams.iter().any(|s| s.name == "m.wr"));
+    assert!(!ws.streams().iter().any(|s| s.name == "m.wr"));
 }
 
 /// The roles of IHI 0022L Table B2.2 are required; the five it lets a slave leave out are
@@ -2112,7 +2178,7 @@ fn axi4_one_side() {
         "arvalid", "arready", "araddr", "arid", "rvalid", "rready", "rdata", "rlast", "rid",
     ]);
     let names = |ws: &Workspace| {
-        ws.streams
+        ws.streams()
             .iter()
             .map(|s| s.name.clone())
             .collect::<Vec<_>>()
@@ -2193,7 +2259,7 @@ fn spi_streams_are_made_from_bits() {
     let names: Vec<String> = ws
         .results("f")
         .into_iter()
-        .map(|i| ws.streams[i].name.clone())
+        .map(|i| ws.streams()[i].name.clone())
         .collect();
     assert_eq!(names, ["f.transfer"]);
 }
@@ -2324,7 +2390,7 @@ fn results_and_sets() {
         .unwrap();
     let names = |ws: &wtf_core::workspace::Workspace, v: Vec<usize>| {
         v.into_iter()
-            .map(|i| ws.streams[i].name.clone())
+            .map(|i| ws.streams()[i].name.clone())
             .collect::<Vec<_>>()
     };
     assert_eq!(
@@ -2363,8 +2429,8 @@ fn results_and_sets() {
     assert!(!names(&ws, ws.results("s")).contains(&"s.rd".to_string()));
     // wr and rd share addr, prot, data, resp, delay; strb is wr's alone
     let set = wtf_core::stream::Set::new(vec![
-        &ws.streams[ws.stream_set("s.wr").unwrap()[0]],
-        &ws.streams[ws.stream_set("s.rd").unwrap()[0]],
+        &ws.streams()[ws.stream_set("s.wr").unwrap()[0]],
+        &ws.streams()[ws.stream_set("s.rd").unwrap()[0]],
     ]);
     assert_eq!(
         set.columns
@@ -2393,8 +2459,8 @@ fn results_and_sets() {
     assert_eq!(groups.iter().map(|g| g.count).sum::<usize>(), 10);
     // a name with two kinds is a column per stream
     let set = wtf_core::stream::Set::new(vec![
-        &ws.streams[ws.stream_set("s.errors").unwrap()[0]],
-        &ws.streams[ws.stream_set("s.wr.unmatched").unwrap()[0]],
+        &ws.streams()[ws.stream_set("s.errors").unwrap()[0]],
+        &ws.streams()[ws.stream_set("s.wr.unmatched").unwrap()[0]],
     ]);
     assert_eq!(
         set.columns
@@ -2415,7 +2481,7 @@ fn set_errors_and_briefs() {
     );
     ws.add_decode(decode("s", "axilite", "aclk", &[], &[("prefix", "s_axi_")]))
         .unwrap();
-    let one = wtf_core::stream::Set::new(vec![&ws.streams[ws.stream_set("s.wr").unwrap()[0]]]);
+    let one = wtf_core::stream::Set::new(vec![&ws.streams()[ws.stream_set("s.wr").unwrap()[0]]]);
     assert!(
         one.group_by(&[], &["nope".into()])
             .err()
@@ -2423,8 +2489,8 @@ fn set_errors_and_briefs() {
             .starts_with("s.wr: no field nope (fields: ")
     );
     let two = wtf_core::stream::Set::new(vec![
-        &ws.streams[ws.stream_set("s.wr").unwrap()[0]],
-        &ws.streams[ws.stream_set("s.rd").unwrap()[0]],
+        &ws.streams()[ws.stream_set("s.wr").unwrap()[0]],
+        &ws.streams()[ws.stream_set("s.rd").unwrap()[0]],
     ]);
     assert!(
         two.group_by(&[], &["nope".into()])
@@ -2549,7 +2615,7 @@ fn protocol_of_a_search() {
         d
     );
     wtf_core::command::run(&mut ws, &p.line()).unwrap();
-    assert_eq!(ws.protocols.last(), Some(&p));
+    assert_eq!(ws.protocols().last(), Some(&p));
     wtf_core::command::run(&mut ws, &d.line()).unwrap();
     assert_eq!(wtf_core::command::quote("valid && b=1"), "\"valid && b=1\"");
     assert!(ws.protocol_of("ev", "s", "@clk nosuch", &[]).is_err());
@@ -2787,8 +2853,7 @@ fn loaded(name: &'static str, about: &'static str) -> std::sync::Arc<wtf_core::p
 fn loaded_protocols() {
     use wtf_core::protocol;
     let mut ws = open("axilite.vcd");
-    ws.loaded
-        .push(loaded("beats", "one beat a cycle, from a file"));
+    ws.push_loaded(loaded("beats", "one beat a cycle, from a file"));
 
     // listed between the on-streams protocols and the session's own
     let list = protocol::list(ws.sources());
@@ -2826,7 +2891,7 @@ fn loaded_protocols() {
     assert_eq!(ws.free_name("beats"), "beats1");
 
     // a built-in shadows a loaded one of its name
-    ws.loaded.push(loaded("axis", "never reached"));
+    ws.push_loaded(loaded("axis", "never reached"));
     assert!(
         protocol::describe("axis", ws.sources())
             .unwrap()
@@ -3000,9 +3065,9 @@ fn axis_warning_rules() {
 #[test]
 fn wasm_protocol_params() {
     let mut ws = open("simple.vcd");
-    ws.loaded.push(common::loaded("probe", &["spin"]));
+    ws.push_loaded(common::loaded("probe", &["spin"]));
     wtf_core::command::run(&mut ws, "decode p probe clock=top.clk spin=3").unwrap();
-    let d = ws.decodes.iter().find(|d| d.name == "p").unwrap();
+    let d = ws.decodes().iter().find(|d| d.name == "p").unwrap();
     assert!(d.signals.is_empty(), "{:?}", d.signals);
     assert_eq!(d.params, vec![("spin".to_string(), "3".to_string())]);
 }
@@ -3040,7 +3105,7 @@ fn protocol_from_a_file() {
     );
     run(&mut ws, "protocol bar wasm=p/bar.wasm").unwrap();
     run(&mut ws, "protocol bar wasm=p/bar.wasm").unwrap();
-    assert_eq!(ws.loaded.iter().filter(|l| l.name == "bar").count(), 1);
+    assert_eq!(ws.loaded().iter().filter(|l| l.name == "bar").count(), 1);
 
     let mut ws = open("axis.vcd");
     let session = "[[protocol]]\nname = \"baz\"\nwasm = \"p/baz.wasm\"\n\n\
@@ -3055,5 +3120,5 @@ fn protocol_from_a_file() {
             "decode z: wasm p/baz.wasm is not loaded"
         ]
     );
-    assert!(ws.streams.is_empty());
+    assert!(ws.streams().is_empty());
 }

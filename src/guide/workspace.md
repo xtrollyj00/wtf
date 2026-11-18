@@ -1,9 +1,10 @@
 Showing the user evidence.
 
 Form
-- `workspace` sets everything at once, as one undo step: `rows`, `cursors`, `range`, `scope`,
-  `signals`, `protocols`, `decode`. Every name, radix and time is checked first and all the
-  errors come back at once.
+- `workspace` sets everything at once, as one undo step, in the session's own shape (spec §11):
+  `signal`, `protocol`, `decode`, `names`, `rows`, `cursors`, `view`, `scope`, `unit`. Every
+  name, radix, time and key is checked first and all the errors come back at once; a call that
+  fails changes nothing.
 - `view` describes it, `render` draws it as text, `present` shows it to the user.
 
 Recipes
@@ -14,19 +15,26 @@ Recipes
 - Build on what the user has open: `user_view` `adopt`, then `command` steps.
 
 Details
-- `rows`, top to bottom: `"name"`, `"name:radix"`, `"name:radix:colour"` (`help radix`), or a
-  group `{"group": "write", "rows": ["awaddr", "awvalid"], "collapsed": false}`. Groups
-  hold signals only. A struct or array is one row (`"pkts"`); `{"signal": "pkts", "open":
-  ["pkts", "pkts[1]"]}` opens levels of it, each named from the row's name; `"fields":
-  ["pkts[1].pair.hi:dec:red"]` gives lines under a row a radix and colour of their own.
+- `signal`: computed signals, `[{"name": "op", "expr": "cmd[7:0]"}]`.
+- `protocol`: sampled protocols, `[{"name": "cmd", "roles": ["valid", "ready", "data"], "when":
+  "valid && ready", "fields": [{"op": "data[7:0]"}]}]`, as `protocol` defines them (`fields` in
+  order: an array of single-key tables; a table works for session parity but sorts); `decode`
+  puts them on signals: `[{"name": "c0", "protocol": "cmd", "clock": "clk", "signals":
+  [{"valid": "cmd_valid"}], "params": [{"prefix": "rx_"}]}]` (`help decode`). Streams can then
+  be rows.
+- `names`: value names, `[{"signal": "state", "values": "0=zero"}]`.
+- `rows`, top to bottom: `{"signal": "awaddr", "radix": "hex", "color": "red"}`, a group
+  `{"group": "write", "rows": [...], "collapsed": false}`, an open struct `{"signal": "pkts",
+  "open": ["pkts", "pkts[1]"], "fields": [{"field": "pkt.pair.hi", "radix": "dec"}]}`. Groups
+  hold signals only.
 - `cursors` by number, `{"1": "80ns", "2": "390ns"}`: 1 is the cursor, where values are read;
   2 - 9 are marks on the events to show. A mark's name stands on the ruler, its note on the
   user's status line when they jump there.
-- `range`: the visible range, `["60ns", "480ns"]`; default the whole trace.
-- `scope` (`help names`); `signals`: computed signals, `["op = cmd[7:0]"]`.
-- `protocols`: `{name, roles, when, fields: ["op = data[7:0]"]}`, as `protocol` defines them;
-  `decode`: `{name, protocol, clock, signals: ["tvalid = rx_tvalid"], params: ["prefix =
-  rx_"]}`, as `decode` does (`help decode`). Streams can then be rows.
+- `view`: the visible range, `{"time": "60ns", "to": "480ns"}`; default the whole trace.
+- `scope` (`help names`).
+- `unit`: the time unit of the answers, `ns`, or `auto` for the one that fits (`help times`).
+- A key an entry doesn't take is an error naming those it does. The session file's `version`
+  and `trail` are not declared: the trail is your calls.
 - With no window open, `present` writes a session file that `wtf <trace>` shows when the user
   opens the trace: tell them so. The user also sees each query and change you make as a step
   (`:trail`), with its time, so each query is part of what they see.

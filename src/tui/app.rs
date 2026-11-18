@@ -21,6 +21,30 @@ pub enum Mode {
     Search,
 }
 
+/// The float over the rows, if one, that has the keys (spec §2 "Views").
+pub enum Overlay {
+    /// The `?` box with the keys of the current mode.
+    Help,
+    /// The `e` box: a title and the full value of the selected signal at the cursor.
+    Examine(Examine),
+    /// The `:records` list, or a `:help <topic>` text.
+    Records(Records),
+    /// `:records`: a stream's records as a table (spec §5 "Records").
+    Browser(crate::tui::browser::Browser),
+    /// `:messages`, at this note (spec §4 "Notifications").
+    Messages(usize),
+    /// A group's name being typed on its header (`>`, `R`) (spec §6).
+    Naming(Naming),
+    /// The right click's menu (spec §2 "Menu").
+    Menu(Menu),
+    /// The picker (`:pick`, spec §5 "Picker").
+    Picker(crate::tui::picker::Picker),
+    /// The decode form (`:decode` alone, spec §5 "Decode form").
+    Form(crate::tui::form::Form),
+    /// The decodes list (`:decodes`, spec §5 "Decodes").
+    Decodes(crate::tui::decodes::Decodes),
+}
+
 pub struct App {
     /// What is shown, and everything that changes it; the rest is how the terminal UI edits it.
     pub ws: Workspace,
@@ -55,8 +79,6 @@ pub struct App {
     pub notes: Vec<Note>,
     /// The message last put in `notes`, so each goes in once.
     logged: Option<Msg>,
-    /// `:messages` is open, at this note (spec §4 "Notifications").
-    pub messages: Option<usize>,
     /// Notes before this one are dismissed from the corner (`Esc`).
     pub dismissed: usize,
     /// What built-in protocols find in the trace (`protocol::detect`), worked out once when it
@@ -90,14 +112,9 @@ pub struct App {
     /// The leader menu, open at this group (the keys from the top) (spec §2 "Leader").
     pub leader: Option<Vec<Key>>,
     pub quit: bool,
-    /// The `?` box with the keys of the current mode is open.
-    pub help: bool,
-    /// The `e` box: a title and the full value of the selected signal at the cursor.
-    pub examine: Option<Examine>,
-    /// The `:records` list, or a `:help <topic>` text.
-    pub records: Option<Records>,
-    /// `:records`: a stream's records as a table (spec §5 "Records").
-    pub browser: Option<crate::tui::browser::Browser>,
+    /// The float over the rows, if one, that has the keys (spec §2 "Views"): key, mouse and
+    /// render each match it once, so adding a view is caught by the compiler at every site.
+    pub overlay: Option<Overlay>,
     /// Text `yy` / `yt` copied, for the terminal's clipboard (OSC 52).
     pub yank: Option<String>,
     /// The agents working on this trace (spec §15 "Joining"), by id, with the session each had
@@ -116,19 +133,8 @@ pub struct App {
     pub held: Option<Held>,
     /// The last click, for a double click: what it was on and when.
     click: Option<(Target, std::time::Instant)>,
-    /// The right click's menu (spec §2 "Menu").
-    pub menu: Option<Menu>,
-    /// The picker (`:pick`, spec §5 "Picker").
-    pub picker: Option<crate::tui::picker::Picker>,
-    /// The decode form (`:decode` alone, spec §5 "Decode form").
-    pub form: Option<crate::tui::form::Form>,
-    /// The decodes list (`:decodes`, spec §5 "Decodes").
-    pub decodes: Option<crate::tui::decodes::Decodes>,
     /// The rows `dd` removed last, for `p` / `P` (spec §6).
     pub removed: Vec<Row>,
-    /// A group's name being typed on its header (`>`, `R`): the header, the name it had, and
-    /// whether the next character replaces it.
-    pub naming: Option<Naming>,
 }
 
 /// A group's name edited in place (spec §6): typed into the header's name.
@@ -248,7 +254,6 @@ impl App {
             msg: None,
             agent_msg: None,
             notes: Vec::new(),
-            messages: None,
             logged: None,
             dismissed: 0,
             noted: None,
@@ -261,10 +266,7 @@ impl App {
             which_delay: std::time::Duration::from_millis(300),
             leader: None,
             quit: false,
-            help: false,
-            examine: None,
-            records: None,
-            browser: None,
+            overlay: None,
             yank: None,
             agents: Vec::new(),
             follow: None,
@@ -277,12 +279,7 @@ impl App {
             drag: None,
             held: None,
             click: None,
-            menu: None,
-            picker: None,
-            form: None,
-            decodes: None,
             removed: Vec::new(),
-            naming: None,
         }
     }
 
@@ -297,7 +294,7 @@ impl App {
             .as_ref()
             .map_or("agent".into(), |f| f.id.clone());
         self.log(&msg, Some(who));
-        Ok(msg.0)
+        Ok(msg.text().to_string())
     }
 
     /// Show the session an agent left for this trace (`<trace>.agent.session.toml`) as `present`
@@ -306,13 +303,18 @@ impl App {
         let path = session::agent_path(&self.ws.trace_path);
         let text = std::fs::read_to_string(&path)
             .map_err(|_| format!("no agent session for this trace ({})", path.display()))?;
-        let (msg, err) = self.ws.present(&text, false)?;
+        let msg = self.ws.present(&text, false)?;
         self.mode = Mode::Normal;
         let steps = match self.ws.trail.len() {
             0 => String::new(),
             n => format!("; :trail lists its {n} steps"),
         };
-        self.msg = Some((format!("{msg}{steps}; u gives your own view"), err));
+        let text = format!("{}{steps}; u gives your own view", msg.text());
+        self.msg = Some(if msg.is_warn() {
+            Msg::Warn(text)
+        } else {
+            Msg::Info(text)
+        });
         Ok(())
     }
 
@@ -339,30 +341,30 @@ impl App {
         let (cmd, arg) = line.split_once(char::is_whitespace).unwrap_or((line, ""));
         let msg = match cmd {
             "help" if arg.trim().is_empty() => {
-                self.help = true;
+                self.overlay = Some(Overlay::Help);
                 None
             }
             // the agents' reference, one source for both (spec §15)
             "help" => {
                 let topics = || {
-                    crate::mcp::help::TOPICS
+                    crate::guide::TOPICS
                         .iter()
                         .map(|t| t.0)
                         .collect::<Vec<_>>()
                         .join(" ")
                 };
-                let text = crate::mcp::help::answer(Some(arg), wtf_core::pattern::Syntax::Glob)
+                let text = crate::guide::answer(Some(arg), wtf_core::pattern::Syntax::Glob)
                     .map_err(|_| format!("no help topic {}; topics: {}", arg.trim(), topics()))?;
                 let items = text.lines().map(|l| (None, l.to_string())).collect();
                 let name = format!("help {} {}", gl().dot, arg.trim().to_lowercase());
-                self.records = Some(Records {
+                self.overlay = Some(Overlay::Records(Records {
                     name,
                     title: String::new(),
                     items,
                     hl: 0,
                     top: 0,
                     page: 1,
-                });
+                }));
                 None
             }
             // the agent's steps, newest last; Enter jumps to a step's time (spec §15 "Trail")
@@ -380,14 +382,14 @@ impl App {
                     .map(|s| (s.time, Self::step_line(s)))
                     .collect();
                 let (title, hl) = (format!("{} steps", items.len()), items.len() - 1);
-                self.records = Some(Records {
+                self.overlay = Some(Overlay::Records(Records {
                     name: "trail".into(),
                     title,
                     items,
                     hl,
                     top: 0,
                     page: 1,
-                });
+                }));
                 None
             }
             // every message, with its time and who caused it (spec §4 "Notifications")
@@ -396,7 +398,7 @@ impl App {
                 if self.notes.is_empty() {
                     return Err("no messages yet".into());
                 }
-                self.messages = Some(self.notes.len() - 1);
+                self.overlay = Some(Overlay::Messages(self.notes.len() - 1));
                 None
             }
             "w" => Some(command::save(&mut self.ws, arg.trim())?),
@@ -459,23 +461,22 @@ impl App {
         let ids = |l: &[(String, String)]| l.iter().map(|a| a.0.clone()).collect::<Vec<_>>();
         let (was, is) = (ids(&old), ids(&self.agents));
         // each with the agent it is about, for `:messages`
-        let mut said: Vec<(String, bool)> = Vec::new();
+        let mut said: Vec<Msg> = Vec::new();
         let mut whose: Vec<String> = Vec::new();
         let mut steps: Vec<Option<(String, String, String)>> = Vec::new();
         for id in is.iter().filter(|id| !was.contains(id)) {
-            said.push((
-                format!("agent {id} joined (:follow shows its workspace)"),
-                false,
-            ));
+            said.push(Msg::Info(format!(
+                "agent {id} joined (:follow shows its workspace)"
+            )));
             whose.push(id.clone());
             steps.push(None);
         }
         for id in was.iter().filter(|id| !is.contains(id)) {
             if self.follow.as_ref().is_some_and(|f| &f.id == id) {
                 self.follow = None;
-                said.push((format!("agent {id} left; not following it"), true));
+                said.push(Msg::Warn(format!("agent {id} left; not following it")));
             } else {
-                said.push((format!("agent {id} left"), false));
+                said.push(Msg::Info(format!("agent {id} left")));
             }
             whose.push(id.clone());
             steps.push(None);
@@ -513,10 +514,14 @@ impl App {
                     } else {
                         "agent".into()
                     };
-                    said.push((
-                        format!("{who}: {}", Self::step_line(s)),
-                        s.answer.starts_with("error: "),
-                    ));
+                    said.push({
+                        let text = format!("{who}: {}", Self::step_line(s));
+                        if s.answer.starts_with("error: ") {
+                            Msg::Warn(text)
+                        } else {
+                            Msg::Info(text)
+                        }
+                    });
                     whose.push(id.clone());
                     steps.push(Some((s.tool.clone(), s.ask.clone(), s.answer.clone())));
                 }
@@ -550,10 +555,10 @@ impl App {
             } else {
                 "your view is back"
             };
-            self.msg = Some((
-                format!("not following {}; {back} (u: what you followed)", f.id),
-                false,
-            ));
+            self.msg = Some(Msg::Info(format!(
+                "not following {}; {back} (u: what you followed)",
+                f.id
+            )));
             return Ok(());
         }
         let agents = crate::live::on_trace("agent", &self.ws.trace_path);
@@ -592,7 +597,7 @@ impl App {
         } else {
             self.agents.push((id.clone(), text));
         }
-        self.msg = Some((format!("following {id}"), false));
+        self.msg = Some(Msg::Info(format!("following {id}")));
         Ok(())
     }
 
@@ -633,63 +638,66 @@ impl App {
     /// Every key that changes the rows records an undo step, except collapsing and expanding
     /// groups (not a change to the layout) and undo / redo themselves.
     pub fn key(&mut self, k: KeyEvent) {
-        // a menu takes the keys while open; Esc cancels a drag
-        if self.menu.is_some() {
-            return self.menu_key(k);
+        // whatever is over the rows takes the key, else the leader menu, else the mode
+        match self.overlay {
+            Some(Overlay::Menu(_)) => return self.menu_key(k),
+            // Esc cancels a drag or a held line before anything under it takes the key
+            _ if self.drag.is_some() && k.code == KeyCode::Esc => return self.cancel_drag(),
+            _ if self.held.is_some() && k.code == KeyCode::Esc => return self.cancel_held(),
+            Some(Overlay::Help) => return self.box_key(true, k),
+            Some(Overlay::Examine(_)) => return self.box_key(false, k),
+            Some(Overlay::Browser(_)) => return self.browser_key(k),
+            Some(Overlay::Records(_)) => return self.records_key(k),
+            Some(Overlay::Messages(_)) => return self.messages_key(k),
+            Some(Overlay::Naming(_)) => return self.naming_key(k),
+            // these three change the workspace, so their keys are one undo step
+            Some(Overlay::Picker(_)) => return self.undoable(Self::picker_key, k),
+            Some(Overlay::Decodes(_)) => return self.undoable(Self::decodes_key, k),
+            Some(Overlay::Form(_)) => return self.undoable(Self::form_key, k),
+            None => {}
         }
-        if self.drag.is_some() && k.code == KeyCode::Esc {
-            return self.cancel_drag();
-        }
-        if self.held.is_some() && k.code == KeyCode::Esc {
-            return self.cancel_held();
-        }
-        // the help and e boxes take no other keys: they scroll and close
-        if self.help || self.examine.is_some() {
-            let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
-            match k.code {
-                KeyCode::Esc | KeyCode::Char('q') => {
-                    (self.help, self.examine, self.scroll) = (false, None, 0)
-                }
-                KeyCode::Char('?') if self.help => (self.help, self.scroll) = (false, 0),
-                KeyCode::Char('e') if !self.help => (self.examine, self.scroll) = (None, 0),
-                KeyCode::Char('j') | KeyCode::Down => self.scroll += 1,
-                KeyCode::Char('k') | KeyCode::Up => self.scroll = self.scroll.saturating_sub(1),
-                KeyCode::Char('d' | 'f') if ctrl => self.scroll += 10,
-                KeyCode::Char('u' | 'b') if ctrl => self.scroll = self.scroll.saturating_sub(10),
-                KeyCode::Char('g') => self.scroll = 0,
-                // the box keeps it in range when drawn
-                KeyCode::Char('G') => self.scroll = usize::MAX,
-                _ => {}
-            }
-            return;
-        }
-        if self.browser.is_some() {
-            return self.browser_key(k);
-        }
-        if self.records.is_some() {
-            return self.records_key(k);
-        }
-        if self.messages.is_some() {
-            return self.messages_key(k);
-        }
-        if self.naming.is_some() {
-            return self.naming_key(k);
-        }
-        let mark = self.ws.mark();
+        let cp = self.ws.checkpoint();
         if self.leader.is_some() {
             self.leader_key(k);
-            return self.ws.record(mark);
+            return self.ws.record(cp);
         }
         match self.mode {
-            _ if self.picker.is_some() => self.picker_key(k),
-            _ if self.decodes.is_some() => self.decodes_key(k),
-            _ if self.form.is_some() => self.form_key(k),
             Mode::Normal if self.adding => self.panel_key(k),
             Mode::Normal => self.normal_key(k),
             Mode::Command | Mode::Search => self.command_key(k),
         }
-        self.ws.record(mark);
-        // a line under a row stays selected only while the row shows it
+        self.ws.record(cp);
+        self.bit_shown();
+    }
+
+    /// An overlay key that changes the workspace, as one undo step.
+    fn undoable(&mut self, f: fn(&mut Self, KeyEvent), k: KeyEvent) {
+        let cp = self.ws.checkpoint();
+        f(self, k);
+        self.ws.record(cp);
+        self.bit_shown();
+    }
+
+    /// The `?` and `e` boxes take no other keys: they scroll and close.
+    fn box_key(&mut self, help: bool, k: KeyEvent) {
+        let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+        match k.code {
+            KeyCode::Esc | KeyCode::Char('q') => (self.overlay, self.scroll) = (None, 0),
+            KeyCode::Char('?') if help => (self.overlay, self.scroll) = (None, 0),
+            KeyCode::Char('e') if !help => (self.overlay, self.scroll) = (None, 0),
+            KeyCode::Char('j') | KeyCode::Down => self.scroll += 1,
+            KeyCode::Char('k') | KeyCode::Up => self.scroll = self.scroll.saturating_sub(1),
+            KeyCode::Char('d' | 'f') if ctrl => self.scroll += 10,
+            KeyCode::Char('u' | 'b') if ctrl => self.scroll = self.scroll.saturating_sub(10),
+            KeyCode::Char('g') => self.scroll = 0,
+            // the box keeps it in range when drawn
+            KeyCode::Char('G') => self.scroll = usize::MAX,
+            _ => {}
+        }
+    }
+
+    /// A line under a row stays selected only while the row shows it.
+    fn bit_shown(&mut self) {
         if let Some(b) = self.ws.bit
             && !matches!(self.ws.rows.get(self.ws.sel), Some(Row::Signal(s)) if (b as usize) < self.ws.subs(s).len())
         {
@@ -730,20 +738,22 @@ impl App {
     /// Start typing the selected header's name in place, the first character replacing it.
     fn start_naming(&mut self) {
         if let Some(Row::Group { name, .. }) = self.ws.rows.get(self.ws.sel) {
-            self.naming = Some(Naming {
+            self.overlay = Some(Overlay::Naming(Naming {
                 header: self.ws.sel,
                 was: name.clone(),
                 fresh: true,
-            });
+            }));
         }
     }
 
     /// Typing a group's name (spec §6): characters, `Backspace`, `Ctrl-u` edit it on the header;
     /// `Enter` keeps it, one undo step; `Esc` puts back the name it had.
     fn naming_key(&mut self, k: KeyEvent) {
-        let Some(n) = &mut self.naming else { return };
+        let Some(Overlay::Naming(n)) = &mut self.overlay else {
+            return;
+        };
         let Some(Row::Group { name, .. }) = self.ws.rows.get_mut(n.header) else {
-            return self.naming = None;
+            return self.overlay = None;
         };
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
         match k.code {
@@ -763,12 +773,11 @@ impl App {
             }
             KeyCode::Esc => {
                 *name = n.was.clone();
-                self.naming = None;
+                self.overlay = None;
             }
             KeyCode::Enter if name.trim().is_empty() => {
-                self.msg = Some((
+                self.msg = Some(Msg::Warn(
                     "a group needs a name; Esc keeps the one it had".into(),
-                    true,
                 ))
             }
             KeyCode::Enter => {
@@ -776,12 +785,12 @@ impl App {
                 let typed = name.trim().to_string();
                 *name = n.was.clone();
                 let h = n.header;
-                let mark = self.ws.mark();
+                let cp = self.ws.checkpoint();
                 if let Some(Row::Group { name, .. }) = self.ws.rows.get_mut(h) {
                     *name = typed;
                 }
-                self.ws.record(mark);
-                self.naming = None;
+                self.ws.record(cp);
+                self.overlay = None;
             }
             _ => {}
         }
@@ -790,11 +799,13 @@ impl App {
     /// The `:help <topic>` and `:trail` box has the keys: `j` / `k` and `Ctrl-f` / `Ctrl-b` move,
     /// `Enter` jumps to a line's time, `Esc` / `q` close.
     fn records_key(&mut self, k: KeyEvent) {
-        let Some(r) = &mut self.records else { return };
+        let Some(Overlay::Records(r)) = &mut self.overlay else {
+            return;
+        };
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
         let last = r.items.len() - 1;
         match k.code {
-            KeyCode::Esc | KeyCode::Char('q') => self.records = None,
+            KeyCode::Esc | KeyCode::Char('q') => self.overlay = None,
             KeyCode::Char('j') | KeyCode::Down => r.hl = (r.hl + 1).min(last),
             KeyCode::Char('k') | KeyCode::Up => r.hl = r.hl.saturating_sub(1),
             KeyCode::Char('f') if ctrl => r.hl = (r.hl + r.page).min(last),
@@ -803,7 +814,7 @@ impl App {
             KeyCode::Char('g') => r.hl = 0,
             KeyCode::Enter => {
                 let Some(t) = r.items[r.hl].0 else { return };
-                self.records = None;
+                self.overlay = None;
                 self.ws.jump(t, false);
             }
             _ => {}
@@ -847,7 +858,7 @@ impl App {
             }
             _ => return Ok(()),
         };
-        self.msg = Some((format!("copied: {text}"), false));
+        self.msg = Some(Msg::Info(format!("copied: {text}")));
         self.yank = Some(text);
         Ok(())
     }
@@ -857,7 +868,7 @@ impl App {
     fn examine(&mut self) {
         let fpt = self.ws.trace.fs_per_tick;
         let Some(Row::Signal(s)) = self.ws.rows.get(self.ws.sel) else {
-            return self.msg = Some(("select a signal to examine".into(), true));
+            return self.msg = Some(Msg::Warn("select a signal to examine".into()));
         };
         if let Some((st, i)) = self.ws.record_at(s.var) {
             let r = &st.records[i];
@@ -882,12 +893,12 @@ impl App {
                     ));
                 }
             }
-            return self.examine = Some(Examine {
+            return self.overlay = Some(Overlay::Examine(Examine {
                 title: format!("{} {}", st.name, st.label(i, fpt)),
                 at,
                 lines,
                 of: (s.var, None),
-            });
+            }));
         }
         let (var, bit) = self.ws.probe(s, self.ws.bit);
         let name = self.ws.trace.probe_path((var, bit));
@@ -903,12 +914,12 @@ impl App {
             lines.push(Default::default());
             lines.extend(self.fields(s, var));
         }
-        self.examine = Some(Examine {
+        self.overlay = Some(Overlay::Examine(Examine {
             title: name,
             at: time::format(self.ws.view.cursor, fpt),
             lines,
             of: (var, bit),
-        });
+        }));
     }
 
     /// A struct's or array's fields at the cursor, a line each, nested ones indented under their
@@ -970,7 +981,7 @@ impl App {
         {
             msg += &format!("; {k}: records of them");
         }
-        self.msg = Some((msg, false));
+        self.msg = Some(Msg::Info(msg));
         Ok(())
     }
 
@@ -1039,7 +1050,7 @@ impl App {
 
     pub(crate) fn report(&mut self, r: Result<(), String>) {
         if let Err(e) = r {
-            self.msg = Some((e, true));
+            self.msg = Some(Msg::Warn(e));
         }
     }
 
@@ -1096,24 +1107,26 @@ impl App {
     /// `:messages` has the keys: `j` / `k` move, `g` / `G` to the first / last, `y` copies the
     /// line's text, `Enter` on an agent's step opens the trail, `Esc` / `q` close.
     fn messages_key(&mut self, k: KeyEvent) {
-        let Some(i) = self.messages else { return };
+        let Some(Overlay::Messages(i)) = self.overlay else {
+            return;
+        };
         let last = self.notes.len().saturating_sub(1);
-        self.messages = match k.code {
-            KeyCode::Char('j') | KeyCode::Down => Some((i + 1).min(last)),
-            KeyCode::Char('k') | KeyCode::Up => Some(i.saturating_sub(1)),
-            KeyCode::Char('g') => Some(0),
-            KeyCode::Char('G') => Some(last),
+        if k.code == KeyCode::Enter && self.notes.get(i).is_some_and(|n| n.step.is_some()) {
+            self.overlay = None;
+            let r = self.run("pick trail");
+            return self.report(r);
+        }
+        self.overlay = match k.code {
+            KeyCode::Char('j') | KeyCode::Down => Some(Overlay::Messages((i + 1).min(last))),
+            KeyCode::Char('k') | KeyCode::Up => Some(Overlay::Messages(i.saturating_sub(1))),
+            KeyCode::Char('g') => Some(Overlay::Messages(0)),
+            KeyCode::Char('G') => Some(Overlay::Messages(last)),
             KeyCode::Char('y') => {
                 self.yank = self.notes.get(i).map(|n| n.text.clone());
-                Some(i)
-            }
-            KeyCode::Enter if self.notes.get(i).is_some_and(|n| n.step.is_some()) => {
-                self.messages = None;
-                let r = self.run("pick trail");
-                return self.report(r);
+                Some(Overlay::Messages(i))
             }
             KeyCode::Esc | KeyCode::Char('q') => None,
-            _ => Some(i),
+            _ => Some(Overlay::Messages(i)),
         };
     }
 
@@ -1128,13 +1141,13 @@ impl App {
     }
 
     /// Put a message in `notes`, as said by `who` (an agent's id, none for the user).
-    fn log(&mut self, (text, err): &Msg, who: Option<String>) {
+    fn log(&mut self, msg: &Msg, who: Option<String>) {
         let wall = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs());
         self.notes.push(Note {
-            text: text.clone(),
-            err: *err,
+            text: msg.text().to_string(),
+            err: msg.is_warn(),
             who,
             step: None,
             wall,
@@ -1195,12 +1208,11 @@ impl App {
     /// The picker's highlight has rested long enough for its preview to read the signal: true
     /// once, to draw it.
     pub fn picker_tick(&self, now: std::time::Instant) -> bool {
-        self.picker
-            .as_ref()
-            .and_then(|p| p.rest)
-            .is_some_and(|(_, since, drawn)| {
-                !drawn && now.duration_since(since) >= self.preview_wait
-            })
+        match &self.overlay {
+            Some(Overlay::Picker(p)) => p.rest,
+            _ => None,
+        }
+        .is_some_and(|(_, since, drawn)| !drawn && now.duration_since(since) >= self.preview_wait)
     }
 
     /// A notification under the pointer doesn't fade: it is put back to full colour, a second
@@ -1369,7 +1381,7 @@ impl App {
                     self.ws.sel = h;
                     self.start_naming();
                 }
-                None => self.msg = Some(("not in a group: > groups the row".into(), true)),
+                None => self.msg = Some(Msg::Warn("not in a group: > groups the row".into())),
             },
             A::Put | A::PutAbove => {
                 let r = self.ws.put(self.removed.clone(), a == A::Put);
@@ -1456,7 +1468,7 @@ impl App {
                 self.adding = true;
             }
             A::Command => self.open_command(),
-            A::Help => self.help = true,
+            A::Help => self.overlay = Some(Overlay::Help),
             A::Examine => self.examine(),
             A::Quit => {
                 let r = self.run("q");
@@ -1481,7 +1493,7 @@ impl App {
                 KeyCode::Enter => {
                     let q = q.clone();
                     if !self.panel.confirm() && !q.is_empty() {
-                        self.msg = Some((format!("not found: {q}"), true));
+                        self.msg = Some(Msg::Warn(format!("not found: {q}")));
                     }
                 }
                 KeyCode::Backspace if q.is_empty() => self.panel.cancel_search(),
@@ -1518,7 +1530,7 @@ impl App {
                 }
                 let vars = self.picked();
                 if vars.is_empty() {
-                    self.msg = Some(("nothing to add: already shown".into(), true));
+                    self.msg = Some(Msg::Warn("nothing to add: already shown".into()));
                 }
                 return self.ws.add_rows(&vars);
             }
@@ -1571,7 +1583,7 @@ impl App {
                 } else {
                     format!("not found: {}", self.panel.pattern)
                 };
-                self.msg = Some((msg, true));
+                self.msg = Some(Msg::Warn(msg));
             }
             'g' => self.pending = Some('g'),
             'G' => self.panel.step(isize::MAX / 2),
@@ -1587,7 +1599,7 @@ impl App {
                 self.report(r);
             }
             ':' => self.open_command(),
-            '?' => self.help = true,
+            '?' => self.overlay = Some(Overlay::Help),
             _ => {}
         }
     }
@@ -1604,7 +1616,7 @@ impl App {
         let vars: Vec<usize> = vars.into_iter().filter(|&v| !self.ws.shown(v)).collect();
         let marked = &mut self.panel.marked;
         if vars.is_empty() {
-            self.msg = Some(("nothing to mark: already shown".into(), true));
+            self.msg = Some(Msg::Warn("nothing to mark: already shown".into()));
         } else if vars.iter().all(|v| marked.contains(v)) {
             marked.retain(|v| !vars.contains(v));
         } else {
@@ -1642,7 +1654,7 @@ impl App {
             .filter(|&v| !self.ws.shown(v) && !self.panel.marked.contains(&v))
             .collect();
         if new.is_empty() {
-            self.msg = Some(("nothing to mark".into(), true));
+            self.msg = Some(Msg::Warn("nothing to mark".into()));
         }
         self.panel.marked.extend(new);
     }
@@ -1657,7 +1669,7 @@ impl App {
         };
         let vars: Vec<usize> = vars.into_iter().filter(|&v| !self.ws.shown(v)).collect();
         if vars.is_empty() {
-            self.msg = Some(("nothing to add: already shown".into(), true));
+            self.msg = Some(Msg::Warn("nothing to add: already shown".into()));
             return;
         }
         let paths: Vec<&str> = vars
@@ -1956,34 +1968,34 @@ mod tests {
         let mut app = simple();
         assert_eq!(app.run("messages").unwrap_err(), "no messages yet");
         for t in ["a", "b", "c"] {
-            app.log(&(t.into(), false), None);
+            app.log(&Msg::Info(t.into()), None);
         }
-        app.log(&("agent: find".into(), false), Some("1-1".into()));
+        app.log(&Msg::Info("agent: find".into()), Some("1-1".into()));
         app.notes[3].step = Some(("find".into(), "x".into(), "1 matches".into()));
         app.keys(":messages\n").unwrap();
-        assert_eq!(app.messages, Some(3));
+        assert!(matches!(app.overlay, Some(Overlay::Messages(3))));
         app.keys("kk").unwrap();
-        assert_eq!(app.messages, Some(1));
+        assert!(matches!(app.overlay, Some(Overlay::Messages(1))));
         app.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
         app.keys("j").unwrap();
         app.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
-        assert_eq!(app.messages, Some(3));
+        assert!(matches!(app.overlay, Some(Overlay::Messages(3))));
         app.keys("g").unwrap();
-        assert_eq!(app.messages, Some(0));
+        assert!(matches!(app.overlay, Some(Overlay::Messages(0))));
         app.keys("y").unwrap();
         assert_eq!(app.yank.as_deref(), Some("a"));
         // Enter on a plain note, and a key with no meaning, change nothing
         app.keys("<CR>z").unwrap();
-        assert_eq!(app.messages, Some(0));
+        assert!(matches!(app.overlay, Some(Overlay::Messages(0))));
         // the wheel moves, a click outside closes
         app.mouse(wheel(MouseEventKind::ScrollDown, 5, 5));
         app.mouse(wheel(MouseEventKind::ScrollDown, 5, 5));
-        assert_eq!(app.messages, Some(2));
+        assert!(matches!(app.overlay, Some(Overlay::Messages(2))));
         app.mouse(wheel(MouseEventKind::ScrollUp, 5, 5));
         app.mouse(wheel(MouseEventKind::Moved, 5, 5));
-        assert_eq!(app.messages, Some(1));
+        assert!(matches!(app.overlay, Some(Overlay::Messages(1))));
         app.mouse(wheel(MouseEventKind::Down(MouseButton::Left), 0, 0));
-        assert!(app.messages.is_none());
+        assert!(app.overlay.is_none());
         // Enter on an agent's step opens the trail
         app.ws.trail = vec![wtf_core::workspace::Step {
             tool: "find".into(),
@@ -1993,15 +2005,16 @@ mod tests {
         }];
         app.keys(":messages\n<CR>").unwrap();
         assert!(
-            app.messages.is_none() && app.picker.is_some(),
+            !matches!(app.overlay, Some(Overlay::Messages(_)))
+                && matches!(app.overlay, Some(Overlay::Picker(_))),
             "{:?} {:?}",
             app.msg,
-            app.messages
+            app.overlay.is_some()
         );
         app.keys("<Esc>:messages\nG").unwrap();
-        assert_eq!(app.messages, Some(3));
+        assert!(matches!(app.overlay, Some(Overlay::Messages(3))));
         app.keys("<Esc>").unwrap();
-        assert!(app.messages.is_none());
+        assert!(app.overlay.is_none());
     }
 
     #[test]
@@ -2027,7 +2040,7 @@ mod tests {
     fn notes_keep_the_latest() {
         let mut app = simple();
         for k in 0..NOTES + 5 {
-            app.log(&(format!("m{k}"), false), None);
+            app.log(&Msg::Info(format!("m{k}")), None);
         }
         assert_eq!((app.notes.len(), app.notes[0].text.as_str()), (NOTES, "m5"));
     }

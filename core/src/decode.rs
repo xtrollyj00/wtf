@@ -1,6 +1,7 @@
 //! Stateful decoders (spec §16): read a stream's records in time order, keep state,
 //! and make records of their own, so protocols stack (`axis.beat -> axis.frame`). Each is a
-//! `Decoder`, made by name by `make` (the registry).
+//! `Decoder`, built directly (`Frame::new`) or called (`pair`, `check`); the registry is
+//! `protocol::Sources`.
 
 use crate::stream::{Field, Record, Stream};
 use crate::time::{self, Tick};
@@ -16,20 +17,6 @@ pub trait Decoder {
     /// Its records are violations (drawn red).
     fn violations(&self) -> bool {
         false
-    }
-}
-
-/// The decoders by name. `params` (name, value) set one up on a stream with fields `input`; all
-/// the mistakes in them are reported at once.
-pub fn make(
-    name: &str,
-    input: &[Field],
-    params: &[(String, String)],
-    fs_per_tick: Option<u128>,
-) -> Result<Box<dyn Decoder>, String> {
-    match name {
-        "frame" => Frame::new(input, params, fs_per_tick).map(|f| Box::new(f) as Box<dyn Decoder>),
-        _ => Err(format!("unknown decoder: {name} (decoders: frame)")),
     }
 }
 
@@ -109,7 +96,7 @@ enum Bytes {
 }
 
 impl Frame {
-    fn new(
+    pub fn new(
         input: &[Field],
         params: &[(String, String)],
         fs_per_tick: Option<u128>,

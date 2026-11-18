@@ -2,7 +2,7 @@
 //! marks, a stream's records, the `:` commands, the agents' sessions and the agent's trail.
 
 use crate::draw::{self, gl, pal, put};
-use crate::tui::app::{App, Target};
+use crate::tui::app::{App, Overlay, Target};
 use crate::tui::keys::{self, Fixed, Key};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
@@ -13,18 +13,80 @@ use ratatui::style::{Modifier, Style};
 use std::time::Instant;
 use wtf_core::rows::{self, Look, Row, Sig};
 use wtf_core::time::{self, Tick};
+use wtf_core::workspace::Msg;
 use wtf_core::workspace::unknown::NoStream;
 
-/// The sources, in the order `Ctrl-s` goes through them.
-pub const SOURCES: [&str; 7] = [
-    "signals",
-    "marks",
-    "records",
-    "commands",
-    "sessions",
-    "trail",
-    "interfaces",
-];
+/// A picker source (spec §5 "Picker"), in the order `Ctrl-s` goes through them.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Source {
+    Signals,
+    Marks,
+    Records,
+    Commands,
+    Sessions,
+    Trail,
+    Interfaces,
+}
+
+impl Source {
+    /// Every source, in the order `Ctrl-s` goes through them.
+    pub const ALL: [Source; 7] = [
+        Source::Signals,
+        Source::Marks,
+        Source::Records,
+        Source::Commands,
+        Source::Sessions,
+        Source::Trail,
+        Source::Interfaces,
+    ];
+
+    /// Its name in `:pick`, completion and the top border.
+    pub fn name(self) -> &'static str {
+        match self {
+            Source::Signals => "signals",
+            Source::Marks => "marks",
+            Source::Records => "records",
+            Source::Commands => "commands",
+            Source::Sessions => "sessions",
+            Source::Trail => "trail",
+            Source::Interfaces => "interfaces",
+        }
+    }
+
+    /// The source `:pick <name>` opens; an error lists them.
+    pub fn from_name(name: &str) -> Result<Source, String> {
+        Self::ALL
+            .into_iter()
+            .find(|s| s.name() == name)
+            .ok_or_else(|| {
+                let names: Vec<&str> = Self::ALL.iter().map(|s| s.name()).collect();
+                format!("no picker source {name} ({})", names.join(", "))
+            })
+    }
+
+    /// The next one, for `Ctrl-s`.
+    pub fn next(self) -> Source {
+        let i = Self::ALL
+            .iter()
+            .position(|s| *s == self)
+            .expect("every source is in ALL");
+        Self::ALL[(i + 1) % Self::ALL.len()]
+    }
+
+    /// Its icon in the top border, with the `nerd` glyphs.
+    fn icon(self) -> char {
+        use crate::draw::icon;
+        match self {
+            Source::Signals => icon::WIRE,
+            Source::Marks => icon::MARK,
+            Source::Records => icon::RECORD,
+            Source::Commands => icon::CMD,
+            Source::Sessions => icon::EYE,
+            Source::Trail => icon::TRAIL,
+            Source::Interfaces => icon::PLUG,
+        }
+    }
+}
 
 /// What `Enter` does with an entry.
 #[derive(Clone)]
@@ -63,8 +125,8 @@ pub struct Entry {
 }
 
 pub struct Picker {
-    /// Index into `SOURCES`.
-    pub source: usize,
+    /// The source the list is of.
+    pub source: Source,
     /// The stream of the records source.
     pub stream: Option<String>,
     pub query: String,
@@ -86,6 +148,9 @@ pub struct Picker {
     /// Opened from the decode form for its field: `Enter` puts the signal there (spec §5 "Decode
     /// form").
     pub fill: Option<usize>,
+    /// The form it was opened from, put back when it closes: the rows hold one float, and this
+    /// one is the form's, not another's.
+    pub back: Option<Box<crate::tui::form::Form>>,
 }
 
 /// How long the highlight rests on a signal not read yet before its preview reads it.
@@ -180,10 +245,7 @@ impl App {
     pub fn open_picker(&mut self, arg: &str) -> Result<(), String> {
         let (name, rest) = arg.split_once(char::is_whitespace).unwrap_or((arg, ""));
         let name = if name.is_empty() { "signals" } else { name };
-        let source = SOURCES
-            .iter()
-            .position(|s| *s == name)
-            .ok_or_else(|| format!("no picker source {name} ({})", SOURCES.join(", ")))?;
+        let source = Source::from_name(name)?;
         let stream = Some(rest.trim().to_string()).filter(|s| !s.is_empty());
         let mut p = Picker {
             source,
@@ -198,14 +260,22 @@ impl App {
             marked: Vec::new(),
             rest: None,
             fill: None,
+            back: None,
         };
         p.entries = self.entries(&mut p)?;
         p.filter();
         // the trail opens on its newest step, as `:trail`
-        if source == 5 {
+        if source == Source::Trail {
             p.hl = p.shown.len().saturating_sub(1);
         }
-        self.picker = Some(p);
+        // over the form (a field's `C-Space`): the form waits under it and comes back when it
+        // closes; a picker that can't open (`?` above) leaves the form as it is
+        if matches!(self.overlay, Some(Overlay::Form(_)))
+            && let Some(Overlay::Form(f)) = self.overlay.take()
+        {
+            p.back = Some(Box::new(f));
+        }
+        self.overlay = Some(Overlay::Picker(p));
         Ok(())
     }
 
@@ -214,7 +284,7 @@ impl App {
         let fpt = self.ws.trace.fs_per_tick;
         let fmt = |t: Tick| time::format(t, fpt);
         let out: Vec<Entry> = match p.source {
-            0 => self
+            Source::Signals => self
                 .ws
                 .trace
                 .vars
@@ -238,7 +308,7 @@ impl App {
                     }
                 })
                 .collect(),
-            1 => {
+            Source::Marks => {
                 let mut out = vec![Entry {
                     text: "1 cursor".into(),
                     head: 2,
@@ -249,32 +319,32 @@ impl App {
                         format!("at {}", fmt(self.ws.view.cursor)),
                     ],
                 }];
-                for (n, t) in self
+                for (n, m) in self
                     .ws
-                    .marks
+                    .marks()
                     .iter()
                     .enumerate()
-                    .filter_map(|(n, t)| t.map(|t| (n, t)))
+                    .filter_map(|(n, m)| m.as_ref().map(|m| (n, m)))
                 {
-                    let l = &self.ws.labels[n];
+                    let t = m.time;
                     let mut preview = vec![
                         format!(
                             "mark {}{}",
                             n + 1,
-                            if l.name.is_empty() {
+                            if m.name.is_empty() {
                                 String::new()
                             } else {
-                                format!(": {}", l.name)
+                                format!(": {}", m.name)
                             }
                         ),
                         format!("at {}", fmt(t)),
                     ];
-                    if !l.note.is_empty() {
+                    if !m.note.is_empty() {
                         preview.push(String::new());
-                        preview.extend(wrap(&l.note, 40));
+                        preview.extend(wrap(&m.note, 40));
                     }
                     out.push(Entry {
-                        text: format!("{} {}", n + 1, l.name),
+                        text: format!("{} {}", n + 1, m.name),
                         head: 2,
                         right: fmt(t),
                         act: Act::Mark(n),
@@ -283,8 +353,8 @@ impl App {
                 }
                 out
             }
-            2 => {
-                let names: Vec<&str> = self.ws.streams.iter().map(|s| s.name.as_str()).collect();
+            Source::Records => {
+                let names: Vec<&str> = self.ws.streams().iter().map(|s| s.name.as_str()).collect();
                 // a set as `:records` reads one; else the selected row's stream, else them all
                 if p.stream.is_none()
                     && let Some(rows::Row::Signal(r)) = self.ws.rows.get(self.ws.sel)
@@ -306,12 +376,12 @@ impl App {
                     None if names.is_empty() => {
                         return Err(super::browser::no_stream(&self.ws, &NoStream::Empty));
                     }
-                    None => (0..self.ws.streams.len()).collect(),
+                    None => (0..self.ws.streams().len()).collect(),
                 };
                 let all = streams.len() > 1;
                 let mut out: Vec<(u64, Entry)> = Vec::new();
                 for i in streams {
-                    let st = &self.ws.streams[i];
+                    let st = &self.ws.streams()[i];
                     out.extend((0..st.records.len()).map(|i| {
                         let r = &st.records[i];
                         let fields = st.fields_text(i, fpt);
@@ -351,7 +421,7 @@ impl App {
                 out.sort_by_key(|e| e.0);
                 out.into_iter().map(|e| e.1).collect()
             }
-            3 => crate::tui::commands::COMMANDS
+            Source::Commands => crate::tui::commands::COMMANDS
                 .iter()
                 .map(|c| {
                     let line = if c.name.starts_with('<') {
@@ -372,7 +442,7 @@ impl App {
                     }
                 })
                 .collect(),
-            4 => {
+            Source::Sessions => {
                 let here = crate::live::on_trace("agent", &self.ws.trace_path);
                 crate::live::sessions()?
                     .into_iter()
@@ -411,8 +481,8 @@ impl App {
                     })
                     .collect()
             }
-            6 => self.interfaces(),
-            _ => self
+            Source::Interfaces => self.interfaces(),
+            Source::Trail => self
                 .ws
                 .trail
                 .iter()
@@ -434,9 +504,11 @@ impl App {
         };
         if out.is_empty() {
             return Err(match p.source {
-                2 => "no records",
-                4 => "no agent is working on this machine",
-                6 => "no interface a built-in protocol decodes: :decode names the signals (:help decode)",
+                Source::Records => "no records",
+                Source::Sessions => "no agent is working on this machine",
+                Source::Interfaces => {
+                    "no interface a built-in protocol decodes: :decode names the signals (:help decode)"
+                }
                 _ => "no trail yet: the steps of an agent working on this trace show here",
             }
             .into());
@@ -453,7 +525,7 @@ impl App {
             .map(|f| {
                 let done = self
                     .ws
-                    .decodes
+                    .decodes()
                     .iter()
                     .find(|d| {
                         d.protocol == f.protocol
@@ -470,7 +542,7 @@ impl App {
                             format!("{base}{k}")
                         }
                     })
-                    .find(|n| !self.ws.decodes.iter().any(|d| d.name == *n))
+                    .find(|n| !self.ws.decodes().iter().any(|d| d.name == *n))
                     .expect("a free name");
                 let line = f.decode_line().replacen(
                     &format!("decode {base} "),
@@ -540,7 +612,13 @@ impl App {
             .ws
             .results(name)
             .into_iter()
-            .filter_map(|i| self.ws.trace.by_path.get(&self.ws.streams[i].name).copied())
+            .filter_map(|i| {
+                self.ws
+                    .trace
+                    .by_path
+                    .get(&self.ws.streams()[i].name)
+                    .copied()
+            })
             .filter(|&v| !self.ws.shown(v))
             .collect();
         let (Some(&first), Some(&last)) = (vars.first(), vars.last()) else {
@@ -593,7 +671,9 @@ impl App {
     /// The picker has the keys (spec §5 "Picker"); they are fixed. A key the table doesn't have
     /// types into the query.
     pub fn picker_key(&mut self, k: KeyEvent) {
-        let Some(p) = &mut self.picker else { return };
+        let Some(Overlay::Picker(p)) = &mut self.overlay else {
+            return;
+        };
         let Some(act) = keys::fixed(Self::PICKER_KEYS, k) else {
             if let KeyCode::Char(c) = k.code
                 && !k.modifiers.contains(KeyModifiers::CONTROL)
@@ -604,7 +684,7 @@ impl App {
             return;
         };
         match act {
-            Pick::Close => self.picker = None,
+            Pick::Close => self.overlay = p.back.take().map(|f| Overlay::Form(*f)),
             Pick::Choose => self.pick(),
             Pick::Down => p.step(1),
             Pick::Up => p.step(-1),
@@ -614,14 +694,17 @@ impl App {
             Pick::Source | Pick::Mark if p.fill.is_some() => {}
             Pick::Source => {
                 // the next source; an empty one shows why
-                let mut p = self.picker.take().expect("checked above");
-                (p.source, p.marked) = ((p.source + 1) % SOURCES.len(), Vec::new());
+                let mut p = match self.overlay.take() {
+                    Some(Overlay::Picker(p)) => p,
+                    _ => unreachable!("checked above"),
+                };
+                (p.source, p.marked) = (p.source.next(), Vec::new());
                 match self.entries(&mut p) {
                     Ok(e) => (p.entries, p.empty) = (e, String::new()),
                     Err(e) => (p.entries, p.empty) = (Vec::new(), e),
                 }
                 p.filter();
-                self.picker = Some(p);
+                self.overlay = Some(Overlay::Picker(p));
             }
             Pick::Mark => {
                 // signals only: mark or unmark the highlighted one, then the next
@@ -632,7 +715,7 @@ impl App {
                     return;
                 };
                 if self.ws.shown(v) {
-                    self.msg = Some(("nothing to mark: already shown".into(), true));
+                    self.msg = Some(Msg::Warn("nothing to mark: already shown".into()));
                 } else if let Some(i) = p.marked.iter().position(|&m| m == v) {
                     p.marked.remove(i);
                 } else {
@@ -649,12 +732,15 @@ impl App {
 
     /// `Enter`: do what the highlighted entry is for, and close the picker.
     fn pick(&mut self) {
-        let Some(p) = self.picker.take() else { return };
+        let Some(Overlay::Picker(mut p)) = self.overlay.take() else {
+            return;
+        };
         let Some(e) = p.current() else {
-            return self.picker = Some(p);
+            return self.overlay = Some(Overlay::Picker(p));
         };
         if let (Some(i), Act::Var(v)) = (p.fill, &e.act) {
             let path = self.ws.trace.vars[*v].path.clone();
+            self.overlay = p.back.take().map(|f| Overlay::Form(*f));
             return self.form_fill(i, path);
         }
         let r = match e.act.clone() {
@@ -705,7 +791,7 @@ impl App {
             Act::Decode { line, name, .. } => self.decode_and_show(&line, &name),
         };
         if let Err(e) = r {
-            self.msg = Some((e, true));
+            self.msg = Some(Msg::Warn(e));
         }
     }
 
@@ -716,11 +802,15 @@ impl App {
             .hit
             .boxed
             .is_some_and(|r| r.contains((x as u16, y as u16).into()));
-        let Some(p) = &mut self.picker else { return };
+        let Some(Overlay::Picker(p)) = &mut self.overlay else {
+            return;
+        };
         match m.kind {
             MouseEventKind::ScrollDown => p.step(1),
             MouseEventKind::ScrollUp => p.step(-1),
-            MouseEventKind::Down(_) if !inside => self.picker = None,
+            MouseEventKind::Down(_) if !inside => {
+                self.overlay = p.back.take().map(|f| Overlay::Form(*f))
+            }
             MouseEventKind::Down(MouseButton::Left) => {
                 let Some(&(_, k)) = self.hit.records.iter().find(|(ly, _)| *ly == y) else {
                     return;
@@ -737,7 +827,9 @@ impl App {
 
 /// Draw the picker over the rows; its box and lines go to `hit` for the mouse.
 pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
-    let Some(p) = &mut app.picker else { return };
+    let Some(Overlay::Picker(p)) = &mut app.overlay else {
+        return;
+    };
     let (bw, bh) = (w.saturating_sub(8).min(120), body.saturating_sub(2).min(26));
     if bw < 30 || bh < 6 {
         return;
@@ -759,7 +851,7 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
     } else {
         st.fg(pal().cursor).add_modifier(Modifier::BOLD)
     };
-    let border = if p.source == 5 && !mono {
+    let border = if p.source == Source::Trail && !mono {
         st.fg(pal().hues[4])
     } else {
         dim
@@ -805,38 +897,49 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
             put(buf, x0 + lw, y0 + y, &c.to_string(), border);
         }
     }
-    // the sources in the top border, the current one in the accent
+    // the sources in the top border, the current one in the accent; filling a form's field, the
+    // field's name instead, which the box may cover on the form under it (spec §5 "Decode form")
+    let filling = p
+        .fill
+        .and_then(|i| p.back.as_ref()?.fields.get(i))
+        .map(|f| format!(" fill {} ", f.key));
+    if let Some(t) = &filling
+        && t.chars().count() + 4 < bw
+    {
+        put(buf, x0 + 2, y0, t, accent);
+    }
     let mut x = x0 + 2;
-    for (i, s) in SOURCES.iter().enumerate() {
-        let s = if i == 2 && p.source == 2 {
+    for s in Source::ALL.into_iter().filter(|_| filling.is_none()) {
+        let on = s == p.source;
+        let name = if s == Source::Records {
             format!("records {}", p.stream.as_deref().unwrap_or(""))
                 .trim_end()
                 .to_string()
         } else {
-            s.to_string()
+            s.name().to_string()
         };
         // the current one with its icon (spec §14 `nerd`)
-        let ic = if i == p.source {
-            draw::icon(source_icon(i)).map_or(String::new(), |c| format!("{c} "))
+        let ic = if on {
+            draw::icon(s.icon()).map_or(String::new(), |c| format!("{c} "))
         } else {
             String::new()
         };
-        let s = format!(" {ic}{s} ");
+        let s = format!(" {ic}{name} ");
         if x + s.chars().count() < x0 + bw - 1 {
-            put(buf, x, y0, &s, if i == p.source { accent } else { dim });
+            put(buf, x, y0, &s, if on { accent } else { dim });
         }
         x += s.chars().count();
     }
     let keys = match p.source {
         _ if p.fill.is_some() => " Enter fill it in  Esc back ".into(),
-        0 if !p.marked.is_empty() => format!(
+        Source::Signals if !p.marked.is_empty() => format!(
             " {} marked  Enter add  Tab mark  C-s source  Esc close ",
             p.marked.len()
         ),
-        0 => " Enter add  Tab mark  C-s source  Esc close ".into(),
-        3 => " Enter type it  C-s source  Esc close ".into(),
-        4 => " Enter follow  C-s source  Esc close ".into(),
-        6 => " Enter decode  C-s source  Esc close ".into(),
+        Source::Signals => " Enter add  Tab mark  C-s source  Esc close ".into(),
+        Source::Commands => " Enter type it  C-s source  Esc close ".into(),
+        Source::Sessions => " Enter follow  C-s source  Esc close ".into(),
+        Source::Interfaces => " Enter decode  C-s source  Esc close ".into(),
         _ => " Enter jump  C-s source  Esc close ".into(),
     };
     if keys.chars().count() + 4 < bw {
@@ -994,7 +1097,10 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
     // a signal: its value at the cursor and its waveform around it, drawn as the rows are, once
     // it is read; what it is and its decodes need no reading
     let whole = app.ws.trace.loaded(v) || now.duration_since(since) >= app.preview_wait;
-    if let Some(r) = app.picker.as_mut().and_then(|p| p.rest.as_mut()) {
+    if let Some(r) = match &mut app.overlay {
+        Some(Overlay::Picker(p)) => p.rest.as_mut(),
+        _ => None,
+    } {
         r.2 |= whole;
     }
     let ws = &mut app.ws;
@@ -1021,7 +1127,7 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
         .map(|(d, role)| {
             (
                 d,
-                ws.decodes
+                ws.decodes()
                     .iter()
                     .find(|x| x.name == d)
                     .map_or("", |x| x.protocol.as_str()),
@@ -1134,23 +1240,6 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
     }
 }
 
-/// A source's icon, in the top border beside its name.
-fn source_icon(i: usize) -> char {
-    use crate::draw::icon;
-    [
-        icon::WIRE,
-        icon::MARK,
-        icon::RECORD,
-        icon::CMD,
-        icon::EYE,
-        icon::TRAIL,
-        icon::PLUG,
-    ]
-    .get(i)
-    .copied()
-    .unwrap_or(icon::SEARCH)
-}
-
 /// An entry's icon and its colour by what it is: a signal's kind (`draw::kind`), a mark, a record, a
 /// command, an agent, a step. None without the `nerd` glyphs.
 fn kind_icon(
@@ -1186,7 +1275,7 @@ mod tests {
             "top.cpu.state",
         ];
         let mut p = Picker {
-            source: 0,
+            source: Source::Signals,
             stream: None,
             query: "rd".into(),
             entries: Vec::new(),
@@ -1198,6 +1287,7 @@ mod tests {
             marked: Vec::new(),
             rest: None,
             fill: None,
+            back: None,
         };
         p.entries = paths
             .iter()
@@ -1225,12 +1315,22 @@ mod tests {
         App::new(wtf_core::workspace::Workspace::new(t, "x".into()))
     }
 
+    fn pk(app: &App) -> &Picker {
+        let Some(Overlay::Picker(p)) = &app.overlay else {
+            panic!("no picker")
+        };
+        p
+    }
+
     fn key(app: &mut App, code: KeyCode, mods: KeyModifiers) {
         app.picker_key(KeyEvent::new(code, mods));
     }
 
     fn hl(app: &App) -> usize {
-        app.picker.as_ref().unwrap().hl
+        let Some(Overlay::Picker(p)) = &app.overlay else {
+            panic!("no picker")
+        };
+        p.hl
     }
 
     #[test]
@@ -1247,7 +1347,10 @@ mod tests {
         key(&mut app, KeyCode::Char('p'), ctrl);
         key(&mut app, KeyCode::Up, none);
         assert_eq!(hl(&app), 0, "stops at the first");
-        let page = app.picker.as_ref().unwrap().page;
+        let Some(Overlay::Picker(p)) = &app.overlay else {
+            panic!("no picker")
+        };
+        let page = p.page;
         assert!((1..5).contains(&page));
         key(&mut app, KeyCode::PageDown, none);
         assert_eq!(hl(&app), page);
@@ -1255,21 +1358,21 @@ mod tests {
         key(&mut app, KeyCode::PageDown, none);
         key(&mut app, KeyCode::PageDown, none);
         crate::snapshot(&mut app, 100, Some(10));
-        assert!(app.picker.as_ref().unwrap().top > 0);
+        assert!(pk(&app).top > 0);
         for _ in 0..4 {
             key(&mut app, KeyCode::PageUp, none);
         }
         crate::snapshot(&mut app, 100, Some(10));
-        assert_eq!(app.picker.as_ref().unwrap().top, 0);
+        assert_eq!(pk(&app).top, 0);
         // keys the picker has no use for do nothing
         key(&mut app, KeyCode::F(1), none);
         key(&mut app, KeyCode::Char('x'), ctrl);
-        assert!(app.picker.as_ref().unwrap().query.is_empty());
+        assert!(pk(&app).query.is_empty());
         // Tab marks, again unmarks; a shown signal can't be marked
         key(&mut app, KeyCode::Tab, none);
         key(&mut app, KeyCode::Up, none);
         key(&mut app, KeyCode::Tab, none);
-        assert!(app.picker.as_ref().unwrap().marked.is_empty());
+        assert!(pk(&app).marked.is_empty());
         app.run("add top.clk").unwrap();
         app.open_picker("signals").unwrap();
         for c in "top.clk".chars() {
@@ -1277,11 +1380,11 @@ mod tests {
         }
         key(&mut app, KeyCode::Tab, none);
         assert_eq!(
-            app.msg.as_ref().unwrap().0,
+            app.msg.as_ref().unwrap().text(),
             "nothing to mark: already shown"
         );
         key(&mut app, KeyCode::Esc, none);
-        assert!(app.picker.is_none());
+        assert!(!matches!(app.overlay, Some(Overlay::Picker(_))));
         // Tab on other sources, and a picker already closed, are ignored
         app.open_picker("commands").unwrap();
         key(&mut app, KeyCode::Tab, none);
@@ -1313,7 +1416,7 @@ mod tests {
             (x as usize, y as usize),
             now,
         );
-        assert!(app.picker.is_some());
+        assert!(matches!(app.overlay, Some(Overlay::Picker(_))));
     }
 
     #[test]
@@ -1341,7 +1444,7 @@ mod tests {
             s.contains("Enter adds it below the group g") || s.contains("Enter adds it below"),
             "{s}"
         );
-        app.picker = None;
+        app.overlay = None;
         app.keys(":pick signals\nbus.rd").unwrap();
         let s = crate::snapshot(&mut app, 120, Some(30));
         assert!(s.contains("stream, "), "{s}");
@@ -1379,11 +1482,11 @@ mod tests {
             crate::live::listen(&format!("pk{id}b"), "agent", &there, |_| Ok(String::new()))
                 .unwrap();
         app.open_picker("signals").unwrap();
-        for _ in 0..SOURCES.len() {
+        for _ in 0..Source::ALL.len() {
             let s = crate::snapshot(&mut app, 120, Some(24));
-            let p = app.picker.as_ref().unwrap();
-            assert!(s.contains(SOURCES[p.source]), "{s}");
-            if p.source == 4 {
+            let p = pk(&app);
+            assert!(s.contains(p.source.name()), "{s}");
+            if p.source == Source::Sessions {
                 assert!(
                     s.contains(&format!("pk{id}a")) && s.contains("this trace"),
                     "{s}"
@@ -1404,7 +1507,7 @@ mod tests {
             key(&mut app, KeyCode::Char(c), KeyModifiers::NONE);
         }
         key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
-        assert!(app.picker.is_none() && app.msg.is_some());
+        assert!(!matches!(app.overlay, Some(Overlay::Picker(_))) && app.msg.is_some());
         // the other trace's: say to open that trace
         app.open_picker("sessions").unwrap();
         for c in format!("pk{id}b").chars() {
@@ -1415,7 +1518,7 @@ mod tests {
             app.msg
                 .as_ref()
                 .unwrap()
-                .0
+                .text()
                 .contains("works on another trace"),
             "{:?}",
             app.msg
@@ -1424,12 +1527,15 @@ mod tests {
         // a step about no time
         app.open_picker("trail").unwrap();
         key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
-        assert_eq!(app.msg.as_ref().unwrap().0, "this step is about no time");
+        assert_eq!(
+            app.msg.as_ref().unwrap().text(),
+            "this step is about no time"
+        );
         // a record: its stream's row is selected and the cursor at its start
         app.run("add top.aclk").unwrap();
         app.run("select top.aclk").unwrap();
         app.open_picker("records bus.rd").unwrap();
-        let t = match app.picker.as_ref().unwrap().entries[0].act {
+        let t = match pk(&app).entries[0].act {
             Act::Record(t) => t,
             _ => panic!(),
         };
@@ -1455,14 +1561,19 @@ mod tests {
         let mut a = app("axilite.vcd");
         a.open_picker("commands").unwrap();
         let line = "decode bus axilite clock=<clk> prefix=top.s_axi_".to_string();
-        a.picker.as_mut().unwrap().entries[0].act = Act::Decode {
+        let Some(Overlay::Picker(p)) = &mut a.overlay else {
+            panic!("no picker")
+        };
+        p.entries[0].act = Act::Decode {
             line,
             name: "bus".into(),
             ready: false,
             done: None,
         };
         key(&mut a, KeyCode::Enter, KeyModifiers::NONE);
-        let f = a.form.as_ref().expect("the form");
+        let Some(Overlay::Form(f)) = &a.overlay else {
+            panic!("no form")
+        };
         assert_eq!(
             (f.fields[f.at].key.as_str(), f.line()),
             ("clock", "decode bus axilite prefix=top.s_axi_".into())
