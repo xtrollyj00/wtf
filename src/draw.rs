@@ -223,6 +223,9 @@ pub mod icon {
     pub const FOLDER: char = '\u{ea83}';
     pub const STREAM: char = '\u{ea86}';
     pub const SAVE: char = '\u{eb4b}';
+    // `:zoom` and `:fit` carry it in the core's table (spec §7): no window code draws it, and
+    // `core_icons_match_draw` pins them to it
+    #[allow(dead_code)]
     pub const ZOOM: char = '\u{eb81}';
     pub const EDIT: char = '\u{ea73}';
     // what a row is (spec §14 "Glyphs"), Material Design icons of the Nerd Font

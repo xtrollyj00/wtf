@@ -209,6 +209,16 @@ mod syntax_tests {
         );
     }
 
+    /// `help commands` names every command the core runs, so a reader has one list (spec §7).
+    #[test]
+    fn commands_topic_names_every_command() {
+        let text = include_str!("guide/commands.md");
+        let named = |c: &str| text.contains(&format!("`{c}`")) || text.contains(&format!("`{c} "));
+        for c in wtf_core::command::COMMANDS {
+            assert!(named(c.name), "commands.md never says `{}`", c.name);
+        }
+    }
+
     /// Every `help <topic>` the topics and the server's instructions point to exists (the tool
     /// descriptions' are checked over MCP, tests/mcp.rs).
     #[test]

@@ -1,47 +1,27 @@
-//! The `workspace` tool's declaration, checked and turned into session TOML (spec §15).
+//! The `workspace` tool's declaration, checked by the session validator (spec §15).
 
 use super::*;
-use wtf_core::rows;
+use toml::{Table, Value};
 
-/// The session TOML for a `workspace` declaration. Every name, radix, time and key is checked
-/// first, and all the errors come back at once, so one retry can fix them; a declaration that
-/// fails changes nothing (`Workspace::attempt`), so the retry starts clean.
-pub(super) fn declared(app: &mut Workspace, a: &WorkspaceArgs) -> Result<String, String> {
-    app.attempt(|app| declare(app, a))
-}
-
-fn declare(app: &mut Workspace, a: &WorkspaceArgs) -> Result<String, String> {
-    use toml::{Table, Value};
+/// A `workspace` declaration applied to the workspace: the tool's own keys checked and stripped,
+/// then the session validator's, every problem at once, so one retry can fix them; a declaration
+/// that fails changes nothing (`Workspace::attempt`), so the retry starts clean.
+pub(super) fn declare(app: &mut Workspace, a: &WorkspaceArgs) -> Result<(), String> {
     let mut errors = Vec::new();
-    let f = &a.file;
-    let mut file = session::File::default();
-    // the scope first, so the names below resolve under it; a bad one is reported with the rest,
-    // its nearest scopes listed (spec §15: every mistake at once)
-    if let Some(s) = &f.scope
-        && let Err(e) = app.set_scope(s)
-    {
-        errors.push(e);
-    }
-    // a TOML string, else nothing to check
-    fn str_of(v: Option<&Value>) -> Option<&str> {
-        match v {
-            Some(Value::String(s)) => Some(s),
-            _ => None,
-        }
-    }
+    let mut file = a.file.clone();
     // entries the workspace doesn't take: the dead names say what took their place; `trail` and
     // `version` are the session file's own, not declared
     let own = [
-        ("trail", !f.trail.is_empty()),
-        ("version", f.version != session::VERSION),
+        ("trail", !file.trail.is_empty()),
+        ("version", file.version != session::VERSION),
     ];
     let unknown = own
         .iter()
         .filter(|o| o.1)
-        .map(|o| o.0)
-        .chain(f.rest.keys().map(String::as_str));
+        .map(|o| o.0.to_string())
+        .chain(file.rest.keys().cloned());
     for k in unknown {
-        let hint = match k {
+        let hint = match k.as_str() {
             "range" => "view: {\"time\": ..., \"to\": ...}",
             "signals" => "signal: [{\"name\": ..., \"expr\": ...}]",
             "protocols" => "protocol: [{\"name\": ...}]",
@@ -49,640 +29,299 @@ fn declare(app: &mut Workspace, a: &WorkspaceArgs) -> Result<String, String> {
         };
         errors.push(format!("unknown workspace entry: {k} (use {hint})"));
     }
-    unknown_keys("view", &f.view.rest, &["time", "to"], &mut errors);
-    for s in &f.signal {
-        let (name, expr) = (str_of(s.name.as_ref()), str_of(s.expr.as_ref()));
-        let what = name.map_or("signal".to_string(), |n| format!("signal {n}"));
-        unknown_keys(&what, &s.rest, &["name", "expr"], &mut errors);
-        match (name, expr) {
-            (Some(n), Some(e)) => match app.define(n, e) {
-                Ok(_) => file.signal.push(session::SignalEntry {
-                    name: Some(Value::String(n.into())),
-                    expr: Some(Value::String(e.into())),
-                    ..Default::default()
-                }),
-                Err(e2) => errors.push(format!("signal {n}: {e2}")),
-            },
-            (None, _) => errors.push("signal: an entry needs a name string".into()),
-            (Some(n), None) => errors.push(format!("signal: {n} needs an expr string")),
-        }
+    file.rest = Table::new();
+    // the scope first, so the rows below resolve under it; a bad one is reported with the rest,
+    // its nearest scopes listed (spec §15: every mistake at once), and taken out so the validator
+    // doesn't say it twice
+    if let Some(s) = file.scope.take()
+        && let Err(e) = app.set_scope(&s)
+    {
+        errors.push(e);
     }
-    for p in &f.protocol {
-        let name = str_of(p.name.as_ref()).unwrap_or("");
+    // `auto` is the tool's word and no unit the file knows: the one that fits, which is no unit
+    let auto = file.unit.as_deref() == Some("auto");
+    if auto {
+        file.unit = None;
+    }
+    // a protocol from a file is loaded here — only the MCP has the host — and its card is the
+    // file's, so roles, `when` and `fields` are refused; the stem is the protocol's name (spec §19)
+    let mut kept = Vec::with_capacity(file.protocol.len());
+    for mut p in std::mem::take(&mut file.protocol) {
+        let subject = match p.name.as_ref().and_then(Value::as_str) {
+            Some(n) => format!("protocol {n}: field"),
+            None => "protocol: field".into(),
+        };
+        pair_table(&subject, &mut p.fields, &mut errors);
+        if p.wasm.is_none() {
+            kept.push(p);
+            continue;
+        }
+        let w = p.wasm.as_ref().and_then(Value::as_str).unwrap_or_default();
+        let name = p.name.as_ref().and_then(Value::as_str).unwrap_or_default();
+        let stem = std::path::Path::new(w)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default();
+        // whether the entry says what only a file's protocol can't (an empty list says nothing)
+        let says = |v: &Option<Value>| match v {
+            None => false,
+            Some(Value::Array(items)) => !items.is_empty(),
+            Some(Value::Table(t)) => !t.is_empty(),
+            Some(_) => true,
+        };
         if name.is_empty() {
             errors.push("protocol: an entry needs a name string".into());
-            continue;
-        }
-        unknown_keys(
-            &format!("protocol {name}"),
-            &p.rest,
-            &["name", "when", "roles", "fields", "wasm"],
-            &mut errors,
-        );
-        let mut roles = Vec::new();
-        match &p.roles {
-            Some(Value::Array(rs)) => {
-                for r in rs {
-                    match r {
-                        Value::String(s) => roles.push(s.clone()),
-                        _ => errors.push(format!("protocol {name}: a role is a string")),
-                    }
-                }
-            }
-            Some(_) => errors.push(format!(
-                "protocol {name}: roles is an array of signal names"
-            )),
-            None => {}
-        }
-        let mut fields = Vec::new();
-        match &p.fields {
-            Some(Value::Array(_)) | Some(Value::Table(_)) => {
-                fields = pair_list(
-                    &format!("protocol {name}: field"),
-                    p.fields.as_ref(),
-                    &mut errors,
-                )
-            }
-            Some(_) => errors.push(format!(
-                "protocol {name}: fields maps field names to expressions"
-            )),
-            None => {}
-        }
-        if let Some(w) = str_of(p.wasm.as_ref()) {
-            // from a file: the file's name is the protocol's, and the session keeps both (spec §11)
-            let stem = std::path::Path::new(w)
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or_default();
-            if stem != name {
-                errors.push(format!("wasm {w} holds {stem}, not {name}: name it {stem}"));
-            } else if str_of(p.when.as_ref()).is_some() || !roles.is_empty() || !fields.is_empty() {
-                errors.push(format!(
-                    "protocol {name} from a file takes no roles, when or fields"
-                ));
-            } else {
-                match app.loader.clone() {
-                    Some(load) => match load(w) {
-                        Ok(loaded) => match app.add_loaded(loaded, w) {
-                            Ok(()) => file.protocol.push(session::Protocol {
-                                name: Some(Value::String(name.into())),
-                                wasm: Some(Value::String(w.into())),
-                                ..Default::default()
-                            }),
-                            Err(e) => errors.push(format!("protocol {name}: {e}")),
-                        },
-                        Err(e) => errors.push(format!("{w}: {e}")),
-                    },
-                    None => errors.push(format!(
-                        "{w}: this wtf has no host for protocols from files"
-                    )),
-                }
-            }
-            continue;
-        }
-        if p.clock.is_some() {
+        } else if stem != name {
+            errors.push(format!("wasm {w} holds {stem}, not {name}: name it {stem}"));
+        } else if says(&p.when) || says(&p.roles) || says(&p.fields) {
             errors.push(format!(
-                "protocol {name} takes no clock: the decode's clock samples it"
+                "protocol {name} from a file takes no roles, when or fields"
             ));
-            continue;
-        }
-        if p.when.is_some() && str_of(p.when.as_ref()).is_none() {
-            errors.push(format!("protocol {name}: when is a string"));
-            continue;
-        }
-        let Some(when) = str_of(p.when.as_ref()) else {
-            errors.push(format!("protocol {name} needs a when expression"));
-            continue;
-        };
-        let def = wtf_core::stream::Sampler {
-            name: name.into(),
-            when: when.into(),
-            fields,
-            roles,
-            wasm: None,
-        };
-        let entry = session::Protocol {
-            name: Some(Value::String(def.name.clone())),
-            when: Some(Value::String(def.when.clone())),
-            roles: Some(Value::Array(
-                def.roles.iter().map(|r| Value::String(r.clone())).collect(),
-            )),
-            fields: Some(table_of(&def.fields)),
-            ..Default::default()
-        };
-        match app.add_protocol(def) {
-            Ok(()) => file.protocol.push(entry),
-            Err(e) => errors.push(format!("protocol {name}: {e}")),
-        }
-    }
-    for d in &f.decode {
-        let name = str_of(d.name.as_ref()).unwrap_or("");
-        if name.is_empty() {
-            errors.push("decode: an entry needs a name string".into());
-            continue;
-        }
-        unknown_keys(
-            &format!("decode {name}"),
-            &d.rest,
-            &["name", "protocol", "clock", "signals", "params"],
-            &mut errors,
-        );
-        let signals = pair_list(
-            &format!("decode {name} signal:"),
-            d.signals.as_ref(),
-            &mut errors,
-        );
-        let params = pair_list(
-            &format!("decode {name} param:"),
-            d.params.as_ref(),
-            &mut errors,
-        );
-        if d.protocol.is_some() && str_of(d.protocol.as_ref()).is_none() {
-            errors.push(format!("decode {name}: protocol is a string"));
-            continue;
-        }
-        let clock = match &d.clock {
-            None => String::new(),
-            Some(Value::String(s)) => s.clone(),
-            Some(_) => {
-                errors.push(format!("decode {name}: clock is a string"));
-                continue;
-            }
-        };
-        let def = wtf_core::stream::Decode {
-            name: name.into(),
-            protocol: str_of(d.protocol.as_ref()).unwrap_or("").into(),
-            clock,
-            signals,
-            params,
-        };
-        let mut entry = session::Decode {
-            name: Some(Value::String(def.name.clone())),
-            protocol: Some(Value::String(def.protocol.clone())),
-            signals: Some(table_of(&def.signals)),
-            ..Default::default()
-        };
-        if !def.params.is_empty() {
-            entry.params = Some(table_of(&def.params));
-        }
-        if !def.clock.is_empty() {
-            entry.clock = Some(Value::String(def.clock.clone()));
-        }
-        match app.add_decode(def) {
-            Ok(_) => file.decode.push(entry),
-            Err(e) => errors.push(format!("decode {e}")),
-        }
-    }
-    for n in &f.names {
-        let what = str_of(n.signal.as_ref()).map_or("names".to_string(), |s| format!("names {s}"));
-        unknown_keys(&what, &n.rest, &["signal", "values"], &mut errors);
-        match (str_of(n.signal.as_ref()), str_of(n.values.as_ref())) {
-            (Some(s), Some(v)) => match app.name_values(s, v) {
-                Ok(()) => file.names.push(n.clone()),
-                Err(e) => errors.push(format!("names {s}: {e}")),
-            },
-            _ => errors.push("names: an entry needs signal and values strings".into()),
-        }
-    }
-    // the unit applies with the rest, after every check (the file never keeps `auto`)
-    let mut unit = None;
-    if let Some(s) = &f.unit {
-        match s.as_str() {
-            "auto" => unit = Some(None),
-            _ => match time::unit_named(s) {
-                Ok(u) => unit = Some(Some(u)),
-                Err(_) => errors.push(format!(
-                    "unit: unknown unit: {s} (s, ms, us, ns, ps, fs or auto)"
+        } else {
+            match app.loader.clone() {
+                Some(load) => match load(w) {
+                    Ok(loaded) => match app.add_loaded(loaded, w) {
+                        Ok(()) => kept.push(session::Protocol {
+                            name: Some(Value::String(name.into())),
+                            wasm: Some(Value::String(w.into())),
+                            ..Default::default()
+                        }),
+                        Err(e) => errors.push(format!("protocol {name}: {e}")),
+                    },
+                    Err(e) => errors.push(format!("{w}: {e}")),
+                },
+                None => errors.push(format!(
+                    "{w}: this wtf has no host for protocols from files"
                 )),
-            },
+            }
         }
     }
-    let mut rows = Vec::new();
-    for r in &f.rows {
-        match r {
-            session::model::Row::Signal(s) => {
-                unknown_keys(
-                    &s.signal,
-                    &s.rest,
-                    &["signal", "radix", "color", "open", "fields"],
-                    &mut errors,
-                );
-                let radix = opt_string(s.radix.as_ref(), &s.signal, "radix", &mut errors);
-                let color = opt_string(s.color.as_ref(), &s.signal, "color", &mut errors);
-                let Some((mut row, var)) = signal_row(
-                    app,
-                    &mut errors,
-                    &s.signal,
-                    radix.as_deref(),
-                    color.as_deref(),
-                ) else {
-                    continue;
-                };
-                if let Some(o) = &s.open {
-                    match o {
-                        Value::Array(levels) => {
-                            let mut open = Vec::new();
-                            for l in levels {
-                                match l {
-                                    Value::String(x) => open.push(x.clone()),
-                                    _ => errors
-                                        .push(format!("{}: an open level is a name", s.signal)),
-                                }
-                            }
-                            for name in &open {
-                                if session::open_var(app, var, name).is_none() {
-                                    errors.push(format!(
-                                        "{} has no {name} to open; its levels are named from {} on",
-                                        s.signal,
-                                        session::open_name(app, var, var)
-                                    ));
-                                }
-                            }
-                            row.open =
-                                Some(Value::Array(open.into_iter().map(Value::String).collect()));
-                        }
-                        _ => errors.push(format!("{}: open is an array of level names", s.signal)),
-                    }
-                }
-                if let Some(fv) = &s.fields {
-                    match fv {
-                        Value::Array(fs) => {
-                            let mut out = Vec::new();
-                            for item in fs {
-                                let Value::Table(ft) = item else {
-                                    errors.push(format!(
-                                        "{}: a field is {{field, radix?, color?}}",
-                                        s.signal
-                                    ));
-                                    continue;
-                                };
-                                let Some(Value::String(fname)) = ft.get("field") else {
-                                    errors
-                                        .push(format!("{}: a field needs a field name", s.signal));
-                                    continue;
-                                };
-                                unknown_keys(fname, ft, &["field", "radix", "color"], &mut errors);
-                                let fr = opt_string(ft.get("radix"), fname, "radix", &mut errors);
-                                let fc = opt_string(ft.get("color"), fname, "color", &mut errors);
-                                let Some(fvar) =
-                                    session::open_var(app, var, fname).filter(|&fvar| fvar != var)
-                                else {
-                                    errors.push(format!(
-                                        "{} has no field {fname}; fields are named from {} on",
-                                        s.signal,
-                                        session::open_name(app, var, var)
-                                    ));
-                                    continue;
-                                };
-                                let mut t = Table::from_iter([(
-                                    "field".into(),
-                                    Value::String(fname.into()),
-                                )]);
-                                let (rr, cc) = look_vals(
-                                    app,
-                                    fvar,
-                                    fname,
-                                    fr.as_deref(),
-                                    fc.as_deref(),
-                                    &mut errors,
-                                );
-                                if let Some(rr) = rr {
-                                    t.insert("radix".into(), rr);
-                                }
-                                if let Some(cc) = cc {
-                                    t.insert("color".into(), cc);
-                                }
-                                out.push(Value::Table(t));
-                            }
-                            row.fields = Some(Value::Array(out));
-                        }
-                        _ => {
-                            errors.push(format!("{}: fields is an array of field tables", s.signal))
-                        }
-                    }
-                }
-                rows.push(session::model::Row::Signal(row));
-            }
-            session::model::Row::Group(g) => {
-                unknown_keys(
-                    &format!("group {}", g.group),
-                    &g.rest,
-                    &["group", "collapsed", "rows"],
-                    &mut errors,
-                );
-                let members = match &g.rows {
-                    Some(Value::Array(ms)) => ms
-                        .iter()
-                        .filter_map(|m| match m {
-                            Value::Table(t) => {
-                                let name = match t.get("signal") {
-                                    Some(Value::String(s)) => s.clone(),
-                                    _ => {
-                                        errors.push(format!(
-                                            "group {}: a row needs a signal",
-                                            g.group
-                                        ));
-                                        return None;
-                                    }
-                                };
-                                let what = format!("group {}", g.group);
-                                unknown_keys(&what, t, &["signal", "radix", "color"], &mut errors);
-                                let radix = opt_string(t.get("radix"), &what, "radix", &mut errors);
-                                let color = opt_string(t.get("color"), &what, "color", &mut errors);
-                                signal_row(
-                                    app,
-                                    &mut errors,
-                                    &name,
-                                    radix.as_deref(),
-                                    color.as_deref(),
-                                )
-                                .map(|(row, _)| {
-                                    Value::try_from(session::model::Row::Signal(row))
-                                        .unwrap_or(Value::Table(Table::new()))
-                                })
-                            }
-                            _ => {
-                                errors.push(format!(
-                                    "group {}: a row is {{signal, radix?, color?}}",
-                                    g.group
-                                ));
-                                None
-                            }
-                        })
-                        .collect::<Vec<_>>(),
-                    Some(_) => {
-                        errors.push(format!("group {}: rows is an array of rows", g.group));
-                        Vec::new()
-                    }
-                    None => Vec::new(),
-                };
-                let mut gr = session::GroupRow {
-                    group: g.group.clone(),
-                    ..Default::default()
-                };
-                if let Some(c) = &g.collapsed {
-                    match c {
-                        Value::Boolean(b) => gr.collapsed = Some(Value::Boolean(*b)),
-                        _ => errors.push(format!("group {}: collapsed is true or false", g.group)),
-                    }
-                }
-                gr.rows = Some(Value::Array(members));
-                rows.push(session::model::Row::Group(gr));
-            }
+    file.protocol = kept;
+    for d in &mut file.decode {
+        let subject = d.name.as_ref().and_then(Value::as_str).unwrap_or("");
+        pair_table(
+            &format!("decode {subject} signal:"),
+            &mut d.signals,
+            &mut errors,
+        );
+        pair_table(
+            &format!("decode {subject} param:"),
+            &mut d.params,
+            &mut errors,
+        );
+    }
+    // a row that is neither a signal nor a group is the one wrong shape the typed file still
+    // carries: say how to write it (spec §15)
+    let mut rows = Vec::with_capacity(file.rows.len());
+    for row in std::mem::take(&mut file.rows) {
+        match row {
             session::model::Row::Other(v) => {
-                // most likely the old shape, a bare name: say the new one
-                let json = rmcp::serde_json::to_string(v).unwrap_or_default();
-                errors.push(match v {
-                    Value::String(_) => {
-                        format!("rows: {json} is not a row: write {{\"signal\": {json}}}")
-                    }
-                    _ => format!(
+                let json = rmcp::serde_json::to_string(&v).unwrap_or_default();
+                errors.push(if v.is_str() {
+                    format!("rows: {json} is not a row: write {{\"signal\": {json}}}")
+                } else {
+                    format!(
                         "rows: {json} is not a row: write {{\"signal\": ...}} or {{\"group\": ..., \"rows\": [...]}}"
-                    ),
+                    )
                 });
             }
+            row => rows.push(row),
         }
     }
+    file.rows = rows;
+    // what the declaration itself makes, unknown until the validator makes it: a decode's stream
+    // and its fields, a computed signal — a row may show one (the rows come after them)
+    let made: Vec<String> = file
+        .decode
+        .iter()
+        .filter_map(|d| d.name.as_ref().and_then(Value::as_str).map(String::from))
+        .chain(
+            file.signal
+                .iter()
+                .filter_map(|s| s.name.as_ref().and_then(Value::as_str).map(String::from)),
+        )
+        .collect();
+    resolve_rows(app, &mut errors, &mut file.rows, &made);
+    // no `view` is the whole trace: a declaration replaces the view, it doesn't inherit the last
+    // one's zoom (spec §15)
     let exact = |t: Tick| Value::String(time::format_exact(t, app.trace.fs_per_tick));
-    let time_of = |s: &str, errors: &mut Vec<String>| {
-        at(app, s)
-            .map_err(|e| errors.push(format!("{s}: {e}")))
-            .ok()
+    if file.view.time.is_none() {
+        file.view.time = Some(exact(app.trace.start()));
+    }
+    if file.view.to.is_none() {
+        file.view.to = Some(exact(app.trace.end().max(1)));
+    }
+    // the validator takes each view time on its own; a range that runs backwards is a unit slip
+    // (`3386665ps` for 3.386665ms), spec §15 "Times"
+    let span = |v: &Option<Value>| {
+        let s = v.as_ref().and_then(Value::as_str);
+        s.and_then(|s| at(app, s).ok())
     };
-    let mut cursors = Table::new();
-    for (n, v) in &f.cursors {
-        let (t, name, note) = match v {
-            Value::String(t) => (t.as_str(), "", ""),
-            Value::Table(m) => {
-                unknown_keys(
-                    &format!("cursors {n}"),
-                    m,
-                    &["time", "name", "note"],
-                    &mut errors,
-                );
-                let t = match m.get("time") {
-                    Some(Value::String(x)) => x.as_str(),
-                    _ => {
-                        errors.push(format!("cursors: {n} is a time or {{time, name?, note?}}"));
-                        continue;
-                    }
-                };
-                (
-                    t,
-                    mark_part(m, n, "name", &mut errors),
-                    mark_part(m, n, "note", &mut errors),
-                )
-            }
-            _ => {
-                errors.push(format!("cursors: {n} is a time or {{time, name?, note?}}"));
-                continue;
-            }
-        };
-        if !matches!(n.parse::<u8>(), Ok(1..=9)) {
-            errors.push(format!("cursors: no cursor {n} (1-9)"));
-        } else if n == "1" && matches!(v, Value::Table(_)) {
-            errors.push(
-                "cursors: 1 is the cursor and moves, so it takes a time only; name a mark (2-9)"
-                    .into(),
-            );
-        } else if let Some((lo, hi)) = time_of(t, &mut errors) {
-            // a cursor stays at the time written, not the end of its span (spec §15 "Times")
-            let at = exact((lo + hi).div_ceil(2));
-            let value = match v {
-                Value::String(_) => at,
-                _ => {
-                    let mut m = Table::new();
-                    m.insert("time".into(), at);
-                    m.insert("name".into(), Value::String(name.into()));
-                    m.insert("note".into(), Value::String(note.into()));
-                    Value::Table(m)
-                }
-            };
-            cursors.insert(n.clone(), value);
-        }
-    }
-    for (k, v) in [("time", &f.view.time), ("to", &f.view.to)] {
-        if matches!(v, Some(x) if !matches!(x, Value::String(_))) {
-            errors.push(format!("view: {k} is a time string"));
-        }
-    }
-    let (from, to) = (
-        str_of(f.view.time.as_ref())
-            .and_then(|s| time_of(s, &mut errors))
-            .map_or(app.trace.start(), |t| t.0),
-        str_of(f.view.to.as_ref())
-            .and_then(|s| time_of(s, &mut errors))
-            .map_or(app.trace.end().max(1), |t| t.1),
-    );
-    if f.view.time.is_some() && f.view.to.is_some() && to <= from {
+    if let (Some((from, _)), Some((_, to))) = (span(&file.view.time), span(&file.view.to))
+        && to <= from
+    {
         errors.push("view: the end must be after the start".into());
     }
-    if !errors.is_empty() {
-        return Err(errors.join("\n"));
+    let (warn, commit) = session::validate_file(app, file);
+    if !errors.is_empty() || !warn.is_empty() {
+        return Err(errors
+            .into_iter()
+            .chain(warn)
+            .collect::<Vec<_>>()
+            .join("\n"));
     }
-    if let Some(u) = unit {
-        app.unit = u;
-        if u.is_some() {
-            file.unit = f.unit.clone();
-        }
+    commit.land(app);
+    if auto {
+        app.unit = None;
     }
-    file.view.time = Some(exact(from));
-    file.view.to = Some(exact(to));
-    file.cursors = cursors;
-    file.rows = rows;
-    if let Some(s) = &app.scope {
-        file.scope = Some(s.clone());
-    }
-    toml::to_string(&file).map_err(|e| e.to_string())
+    Ok(())
 }
 
-/// A name-to-value map as pairs, in declaration order: an array of single-key tables
-/// (`[{"tdata": "data"}]`) or, for session parity, a table (sorted, as the file keeps it).
-/// Tables sort (spec §11 keeps file key order, but `Table` is a `BTreeMap`), so agents
-/// declare order with arrays; `adopt`ed sessions read back as tables. Wrong shapes warn and miss out.
-fn pair_list(
-    subject: &str,
-    v: Option<&toml::Value>,
-    errors: &mut Vec<String>,
-) -> Vec<(String, String)> {
-    match v {
-        Some(toml::Value::Array(items)) => {
-            let mut out = Vec::new();
-            for (i, item) in items.iter().enumerate() {
-                match item {
-                    toml::Value::Table(t) if t.len() == 1 => {
-                        let (k, v) = t.iter().next().unwrap();
-                        match v {
-                            toml::Value::String(s) => out.push((k.clone(), s.clone())),
-                            _ => errors.push(format!("{subject} {k} is a string")),
-                        }
-                    }
-                    _ => errors.push(format!("{subject} [{i}] is {{name = value}}")),
-                }
-            }
-            out
-        }
-        Some(toml::Value::Table(t)) => {
-            let mut out = Vec::new();
-            for (k, v) in t {
-                match v {
-                    toml::Value::String(s) => out.push((k.clone(), s.clone())),
+/// The session's tables in the shape agents write them (`{"signals": [{"valid": "cmd_valid"}]}`),
+/// as the file keeps them (spec §11): every list item is one `{name: value}` pair. Anything else is
+/// left as it is, for the validator to want a table; a value that isn't a string is a mistake now.
+fn pair_table(subject: &str, v: &mut Option<Value>, errors: &mut Vec<String>) {
+    let Some(Value::Array(items)) = v else {
+        return;
+    };
+    let mut t = Table::new();
+    for item in items.iter() {
+        match item {
+            Value::Table(pair) if pair.len() == 1 => {
+                let (k, value) = pair.iter().next().unwrap();
+                match value {
+                    Value::String(_) => t.extend(pair.clone()),
                     _ => errors.push(format!("{subject} {k} is a string")),
                 }
             }
-            out
+            _ => return,
         }
-        Some(_) => {
-            errors.push(format!("{subject} maps names to values"));
-            Vec::new()
-        }
-        None => Vec::new(),
     }
+    *v = Some(Value::Table(t));
 }
 
-/// The keys an entry doesn't take (serde's `rest`, or a table's), each an error naming those it
-/// does: a misspelt key is a mistake to fix, not one dropped without a word (spec §15).
-fn unknown_keys(what: &str, t: &toml::Table, known: &[&str], errors: &mut Vec<String>) {
-    for k in t.keys().filter(|k| !known.contains(&k.as_str())) {
-        errors.push(format!("{what}: unknown entry: {k} ({})", known.join(", ")));
-    }
-}
-
-/// An optional string value; wrong shapes warn and miss out.
-fn opt_string(
-    v: Option<&toml::Value>,
-    what: &str,
-    k: &str,
+/// Each row's signal as the trace spells it: the MCP's rows are names, resolved under the
+/// declared scope (spec §15 "A name ambiguous in the trace"), so the errors are the ones a name
+/// gets. `made` names what the declaration itself makes (`decode`, `signal`): no path yet, since
+/// the validator makes them, so a row showing one is no mistake.
+fn resolve_rows(
+    app: &mut Workspace,
     errors: &mut Vec<String>,
-) -> Option<String> {
-    match v {
-        Some(toml::Value::String(s)) => Some(s.clone()),
-        Some(_) => {
-            errors.push(format!("{what}: {k} is a string"));
-            None
+    rows: &mut [session::model::Row],
+    made: &[String],
+) {
+    for row in rows {
+        match row {
+            session::model::Row::Signal(s) => {
+                if let Some(path) = row_path(app, errors, &s.signal, made) {
+                    s.signal = path;
+                }
+            }
+            session::model::Row::Group(g) => {
+                let Some(Value::Array(items)) = &mut g.rows else {
+                    continue;
+                };
+                let mut members: Vec<session::model::Row> = std::mem::take(items)
+                    .into_iter()
+                    .filter_map(|v| v.try_into().ok())
+                    .collect();
+                resolve_rows(app, errors, &mut members, made);
+                *items = members
+                    .into_iter()
+                    .filter_map(|r| Value::try_from(r).ok())
+                    .collect();
+            }
+            session::model::Row::Other(_) => {}
         }
-        None => None,
     }
 }
 
-/// Pairs as a TOML table value, for session entries.
-fn table_of(pairs: &[(String, String)]) -> toml::Value {
-    toml::Value::Table(
-        pairs
-            .iter()
-            .map(|(f, s)| (f.clone(), toml::Value::String(s.clone())))
-            .collect(),
-    )
-}
-
-/// A row from its parts, checked as `:add` checks them: the row and its variable.
-/// A free fn (not a closure): the rows loop and the group members each reborrow per call.
-fn signal_row(
+/// The path a row's name resolves to: a bus, as a row shows one (a bit is a `values` column).
+fn row_path(
     app: &mut Workspace,
     errors: &mut Vec<String>,
     name: &str,
-    radix: Option<&str>,
-    color: Option<&str>,
-) -> Option<(session::SignalRow, usize)> {
-    let var = match app.resolve(name) {
-        Ok((v, None)) => v,
+    made: &[String],
+) -> Option<String> {
+    // a decode names its stream and its fields under it (`rx.frame.len`); the rows come after it
+    let made = made
+        .iter()
+        .any(|n| name == n || name.strip_prefix(n).is_some_and(|r| r.starts_with('.')));
+    match app.resolve(name) {
+        Ok((v, None)) => Some(app.trace.vars[v].path.clone()),
+        _ if made => None,
         Ok(_) => {
             errors.push(format!("{name}: a bit can't be a row; add its bus"));
-            return None;
+            None
         }
         Err(e) => {
             errors.push(e);
-            return None;
+            None
         }
-    };
-    let mut row = session::SignalRow {
-        signal: app.trace.vars[var].path.clone(),
-        ..Default::default()
-    };
-    let (radix, color) = look_vals(app, var, name, radix, color, errors);
-    row.radix = radix;
-    row.color = color;
-    Some((row, var))
-}
-
-/// A mark's optional string; wrong shapes warn and miss out.
-fn mark_part<'m>(m: &'m toml::Table, n: &str, k: &str, errors: &mut Vec<String>) -> &'m str {
-    match m.get(k) {
-        Some(toml::Value::String(x)) => x.as_str(),
-        Some(_) => {
-            errors.push(format!("cursors: {n} {k} is a string"));
-            ""
-        }
-        None => "",
     }
 }
 
-/// A line's `radix` and `color` values, checked against `var`: the rule lives in the core,
-/// `radix_for` only words it.
-fn look_vals(
-    app: &Workspace,
-    var: usize,
-    name: &str,
-    radix: Option<&str>,
-    color: Option<&str>,
-    errors: &mut Vec<String>,
-) -> (Option<toml::Value>, Option<toml::Value>) {
-    use toml::Value;
-    let v = &app.trace.vars[var];
-    let width = v.width.unwrap_or(0);
-    let radix = radix.and_then(|r| match radix_for(r, width, v.names.is_some(), name) {
-        Ok((r, frac)) => Some(Value::String(radix::name(r, frac, width))),
-        Err(e) => {
-            errors.push(e);
-            None
+/// The kind each `workspace` key takes: a key of another kind is an error in wtf's words, naming
+/// the key, the kind it takes and an example, before serde's own text (spec §15).
+pub(super) fn shape_error(args: &rmcp::model::JsonObject) -> Option<String> {
+    /// A JSON value's kind, as an error names it.
+    fn kind_of(v: &rmcp::serde_json::Value) -> &'static str {
+        use rmcp::serde_json::Value;
+        match v {
+            Value::Null => "null",
+            Value::Bool(_) => "a boolean",
+            Value::Number(_) => "a number",
+            Value::String(_) => "a string",
+            Value::Array(_) => "a list",
+            Value::Object(_) => "a table",
         }
-    });
-    let color = color.and_then(|c| match rows::color_named(c) {
-        Ok(_) => Some(Value::String(c.into())),
-        Err(e) => {
-            errors.push(e);
-            None
+    }
+    // the session's keys in its own order (spec §11), each with the kind it takes and one example
+    let expected = [
+        ("scope", "a string", "\"top\""),
+        ("unit", "a string", "\"ns\""),
+        ("view", "a table", "{\"time\": \"60ns\", \"to\": \"480ns\"}"),
+        ("cursors", "a table", "{\"1\": \"80ns\"}"),
+        (
+            "signal",
+            "a list",
+            "[{\"name\": \"op\", \"expr\": \"cmd[7:0]\"}]",
+        ),
+        (
+            "names",
+            "a list",
+            "[{\"signal\": \"state\", \"values\": \"0=zero\"}]",
+        ),
+        (
+            "protocol",
+            "a list",
+            "[{\"name\": \"cmd\", \"roles\": [\"valid\", \"data\"]}]",
+        ),
+        (
+            "decode",
+            "a list",
+            "[{\"name\": \"c0\", \"protocol\": \"cmd\", \"signals\": [{\"valid\": \"cmd_valid\"}]}]",
+        ),
+        ("rows", "a list", "[{\"signal\": \"top.clk\"}]"),
+    ];
+    for (key, kind, example) in expected {
+        let Some(v) = args.get(key) else { continue };
+        // null is no value for the two strings (serde takes it), not a wrong kind
+        if v.is_null() && (key == "scope" || key == "unit") {
+            continue;
         }
-    });
-    (radix, color)
+        let fits = match v {
+            rmcp::serde_json::Value::String(_) => kind == "a string",
+            rmcp::serde_json::Value::Object(_) => kind == "a table",
+            rmcp::serde_json::Value::Array(_) => kind == "a list",
+            _ => false,
+        };
+        if !fits {
+            return Some(format!(
+                "{key} must be {kind}, not {}: write it as {example}; see `help workspace`",
+                kind_of(v)
+            ));
+        }
+    }
+    None
 }

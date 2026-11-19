@@ -309,9 +309,9 @@ Showing the user evidence.
 **Form**
 
 - `workspace` sets everything at once, as one undo step, in the session's own shape (spec §11):
-  `signal`, `protocol`, `decode`, `names`, `rows`, `cursors`, `view`, `scope`, `unit`. Every
-  name, radix, time and key is checked first and all the errors come back at once; a call that
-  fails changes nothing.
+  `signal`, `protocol`, `decode`, `names`, `rows`, `cursors`, `view`, `scope`, `unit`. The
+  session validator checks it, so a bad name, radix or time is worded as wtf words it for a
+  session file; all the errors come back at once and a call that fails changes nothing.
 - `view` describes it, `render` draws it as text, `present` shows it to the user.
 
 **Recipes**
@@ -342,8 +342,10 @@ Showing the user evidence.
 - `view`: the visible range, `{"time": "60ns", "to": "480ns"}`; default the whole trace.
 - `scope` (`help names`).
 - `unit`: the time unit of the answers, `ns`, or `auto` for the one that fits (`help times`).
-- A key an entry doesn't take is an error naming those it does. The session file's `version`
-  and `trail` are not declared: the trail is your calls.
+- A key the tool doesn't take, at the top, is an error naming those it does; inside an entry the
+  validator names the key it didn't take. The session file's `version` and `trail` are not
+  declared: the trail is your calls.
+- A key of the wrong kind, a string where a list goes, is an error naming the kind it takes.
 - With no window open, `present` writes a session file that `wtf <trace>` shows when the user
   opens the trace: tell them so. The user also sees each query and change you make as a step
   (`:trail`), with its time, so each query is part of what they see.
@@ -360,12 +362,12 @@ The `:` commands `command` runs on the workspace.
 **Recipes**
 
 - Add rows: `add <path|pattern>...`, below the selected row, joining its group; a scope becomes
-  a group of its direct signals, a struct or array one row. Remove: `rm <path|pattern>...`;
+  a group of its direct signals, a struct or array one row. Remove: `rm <name>...`;
   `rm /.*/` clears (`help patterns`).
 - Act on rows: `select <row> [<last row>]`, then `group <name>`, `rename <name>`, `ungroup`,
-  `radix <radix>`, `color <colour|off>` (`help radix`).
-- Name a state machine's values: `names <signal> <value>=<name>...`, as an FST enum table gives
-  them; `off` removes them.
+  `radix <radix>`, `color <color|off>` (`help radix`).
+- Name a state machine's values: `names <signal> <spec>`, as an FST enum table gives them;
+  `off` removes them.
 - Mark an event: `cursor <1-9> [time|off] [name=<text>] [note=<text>]`; without a time or keys,
   jump to that mark.
 - Look at a stretch: `fit [<from> <to>]` (all, or between cursors `'2 '3` or times);
@@ -373,6 +375,7 @@ The `:` commands `command` runs on the workspace.
 
 **Details**
 
-- Names and times: `scope <path>` (`help names`), `unit <ns|ps|...|auto>` (`help times`).
+- Names and times: `scope <path>` (`help names`), `unit <s|ms|us|ns|ps|fs|auto>` (`help times`).
+- The trace again after a new dump: `e`.
 - Decoding: `decode`, `protocol`, `signal` (`help decode`).
 - `undo`, `redo`. The answer lists the rows added and removed.

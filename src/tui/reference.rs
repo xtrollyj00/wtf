@@ -3,7 +3,7 @@
 //! defaults and the `:` commands. A test keeps the page in step with them.
 
 use crate::tui::app::App;
-use crate::tui::commands::COMMANDS;
+use crate::tui::commands::{at_time, listed};
 use crate::tui::keys::{ACTIONS, Entry, Key, Keymap};
 
 /// A table cell: `|` escaped, as Markdown tables need.
@@ -151,8 +151,8 @@ pub fn keys_page(app: &mut App) -> String {
         leader(&mut out, items);
     }
     out.push_str("## Commands\n\n`:` opens the command line; `Tab` completes, and the card above it says what each command does.\n\n| Command | Does |\n|---|---|\n");
-    for c in COMMANDS {
-        out.push_str(&format!("| `{}` | {} |\n", cell(c.usage), cell(c.desc)));
+    for c in std::iter::once(at_time()).chain(listed()) {
+        out.push_str(&format!("| `{}` | {} |\n", cell(&c.usage), cell(c.desc)));
     }
     out.push_str("\n## Names for `[keys]`\n\nEach key's name in the config file's `[keys]` table, with its default. A count before a key marked *count* repeats it (`5l`), or numbers a mark (`3m`).\n\n```toml\n[keys]\nzoom_in = \"i\"       # z\nstart = \"<C-g>\"     # gg\n```\n\n| Name | Default | Does |\n|---|---|---|\n");
     for &(_, name, key, desc, count) in ACTIONS {

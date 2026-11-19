@@ -450,9 +450,8 @@ fn command_table_is_the_dispatch() {
     // the table names every command `run` answers (spec §7); warp is not one
     let names: Vec<&str> = command::COMMANDS.iter().map(|c| c.name).collect();
     for known in [
-        "add", "e", "decode", "signal", "zoom", "fit", "scope", "unit", "radix", "color",
-        "group", "protocol", "names", "rename", "ungroup", "select", "cursor", "undo", "redo",
-        "rm",
+        "add", "e", "decode", "signal", "zoom", "fit", "scope", "unit", "radix", "color", "group",
+        "protocol", "names", "rename", "ungroup", "select", "cursor", "undo", "redo", "rm",
     ] {
         assert!(names.contains(&known), "{known} not in COMMANDS");
     }
@@ -493,4 +492,18 @@ fn command_table_is_the_dispatch() {
         usage_of("zoom 0ns 40ns"),
         format!("{} 0ns 40ns", command::lookup("zoom").unwrap().usage)
     );
+    for c in command::COMMANDS {
+        assert!(!c.desc.is_empty(), "{} has no desc", c.name);
+        assert!(!c.icon.is_ascii(), "{} has no glyph", c.name);
+        assert!(
+            !c.trailing || !c.args.is_empty(),
+            "{} trails nothing",
+            c.name
+        );
+        for a in c.args {
+            if let command::ArgKind::Lit(s) = a {
+                assert!(!s.is_empty() && !s.contains(' '), "{}: {s:?}", c.name);
+            }
+        }
+    }
 }

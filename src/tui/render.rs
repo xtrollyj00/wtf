@@ -284,7 +284,8 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
     }
     if app.leader.is_some() {
         leader(app, buf, w, body);
-    } else if app.which_key {
+    } else if app.which_key && !matches!(app.overlay, Some(Overlay::Menu(_))) {
+        // a right-click menu is on top; the keys pending show again once it closes
         which_key(app, buf, w, body);
     }
     let at = if matches!(app.mode, Mode::Command | Mode::Search) {
@@ -1970,6 +1971,7 @@ fn command_line(app: &mut App, buf: &mut Buffer, w: usize, h: usize) -> Option<(
         }
     };
     let what = comp.as_ref().map_or("", |c| c.what);
+    let kind = comp.as_ref().and_then(|c| c.kind);
     let ix = if gl().icons { 2 } else { 0 };
     let uw = items
         .iter()
@@ -2017,7 +2019,7 @@ fn command_line(app: &mut App, buf: &mut Buffer, w: usize, h: usize) -> Option<(
         if k == app.hl {
             put(buf, lx + 1, ly, &gl().hl.to_string(), row.fg(pal().cursor));
         }
-        if let Some(ic) = draw::icon(crate::tui::commands::item_icon(what, c)) {
+        if let Some(ic) = draw::icon(crate::tui::commands::item_icon(kind, c)) {
             put(buf, lx + 2, ly, &ic.to_string(), row.fg(pal().hues[5]));
         }
         let x = lx + 2 + ix;

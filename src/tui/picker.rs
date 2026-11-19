@@ -3,6 +3,7 @@
 
 use crate::draw::{self, gl, pal, put};
 use crate::tui::app::{App, Overlay, Target};
+use crate::tui::commands::{at_time, listed};
 use crate::tui::keys::{self, Fixed, Key};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
@@ -73,8 +74,8 @@ impl Source {
         Self::ALL[(i + 1) % Self::ALL.len()]
     }
 
-    /// Its icon in the top border, with the `nerd` glyphs.
-    fn icon(self) -> char {
+    /// Its icon in the top border, with the `nerd` glyphs; also a completion's, for `:pick`.
+    pub(super) fn icon(self) -> char {
         use crate::draw::icon;
         match self {
             Source::Signals => icon::WIRE,
@@ -421,22 +422,22 @@ impl App {
                 out.sort_by_key(|e| e.0);
                 out.into_iter().map(|e| e.1).collect()
             }
-            Source::Commands => crate::tui::commands::COMMANDS
-                .iter()
+            Source::Commands => std::iter::once(at_time())
+                .chain(listed())
                 .map(|c| {
                     let line = if c.name.starts_with('<') {
                         String::new()
-                    } else if c.args {
+                    } else if !c.args.is_empty() {
                         format!("{} ", c.name)
                     } else {
                         c.name.to_string()
                     };
-                    let mut preview = vec![c.usage.to_string(), String::new()];
+                    let mut preview = vec![c.usage.clone(), String::new()];
                     preview.extend(wrap(c.desc, 40));
                     Entry {
                         text: c.name.to_string(),
                         head: 0,
-                        right: c.usage.to_string(),
+                        right: c.usage,
                         act: Act::Command(line),
                         preview,
                     }

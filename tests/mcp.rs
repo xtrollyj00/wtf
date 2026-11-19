@@ -529,10 +529,7 @@ fn struct_fields() {
             json!({"rows": [{"signal": "grid", "open": ["grid", "mem[1]"]}]}),
         )
         .unwrap_err();
-    assert_eq!(
-        bad,
-        "grid has no mem[1] to open; its levels are named from grid on"
-    );
+    assert_eq!(bad, "types.grid has no mem[1] to open");
     let view = s.ok("workspace", json!({"rows": [{"signal": "pkt"}, {"signal": "pkts", "open": ["pkts", "pkts[1]"]}], "view": {"time": "0ns", "to": "20ns"}}));
     assert!(
         view.contains("pkts  types.pkts  hex  (open: pkts, pkts[1])"),
@@ -546,10 +543,7 @@ fn struct_fields() {
             json!({"rows": [{"signal": "pkt", "fields": [{"field": "pair.hi", "radix": "dec"}]}]}),
         )
         .unwrap_err();
-    assert_eq!(
-        bad,
-        "pkt has no field pair.hi; fields are named from pkt on"
-    );
+    assert_eq!(bad, "types.pkt has no field pair.hi");
     let view = s.ok("workspace", json!({"rows": [{"signal": "pkt", "open": ["pkt", "pkt.pair"], "fields": [{"field": "pkt.pair.hi", "radix": "dec", "color": "red"}, {"field": "pkt.state", "color": "green"}]}]}));
     assert!(view.contains("pkt  types.pkt  hex  (open: pkt, pkt.pair)  (fields: pkt.pair.hi:dec:red, pkt.state:enum:green)"), "{view}");
     let r = s.ok("render", json!({"width": 60}));
@@ -799,7 +793,27 @@ fn workspace_in_one_call() {
     );
     // every mistake at once, and nothing changes
     let bad = s.tool("workspace", json!({"rows": [{"signal": "state"}, {"signal": "top.clk", "radix": "float"}, {"signal": "nope"}, {"signal": "data[3]"}], "cursors": {"12": "1ns", "2": "soon"}, "view": {"time": "50ns", "to": "10ns"}}));
-    assert_eq!(bad, Err("ambiguous: state (2 signals: top.cpu.state, top.dma.state)\nfloat doesn't fit top.clk (1 bits)\nunknown signal: nope\ndata[3]: a bit can't be a row; add its bus\ncursors: no cursor 12 (1-9)\nsoon: bad time: soon (a number and a unit, 20ns or 1.5us; a plain number is file ticks)\nview: the end must be after the start".into()));
+    // the declaration's own first, in its order, then the validator's: the radix, the cursor
+    // number and the bad time are the validator's lines now, one each
+    let bad = bad.unwrap_err();
+    let lines: Vec<&str> = bad.lines().collect();
+    assert_eq!(
+        &lines[..4],
+        [
+            "ambiguous: state (2 signals: top.cpu.state, top.dma.state)",
+            "unknown signal: nope",
+            "data[3]: a bit can't be a row; add its bus",
+            "view: the end must be after the start",
+        ],
+        "{bad}"
+    );
+    for needle in ["top.clk", "radix", "no cursor", "bad time"] {
+        assert_eq!(
+            lines.iter().filter(|l| l.contains(needle)).count(),
+            1,
+            "{needle} in {bad}"
+        );
+    }
     assert!(
         s.ok("view", json!({}))
             .starts_with("rows (> selected):\n  (none)\n")
@@ -820,11 +834,12 @@ fn workspace_in_one_call() {
         "workspace",
         json!({"rows": [{"signal": "top.clk"}], "cursors": {"1": {"time": "5ns", "name": "x"}}}),
     );
-    assert_eq!(
-        bad,
-        Err(
-            "cursors: 1 is the cursor and moves, so it takes a time only; name a mark (2-9)".into()
-        )
+    // `cursors: 1` is the cursor and takes no name: one line, from the validator's mark section
+    let bad = bad.unwrap_err();
+    assert!(
+        bad.lines()
+            .any(|l| l.starts_with("cursors.1") && l.contains("the cursor")),
+        "{bad}"
     );
     // a collapsed group
     let view = s.ok("workspace", json!({"scope": "top", "rows": [{"group": "cpu", "rows": [{"signal": "cpu.data"}, {"signal": "cpu.busy"}], "collapsed": true}, {"signal": "clk"}]}));
@@ -854,7 +869,7 @@ fn workspace_in_one_call() {
     assert_eq!(
         bad,
         Err(
-            "signal x: unknown signal: nope\nsignal: y needs an expr string\nunknown signal: x"
+            "signal x: unknown signal: nope\nsignal [2]: needs a name and an expr\nnot in trace: x"
                 .into()
         )
     );
@@ -895,18 +910,28 @@ fn workspace_fails_whole() {
             "trail": [{"tool": "find"}],
         }),
     );
+    let err = bad.unwrap_err();
+    let lines: Vec<&str> = err.lines().collect();
+    // the declaration's own two, in order: the top-level `trail`, then a row that isn't one
     assert_eq!(
-        bad,
-        Err([
+        &lines[..2],
+        [
             "unknown workspace entry: trail (use signal, protocol, decode, names, rows, cursors, view, scope, unit)",
-            "signal op: unknown entry: colour (name, expr)",
-            "top.clk: unknown entry: colour (signal, radix, color, open, fields)",
             "rows: \"top.clk\" is not a row: write {\"signal\": \"top.clk\"}",
-            "group g: unknown entry: colour (signal, radix, color)",
-            "cursors 2: unknown entry: label (time, name, note)",
-        ]
-        .join("\n"))
+        ],
+        "{err}"
     );
+    // then the validator's: one unknown-key line per entry that carries one, keyed by where in the
+    // file it sits (a `rows` entry has no name of its own), the group member's among the rows'
+    for needle in ["signal.colour", "rows.colour", "cursors.2.label"] {
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.starts_with("unknown key: ") && l.contains(needle)),
+            "{err}"
+        );
+    }
+    assert_eq!(lines.len(), 6, "{err}");
     // a bad scope is one mistake among the others, its nearest scopes listed
     let e = s
         .tool(
@@ -919,7 +944,7 @@ fn workspace_fails_whole() {
         "{e}"
     );
     assert!(e.lines().any(|l| l.contains("nope")), "{e}");
-    assert!(e.contains("unit: unknown unit: xs"), "{e}");
+    assert!(e.contains("unit: bad time unit: xs"), "{e}");
     // `op` was made to check the rows, and is gone again
     assert!(
         s.tool("command", json!({"line": "signal op off"}))
@@ -938,13 +963,57 @@ fn workspace_fails_whole() {
     );
     assert_eq!(r["isError"], true, "{r}");
     let steps = trail_steps(&dir.0, s.child.id(), 1);
+    let last = steps.last().unwrap();
+    // wtf's words now, not serde's: the text carries quotes, so the step writes it single-quoted
     assert!(
-        steps
-            .last()
-            .unwrap()
-            .starts_with("tool = \"workspace\"\nask = \"\"\nanswer = \"error: "),
+        last.starts_with("tool = \"workspace\"\nask = \"\"\n")
+            && last.contains("error: rows must be a list, not a number"),
         "{steps:?}"
     );
+}
+
+#[test]
+fn workspace_wrong_types() {
+    // a key of the wrong kind is the agent's mistake, so it is answered in wtf's words (spec §15)
+    let dir = Dir::new("decl-kinds");
+    let mut s = Server::start(&dir.0);
+    s.ok("open", json!({"trace": simple()}));
+    s.ok("workspace", json!({"rows": [{"signal": "top.clk"}]}));
+    let cases = [
+        (
+            json!({"rows": "top.clk"}),
+            "rows must be a list, not a string: write it as [{\"signal\": \"top.clk\"}]; see `help workspace`",
+        ),
+        (
+            json!({"scope": ["top"]}),
+            "scope must be a string, not a list: write it as \"top\"; see `help workspace`",
+        ),
+        (
+            json!({"view": [1, 2]}),
+            "view must be a table, not a list: write it as {\"time\": \"60ns\", \"to\": \"480ns\"}; see `help workspace`",
+        ),
+    ];
+    for (args, want) in cases {
+        let e = s.tool("workspace", args).unwrap_err();
+        assert_eq!(e, want);
+        assert!(
+            !e.contains("failed to deserialize") && !e.contains("invalid type"),
+            "{e}"
+        );
+    }
+    let e = s.tool("workspace", json!({"cursors": null})).unwrap_err();
+    assert!(e.contains("cursors") && e.contains("not null"), "{e}");
+    // nothing changed, and each failed call is a step on the trail
+    assert!(s.ok("view", json!({})).contains("top.clk"));
+    let steps = trail_steps(&dir.0, s.child.id(), 1);
+    assert!(
+        steps
+            .iter()
+            .any(|st| st.starts_with("tool = \"workspace\"") && st.contains("rows must be a list")),
+        "{steps:?}"
+    );
+    // null is no value for the two strings, not a wrong kind: the key is left out
+    s.ok("workspace", json!({"scope": null}));
 }
 
 #[test]
@@ -1075,6 +1144,33 @@ fn errors() {
     assert_eq!(
         s.tool("user_view", json!({})),
         Err("no wtf window is open on this trace".into())
+    );
+}
+
+#[test]
+fn window_commands_refused() {
+    let dir = Dir::new("refused");
+    let mut s = Server::start(&dir.0);
+    s.ok("open", json!({"trace": simple()}));
+    // every command of the window's own list, not a closed few (spec §7, §15)
+    for line in [":trail", ":records clk", ":pick"] {
+        let e = s.tool("command", json!({"line": line})).unwrap_err();
+        let cmd = line
+            .trim_start_matches(':')
+            .split_whitespace()
+            .next()
+            .unwrap();
+        assert_eq!(
+            e,
+            format!(
+                ":{cmd} belongs to the user's window; use `present` to show the workspace, `open` with no arguments to reopen the trace"
+            )
+        );
+    }
+    // one the core answers too, with no arguments: its usage line, not a refusal
+    assert_eq!(
+        s.tool("command", json!({"line": ":decode"})).unwrap_err(),
+        "usage: :decode <name> <protocol> <role>=<signal>..."
     );
 }
 
@@ -1698,7 +1794,7 @@ fn records_of_a_declared_stream() {
         "rows": [{"signal": "nope2"}],
     });
     let bad = s.tool("workspace", decl);
-    assert_eq!(bad, Err("protocol e: field y is a string\ndecode e0: e0.x: nope is no role: e names only its roles (v) and fields\nunknown signal: nope2".into()));
+    assert_eq!(bad, Err("protocol e: field y is a string\nunknown signal: nope2\ndecode e0: e0.x: nope is no role: e names only its roles (v) and fields\nnot in trace: nope2".into()));
 }
 
 /// Protocols and decodes declared in the session's shape, through `workspace` (spec §15).
@@ -1725,7 +1821,10 @@ fn workspace_declares_protocols() {
         "the decode made by workspace"
     );
     let bad = s.tool("workspace", json!({"protocol": [{"roles": ["busy"]}]}));
-    assert_eq!(bad, Err("protocol: an entry needs a name string".into()));
+    assert_eq!(
+        bad,
+        Err("protocol [1]: needs a name, roles as a list, a when and fields as a table".into())
+    );
 }
 
 /// A protocol is a definition on roles: it needs them, and its decode gives the signals and clock.

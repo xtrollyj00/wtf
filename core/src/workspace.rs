@@ -1158,8 +1158,38 @@ impl Workspace {
     pub fn present(&mut self, text: &str, keep_decoding: bool) -> Result<Msg, String> {
         // a session refused whole changes nothing
         session::read(text)?;
-        let before = self.layout();
         let saved = std::mem::take(&mut self.saved);
+        let (before, _, _) = self.begin(keep_decoding);
+        let warn = session::apply(self, text);
+        self.saved = saved;
+        Ok(self.end(before, warn?))
+    }
+
+    /// `present` for a declaration checked in code (`declare`, spec §15): there is no text to read
+    /// and nothing to warn about, since a declaration that isn't clean fails whole, and the
+    /// declaration runs in one `attempt` so a failure changes nothing — not even where the window
+    /// was looking, which `attempt` doesn't put back.
+    pub fn present_declared(
+        &mut self,
+        keep_decoding: bool,
+        declare: impl FnOnce(&mut Self) -> Result<(), String>,
+    ) -> Result<Msg, String> {
+        let saved = std::mem::take(&mut self.saved);
+        let (before, cursor, back) = self.begin(keep_decoding);
+        let done = self.attempt(declare);
+        self.saved = saved;
+        if let Err(e) = done {
+            (self.view.cursor, self.back) = (cursor, back);
+            return Err(e);
+        }
+        Ok(self.end(before, Vec::new()))
+    }
+
+    /// What `present` and `present_declared` share: the layout the step goes back to, where the
+    /// window was looking, and the marks and decoding a presentation replaces.
+    fn begin(&mut self, keep_decoding: bool) -> (Layout, Tick, Option<Tick>) {
+        let before = self.layout();
+        let looking = (self.view.cursor, self.back);
         self.clear_marks();
         (self.view.cursor, self.back) = (0, None);
         // the session is all that is shown: named signals and decoding it leaves out go (§15)
@@ -1169,9 +1199,12 @@ impl Workspace {
             self.decodes.clear();
             self.streams.clear();
         }
-        let warn = session::apply(self, text);
-        self.saved = saved;
-        let warn = warn?;
+        (before, looking.0, looking.1)
+    }
+
+    /// The rest: one undo step when the layout changed, and the status message, `agent: presented
+    /// …`, with the warnings a session's parts didn't fit.
+    fn end(&mut self, before: Layout, warn: Vec<String>) -> Msg {
         if !before.same(&self.layout()) {
             self.undo.push(before);
             self.redo.clear();
@@ -1183,11 +1216,11 @@ impl Workspace {
             "agent: presented {signals} signals, {} cursors",
             self.cursor_list().len()
         );
-        Ok(if warn.is_empty() {
+        if warn.is_empty() {
             Msg::Info(msg)
         } else {
             Msg::Warn(format!("{msg}; {}", warn.join("; ")))
-        })
+        }
     }
 
     /// The layout differs from the session file: `[+]`, and `:q` refuses.

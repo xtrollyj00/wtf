@@ -2,7 +2,7 @@
 
 use crate::radix;
 use crate::rows::{self, Look, Row, Sig};
-use crate::time;
+use crate::time::{self, Tick};
 use crate::trace::Trace;
 use crate::workspace::Workspace;
 use serde::Deserialize;
@@ -32,7 +32,11 @@ pub fn agent_path(trace: &std::path::Path) -> std::path::PathBuf {
 
 /// Why a `radix` name doesn't fit a signal: it names no radix, or one that can't show its width.
 pub enum RadixErr {
-    Unknown(String),
+    /// No radix has this name; those that could show this width are the ones to pick from.
+    Unknown {
+        name: String,
+        candidates: Vec<String>,
+    },
     Misfit(String),
 }
 
@@ -40,7 +44,15 @@ pub enum RadixErr {
 /// side formats its own message.
 pub fn check_radix(name: &str, width: u32, named: bool) -> Result<(usize, u32), RadixErr> {
     match radix::parse_name(name) {
-        None => Err(RadixErr::Unknown(name.into())),
+        None => Err(RadixErr::Unknown {
+            name: name.into(),
+            candidates: radix::RADIXES
+                .iter()
+                .enumerate()
+                .filter(|(r, radix)| !radix.fixed && radix::fits(*r, None, width, named))
+                .map(|(_, radix)| radix.name.to_string())
+                .collect(),
+        }),
         Some((r, frac, need)) if radix::fits(r, need, width, named) => Ok((r, frac)),
         Some((r, frac, need)) => Err(RadixErr::Misfit(radix::name(
             r,
@@ -56,14 +68,20 @@ pub fn read(text: &str) -> Result<File, String> {
     parse(text).map(|(file, _)| file)
 }
 
-/// The file plus what misshapen sections it held: those read as missing. `rows` and `trail` warn
-/// where they sit (a `trail` that isn't a list leaves the steps as they are; a list, even an empty
-/// one, replaces them), scope and unit warn, the other sections are left out without a word, so
-/// the typed file only holds valid shapes.
+/// The file plus what misshapen sections it held: those read as missing. Scope, unit and every
+/// other section warn where they sit, so a file the user typed only holds valid shapes; the typed
+/// file only holds valid shapes.
+#[derive(Default)]
 struct Shape {
     scope_bad: bool,
     unit_bad: bool,
+    signal_bad: bool,
+    names_bad: bool,
+    protocol_bad: bool,
+    decode_bad: bool,
     rows_bad: bool,
+    view_bad: bool,
+    cursors_bad: bool,
     trail_bad: bool,
     trail_seen: bool,
 }
@@ -83,7 +101,13 @@ fn parse(text: &str) -> Result<(File, Shape), String> {
     let mut shape = Shape {
         scope_bad: false,
         unit_bad: false,
+        signal_bad: false,
+        names_bad: false,
+        protocol_bad: false,
+        decode_bad: false,
         rows_bad: false,
+        view_bad: false,
+        cursors_bad: false,
         trail_bad: false,
         trail_seen: t.contains_key("trail"),
     };
@@ -96,28 +120,111 @@ fn parse(text: &str) -> Result<(File, Shape), String> {
     };
     shape.scope_bad = strip(&mut t, "scope", Value::is_str);
     shape.unit_bad = strip(&mut t, "unit", Value::is_str);
+    shape.signal_bad = strip(&mut t, "signal", Value::is_array);
+    shape.names_bad = strip(&mut t, "names", Value::is_array);
+    shape.protocol_bad = strip(&mut t, "protocol", Value::is_array);
+    shape.decode_bad = strip(&mut t, "decode", Value::is_array);
     shape.rows_bad = strip(&mut t, "rows", Value::is_array);
+    shape.view_bad = strip(&mut t, "view", Value::is_table);
+    shape.cursors_bad = strip(&mut t, "cursors", Value::is_table);
     shape.trail_bad = strip(&mut t, "trail", Value::is_array);
-    for key in ["signal", "names", "protocol", "decode"] {
-        strip(&mut t, key, Value::is_array);
-    }
-    for key in ["view", "cursors"] {
-        strip(&mut t, key, Value::is_table);
-    }
     let file: File = Value::Table(t)
         .try_into()
         .map_err(|e: toml::de::Error| format!("session: {}", e.message()))?;
     Ok((file, shape))
 }
 
+/// The session's changes that are not a command of their own, read and checked but not made:
+/// `apply` lands them at once, a caller that only asks (the MCP `workspace` tool) settles them
+/// alone. A field is `None`/empty when the file didn't ask for it.
+#[derive(Default)]
+pub struct Commit {
+    unit: Option<usize>,
+    zoom: Option<f64>,
+    start: Option<Tick>,
+    to: Option<Tick>,
+    cursors: Vec<CursorOp>,
+    trail: Option<Vec<crate::workspace::Step>>,
+}
+
+/// One `[cursors.N]` entry, in the file's order.
+enum CursorOp {
+    /// `1`: where the cursor moves.
+    SetCursor(Tick),
+    /// A mark: its time, and the label a `[cursors.N]` table gave it (a plain time keeps the one
+    /// the mark had, a table's empty name and note clear it).
+    PutMark {
+        n: usize,
+        time: Tick,
+        label: Option<(String, String)>,
+    },
+    /// A mark the file put nowhere (a time that isn't one): it goes.
+    ClearMark(usize),
+}
+
+impl Commit {
+    /// Make the changes `validate` read, in the file's order.
+    pub fn land(self, app: &mut Workspace) {
+        if let Some(u) = self.unit {
+            app.unit = Some(u);
+        }
+        if let Some(z) = self.zoom {
+            app.view.set_zoom(z);
+        }
+        if let Some(s) = self.start {
+            app.view.start = s;
+            app.view.pending_fit = false;
+        }
+        // `to`: the end of the visible range, whatever the screen's width (sent by `present`)
+        if let Some(to) = self.to {
+            app.view.show_until(to);
+        }
+        app.view.cursor = 0;
+        for op in self.cursors {
+            match op {
+                CursorOp::SetCursor(t) => app.view.cursor = t,
+                CursorOp::PutMark { n, time, label } => {
+                    app.put_mark(n, time);
+                    if let Some((name, note)) = label {
+                        app.label_mark(n, &name, &note);
+                    }
+                }
+                CursorOp::ClearMark(n) => {
+                    app.remove_mark(Some(n)).ok();
+                }
+            }
+        }
+        if let Some(trail) = self.trail {
+            app.trail = trail;
+        }
+    }
+}
+
 /// Apply a session to a freshly opened app. Returns warnings for the status line.
 pub fn apply(app: &mut Workspace, text: &str) -> Result<Vec<String>, String> {
     let (file, shape) = parse(text)?;
+    let (warn, commit) = validate(app, file, shape);
+    commit.land(app);
+    // after the marks: `[+]` compares them too
+    app.saved = layout_toml(app);
+    Ok(warn)
+}
+
+/// The problems a declaration has and what it sets, for a `File` that skipped `parse`: the MCP
+/// `workspace` tool's JSON is typed, so no section can arrive the wrong shape (spec §15).
+pub fn validate_file(app: &mut Workspace, file: File) -> (Vec<String>, Commit) {
+    validate(app, file, Shape::default())
+}
+
+/// Read a session onto the app: every section that can be made is made, the rest is `Commit`, and
+/// each problem it meets is a warning naming its subject, in the order the file holds them.
+fn validate(app: &mut Workspace, file: File, shape: Shape) -> (Vec<String>, Commit) {
     let mut warn = Vec::new();
+    let mut commit = Commit::default();
 
     // the scope first: the names after it resolve under it
     if shape.scope_bad {
-        warn.push("scope must be a string".into());
+        warn.push("scope: must be a string".into());
     } else if let Some(scope) = file.scope
         && let Err(e) = app.set_scope(&scope)
     {
@@ -125,15 +232,18 @@ pub fn apply(app: &mut Workspace, text: &str) -> Result<Vec<String>, String> {
     }
     // the agent's time unit (`:unit`)
     if shape.unit_bad {
-        warn.push("unit must be a string".into());
+        warn.push("unit: must be a string".into());
     } else if let Some(unit) = file.unit.as_deref() {
         match time::unit_named(unit) {
-            Ok(u) => app.unit = Some(u),
-            Err(e) => warn.push(e),
+            Ok(u) => commit.unit = Some(u),
+            Err(e) => warn.push(format!("unit: {e}")),
         }
     }
     // named signals first: rows may show them
-    for s in file.signal {
+    if shape.signal_bad {
+        warn.push("signal: must be a list".into());
+    }
+    for (i, s) in file.signal.into_iter().enumerate() {
         unknown("signal.", &s.rest, &mut warn);
         let (name, expr) = (
             s.name.as_ref().and_then(Value::as_str),
@@ -144,11 +254,14 @@ pub fn apply(app: &mut Workspace, text: &str) -> Result<Vec<String>, String> {
                 .define(n, e)
                 .map(drop)
                 .unwrap_or_else(|e| warn.push(format!("signal {n}: {e}"))),
-            _ => warn.push("signal: needs a name and an expr".into()),
+            _ => warn.push(format!("signal [{}]: needs a name and an expr", i + 1)),
         }
     }
     // names for values (`:names`), before rows pick their radix
-    for n in file.names {
+    if shape.names_bad {
+        warn.push("names: must be a list".into());
+    }
+    for (i, n) in file.names.into_iter().enumerate() {
         unknown("names.", &n.rest, &mut warn);
         match (
             n.signal.as_ref().and_then(Value::as_str),
@@ -157,7 +270,7 @@ pub fn apply(app: &mut Workspace, text: &str) -> Result<Vec<String>, String> {
             (Some(sig), Some(v)) => app
                 .name_values(sig, v)
                 .unwrap_or_else(|e| warn.push(format!("names {sig}: {e}"))),
-            _ => warn.push("names: needs a signal and values".into()),
+            _ => warn.push(format!("names [{}]: needs a signal and values", i + 1)),
         }
     }
     // protocols and their instances (spec §16), after the signals they may use
@@ -171,8 +284,17 @@ pub fn apply(app: &mut Workspace, text: &str) -> Result<Vec<String>, String> {
                 .collect()
         }),
     };
-    for p in file.protocol {
+    // the entry's name, or where it sits in the file when it gives none to call it by
+    let named = |kind: &str, name: Option<String>, i: usize| match name {
+        Some(n) => format!("{kind} {n}"),
+        None => format!("{kind} [{}]", i + 1),
+    };
+    if shape.protocol_bad {
+        warn.push("protocol: must be a list".into());
+    }
+    for (i, p) in file.protocol.into_iter().enumerate() {
         unknown("protocol.", &p.rest, &mut warn);
+        let subject = named("protocol", text(&p.name), i);
         let roles = match p.roles.as_ref() {
             None => None,
             Some(r) => r.as_array().map(|r| {
@@ -183,8 +305,7 @@ pub fn apply(app: &mut Workspace, text: &str) -> Result<Vec<String>, String> {
         };
         if p.clock.is_some() {
             warn.push(format!(
-                "protocol {}: a protocol has no clock; its [[decode]] gives it",
-                text(&p.name).unwrap_or_default()
+                "{subject}: a protocol has no clock; its [[decode]] gives it"
             ));
             continue;
         }
@@ -227,13 +348,17 @@ pub fn apply(app: &mut Workspace, text: &str) -> Result<Vec<String>, String> {
                     .map(drop)
                     .unwrap_or_else(|e| warn.push(format!("protocol {name}: {e}")));
             }
-            _ => warn.push(
-                "protocol: needs a name, roles as a list, a when and fields as a table".into(),
-            ),
+            _ => warn.push(format!(
+                "{subject}: needs a name, roles as a list, a when and fields as a table"
+            )),
         }
     }
-    for d in file.decode {
+    if shape.decode_bad {
+        warn.push("decode: must be a list".into());
+    }
+    for (i, d) in file.decode.into_iter().enumerate() {
         unknown("decode.", &d.rest, &mut warn);
+        let subject = named("decode", text(&d.name), i);
         match (
             text(&d.name),
             text(&d.protocol),
@@ -252,7 +377,9 @@ pub fn apply(app: &mut Workspace, text: &str) -> Result<Vec<String>, String> {
                 .map(drop)
                 .unwrap_or_else(|e| warn.push(format!("decode {e}")));
             }
-            _ => warn.push("decode: needs a name, a protocol, signals and params as tables".into()),
+            _ => warn.push(format!(
+                "{subject}: needs a name, a protocol, signals and params as tables"
+            )),
         }
     }
     if shape.rows_bad {
@@ -262,7 +389,7 @@ pub fn apply(app: &mut Workspace, text: &str) -> Result<Vec<String>, String> {
     let mut rows = Vec::new();
     // the rows read back through the value they serialize to, so `rows_of` keeps its shape
     let rv = Value::try_from(file.rows).unwrap_or(Value::Array(Vec::new()));
-    rows_of(app, rv, false, &mut rows, &mut missing, &mut warn);
+    rows_of(app, rv, false, "rows", &mut rows, &mut missing, &mut warn);
     // groups whose signals are all missing
     rows::tidy(&mut rows);
     let vars: Vec<usize> = rows.iter().filter_map(Row::sig).map(|s| s.var).collect();
@@ -273,40 +400,44 @@ pub fn apply(app: &mut Workspace, text: &str) -> Result<Vec<String>, String> {
         warn.push(format!("not in trace: {}", missing.join(", ")));
     }
 
+    // a time at `site`, in file ticks; a trace's end is as far as the view goes
     let fpt = app.trace.fs_per_tick;
     let end = app.trace.end();
-    let time = |v: &Value, warn: &mut Vec<String>| -> Option<u64> {
+    let time = |v: &Value, site: &str, warn: &mut Vec<String>| -> Option<Tick> {
         let r = match v {
             Value::String(s) => crate::time::parse(s, fpt).map_err(String::from),
             Value::Integer(i) => Ok(*i as f64),
             _ => Err("bad time".into()),
         };
-        r.map_err(|e| warn.push(e))
+        r.map_err(|e| warn.push(format!("{site}: {e}")))
             .ok()
             .map(|x| (x.round() as u64).min(end))
     };
+    if shape.view_bad {
+        warn.push("view: must be a table".into());
+    }
     let view = file.view;
     if let Some(z) = view.zoom {
         match z.as_str().map(|s| crate::time::parse(s, fpt)) {
-            Some(Ok(z)) if z > 0.0 => app.view.set_zoom(z),
+            Some(Ok(z)) if z > 0.0 => commit.zoom = Some(z),
             _ => warn.push("view.zoom: bad time".into()),
         }
     }
-    if let Some(s) = view.time.and_then(|v| time(&v, &mut warn)) {
-        app.view.start = s;
-        app.view.pending_fit = false;
-    }
-    // `to`: the end of the visible range, whatever the screen's width (sent by `present`)
-    if let Some(to) = view.to.and_then(|v| time(&v, &mut warn)) {
-        app.view.show_until(to);
-    }
+    commit.start = view.time.and_then(|v| time(&v, "view.time", &mut warn));
+    commit.to = view.to.and_then(|v| time(&v, "view.to", &mut warn));
     unknown("view.", &view.rest, &mut warn);
-    app.view.cursor = 0;
+    if shape.cursors_bad {
+        warn.push("cursors: must be a table".into());
+    }
     for (k, v) in file.cursors {
         match k.parse::<usize>() {
             Ok(1) if v.is_table() => warn
                 .push("cursors.1: the cursor moves and has no name or note; give it a time".into()),
-            Ok(1) => app.view.cursor = time(&v, &mut warn).unwrap_or(0),
+            Ok(1) => {
+                let site = format!("cursors.{k}");
+                let t = time(&v, &site, &mut warn).unwrap_or(0);
+                commit.cursors.push(CursorOp::SetCursor(t));
+            }
             // a mark is a time, or a table with its time, name and note (spec §9)
             Ok(n @ 2..=9) => match v {
                 Value::Table(mut m) => {
@@ -324,27 +455,34 @@ pub fn apply(app: &mut Workspace, text: &str) -> Result<Vec<String>, String> {
                         text(&mut m, "note", &mut warn),
                     );
                     match m.remove("time") {
-                        Some(t) => match time(&t, &mut warn) {
-                            Some(t) => {
-                                app.put_mark(n - 1, t);
-                                app.label_mark(n - 1, &name, &note);
+                        Some(t) => {
+                            let site = format!("cursors.{k}.time");
+                            match time(&t, &site, &mut warn) {
+                                Some(time) => commit.cursors.push(CursorOp::PutMark {
+                                    n: n - 1,
+                                    time,
+                                    label: Some((name, note)),
+                                }),
+                                // a bad time clears the mark, as assigning None did; a name
+                                // without a time has nowhere to live — the writer only writes put marks
+                                None => commit.cursors.push(CursorOp::ClearMark(n - 1)),
                             }
-                            // a bad time clears the mark, as assigning None did; a name
-                            // without a time has nowhere to live — the writer only writes put marks
-                            None => {
-                                app.remove_mark(Some(n - 1)).ok();
-                            }
-                        },
+                        }
                         None => warn.push(format!("cursors.{k}: needs a time")),
                     }
                     unknown(&format!("cursors.{k}."), &m, &mut warn);
                 }
-                v => match time(&v, &mut warn) {
-                    Some(t) => app.put_mark(n - 1, t),
-                    None => {
-                        app.remove_mark(Some(n - 1)).ok();
-                    }
-                },
+                v => {
+                    let site = format!("cursors.{k}");
+                    commit.cursors.push(match time(&v, &site, &mut warn) {
+                        Some(time) => CursorOp::PutMark {
+                            n: n - 1,
+                            time,
+                            label: None,
+                        },
+                        None => CursorOp::ClearMark(n - 1),
+                    });
+                }
             },
             _ => warn.push(format!("cursors: no cursor {k} (1-9)")),
         }
@@ -356,28 +494,28 @@ pub fn apply(app: &mut Workspace, text: &str) -> Result<Vec<String>, String> {
     } else if shape.trail_seen {
         let mut trail = Vec::new();
         steps(app, &file.trail, &mut trail, &mut warn);
-        app.trail = trail;
+        commit.trail = Some(trail);
     }
     unknown("", &file.rest, &mut warn);
-    // after the marks: `[+]` compares them too
-    app.saved = layout_toml(app);
-    Ok(warn)
+    (warn, commit)
 }
 
 fn rows_of(
     app: &mut Workspace,
     rows: Value,
     grouped: bool,
+    site: &str,
     out: &mut Vec<Row>,
     missing: &mut Vec<String>,
     warn: &mut Vec<String>,
 ) {
     let Value::Array(rows) = rows else {
-        warn.push("rows: must be a list".into());
+        warn.push(format!("{site}: must be a list"));
         return;
     };
-    for row in rows {
+    for (i, row) in rows.into_iter().enumerate() {
         let Value::Table(mut row) = row else { continue };
+        let site = format!("{site} [{}]", i + 1);
         if let Some(Value::String(path)) = row.remove("signal") {
             let levels: Vec<String> = match row.remove("open") {
                 Some(Value::Array(a)) => a
@@ -391,16 +529,24 @@ fn rows_of(
                 None => Vec::new(),
             };
             let fields = row.remove("fields");
-            match app.var_named(&path) {
+            // its path, else a name: a row may name what a `decode` above it made, which no path
+            // has until the decode is on the workspace (the decodes are made before the rows)
+            let found = app.var_named(&path).or_else(|| match app.resolve(&path) {
+                Ok((var, None)) => Some(var),
+                _ => None,
+            });
+            match found {
                 Some(var) if !out.iter().any(|r| r.sig().is_some_and(|s| s.var == var)) => {
+                    let mut look_warn = Vec::new();
                     let look = look_keys(
                         app,
                         &mut row,
                         var,
                         &path,
                         Look::of(&app.trace.vars[var]),
-                        warn,
+                        &mut look_warn,
                     );
+                    warn.extend(look_warn.into_iter().map(|w| format!("rows: {path}: {w}")));
                     let mut open: Vec<usize> = Vec::new();
                     for name in levels {
                         match open_var(app, var, &name) {
@@ -442,10 +588,10 @@ fn rows_of(
                 out.push(Row::Group { name, collapsed });
             }
             if let Some(sub) = row.remove("rows") {
-                rows_of(app, sub, true, out, missing, warn);
+                rows_of(app, sub, true, &format!("{site}.rows"), out, missing, warn);
             }
         } else {
-            warn.push("rows: entry without signal or group".into());
+            warn.push(format!("{site}: entry without signal or group"));
         }
         unknown("rows.", &row, warn);
     }
@@ -470,7 +616,10 @@ fn look_keys(
             v.names.is_some(),
         ) {
             Ok((r, frac)) => (l.radix, l.frac) = (r, frac),
-            Err(RadixErr::Unknown(n)) => warn.push(format!("unknown radix: {n}")),
+            Err(RadixErr::Unknown { name, candidates }) => warn.push(format!(
+                "unknown radix: {name} (radixes: {})",
+                candidates.join(", ")
+            )),
             Err(RadixErr::Misfit(shown)) => warn.push(format!("radix {shown} doesn't fit {path}")),
         }
     }
@@ -537,7 +686,7 @@ pub fn open_var(app: &Workspace, row: usize, name: &str) -> Option<usize> {
 /// The steps a shared session holds.
 pub fn read_trail(app: &Workspace, text: &str) -> Vec<crate::workspace::Step> {
     let mut out = Vec::new();
-    if let Ok((file, _)) = parse(text) {
+    if let Ok((file, _shape)) = parse(text) {
         steps(app, &file.trail, &mut out, &mut Vec::new());
     }
     out
@@ -552,7 +701,7 @@ fn steps(
 ) {
     let (fpt, end) = (app.trace.fs_per_tick, app.trace.end());
     let opt = |v: &Option<Value>| v.as_ref().and_then(Value::as_str).map(String::from);
-    for s in steps {
+    for (i, s) in steps.iter().enumerate() {
         unknown("trail.", &s.rest, warn);
         match (opt(&s.tool), opt(&s.ask), opt(&s.answer)) {
             (Some(tool), Some(ask), Some(answer)) => {
@@ -566,7 +715,10 @@ fn steps(
                     time,
                 });
             }
-            _ => warn.push("trail: a step needs a tool, an ask and an answer".into()),
+            _ => warn.push(format!(
+                "trail [{}]: a step needs a tool, an ask and an answer",
+                i + 1
+            )),
         }
     }
 }

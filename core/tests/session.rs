@@ -218,16 +218,16 @@ fn warns_and_keeps_going() {
     assert_eq!(
         warn,
         [
-            "bad time unit: furlong (s, ms, us, ns, ps, fs)",
-            "unknown radix: roman",
-            "radix q4.4 doesn't fit top.clk",
-            "unknown colour: pink (colours: red, orange, yellow, green, cyan, blue, magenta, gray)",
+            "unit: bad time unit: furlong (s, ms, us, ns, ps, fs)",
+            "rows: top.cpu.data: unknown radix: roman (radixes: hex, bin, dec, sdec, oct, ascii)",
+            "rows: top.clk: radix q4.4 doesn't fit top.clk",
+            "rows: top.clk: unknown colour: pink (colours: red, orange, yellow, green, cyan, blue, magenta, gray)",
             "nested group flattened: inner",
-            "rows: entry without signal or group",
+            "rows [5]: entry without signal or group",
             "unknown key: rows.label",
             "not in trace: top.gone",
             "view.zoom: bad time",
-            "bad time: soon (a number and a unit, 20ns or 1.5us; a plain number is file ticks)",
+            "view.time: bad time: soon (a number and a unit, 20ns or 1.5us; a plain number is file ticks)",
             "unknown key: view.speed",
             "cursors: no cursor 12 (1-9)",
             "unknown key: colour",
@@ -266,11 +266,37 @@ fn refuses_what_it_cant_read() {
     // a time as plain ticks, and one that isn't a time
     assert_eq!(
         session::apply(&mut ws, "[cursors]\n1 = 30\n2 = true"),
-        Ok(vec!["bad time".to_string()])
+        Ok(vec!["cursors.2: bad time".to_string()])
     );
     assert_eq!(
         (ws.view.cursor, ws.marks()[1].as_ref().map(|m| m.time)),
         (30, None)
+    );
+    // a section in the wrong shape holds nothing and says so where it sits
+    for (bad, msg) in [
+        ("signal = 3", "signal: must be a list"),
+        ("names = 3", "names: must be a list"),
+        ("protocol = 3", "protocol: must be a list"),
+        ("decode = 3", "decode: must be a list"),
+        ("view = 3", "view: must be a table"),
+        ("cursors = 3", "cursors: must be a table"),
+    ] {
+        assert_eq!(session::apply(&mut open(), bad), Ok(vec![msg.to_string()]));
+    }
+    // at its place in the file, with the rest of the session still loaded
+    let mut next = open();
+    let warn = session::apply(
+        &mut next,
+        "unit = \"ns\"\nsignal = 3\n[[rows]]\nsignal = \"top.clk\"",
+    )
+    .unwrap();
+    assert_eq!(warn, ["signal: must be a list"]);
+    assert!(next.unit.is_some());
+    assert_eq!(names(&next), ["clk"]);
+    // a nested `rows` that isn't a list names the group it sits in
+    assert_eq!(
+        session::apply(&mut open(), "[[rows]]\ngroup = \"g\"\nrows = 3"),
+        Ok(vec!["rows [1].rows: must be a list".to_string()])
     );
 }
 
@@ -406,7 +432,7 @@ fn trail_split_one_line_quotes() {
 fn row_with_bad_signal_warns() {
     let mut ws = open();
     let warn = session::apply(&mut ws, "[[rows]]\nsignal = 3\n").unwrap();
-    assert_eq!(warn, ["rows: entry without signal or group"]);
+    assert_eq!(warn, ["rows [1]: entry without signal or group"]);
     assert!(ws.rows.is_empty());
 }
 

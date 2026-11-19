@@ -401,6 +401,42 @@ mod tests {
     }
 
     #[test]
+    fn run_guards() {
+        let mut app = open("vcd", None);
+        // the window keeps its own: the refusal text is the core's advice, shown as is
+        let e = app.run("unit ns").unwrap_err();
+        assert_eq!(
+            e,
+            "unit sets the time unit of an agent's answers; the window picks what fits"
+        );
+        // a window command that needs a state the core cannot know about
+        let e = app.run("protocol search").unwrap_err();
+        assert_eq!(e, "no clocked search: search with /@clk <expr> first");
+        // with arguments `:decode` is the core's, not the form's
+        assert_eq!(
+            app.run("decode rx").unwrap_err(),
+            "usage: :decode <name> <protocol> <role>=<signal>..."
+        );
+        assert!(app.overlay.is_none());
+        // alone, the form's
+        app.run("decode").unwrap();
+        assert!(matches!(app.overlay, Some(app::Overlay::Form(_))));
+    }
+
+    #[test]
+    fn window_commands_match() {
+        let mut tui: Vec<_> = commands::WINDOW
+            .iter()
+            .filter(|w| matches!(w.when, commands::When::Window))
+            .map(|w| w.name)
+            .collect();
+        let mut mcp = crate::mcp::WINDOW_COMMANDS.to_vec();
+        tui.sort_unstable();
+        mcp.sort_unstable();
+        assert_eq!(tui, mcp);
+    }
+
+    #[test]
     fn add_walk_zoom() {
         let mut app = open("vcd", None);
         keys(&mut app, ":add top.cpu\n");
@@ -2966,15 +3002,32 @@ mod tests {
         // at once when it already shows, or with no wait
         app.which_delay = Duration::ZERO;
         keys(&mut app, "3");
-        let screen = snapshot(&mut app, 80, Some(30));
+        let counted = snapshot(&mut app, 80, Some(30));
         assert!(
-            screen.contains(" 3  ") && screen.contains("put mark N") && screen.contains("zoom in"),
-            "{screen}"
+            counted.contains(" 3  ")
+                && counted.contains("put mark N")
+                && counted.contains("zoom in"),
+            "{counted}"
         );
         keys(&mut app, "<Esc>g");
         assert!(snapshot(&mut app, 80, Some(14)).contains("g → start of the trace"));
         keys(&mut app, "g");
         assert!(!app.which_key && app.pending().is_empty());
+        // a right-click menu is over the rows: the card waits until it closes (spec §2 "Which-key")
+        keys(&mut app, "g");
+        assert!(app.which_key);
+        screen(&mut app, 100, Some(22));
+        right(&mut app, 50, 0);
+        let over_menu = snapshot(&mut app, 100, Some(22));
+        assert!(
+            over_menu.contains("Zoom to fit") && !over_menu.contains("Esc close"),
+            "{over_menu}"
+        );
+        keys(&mut app, "<Esc>");
+        assert!(app.overlay.is_none() && app.which_key);
+        let back = snapshot(&mut app, 100, Some(22));
+        assert!(back.contains("Esc close"), "{back}");
+        keys(&mut app, "<Esc>");
     }
 
     #[test]

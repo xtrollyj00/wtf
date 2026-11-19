@@ -24,7 +24,7 @@ mod args;
 mod declare;
 mod trail;
 pub use args::*;
-use declare::declared;
+use declare::declare;
 use trail::Answer;
 
 /// Most lines one answer gives, so a busy clock can't flood the agent.
@@ -33,6 +33,12 @@ const MAX_LINES: usize = 1000;
 const MAX_INTERFACES: usize = 10;
 /// Most bytes one answer gives: output can't be taken back out of the agent's context.
 const MAX_BYTES: usize = 24_000;
+/// The `:` commands the user's window answers itself: its `When::Window` rows (spec §7). MCP keeps
+/// its own copy, not an import of the TUI; `window_commands_match` (src/main.rs) keeps them equal.
+pub(crate) const WINDOW_COMMANDS: &[&str] = &[
+    "records", "decodes", "pick", "messages", "trail", "agent", "follow", "w", "wq", "help", "q",
+    "q!", "e",
+];
 
 #[derive(Clone)]
 pub struct Wtf {
@@ -463,7 +469,7 @@ fn budget(s: String) -> String {
 fn radix_for(r: &str, width: u32, named: bool, n: &str) -> Result<(usize, u32), String> {
     match session::check_radix(r, width, named) {
         Ok(v) => Ok(v),
-        Err(session::RadixErr::Unknown(_)) => Err(format!("unknown radix: {r}")),
+        Err(session::RadixErr::Unknown { .. }) => Err(format!("unknown radix: {r}")),
         Err(session::RadixErr::Misfit(shown)) => {
             if radix::parse_name(r).is_some_and(|(r, _, _)| r == radix::ENUM) {
                 Err(format!("enum: the file names no values of {n}"))
@@ -1220,9 +1226,10 @@ impl Wtf {
         Answer::asked(a.line.clone(), || {
             let w = current(self)?;
             let mut app = lock(&w);
-            let line = a.line.trim().trim_start_matches(':');
+            let line = a.line.trim().trim_start_matches(':').trim_start();
             let cmd = line.split_whitespace().next().unwrap_or("");
-            if matches!(cmd, "w" | "wq" | "q" | "q!" | "e" | "help") {
+            // the window's own commands are not this tool's (spec §15)
+            if WINDOW_COMMANDS.contains(&cmd) {
                 return Err(format!(
                     ":{cmd} belongs to the user's window; use `present` to show the workspace, `open` with no arguments to reopen the trace"
                 ));
@@ -1304,18 +1311,9 @@ impl Wtf {
             || {
                 let w = current(self)?;
                 let mut app = lock(&w);
-                let text = declared(&mut app, &a)?;
                 // decodes made before with `command` stay (spec §15)
-                let msg = app.present(&text, true)?;
-                let warn = if msg.is_warn() {
-                    format!("({})\n", msg.text())
-                } else {
-                    String::new()
-                };
-                Ok(Answer::new(
-                    budget(format!("{}{warn}", describe(&app, None))),
-                    None,
-                ))
+                app.present_declared(true, |app| declare(app, &a))?;
+                Ok(Answer::new(budget(describe(&app, None)), None))
             },
         )
     }
@@ -1432,12 +1430,28 @@ impl ServerHandler for Wtf {
         context: rmcp::service::RequestContext<rmcp::RoleServer>,
     ) -> Result<rmcp::model::CallToolResponse, rmcp::ErrorData> {
         let tool = request.name.to_string();
-        let mut r = self
-            .tool_router
-            .call(rmcp::handler::server::tool::ToolCallContext::new(
-                self, request, context,
-            ))
-            .await;
+        // a wrong JSON kind is answered in wtf's words, the form rmcp gives arguments that don't
+        // parse (spec §15); it is a step on the trail below all the same
+        let wrong = if tool == "workspace" {
+            request.arguments.as_ref().and_then(declare::shape_error)
+        } else {
+            None
+        };
+        let mut r = match wrong {
+            Some(text) => {
+                Ok(
+                    rmcp::model::CallToolResult::error(vec![rmcp::model::ContentBlock::text(text)])
+                        .into(),
+                )
+            }
+            None => {
+                self.tool_router
+                    .call(rmcp::handler::server::tool::ToolCallContext::new(
+                        self, request, context,
+                    ))
+                    .await
+            }
+        };
         let step = match &mut r {
             Ok(rmcp::model::CallToolResponse::Complete(res)) => {
                 // the ask and time are the trail's: out of `_meta` before the client sees the result

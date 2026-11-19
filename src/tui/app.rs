@@ -1,6 +1,7 @@
 //! App state and the keys of each mode (spec §2, §3, §4 "Command line", §5).
 
 use crate::draw::gl;
+use crate::tui::commands::{When, WindowCmd, window_for};
 use crate::tui::keys::{Action as A, Entry, Key, Keymap, Meaning};
 use crate::tui::panel::Panel;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -334,104 +335,113 @@ impl App {
         format!("{} {}{dot}{}", s.tool, s.ask, s.answer)
     }
 
-    /// A `:` command: the window's own (`:w`, `:wq`, `:q`, `:q!`, `:help`, and `:e`, which also
-    /// rebuilds the signal panel), or one on the workspace. Its message goes to the status line.
+    /// A `:` command: one the window owns, from `WINDOW` (`:w`, `:q`, `:help`, `:e`, …), or one
+    /// on the workspace. Its message goes to the status line.
     pub fn run(&mut self, line: &str) -> Result<(), String> {
         let line = line.trim();
         let (cmd, arg) = line.split_once(char::is_whitespace).unwrap_or((line, ""));
-        let msg = match cmd {
-            "help" if arg.trim().is_empty() => {
-                self.overlay = Some(Overlay::Help);
-                None
-            }
-            // the agents' reference, one source for both (spec §15)
-            "help" => {
-                let topics = || {
-                    crate::guide::TOPICS
+        let arg = arg.trim();
+        // which commands are the window's own is WINDOW's to say; the rest are the core's (spec §7)
+        let msg = match window_for(cmd, arg) {
+            Some(WindowCmd {
+                when: When::Refuse(text),
+                ..
+            }) => return Err(text.to_string()),
+            Some(w) => match w.name {
+                "help" if arg.is_empty() => {
+                    self.overlay = Some(Overlay::Help);
+                    None
+                }
+                // the agents' reference, one source for both (spec §15)
+                "help" => {
+                    let topics = || {
+                        crate::guide::TOPICS
+                            .iter()
+                            .map(|t| t.0)
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    };
+                    let text = crate::guide::answer(Some(arg), wtf_core::pattern::Syntax::Glob)
+                        .map_err(|_| format!("no help topic {}; topics: {}", arg, topics()))?;
+                    let items = text.lines().map(|l| (None, l.to_string())).collect();
+                    let name = format!("help {} {}", gl().dot, arg.to_lowercase());
+                    self.overlay = Some(Overlay::Records(Records {
+                        name,
+                        title: String::new(),
+                        items,
+                        hl: 0,
+                        top: 0,
+                        page: 1,
+                    }));
+                    None
+                }
+                // the agent's steps, newest last; Enter jumps to a step's time (spec §15 "Trail")
+                "trail" => {
+                    if self.ws.trail.is_empty() {
+                        return Err(
+                            "no trail yet: the steps of an agent working on this trace show here"
+                                .into(),
+                        );
+                    }
+                    let items: Vec<_> = self
+                        .ws
+                        .trail
                         .iter()
-                        .map(|t| t.0)
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                };
-                let text = crate::guide::answer(Some(arg), wtf_core::pattern::Syntax::Glob)
-                    .map_err(|_| format!("no help topic {}; topics: {}", arg.trim(), topics()))?;
-                let items = text.lines().map(|l| (None, l.to_string())).collect();
-                let name = format!("help {} {}", gl().dot, arg.trim().to_lowercase());
-                self.overlay = Some(Overlay::Records(Records {
-                    name,
-                    title: String::new(),
-                    items,
-                    hl: 0,
-                    top: 0,
-                    page: 1,
-                }));
-                None
-            }
-            // the agent's steps, newest last; Enter jumps to a step's time (spec §15 "Trail")
-            "trail" => {
-                if self.ws.trail.is_empty() {
-                    return Err(
-                        "no trail yet: the steps of an agent working on this trace show here"
-                            .into(),
-                    );
+                        .map(|s| (s.time, Self::step_line(s)))
+                        .collect();
+                    let (title, hl) = (format!("{} steps", items.len()), items.len() - 1);
+                    self.overlay = Some(Overlay::Records(Records {
+                        name: "trail".into(),
+                        title,
+                        items,
+                        hl,
+                        top: 0,
+                        page: 1,
+                    }));
+                    None
                 }
-                let items: Vec<_> = self
-                    .ws
-                    .trail
-                    .iter()
-                    .map(|s| (s.time, Self::step_line(s)))
-                    .collect();
-                let (title, hl) = (format!("{} steps", items.len()), items.len() - 1);
-                self.overlay = Some(Overlay::Records(Records {
-                    name: "trail".into(),
-                    title,
-                    items,
-                    hl,
-                    top: 0,
-                    page: 1,
-                }));
-                None
-            }
-            // every message, with its time and who caused it (spec §4 "Notifications")
-            "messages" => {
-                self.note_msg();
-                if self.notes.is_empty() {
-                    return Err("no messages yet".into());
+                // every message, with its time and who caused it (spec §4 "Notifications")
+                "messages" => {
+                    self.note_msg();
+                    if self.notes.is_empty() {
+                        return Err("no messages yet".into());
+                    }
+                    self.overlay = Some(Overlay::Messages(self.notes.len() - 1));
+                    None
                 }
-                self.overlay = Some(Overlay::Messages(self.notes.len() - 1));
-                None
-            }
-            "w" => Some(command::save(&mut self.ws, arg.trim())?),
-            "wq" => {
-                command::save(&mut self.ws, arg.trim())?;
-                self.quit = true;
-                None
-            }
-            "q" if self.ws.modified() => {
-                return Err("unsaved session (:w to save, :q! to quit)".into());
-            }
-            "q" | "q!" => {
-                self.quit = true;
-                None
-            }
-            "e" => return self.reload(),
-            "follow" => return self.set_follow(arg.trim()),
-            "agent" => return self.show_agent_file(),
-            "records" => return self.open_browser(arg.trim()),
-            "pick" => return self.open_picker(arg.trim()),
-            "decode" if arg.trim().is_empty() => return self.open_form(""),
-            "protocol" if arg.trim().is_empty() => return self.open_protocol_form(),
-            "protocol" if arg.trim() == "search" => return self.protocol_of_search(),
-            "names" if arg.trim().is_empty() => return self.open_names(),
-            "decodes" => return self.open_decodes(),
-            // the window picks the unit that fits; `unit` is for agents' answers (spec §15)
-            "unit" => {
-                return Err(
-                    "unit sets the time unit of an agent's answers; the window picks what fits"
-                        .into(),
-                );
-            }
-            _ => command::run(&mut self.ws, line)?,
+                "w" => Some(command::save(&mut self.ws, arg)?),
+                "wq" => {
+                    command::save(&mut self.ws, arg)?;
+                    self.quit = true;
+                    None
+                }
+                "q" => {
+                    if self.ws.modified() {
+                        return Err("unsaved session (:w to save, :q! to quit)".into());
+                    }
+                    self.quit = true;
+                    None
+                }
+                "q!" => {
+                    self.quit = true;
+                    None
+                }
+                // `:e` reloads the trace and rebuilds the signal panel (spec §7)
+                "e" => return self.reload(),
+                "follow" => return self.set_follow(arg),
+                "agent" => return self.show_agent_file(),
+                "records" => return self.open_browser(arg),
+                "pick" => return self.open_picker(arg),
+                "decode" => return self.open_form(""),
+                // alone, a protocol's form; `search` fills it from the clocked search (spec §5)
+                "protocol" if arg.is_empty() => return self.open_protocol_form(),
+                "protocol" => return self.protocol_of_search(),
+                "names" => return self.open_names(),
+                "decodes" => return self.open_decodes(),
+                // a WINDOW row with no body here: the core answers `unknown command`
+                _ => command::run(&mut self.ws, line)?,
+            },
+            None => command::run(&mut self.ws, line)?,
         };
         if msg.is_some() {
             self.msg = msg;

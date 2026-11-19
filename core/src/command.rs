@@ -6,39 +6,264 @@ use crate::rows::{self, Row};
 use crate::session;
 use crate::workspace::{Msg, Workspace};
 
-/// One `:` command: its name, its usage line, and its handler. `run` looks
-/// the name up here instead of matching inline, so this table is the only
-/// place that names what commands exist (spec §7). Handlers report their own
-/// entry's `usage`, except `add` and `color`, whose usage is built at runtime
-/// (pattern syntax, color list); entries with no usage error (`e`, `scope`,
-/// `names`, `ungroup`, `undo`, `redo`, `rm`) carry the doc line only.
+/// What a command's argument is, so a listing can say what to type there (`<time>`) and a
+/// completion can offer the values.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ArgKind {
+    Signal,
+    Scope,
+    Stream,
+    Protocol,
+    Role,
+    Field,
+    Radix,
+    Color,
+    HelpTopic,
+    Agent,
+    PickSource,
+    FilePath,
+    Row,
+    CursorIndex,
+    MarkRef,
+    Time,
+    Text,
+    KeyVal,
+    /// The values to pick from, `|` between them: `off|name=|note=`.
+    Lit(&'static str),
+}
+
+impl ArgKind {
+    /// What a listing shows for it: a placeholder in `<...>`, or what a `Lit` says.
+    pub fn placeholder(self) -> &'static str {
+        match self {
+            ArgKind::Signal => "<path|pattern>",
+            ArgKind::Scope => "<scope>",
+            ArgKind::Stream => "<streams>",
+            ArgKind::Protocol => "<protocol>",
+            ArgKind::Role => "<role>=<signal>",
+            ArgKind::Field => "<expr>",
+            ArgKind::Radix => "<radix>",
+            ArgKind::Color => "<color|off>",
+            ArgKind::HelpTopic => "<topic>",
+            ArgKind::Agent => "<id|off>",
+            ArgKind::PickSource => "<source>",
+            ArgKind::FilePath => "<file>",
+            ArgKind::Row => "<row>",
+            ArgKind::CursorIndex => "<1-9>",
+            ArgKind::MarkRef => "<from|to>",
+            ArgKind::Time => "<time>",
+            ArgKind::Text => "<name>",
+            ArgKind::KeyVal => "<key>=<value>",
+            ArgKind::Lit(s) => s,
+        }
+    }
+}
+
+/// One `:` command: its name, its usage line, a description for the listings, what its arguments
+/// are and its handler. `run` looks the name up here instead of matching inline, so this table is
+/// the only place that names what the core runs (spec §7); the window's own commands (`:w`, `:q`,
+/// `:help`) are its `WINDOW` (`src/tui/commands.rs`), the only other list. A listing shows `desc`
+/// and the usage line without `usage: `; handlers report their own entry's `usage`, except `add`
+/// and `color`, whose usage is built at runtime (pattern syntax, color list); entries with no
+/// usage error (`e`, `scope`, `names`, `ungroup`, `undo`, `redo`, `rm`) carry it for the listings.
 pub struct Command {
     pub name: &'static str,
     pub usage: &'static str,
+    pub desc: &'static str,
+    /// The arguments, in order; empty when it takes none.
+    pub args: &'static [ArgKind],
+    /// The last argument takes more of the same: `...` after the placeholders.
+    pub trailing: bool,
+    /// The glyph a completion shows before it (`src/draw.rs`, `icon`).
+    pub icon: char,
     pub run: fn(&mut Workspace, &Command, &str) -> Result<Option<Msg>, String>,
 }
 
 pub const COMMANDS: &[Command] = &[
-    Command { name: "add", usage: "usage: :add <path|pattern>...", run: do_add },
-    Command { name: "e", usage: "usage: :e", run: do_reload },
-    Command { name: "decode", usage: "usage: :decode <name> <protocol> <role>=<signal>...", run: do_decode },
-    Command { name: "signal", usage: "usage: :signal <name> = <signal>, or :signal <name> off", run: do_signal },
-    Command { name: "zoom", usage: "zoom takes one time, per column (`zoom 1ns`); to show a range: fit", run: do_zoom },
-    Command { name: "fit", usage: "usage: :fit, or :fit <from> <to> as cursors ('2 '3) or times", run: do_fit },
-    Command { name: "scope", usage: "usage: :scope <scope>", run: do_scope },
-    Command { name: "unit", usage: "usage: :unit <s|ms|us|ns|ps|fs|auto>", run: do_unit },
-    Command { name: "radix", usage: "usage: :radix <name>", run: do_radix },
-    Command { name: "color", usage: "usage: :color <color|off>", run: do_color },
-    Command { name: "group", usage: "usage: :group <name>", run: do_group },
-    Command { name: "protocol", usage: "usage: :protocol <name> roles=<a,b> when=<expr> <field>=<expr>... | :protocol <name> wasm=<file>", run: do_protocol },
-    Command { name: "names", usage: "usage: :names <signal> <spec>", run: do_names },
-    Command { name: "rename", usage: "usage: :rename <name>", run: do_rename },
-    Command { name: "ungroup", usage: "usage: :ungroup", run: do_ungroup },
-    Command { name: "select", usage: "usage: :select <row> [<last row>]", run: do_select },
-    Command { name: "cursor", usage: "usage: :cursor <1-9> [time|off] [name=<text>] [note=<text>]", run: do_cursor },
-    Command { name: "undo", usage: "usage: :undo", run: do_undo },
-    Command { name: "redo", usage: "usage: :redo", run: do_redo },
-    Command { name: "rm", usage: "usage: :rm <name>...", run: do_rm },
+    Command {
+        name: "add",
+        usage: "usage: :add <path|pattern>...",
+        desc: "Add signals below the selected row (after a selected group); a scope becomes a group, e.g. :add top.cpu.*",
+        args: &[ArgKind::Signal],
+        trailing: true,
+        icon: '\u{eb31}',
+        run: do_add,
+    },
+    Command {
+        name: "e",
+        usage: "usage: :e",
+        desc: "Reload the trace, keeping signals, groups, cursor and zoom",
+        args: &[],
+        trailing: false,
+        icon: '\u{ea7b}',
+        run: do_reload,
+    },
+    Command {
+        name: "decode",
+        usage: "usage: :decode <name> <protocol> <role>=<signal>...",
+        desc: "Decode a protocol into streams, e.g. :decode rx axis clock=clk tvalid=rx_tvalid tready=rx_tready tdata=rx_tdata tlast=rx_tlast; alone, a form that fills it in",
+        args: &[ArgKind::Text, ArgKind::Protocol, ArgKind::Role],
+        trailing: true,
+        icon: '\u{eb2d}',
+        run: do_decode,
+    },
+    Command {
+        name: "signal",
+        usage: "usage: :signal <name> = <signal>, or :signal <name> off",
+        desc: "Name a computed signal, e.g. :signal op = cmd[7:0] or :signal hdr = {a, b}; :signal op off removes it",
+        args: &[ArgKind::Text, ArgKind::Lit("=|off"), ArgKind::Signal],
+        trailing: true,
+        icon: '\u{eb31}',
+        run: do_signal,
+    },
+    Command {
+        name: "zoom",
+        usage: "zoom takes one time, per column (`zoom 1ns`); to show a range: fit",
+        desc: "Set the time per column, e.g. :zoom 1ns",
+        args: &[ArgKind::Time],
+        trailing: false,
+        icon: '\u{eb81}',
+        run: do_zoom,
+    },
+    Command {
+        name: "fit",
+        usage: "usage: :fit, or :fit <from> <to> as cursors ('2 '3) or times",
+        desc: "Zoom to the whole simulation, or between cursors or times, e.g. :fit '2 '3 or :fit 10ns 20ns",
+        args: &[ArgKind::MarkRef, ArgKind::MarkRef],
+        trailing: false,
+        icon: '\u{eb81}',
+        run: do_fit,
+    },
+    Command {
+        name: "scope",
+        usage: "usage: :scope <scope>",
+        desc: "Resolve names under a scope first, e.g. :scope top.cpu makes state top.cpu.state; none without a path",
+        args: &[ArgKind::Scope],
+        trailing: false,
+        icon: '\u{ea73}',
+        run: do_scope,
+    },
+    Command {
+        name: "unit",
+        usage: "usage: :unit <s|ms|us|ns|ps|fs|auto>",
+        desc: "Set the time unit an agent's answers are given in; the window picks the one that fits",
+        args: &[ArgKind::Lit("s|ms|us|ns|ps|fs|auto")],
+        trailing: false,
+        icon: '\u{ea73}',
+        run: do_unit,
+    },
+    Command {
+        name: "radix",
+        usage: "usage: :radix <name>",
+        desc: "Set the radix: hex bin dec sdec oct ascii float enum, q4.12 / uq4.12 fixed point",
+        args: &[ArgKind::Radix],
+        trailing: false,
+        icon: '\u{ea73}',
+        run: do_radix,
+    },
+    Command {
+        name: "color",
+        usage: "usage: :color <color|off>",
+        desc: "Colour the selected row or group: red orange yellow green cyan blue magenta gray; off for the theme's",
+        args: &[ArgKind::Color],
+        trailing: false,
+        icon: '\u{ea73}',
+        run: do_color,
+    },
+    Command {
+        name: "group",
+        usage: "usage: :group <name>",
+        desc: "Group the selected rows (V selects them)",
+        args: &[ArgKind::Text],
+        trailing: false,
+        icon: '\u{ea73}',
+        run: do_group,
+    },
+    Command {
+        name: "protocol",
+        usage: "usage: :protocol <name> roles=<a,b> when=<expr> <field>=<expr>... | :protocol <name> wasm=<file>",
+        desc: "Define a protocol on its roles, a record per cycle where when holds, e.g. :protocol cmd roles=valid,ready,data when=valid && ready op=data[7:0]; :decode puts it on signals; alone, a form with the selected rows as roles; :protocol search, one filled in from the last clocked search",
+        args: &[ArgKind::Text, ArgKind::KeyVal],
+        trailing: true,
+        icon: '\u{eb2d}',
+        run: do_protocol,
+    },
+    Command {
+        name: "names",
+        usage: "usage: :names <signal> <spec>",
+        desc: "Name a signal's values, shown by the enum radix and searched by name, e.g. :names state 0=IDLE 1=BUSY; off removes them; alone, a card of the values the selected signal takes",
+        args: &[ArgKind::Signal, ArgKind::Text],
+        trailing: true,
+        icon: '\u{eb2d}',
+        run: do_names,
+    },
+    Command {
+        name: "rename",
+        usage: "usage: :rename <name>",
+        desc: "Rename the group the selected row is in",
+        args: &[ArgKind::Text],
+        trailing: false,
+        icon: '\u{ea73}',
+        run: do_rename,
+    },
+    Command {
+        name: "ungroup",
+        usage: "usage: :ungroup",
+        desc: "Dissolve the group the selected row is in, keeping its signals",
+        args: &[],
+        trailing: false,
+        icon: '\u{ea73}',
+        run: do_ungroup,
+    },
+    Command {
+        name: "select",
+        usage: "usage: :select <row> [<last row>]",
+        desc: "Select a signal or group by name, or the rows from one to another",
+        args: &[ArgKind::Row, ArgKind::Row],
+        trailing: false,
+        icon: '\u{ea73}',
+        run: do_select,
+    },
+    Command {
+        name: "cursor",
+        usage: "usage: :cursor <1-9> [time|off] [name=<text>] [note=<text>]",
+        desc: "Put mark n at a time (1: the cursor), name it, remove it, or jump to it, e.g. :cursor 2 120ns name=bad write",
+        args: &[
+            ArgKind::CursorIndex,
+            ArgKind::Lit("off|name=|note="),
+            ArgKind::Lit("name=|note="),
+        ],
+        trailing: true,
+        icon: '\u{eaa5}',
+        run: do_cursor,
+    },
+    Command {
+        name: "undo",
+        usage: "usage: :undo",
+        desc: "Undo the last change to the rows",
+        args: &[],
+        trailing: false,
+        icon: '\u{ea82}',
+        run: do_undo,
+    },
+    Command {
+        name: "redo",
+        usage: "usage: :redo",
+        desc: "Redo a change undone with :undo",
+        args: &[],
+        trailing: false,
+        icon: '\u{ea82}',
+        run: do_redo,
+    },
+    Command {
+        name: "rm",
+        usage: "usage: :rm <name>...",
+        desc: "Remove matching rows, or the selected row; :rm ** removes all",
+        args: &[ArgKind::Signal],
+        trailing: true,
+        icon: '\u{ea73}',
+        run: do_rm,
+    },
 ];
 
 /// The table entry for `name`, if `run` answers it.
@@ -201,7 +426,6 @@ fn do_redo(app: &mut Workspace, _: &Command, _arg: &str) -> Result<Option<Msg>, 
 fn do_rm(app: &mut Workspace, _: &Command, arg: &str) -> Result<Option<Msg>, String> {
     rm(app, arg).map(|()| None)
 }
-
 
 /// `:decode name protocol key=value...`: an instance (`[[decode]]`); `clock=` is its clock,
 /// `prefix=` a param, and for `frame`, `pair` and `check` the keys that aren't roles are params. A

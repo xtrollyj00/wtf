@@ -251,7 +251,11 @@ fn join_in_order() {
 fn on_stream_checks() {
     use wtf_core::stream::Decode;
     let mut ws = Workspace::open(&fixture("vcd").with_file_name("axilite.vcd")).unwrap();
-    let d = |name: &str, protocol: &str, clock: &str, signals: &[(&str, &str)], params: &[(&str, &str)]| Decode {
+    let d = |name: &str,
+             protocol: &str,
+             clock: &str,
+             signals: &[(&str, &str)],
+             params: &[(&str, &str)]| Decode {
         name: name.into(),
         protocol: protocol.into(),
         clock: clock.into(),
@@ -262,7 +266,10 @@ fn on_stream_checks() {
         .unwrap();
     let streams = [("request", "s.aw"), ("response", "s.b")];
     for (decode, error) in [
-        (d("f", "frame", "", &[], &[("gap", "1ns")]), "f: no stream for input"),
+        (
+            d("f", "frame", "", &[], &[("gap", "1ns")]),
+            "f: no stream for input",
+        ),
         (
             d("p", "pair", "", &streams, &[("tag", "id")]),
             "p: pair: no parameter tag (id, req_id, resp_id)",

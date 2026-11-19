@@ -2,9 +2,9 @@ Showing the user evidence.
 
 Form
 - `workspace` sets everything at once, as one undo step, in the session's own shape (spec §11):
-  `signal`, `protocol`, `decode`, `names`, `rows`, `cursors`, `view`, `scope`, `unit`. Every
-  name, radix, time and key is checked first and all the errors come back at once; a call that
-  fails changes nothing.
+  `signal`, `protocol`, `decode`, `names`, `rows`, `cursors`, `view`, `scope`, `unit`. The
+  session validator checks it, so a bad name, radix or time is worded as wtf words it for a
+  session file; all the errors come back at once and a call that fails changes nothing.
 - `view` describes it, `render` draws it as text, `present` shows it to the user.
 
 Recipes
@@ -33,8 +33,10 @@ Details
 - `view`: the visible range, `{"time": "60ns", "to": "480ns"}`; default the whole trace.
 - `scope` (`help names`).
 - `unit`: the time unit of the answers, `ns`, or `auto` for the one that fits (`help times`).
-- A key an entry doesn't take is an error naming those it does. The session file's `version`
-  and `trail` are not declared: the trail is your calls.
+- A key the tool doesn't take, at the top, is an error naming those it does; inside an entry the
+  validator names the key it didn't take. The session file's `version` and `trail` are not
+  declared: the trail is your calls.
+- A key of the wrong kind, a string where a list goes, is an error naming the kind it takes.
 - With no window open, `present` writes a session file that `wtf <trace>` shows when the user
   opens the trace: tell them so. The user also sees each query and change you make as a step
   (`:trail`), with its time, so each query is part of what they see.

@@ -297,7 +297,7 @@ fn sessions_keep_streams() {
         wtf_core::session::apply(&mut other, bad),
         Ok(vec![
             "protocol e: a protocol has no clock; its [[decode]] gives it".to_string(),
-            "protocol: needs a name, roles as a list, a when and fields as a table".to_string(),
+            "protocol f: needs a name, roles as a list, a when and fields as a table".to_string(),
             "protocol g: g: not a field name: a b".to_string(),
         ])
     );
@@ -528,7 +528,7 @@ fn instance_errors_at_once() {
         warn,
         Ok(vec![
             "decode z: no signal for ready, cmd".to_string(),
-            "decode: needs a name, a protocol, signals and params as tables".to_string()
+            "decode w: needs a name, a protocol, signals and params as tables".to_string()
         ])
     );
 }

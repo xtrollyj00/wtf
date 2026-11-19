@@ -820,7 +820,7 @@ fn named_signals() {
         wtf_core::session::apply(&mut other, bad),
         Ok(vec![
             "signal x: unknown signal: nope".into(),
-            "signal: needs a name and an expr".into()
+            "signal [2]: needs a name and an expr".into()
         ])
     );
     // the simulation ran again: :e works them out from the new values
