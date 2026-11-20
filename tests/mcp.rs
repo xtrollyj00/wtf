@@ -201,6 +201,24 @@ fn tools_list() {
         size <= 14_150,
         "the tool definitions are {size} bytes, past the 14150 allowed"
     );
+    // the workspace schema offers only what a declaration takes: no protocol clock, no
+    // anything-goes row
+    let ws = list["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["name"] == "workspace")
+        .unwrap();
+    let defs = &ws["inputSchema"]["$defs"];
+    assert!(
+        defs["Protocol"]["properties"].get("clock").is_none(),
+        "{defs}"
+    );
+    assert_eq!(
+        defs["Row"]["anyOf"].as_array().map(Vec::len),
+        Some(2),
+        "{defs}"
+    );
     for t in list["tools"].as_array().unwrap() {
         let d = t["description"].as_str().unwrap();
         assert!(
@@ -511,11 +529,8 @@ fn struct_fields() {
             json!({"rows": [{"signal": "grid", "open": ["grid", "mem[1]"]}]}),
         )
         .unwrap_err();
-    assert_eq!(
-        bad,
-        "grid has no mem[1] to open; its levels are named from grid on"
-    );
-    let view = s.ok("workspace", json!({"rows": ["pkt", {"signal": "pkts", "open": ["pkts", "pkts[1]"]}], "range": ["0ns", "20ns"]}));
+    assert_eq!(bad, "types.grid has no mem[1] to open");
+    let view = s.ok("workspace", json!({"rows": [{"signal": "pkt"}, {"signal": "pkts", "open": ["pkts", "pkts[1]"]}], "view": {"time": "0ns", "to": "20ns"}}));
     assert!(
         view.contains("pkts  types.pkts  hex  (open: pkts, pkts[1])"),
         "{view}"
@@ -525,14 +540,11 @@ fn struct_fields() {
     let bad = s
         .tool(
             "workspace",
-            json!({"rows": [{"signal": "pkt", "fields": ["pair.hi:dec"]}]}),
+            json!({"rows": [{"signal": "pkt", "fields": [{"field": "pair.hi", "radix": "dec"}]}]}),
         )
         .unwrap_err();
-    assert_eq!(
-        bad,
-        "pkt has no field pair.hi; fields are named from pkt on"
-    );
-    let view = s.ok("workspace", json!({"rows": [{"signal": "pkt", "open": ["pkt", "pkt.pair"], "fields": ["pkt.pair.hi:dec:red", "pkt.state:green"]}]}));
+    assert_eq!(bad, "types.pkt has no field pair.hi");
+    let view = s.ok("workspace", json!({"rows": [{"signal": "pkt", "open": ["pkt", "pkt.pair"], "fields": [{"field": "pkt.pair.hi", "radix": "dec", "color": "red"}, {"field": "pkt.state", "color": "green"}]}]}));
     assert!(view.contains("pkt  types.pkt  hex  (open: pkt, pkt.pair)  (fields: pkt.pair.hi:dec:red, pkt.state:enum:green)"), "{view}");
     let r = s.ok("render", json!({"width": 60}));
     assert!(
@@ -759,9 +771,13 @@ fn workspace_in_one_call() {
     s.ok("open", json!({"trace": simple()}));
     let decl = json!({
         "scope": "top",
-        "rows": ["clk", {"group": "cpu", "rows": ["cpu.data:dec", "cpu.busy"]}, "dma.state:bin"],
+        "rows": [
+            {"signal": "clk"},
+            {"group": "cpu", "rows": [{"signal": "cpu.data", "radix": "dec"}, {"signal": "cpu.busy"}]},
+            {"signal": "dma.state", "radix": "bin"},
+        ],
         "cursors": {"1": "15ns", "2": "35ns"},
-        "range": ["10ns", "50ns"],
+        "view": {"time": "10ns", "to": "50ns"},
     });
     // (zoom goes in steps: 40ns over the workspace's 80 columns shows 10ns - 49ns plus the last column)
     let view = s.ok("workspace", decl.clone());
@@ -776,8 +792,28 @@ fn workspace_in_one_call() {
         Ok("removed 5: top.clk, group cpu, top.cpu.data, top.cpu.busy, top.dma.state".into())
     );
     // every mistake at once, and nothing changes
-    let bad = s.tool("workspace", json!({"rows": ["state", "top.clk:float", "nope", "data[3]"], "cursors": {"12": "1ns", "2": "soon"}, "range": ["50ns", "10ns"]}));
-    assert_eq!(bad, Err("ambiguous: state (2 signals: top.cpu.state, top.dma.state)\nfloat doesn't fit top.clk (1 bits)\nunknown signal: nope\ndata[3]: a bit can't be a row; add its bus\ncursors: no cursor 12 (1-9)\nsoon: bad time: soon (a number and a unit, 20ns or 1.5us; a plain number is file ticks)\nrange: the end must be after the start".into()));
+    let bad = s.tool("workspace", json!({"rows": [{"signal": "state"}, {"signal": "top.clk", "radix": "float"}, {"signal": "nope"}, {"signal": "data[3]"}], "cursors": {"12": "1ns", "2": "soon"}, "view": {"time": "50ns", "to": "10ns"}}));
+    // the declaration's own first, in its order, then the validator's: the radix, the cursor
+    // number and the bad time are the validator's lines now, one each
+    let bad = bad.unwrap_err();
+    let lines: Vec<&str> = bad.lines().collect();
+    assert_eq!(
+        &lines[..4],
+        [
+            "ambiguous: state (2 signals: top.cpu.state, top.dma.state)",
+            "unknown signal: nope",
+            "data[3]: a bit can't be a row; add its bus",
+            "view: the end must be after the start",
+        ],
+        "{bad}"
+    );
+    for needle in ["top.clk", "radix", "no cursor", "bad time"] {
+        assert_eq!(
+            lines.iter().filter(|l| l.contains(needle)).count(),
+            1,
+            "{needle} in {bad}"
+        );
+    }
     assert!(
         s.ok("view", json!({}))
             .starts_with("rows (> selected):\n  (none)\n")
@@ -785,33 +821,34 @@ fn workspace_in_one_call() {
     // view in a unit of the agent's
     s.ok(
         "workspace",
-        json!({"rows": ["top.clk"], "cursors": {"2": "35ns"}}),
+        json!({"rows": [{"signal": "top.clk"}], "cursors": {"2": "35ns"}}),
     );
     assert!(
         s.ok("view", json!({"unit": "ps"}))
             .contains("  2: 35000ps, +35000ps after 1\nvisible: 0ps - ")
     );
     // a mark with a name and a note (spec §9); the cursor takes a time only
-    let view = s.ok("workspace", json!({"rows": ["top.clk"], "cursors": {"2": {"time": "35ns", "name": "first bad write", "note": "AW before W"}, "3": {"time": "45ns", "name": "end"}}}));
+    let view = s.ok("workspace", json!({"rows": [{"signal": "top.clk"}], "cursors": {"2": {"time": "35ns", "name": "first bad write", "note": "AW before W"}, "3": {"time": "45ns", "name": "end"}}}));
     assert!(view.contains("  2: 35ns, +35ns after 1, \"first bad write\": AW before W\n  3: 45ns, +10ns after 2, \"end\"\n"), "{view}");
     let bad = s.tool(
         "workspace",
-        json!({"rows": ["top.clk"], "cursors": {"1": {"time": "5ns", "name": "x"}}}),
+        json!({"rows": [{"signal": "top.clk"}], "cursors": {"1": {"time": "5ns", "name": "x"}}}),
     );
-    assert_eq!(
-        bad,
-        Err(
-            "cursors: 1 is the cursor and moves, so it takes a time only; name a mark (2-9)".into()
-        )
+    // `cursors: 1` is the cursor and takes no name: one line, from the validator's mark section
+    let bad = bad.unwrap_err();
+    assert!(
+        bad.lines()
+            .any(|l| l.starts_with("cursors.1") && l.contains("the cursor")),
+        "{bad}"
     );
     // a collapsed group
-    let view = s.ok("workspace", json!({"scope": "top", "rows": [{"group": "cpu", "rows": ["cpu.data", "cpu.busy"], "collapsed": true}, "clk"]}));
+    let view = s.ok("workspace", json!({"scope": "top", "rows": [{"group": "cpu", "rows": [{"signal": "cpu.data"}, {"signal": "cpu.busy"}], "collapsed": true}, {"signal": "clk"}]}));
     // (the description lists a collapsed group's signals too, under its header)
     assert!(view.starts_with("rows (> selected):\n> ▸ cpu (2)  (collapsed)\n    data  top.cpu.data  hex\n    busy  top.cpu.busy\n  clk  top.clk\n"), "{view}");
     // a colour last, after a radix or alone; a slice's `:` is no colour's
     let view = s.ok(
         "workspace",
-        json!({"scope": "top", "rows": ["cpu.data:dec:red", "clk:green", "cpu.data[7:4]"]}),
+        json!({"scope": "top", "rows": [{"signal": "cpu.data", "radix": "dec", "color": "red"}, {"signal": "clk", "color": "green"}, {"signal": "cpu.data[7:4]"}]}),
     );
     assert!(view.starts_with("rows (> selected):\n> data  top.cpu.data  dec  red\n  clk  top.clk  green\n  data[7:4]  top.cpu.data[7:4]  hex\n"), "{view}");
     assert_eq!(
@@ -819,7 +856,7 @@ fn workspace_in_one_call() {
         Ok("done".into())
     );
     // named computed signals, declared with the rows that show them; bad ones reported with the rest
-    let view = s.ok("workspace", json!({"signals": ["hi = cpu.data[7:4]", "pair = {busy, data[0]}"], "rows": ["hi:dec", "pair"]}));
+    let view = s.ok("workspace", json!({"signal": [{"name": "hi", "expr": "cpu.data[7:4]"}, {"name": "pair", "expr": "{busy, data[0]}"}], "rows": [{"signal": "hi", "radix": "dec"}, {"signal": "pair"}]}));
     assert!(
         view.starts_with("rows (> selected):\n> hi  hi  dec\n  pair  pair  hex\n"),
         "{view}"
@@ -827,12 +864,12 @@ fn workspace_in_one_call() {
     assert_eq!(s.ok("find", json!({"expr": "pair == 2"})), "time\n20ns");
     let bad = s.tool(
         "workspace",
-        json!({"signals": ["x = nope", "y"], "rows": ["x"]}),
+        json!({"signal": [{"name": "x", "expr": "nope"}, {"name": "y"}], "rows": [{"signal": "x"}]}),
     );
     assert_eq!(
         bad,
         Err(
-            "signal x: unknown signal: nope\nsignals: y: not `name = expr`\nunknown signal: x"
+            "signal x: unknown signal: nope\nsignal [2]: needs a name and an expr\nnot in trace: x"
                 .into()
         )
     );
@@ -845,7 +882,7 @@ fn workspace_in_one_call() {
         "command",
         json!({"line": "decode beat b clock=top.clk busy=top.cpu.busy data=top.cpu.data"}),
     );
-    s.ok("workspace", json!({"rows": ["top.clk"]}));
+    s.ok("workspace", json!({"rows": [{"signal": "top.clk"}]}));
     assert!(
         s.ok("records", json!({"stream": "beat", "count_only": true}))
             .starts_with("2 records"),
@@ -853,12 +890,176 @@ fn workspace_in_one_call() {
     );
 }
 
+/// Every entry's keys are checked, a failed declaration changes nothing so the retry starts
+/// clean, and a call whose arguments don't parse is still a step (spec §15).
+#[test]
+fn workspace_fails_whole() {
+    let dir = Dir::new("decl-fail");
+    let mut s = Server::start(&dir.0);
+    s.ok("open", json!({"trace": simple()}));
+    let bad = s.tool(
+        "workspace",
+        json!({
+            "signal": [{"name": "op", "expr": "top.cpu.data[3:0]", "colour": "red"}],
+            "rows": [
+                {"signal": "top.clk", "colour": "red"},
+                "top.clk",
+                {"group": "g", "rows": [{"signal": "top.rst", "colour": "red"}]},
+            ],
+            "cursors": {"2": {"time": "1ns", "label": "x"}},
+            "trail": [{"tool": "find"}],
+        }),
+    );
+    let err = bad.unwrap_err();
+    let lines: Vec<&str> = err.lines().collect();
+    // the declaration's own two, in order: the top-level `trail`, then a row that isn't one
+    assert_eq!(
+        &lines[..2],
+        [
+            "unknown workspace entry: trail (use signal, protocol, decode, names, rows, cursors, view, scope, unit)",
+            "rows: \"top.clk\" is not a row: write {\"signal\": \"top.clk\"}",
+        ],
+        "{err}"
+    );
+    // then the validator's: one unknown-key line per entry that carries one, keyed by where in the
+    // file it sits (a `rows` entry has no name of its own), the group member's among the rows'
+    for line in [
+        "signal op: unknown key: colour (keys: name, expr)",
+        "rows: top.clk: unknown key: colour (keys: signal, radix, color, open, fields)",
+        "rows: top.rst: unknown key: colour (keys: signal, radix, color, open, fields)",
+        "cursors.2: unknown key: label (keys: time, name, note)",
+    ] {
+        assert!(lines.contains(&line), "{err}");
+    }
+    assert_eq!(lines.len(), 6, "{err}");
+    // a bad scope is one mistake among the others, its nearest scopes listed
+    let e = s
+        .tool(
+            "workspace",
+            json!({"scope": "top.cpux", "rows": [{"signal": "nope"}], "unit": "xs"}),
+        )
+        .unwrap_err();
+    assert!(
+        e.starts_with("no scope top.cpux (nearest: top.cpu)\n"),
+        "{e}"
+    );
+    assert!(e.lines().any(|l| l.contains("nope")), "{e}");
+    assert!(e.contains("unit: bad time unit: xs"), "{e}");
+    // `op` was made to check the rows, and is gone again
+    assert!(
+        s.tool("command", json!({"line": "signal op off"}))
+            .unwrap_err()
+            .starts_with("no signal op"),
+    );
+    // the retry starts clean
+    s.ok(
+        "workspace",
+        json!({"signal": [{"name": "op", "expr": "top.cpu.data[3:0]"}], "rows": [{"signal": "op"}]}),
+    );
+    // arguments that don't parse never reach the tool, and are a step all the same
+    let r = s.call(
+        "tools/call",
+        json!({"name": "workspace", "arguments": {"rows": 3}}),
+    );
+    assert_eq!(r["isError"], true, "{r}");
+    let steps = trail_steps(&dir.0, s.child.id(), 1);
+    let last = steps.last().unwrap();
+    // wtf's words now, not serde's: the text carries quotes, so the step writes it single-quoted
+    assert!(
+        last.starts_with("tool = \"workspace\"\nask = \"\"\n")
+            && last.contains("error: rows must be a list, not a number"),
+        "{steps:?}"
+    );
+}
+
+/// A failed declaration keeps the marks with their names and notes; a row names what the
+/// declaration makes before a trace path ending the same; each mistake is said once (spec §15).
+#[test]
+fn workspace_failure_keeps_marks() {
+    let dir = Dir::new("decl-marks");
+    let mut s = Server::start(&dir.0);
+    s.ok("open", json!({"trace": simple()}));
+    s.ok(
+        "workspace",
+        json!({"rows": [{"signal": "top.clk"}], "cursors": {"2": {"time": "20ns", "name": "a", "note": "b"}, "3": "40ns"}}),
+    );
+    let before = s.ok("view", json!({}));
+    assert_eq!(
+        s.tool(
+            "workspace",
+            json!({"rows": [{"signal": "top.nope"}], "unit": "xs"})
+        ),
+        Err(
+            "unit: bad time unit: xs (s, ms, us, ns, ps, fs or auto)\nunknown signal: top.nope"
+                .into()
+        )
+    );
+    assert_eq!(s.ok("view", json!({})), before);
+    assert!(
+        before.contains("2: 20ns, +20ns after 1, \"a\": b"),
+        "{before}"
+    );
+    // `busy` also ends top.cpu.busy: the row is the signal declared here
+    let shown = s.ok(
+        "workspace",
+        json!({"signal": [{"name": "busy", "expr": "top.clk"}], "rows": [{"signal": "busy"}]}),
+    );
+    assert!(shown.contains("> busy  busy\n"), "{shown}");
+}
+
+#[test]
+fn workspace_wrong_types() {
+    // a key of the wrong kind is the agent's mistake, so it is answered in wtf's words (spec §15)
+    let dir = Dir::new("decl-kinds");
+    let mut s = Server::start(&dir.0);
+    s.ok("open", json!({"trace": simple()}));
+    s.ok("workspace", json!({"rows": [{"signal": "top.clk"}]}));
+    let cases = [
+        (
+            json!({"rows": "top.clk"}),
+            "rows must be a list, not a string: write it as [{\"signal\": \"top.clk\"}]; see `help workspace`",
+        ),
+        (
+            json!({"scope": ["top"]}),
+            "scope must be a string, not a list: write it as \"top\"; see `help workspace`",
+        ),
+        (
+            json!({"view": [1, 2]}),
+            "view must be a table, not a list: write it as {\"time\": \"60ns\", \"to\": \"480ns\"}; see `help workspace`",
+        ),
+    ];
+    for (args, want) in cases {
+        let e = s.tool("workspace", args).unwrap_err();
+        assert_eq!(e, want);
+        assert!(
+            !e.contains("failed to deserialize") && !e.contains("invalid type"),
+            "{e}"
+        );
+    }
+    let e = s.tool("workspace", json!({"cursors": null})).unwrap_err();
+    assert!(e.contains("cursors") && e.contains("not null"), "{e}");
+    // nothing changed, and each failed call is a step on the trail
+    assert!(s.ok("view", json!({})).contains("top.clk"));
+    let steps = trail_steps(&dir.0, s.child.id(), 1);
+    assert!(
+        steps
+            .iter()
+            .any(|st| st.starts_with("tool = \"workspace\"") && st.contains("rows must be a list")),
+        "{steps:?}"
+    );
+    // null is no value for the two strings, not a wrong kind: the key is left out
+    s.ok("workspace", json!({"scope": null}));
+}
+
 #[test]
 fn render_range_stays_with_the_workspace() {
     let dir = Dir::new("range");
     let mut s = Server::start(&dir.0);
     s.ok("open", json!({"trace": simple()}));
-    s.ok("workspace", json!({"rows": ["top.clk", "top.cpu.data"]}));
+    s.ok(
+        "workspace",
+        json!({"rows": [{"signal": "top.clk"}, {"signal": "top.cpu.data"}]}),
+    );
     let shown = s.ok("render", json!({"from": "20ns", "to": "60ns", "width": 80}));
     // zoom steps can show more than asked, never less: the next step in would end at 53ns
     assert!(shown.starts_with("20ns - 80ns:"), "{shown}");
@@ -978,6 +1179,33 @@ fn errors() {
     assert_eq!(
         s.tool("user_view", json!({})),
         Err("no wtf window is open on this trace".into())
+    );
+}
+
+#[test]
+fn window_commands_refused() {
+    let dir = Dir::new("refused");
+    let mut s = Server::start(&dir.0);
+    s.ok("open", json!({"trace": simple()}));
+    // every command of the window's own list, not a closed few (spec §7, §15)
+    for line in [":trail", ":decodes", ":pick"] {
+        let e = s.tool("command", json!({"line": line})).unwrap_err();
+        let cmd = line
+            .trim_start_matches(':')
+            .split_whitespace()
+            .next()
+            .unwrap();
+        assert_eq!(
+            e,
+            format!(
+                ":{cmd} belongs to the user's window; use `present` to show the workspace, `open` with no arguments to reopen the trace"
+            )
+        );
+    }
+    // one the core answers too, with no arguments: its usage line, not a refusal
+    assert_eq!(
+        s.tool("command", json!({"line": ":decode"})).unwrap_err(),
+        "usage: :decode <name> <protocol> <role>=<signal>..."
     );
 }
 
@@ -1247,7 +1475,7 @@ fn trail_reaches_the_window() {
     s.ok("help", json!({"topic": "times"}));
     let _ = s.tool("values", json!({"signals": ["nope"], "from": "10ns"}));
     // the agent's own declaration keeps the steps before it
-    s.ok("workspace", json!({"rows": ["top.cpu.data"]}));
+    s.ok("workspace", json!({"rows": [{"signal": "top.cpu.data"}]}));
     // a window reads the whole trail over the link (spec §15 "Joining"); present carries none
     let window = fake_window(&dir.0, "5", &trace, "version = 1\n");
     s.ok("present", json!({}));
@@ -1355,9 +1583,9 @@ fn trail_steps_carry_their_time() {
         json!({"trace": std::fs::canonicalize("tests/data/handshake.vcd").unwrap()}),
     );
     let decl = json!({
-        "protocols": [{"name": "beat", "roles": ["valid", "ready", "data"], "when": "valid && ready", "fields": ["tdata = data", "low = data[3:0]"]}],
-        "decode": [{"name": "rx", "protocol": "beat", "clock": "clk", "signals": ["valid = valid", "ready = ready", "data = data"]}],
-        "rows": ["rx"],
+        "protocol": [{"name": "beat", "roles": ["valid", "ready", "data"], "when": "valid && ready", "fields": [{"tdata": "data"}, {"low": "data[3:0]"}]}],
+        "decode": [{"name": "rx", "protocol": "beat", "clock": "clk", "signals": [{"valid": "valid"}, {"ready": "ready"}, {"data": "data"}]}],
+        "rows": [{"signal": "rx"}],
     });
     s.ok("workspace", decl);
     let merged = s.ok("find", json!({"expr": "@clk valid", "unit": "ns"}));
@@ -1526,15 +1754,15 @@ fn records_of_a_declared_stream() {
     assert_eq!(s.tool("records", json!({"stream": "rx"})), Err("unknown stream: rx (none yet; make one with `command`: `decode <name> <protocol> ...`)".into()));
     // valid 15 - 45 (data 0x11), 65 - 85 (0x22, 0x23 from 75), 105 - 115 (0x33); ready 35 - 45, 105 - 115
     let decl = json!({
-        "protocols": [
-            {"name": "beat", "roles": ["valid", "ready", "data"], "when": "valid && ready", "fields": ["tdata = data", "low = data[3:0]"]},
-            {"name": "any", "roles": ["valid", "data"], "when": "valid", "fields": ["d = data"]},
+        "protocol": [
+            {"name": "beat", "roles": ["valid", "ready", "data"], "when": "valid && ready", "fields": [{"tdata": "data"}, {"low": "data[3:0]"}]},
+            {"name": "any", "roles": ["valid", "data"], "when": "valid", "fields": [{"d": "data"}]},
         ],
         "decode": [
-            {"name": "rx", "protocol": "beat", "clock": "clk", "signals": ["valid = valid", "ready = ready", "data = data"]},
-            {"name": "v", "protocol": "any", "clock": "clk", "signals": ["valid = valid", "data = data"]},
+            {"name": "rx", "protocol": "beat", "clock": "clk", "signals": [{"valid": "valid"}, {"ready": "ready"}, {"data": "data"}]},
+            {"name": "v", "protocol": "any", "clock": "clk", "signals": [{"valid": "valid"}, {"data": "data"}]},
         ],
-        "rows": ["rx", "rx.tdata"],
+        "rows": [{"signal": "rx"}, {"signal": "rx.tdata"}],
     });
     assert!(
         s.ok("workspace", decl)
@@ -1575,9 +1803,9 @@ fn records_of_a_declared_stream() {
     );
     // a protocol with roles, put on signals by an instance
     let decl = json!({
-        "protocols": [{"name": "cmd", "roles": ["valid", "ready", "cmd"], "when": "valid && ready", "fields": ["op = cmd[3:0]"]}],
-        "decode": [{"name": "c0", "protocol": "cmd", "clock": "clk", "signals": ["valid = valid", "ready = ready", "cmd = data"]}],
-        "rows": ["c0.op"],
+        "protocol": [{"name": "cmd", "roles": ["valid", "ready", "cmd"], "when": "valid && ready", "fields": [{"op": "cmd[3:0]"}]}],
+        "decode": [{"name": "c0", "protocol": "cmd", "clock": "clk", "signals": [{"valid": "valid"}, {"ready": "ready"}, {"cmd": "data"}]}],
+        "rows": [{"signal": "c0.op"}],
     });
     assert!(
         s.ok("workspace", decl)
@@ -1587,22 +1815,51 @@ fn records_of_a_declared_stream() {
         s.ok("records", json!({"stream": "c0"})),
         "2 of 2\nn\tstart\tend\top\n0\t35ns\t45ns\t0x1\n1\t105ns\t115ns\t0x3"
     );
-    let bad = s.tool("workspace", json!({"decode": [{"name": "c1", "protocol": "cmd", "signals": ["valid = valid", "x"]}], "rows": []}));
+    let bad = s.tool("workspace", json!({"decode": [{"name": "c1", "protocol": "cmd", "signals": [{"valid": "valid"}, {"x": true}]}], "rows": []}));
     assert_eq!(
         bad,
         Err(
-            "decode c1: x: not `name = signal`\ndecode c1: no signal for ready, cmd; no clock"
-                .into()
+            "decode c1 signal: x is a string\ndecode c1: no signal for ready, cmd; no clock".into()
         )
     );
     // mistakes come back with the rest, and nothing changes; a protocol names its roles only
     let decl = json!({
-        "protocols": [{"name": "e", "roles": ["v"], "when": "v", "fields": ["x = nope", "y"]}],
-        "decode": [{"name": "e0", "protocol": "e", "clock": "clk", "signals": ["v = valid"]}],
-        "rows": ["nope2"],
+        "protocol": [{"name": "e", "roles": ["v"], "when": "v", "fields": [{"x": "nope"}, {"y": true}]}],
+        "decode": [{"name": "e0", "protocol": "e", "clock": "clk", "signals": [{"v": "valid"}]}],
+        "rows": [{"signal": "nope2"}],
     });
     let bad = s.tool("workspace", decl);
-    assert_eq!(bad, Err("protocol e: y: not `name = signal`\ndecode e0: e0.x: nope is no role: e names only its roles (v) and fields\nunknown signal: nope2".into()));
+    assert_eq!(bad, Err("protocol e: field y is a string\nunknown signal: nope2\ndecode e0: e0.x: nope is no role: e names only its roles (v) and fields".into()));
+}
+
+/// Protocols and decodes declared in the session's shape, through `workspace` (spec §15).
+/// `unit: auto` leaves the workspace unit alone and warns about nothing (the file keeps no auto).
+#[test]
+fn workspace_declares_protocols() {
+    let dir = Dir::new("declproto");
+    let mut s = Server::start(&dir.0);
+    s.ok("open", json!({"trace": simple()}));
+    let view = s.ok(
+        "workspace",
+        json!({
+            "unit": "auto",
+            "protocol": [{"name": "b", "roles": ["busy", "data"], "when": "busy", "fields": [{"d": "data"}]}],
+            "decode": [{"name": "beat", "protocol": "b", "clock": "top.clk", "signals": [{"busy": "top.cpu.busy"}, {"data": "top.cpu.data"}]}],
+            "rows": [{"signal": "top.clk"}],
+        }),
+    );
+    assert!(view.starts_with("rows"), "{view}");
+    assert!(view.contains("clk  top.clk"), "{view}");
+    assert!(
+        s.ok("records", json!({"stream": "beat", "count_only": true}))
+            .starts_with("2 records"),
+        "the decode made by workspace"
+    );
+    let bad = s.tool("workspace", json!({"protocol": [{"roles": ["busy"]}]}));
+    assert_eq!(
+        bad,
+        Err("protocol [1]: needs a name, roles as a list, a when and fields as a table".into())
+    );
 }
 
 /// A protocol is a definition on roles: it needs them, and its decode gives the signals and clock.
@@ -1614,7 +1871,7 @@ fn protocol_needs_roles_and_no_clock() {
         "open",
         json!({"trace": std::fs::canonicalize("tests/data/handshake.vcd").unwrap()}),
     );
-    let bad = s.tool("workspace", json!({"protocols": [{"name": "ret", "roles": [], "when": "valid && ready", "fields": ["d = data"]}], "rows": []}));
+    let bad = s.tool("workspace", json!({"protocol": [{"name": "ret", "roles": [], "when": "valid && ready", "fields": [{"d": "data"}]}], "rows": []}));
     assert!(
         bad.unwrap_err()
             .starts_with("protocol ret: ret: needs roles")
@@ -1645,8 +1902,8 @@ fn axis_frames_and_errors() {
             .contains("\n  top.* axis: decode axis axis clock=top.clk prefix=top.")
     );
     let decl = json!({
-        "decode": [{"name": "rx", "protocol": "axis", "clock": "clk", "signals": ["tvalid = tvalid", "tready = tready", "tdata = tdata", "tlast = tlast", "tkeep = tkeep"]}],
-        "rows": ["rx.frame", "rx.frame.len:dec", "rx.errors"],
+        "decode": [{"name": "rx", "protocol": "axis", "clock": "clk", "signals": [{"tvalid": "tvalid"}, {"tready": "tready"}, {"tdata": "tdata"}, {"tlast": "tlast"}, {"tkeep": "tkeep"}]}],
+        "rows": [{"signal": "rx.frame"}, {"signal": "rx.frame.len", "radix": "dec"}, {"signal": "rx.errors"}],
     });
     assert!(s.ok("workspace", decl).starts_with("rows (> selected):\n> rx.frame  rx.frame\n  rx.frame.len  rx.frame.len  dec\n  rx.errors  rx.errors\n"));
     // a frame's data past 8 bytes is its count in a table, whole in one record
@@ -1719,7 +1976,7 @@ fn decode_with_command() {
             "command",
             json!({"line": "decode bus axilite clock=aclk prefix=s_axi_"})
         ),
-        "bus: records bus.wr 2, bus.rd 8; violations bus.errors 13, bus.wr.unmatched 0, bus.rd.unmatched 0; made from bus.aw 2, bus.w 2, bus.b 3, bus.ar 8, bus.r 8\n`records <stream>` lists one, `records <name>` its records and violations in order; `protocols axilite` says what each stream and field is; `pair` matches a stream with another (`help decode`)"
+        "bus: records bus.wr 2, bus.rd 8; violations bus.errors 13, bus.wr.unmatched 0, bus.rd.unmatched 0; made from bus.aw 2, bus.w 2, bus.b 3, bus.ar 8, bus.r 8\n`records <stream>` lists one, `records <name>` its records and violations in order; `protocols` says what each stream and field is; `pair` matches a stream with another (`help decode`)"
     );
     assert!(s.ok("view", json!({})).contains("aclk"), "the rows stay");
     // a decode's name: its results and violations in order of start, a column per field, empty
@@ -2130,6 +2387,170 @@ fn protocols_loaded_from_the_config_dir() {
     );
 }
 
+/// A `workspace` protocol from a file: loaded by the MCP, named by its stem, with no roles, `when`
+/// or `fields` of its own; every entry's mistake at once, the file named once (spec §15, §19).
+#[test]
+fn workspace_declares_a_protocol_from_a_file() {
+    let dir = Dir::new("decl-wasm");
+    let probe = dir.0.join("probe.wasm");
+    std::fs::copy("tests/data/wasm/probe.wasm", &probe).unwrap();
+    // a file named for a built-in loads, and is refused as one
+    let axis = dir.0.join("axis.wasm");
+    std::fs::copy("tests/data/wasm/probe.wasm", &axis).unwrap();
+    let gone = dir.0.join("gone.wasm");
+    let (probe, axis, gone) = (
+        probe.to_str().unwrap(),
+        axis.to_str().unwrap(),
+        gone.to_str().unwrap(),
+    );
+    let mut s = Server::start(&dir.0);
+    s.ok("open", json!({"trace": simple()}));
+    let err = s
+        .tool(
+            "workspace",
+            json!({"protocol": [
+                {"wasm": probe},
+                {"name": "p", "wasm": probe},
+                {"name": "probe", "wasm": probe, "roles": "v"},
+                {"name": "axis", "wasm": axis},
+                {"name": "gone", "wasm": gone},
+            ]}),
+        )
+        .unwrap_err();
+    assert_eq!(
+        err,
+        [
+            "protocol: an entry needs a name string".to_string(),
+            format!("wasm {probe} holds probe, not p: name it probe"),
+            "protocol probe from a file takes no roles, when or fields".into(),
+            "protocol axis: axis is a built-in protocol".into(),
+            format!("{gone}: no such file"),
+        ]
+        .join("\n")
+    );
+    // the right entry loads, and a decode in the same declaration uses it; empty lists say nothing
+    s.ok(
+        "workspace",
+        json!({
+            "protocol": [{"name": "probe", "wasm": probe, "roles": [], "fields": []}],
+            "decode": [{"name": "p", "protocol": "probe", "clock": "top.clk"}],
+        }),
+    );
+    let beats = s.ok("records", json!({"stream": "p.beat", "count_only": true}));
+    assert!(beats.starts_with("7 records, first 5ns"), "{beats}");
+}
+
+/// Each wrong shape a declaration can take is named, with how to write it, in a group's rows too
+/// (spec §15).
+#[test]
+fn workspace_names_wrong_shapes() {
+    let dir = Dir::new("decl-shapes");
+    let mut s = Server::start(&dir.0);
+    s.ok("open", json!({"trace": simple()}));
+    for (args, err) in [
+        (
+            json!({"rows": [3, {"group": "g", "rows": ["top.clk"]}]}),
+            "rows: 3 is not a row: write {\"signal\": ...} or {\"group\": ..., \"rows\": [...]}\nrows: \"top.clk\" is not a row: write {\"signal\": \"top.clk\"}",
+        ),
+        (
+            json!({"rows": [{"group": "g", "rows": "top.clk"}]}),
+            "rows [1].rows: must be a list",
+        ),
+        // a list that isn't one of pairs is left for the validator to want a table
+        (
+            json!({"decode": [{"name": "d", "protocol": "axis", "clock": "top.clk", "signals": ["tvalid"]}]}),
+            "decode d: needs a name, a protocol, signals and params as tables",
+        ),
+        (
+            json!({"scope": true}),
+            "scope must be a string, not a boolean: write it as \"top\"; see `help workspace`",
+        ),
+        (
+            json!({"cursors": {}, "view": {"time": "0ns", "to": "10ns"}, "names": {}, "unit": {}}),
+            "unit must be a string, not a table: write it as \"ns\"; see `help workspace`",
+        ),
+    ] {
+        assert_eq!(s.tool("workspace", args), Err(err.into()));
+    }
+}
+
+/// A unit no answer is given in is refused by every tool that takes one, the units listed.
+#[test]
+fn bad_unit_refused_everywhere() {
+    let dir = Dir::new("bad-unit");
+    let mut s = Server::start(&dir.0);
+    s.ok("open", json!({"trace": simple()}));
+    s.ok(
+        "command",
+        json!({"line": "protocol b roles=busy,data when=busy d=data"}),
+    );
+    s.ok(
+        "command",
+        json!({"line": "decode f b clock=top.clk busy=top.cpu.busy data=top.cpu.data"}),
+    );
+    let bad = Err("bad time unit: parsec (s, ms, us, ns, ps, fs)".to_string());
+    for (tool, args) in [
+        (
+            "values",
+            json!({"signals": ["top.clk"], "from": "0ns", "unit": "parsec"}),
+        ),
+        ("records", json!({"stream": "f", "unit": "parsec"})),
+        (
+            "find",
+            json!({"expr": "top.cpu.busy", "count_only": true, "unit": "parsec"}),
+        ),
+    ] {
+        assert_eq!(s.tool(tool, args), bad, "{tool}");
+    }
+}
+
+/// `count_only` stops at a million matches and says so, rather than scan a huge trace (spec §15).
+#[test]
+fn find_count_stops_at_a_million() {
+    let dir = Dir::new("million");
+    let trace = dir.0.join("toggle.vcd");
+    let mut vcd = String::from(
+        "$timescale 1ns $end\n$scope module top $end\n$var wire 1 ! x $end\n$upscope $end\n$enddefinitions $end\n",
+    );
+    for t in 0..2_000_002u32 {
+        vcd += &format!("#{t}\n{}!\n", (t + 1) % 2);
+    }
+    std::fs::write(&trace, vcd).unwrap();
+    let mut s = Server::start(&dir.0);
+    s.ok("open", json!({"trace": trace}));
+    assert_eq!(
+        s.ok("find", json!({"expr": "top.x", "count_only": true})),
+        "1000000 matches, first 2ns, last 2000000ns (stopped counting there)"
+    );
+}
+
+/// A tool the server doesn't have is a protocol error, not a step on the trail (spec §15 "Trail").
+#[test]
+fn unknown_tool_is_no_step() {
+    let dir = Dir::new("no-tool");
+    let mut s = Server::start(&dir.0);
+    s.ok("open", json!({"trace": simple()}));
+    let r = s.call("tools/call", json!({"name": "nope", "arguments": {}}));
+    assert!(r.is_null(), "{r}");
+    assert!(trail_steps(&dir.0, s.child.id(), 1).is_empty());
+}
+
+/// A command that adds many rows lists the first 20 and counts the rest (spec §15).
+#[test]
+fn command_lists_twenty_rows_changed() {
+    let dir = Dir::new("many-rows");
+    let mut s = Server::start(&dir.0);
+    s.ok(
+        "open",
+        json!({"trace": std::fs::canonicalize("tests/data/axi4.vcd").unwrap()}),
+    );
+    let added = s.ok("command", json!({"line": "add /./"}));
+    assert!(
+        added.starts_with("added 26: ") && added.ends_with(", and 6 more"),
+        "{added}"
+    );
+}
+
 /// A trace in fs whose clock and signals lag by a femtosecond or two, as a real capture's: once a clock
 /// is searched, answers are in its unit, whole numbers of it; a finer unit gives them exactly.
 /// `records` `where` on a `pair`: its two sides compared field with field, as a scoreboard does,
@@ -2376,7 +2797,7 @@ fn names_under_the_scope() {
     );
     assert_eq!(
         s.tool("command", json!({"line": "scope top.cpux"})),
-        Err("no scope top.cpux".into())
+        Err("no scope top.cpux (nearest: top.cpu)".into())
     );
     s.ok("command", json!({"line": "scope top.dma"}));
     assert!(s.ok("values", at.clone()).ends_with("\n  0ns 0x0\n"));
@@ -2401,8 +2822,11 @@ fn names_under_the_scope() {
     assert!(file.contains("scope = \"top.dma\"\n"), "{file}");
     // workspace sets it for later calls; a failed declaration changes nothing
     assert!(
-        s.tool("workspace", json!({"scope": "top.cpu", "rows": ["nope"]}))
-            .is_err()
+        s.tool(
+            "workspace",
+            json!({"scope": "top.cpu", "rows": [{"signal": "nope"}]})
+        )
+        .is_err()
     );
     assert!(
         s.ok("command", json!({"line": "rm state"}))
@@ -2410,7 +2834,7 @@ fn names_under_the_scope() {
     );
     s.ok(
         "workspace",
-        json!({"scope": "top.cpu", "rows": ["state", "data"]}),
+        json!({"scope": "top.cpu", "rows": [{"signal": "state"}, {"signal": "data"}]}),
     );
     assert!(
         s.ok("values", json!({"signals": ["state"], "from": "0ns"}))
@@ -2788,5 +3212,21 @@ fn axis_errors_filter_by_severity() {
     assert!(
         g.contains("3 × severity=warning") && g.contains("2 × severity=error"),
         "{g}"
+    );
+}
+
+/// A window command the agent has a tool for names that tool (spec §15).
+#[test]
+fn window_commands_name_the_tool() {
+    let dir = Dir::new("refused_tool");
+    let mut s = Server::start(&dir.0);
+    s.ok("open", json!({"trace": simple()}));
+    assert_eq!(
+        s.tool("command", json!({"line": ":records clk"})),
+        Err(":records belongs to the user's window; use the `records` tool".into())
+    );
+    assert_eq!(
+        s.tool("command", json!({"line": "help names"})),
+        Err(":help belongs to the user's window; use the `help` tool".into())
     );
 }

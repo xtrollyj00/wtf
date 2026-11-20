@@ -3,12 +3,9 @@
 mod common;
 use common::*;
 use wtf_core::command::{self, no_match};
-use wtf_core::workspace::Workspace;
+use wtf_core::workspace::{Msg, Workspace};
 
-fn run(
-    ws: &mut wtf_core::workspace::Workspace,
-    line: &str,
-) -> Result<Option<(String, bool)>, String> {
+fn run(ws: &mut wtf_core::workspace::Workspace, line: &str) -> Result<Option<Msg>, String> {
     command::run(ws, line)
 }
 
@@ -79,7 +76,7 @@ fn fit_a_range() {
     );
     assert_eq!(
         run(&mut ws, "fit 10ns"),
-        Err("usage: :fit, or :fit <from> <to> as cursors ('2 '3) or times".into())
+        Err("usage: :fit [<from> <to>], as cursors ('2 '3) or times".into())
     );
 }
 
@@ -107,7 +104,7 @@ fn adding_and_removing() {
     );
     assert_eq!(
         run(&mut ws, "add top.clk nope"),
-        Ok(Some(("no match: nope".into(), true)))
+        Ok(Some(Msg::Warn("no match: nope".into())))
     );
     assert_eq!(run(&mut ws, "rm top.cpu.*a*"), Ok(None));
     // clk went in below busy, a row of the group, so it joined the group
@@ -228,13 +225,13 @@ fn signal_off_and_undo() {
     );
     assert_eq!(
         ws.undoable(|ws| run(ws, "signal hi off")),
-        Ok(Some(("hi: removed".into(), false)))
+        Ok(Some(Msg::Info("hi: removed".into())))
     );
     run(&mut ws, "names lo 0=zero").unwrap();
     let rows = names(&ws).len();
     assert_eq!(
         ws.undoable(|ws| run(ws, "signal lo off")),
-        Ok(Some(("lo: removed".into(), false)))
+        Ok(Some(Msg::Info("lo: removed".into())))
     );
     assert!(ws.signals.is_empty() && ws.value_names.is_empty());
     assert_eq!(names(&ws).len(), rows - 1);
@@ -265,7 +262,7 @@ fn signal_off_and_undo() {
 #[test]
 fn reload_answers() {
     let mut ws = with(&["top.clk"]);
-    assert_eq!(run(&mut ws, "e"), Ok(Some(("reloaded".into(), false))));
+    assert_eq!(run(&mut ws, "e"), Ok(Some(Msg::Info("reloaded".into()))));
 }
 
 #[test]
@@ -364,7 +361,7 @@ fn quoted_values() {
     )
     .unwrap();
     let records = |ws: &wtf_core::workspace::Workspace, n: &str| {
-        ws.streams
+        ws.streams()
             .iter()
             .find(|s| s.name == n)
             .unwrap()
@@ -375,7 +372,7 @@ fn quoted_values() {
     assert!(records(&ws, "a") > 0);
     // a quoted `key=` stays in the value; an unclosed quote is a mistake
     assert_eq!(
-        ws.decodes[1].params,
+        ws.decodes()[1].params,
         [("hot".to_string(), "busy && data != 0".to_string())]
     );
     run(
@@ -384,7 +381,7 @@ fn quoted_values() {
     )
     .unwrap();
     assert_eq!(
-        ws.protocols[0].fields,
+        ws.protocols()[0].fields,
         [("d".to_string(), "data".to_string())]
     );
     assert!(
@@ -400,39 +397,33 @@ fn quoted_values() {
 fn mark_names_and_notes() {
     // spec §9: a mark has a name and a note; `:cursor` sets them, moving keeps them
     let mut ws = with(&["top.clk"]);
+    let m = |ws: &wtf_core::workspace::Workspace| ws.marks()[1].clone().expect("mark 2 put");
     run(
         &mut ws,
         "cursor 2 30ns name=first bad write note=AW came before W, addr latched stale",
     )
     .unwrap();
     assert_eq!(
+        (m(&ws).time, m(&ws).name.as_str(), m(&ws).note.as_str()),
         (
-            ws.marks[1],
-            ws.labels[1].name.as_str(),
-            ws.labels[1].note.as_str()
-        ),
-        (
-            Some(30),
+            30,
             "first bad write",
             "AW came before W, addr latched stale"
         )
     );
     run(&mut ws, "cursor 2 40ns").unwrap();
-    assert_eq!(
-        (ws.marks[1], ws.labels[1].name.as_str()),
-        (Some(40), "first bad write")
-    );
+    assert_eq!((m(&ws).time, m(&ws).name.as_str()), (40, "first bad write"));
     run(&mut ws, "cursor 2 name=\"stale  addr\"").unwrap();
     assert_eq!(
-        (ws.labels[1].name.as_str(), ws.labels[1].note.as_str()),
+        (m(&ws).name.as_str(), m(&ws).note.as_str()),
         ("stale addr", "AW came before W, addr latched stale")
     );
     run(&mut ws, "cursor 2 note=").unwrap();
-    assert!(ws.labels[1].note.is_empty());
+    assert!(m(&ws).note.is_empty());
     // removed, then placed again: a new mark, no name
     run(&mut ws, "cursor 2 off").unwrap();
     run(&mut ws, "cursor 2 50ns").unwrap();
-    assert!(ws.labels[1].is_empty());
+    assert!(m(&ws).is_empty());
     // the cursor at a named mark
     run(&mut ws, "cursor 3 60ns name=here").unwrap();
     run(&mut ws, "cursor 1 60ns").unwrap();
@@ -452,4 +443,68 @@ fn mark_names_and_notes() {
         run(&mut ws, "cursor 3 colour=red"),
         Err(":cursor has no key colour (name, note)".into())
     );
+}
+
+#[test]
+fn command_table_is_the_dispatch() {
+    // the table names every command `run` answers (spec §7); warp is not one
+    let names: Vec<&str> = command::COMMANDS.iter().map(|c| c.name).collect();
+    for known in [
+        "add", "e", "decode", "signal", "zoom", "fit", "scope", "unit", "radix", "color", "group",
+        "protocol", "names", "rename", "ungroup", "select", "cursor", "undo", "redo", "rm",
+    ] {
+        assert!(names.contains(&known), "{known} not in COMMANDS");
+    }
+    let mut dedup = names.clone();
+    dedup.sort_unstable();
+    dedup.dedup();
+    assert_eq!(names.len(), dedup.len(), "a command twice in the table");
+    assert!(command::lookup("warp").is_none());
+    // every entry dispatches: none answers "unknown command"
+    for c in command::COMMANDS {
+        let r = run(&mut open(), c.name);
+        assert_ne!(
+            r,
+            Err(format!("unknown command: {}", c.name)),
+            "{} not dispatched",
+            c.name
+        );
+    }
+    // handlers with a static usage report the table's own line
+    let usage_of = |line: &str| run(&mut open(), line).unwrap_err();
+    for (line, name) in [
+        ("group", "group"),
+        ("rename", "rename"),
+        ("select", "select"),
+        ("signal foo", "signal"),
+        ("cursor 10 1ns", "cursor"),
+        ("decode", "decode"),
+        ("protocol", "protocol"),
+    ] {
+        assert_eq!(
+            usage_of(line),
+            command::lookup(name).unwrap().usage,
+            "{line} usage drifted"
+        );
+    }
+    // fit's says what its two arguments may be after it
+    assert!(usage_of("fit 10ns").starts_with(command::lookup("fit").unwrap().usage));
+    assert_eq!(
+        usage_of("zoom 0ns 40ns"),
+        format!("{} 0ns 40ns", command::lookup("zoom").unwrap().usage)
+    );
+    for c in command::COMMANDS {
+        assert!(!c.desc.is_empty(), "{} has no desc", c.name);
+        assert!(!c.icon.is_ascii(), "{} has no glyph", c.name);
+        assert!(
+            !c.trailing || !c.args.is_empty(),
+            "{} trails nothing",
+            c.name
+        );
+        for a in c.args {
+            if let command::ArgKind::Lit(s) = a {
+                assert!(!s.is_empty() && !s.contains(' '), "{}: {s:?}", c.name);
+            }
+        }
+    }
 }

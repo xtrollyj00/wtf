@@ -108,7 +108,8 @@ How values are shown, and the colours of rows.
 
 - Every signal of a call in decimal: the call's `radix` `dec`.
 - One signal in another radix: `data:dec`, wherever tools take signals.
-- A row with a radix and a colour: `awaddr:hex:red`, `wvalid:red` (`help workspace`).
+- A row with a radix and a colour: `{"signal": "awaddr", "radix": "hex", "color": "red"}`
+  (`help workspace`).
 
 **Details**
 
@@ -307,9 +308,10 @@ Showing the user evidence.
 
 **Form**
 
-- `workspace` sets everything at once, as one undo step: `rows`, `cursors`, `range`, `scope`,
-  `signals`, `protocols`, `decode`. Every name, radix and time is checked first and all the
-  errors come back at once.
+- `workspace` sets everything at once, as one undo step, in the session's own shape (spec §11):
+  `signal`, `protocol`, `decode`, `names`, `rows`, `cursors`, `view`, `scope`, `unit`. The
+  session validator checks it, so a bad name, radix or time is worded as wtf words it for a
+  session file; all the errors come back at once and a call that fails changes nothing.
 - `view` describes it, `render` draws it as text, `present` shows it to the user.
 
 **Recipes**
@@ -322,19 +324,28 @@ Showing the user evidence.
 
 **Details**
 
-- `rows`, top to bottom: `"name"`, `"name:radix"`, `"name:radix:colour"` (`help radix`), or a
-  group `{"group": "write", "rows": ["awaddr", "awvalid"], "collapsed": false}`. Groups
-  hold signals only. A struct or array is one row (`"pkts"`); `{"signal": "pkts", "open":
-  ["pkts", "pkts[1]"]}` opens levels of it, each named from the row's name; `"fields":
-  ["pkts[1].pair.hi:dec:red"]` gives lines under a row a radix and colour of their own.
+- `signal`: computed signals, `[{"name": "op", "expr": "cmd[7:0]"}]`.
+- `protocol`: sampled protocols, `[{"name": "cmd", "roles": ["valid", "ready", "data"], "when":
+  "valid && ready", "fields": [{"op": "data[7:0]"}]}]`, as `protocol` defines them (`fields` in
+  order: an array of single-key tables; a table works for session parity but sorts); `decode`
+  puts them on signals: `[{"name": "c0", "protocol": "cmd", "clock": "clk", "signals":
+  [{"valid": "cmd_valid"}], "params": [{"prefix": "rx_"}]}]` (`help decode`). Streams can then
+  be rows.
+- `names`: value names, `[{"signal": "state", "values": "0=zero"}]`.
+- `rows`, top to bottom: `{"signal": "awaddr", "radix": "hex", "color": "red"}`, a group
+  `{"group": "write", "rows": [...], "collapsed": false}`, an open struct `{"signal": "pkts",
+  "open": ["pkts", "pkts[1]"], "fields": [{"field": "pkt.pair.hi", "radix": "dec"}]}`. Groups
+  hold signals only.
 - `cursors` by number, `{"1": "80ns", "2": "390ns"}`: 1 is the cursor, where values are read;
   2 - 9 are marks on the events to show. A mark's name stands on the ruler, its note on the
   user's status line when they jump there.
-- `range`: the visible range, `["60ns", "480ns"]`; default the whole trace.
-- `scope` (`help names`); `signals`: computed signals, `["op = cmd[7:0]"]`.
-- `protocols`: `{name, roles, when, fields: ["op = data[7:0]"]}`, as `protocol` defines them;
-  `decode`: `{name, protocol, clock, signals: ["tvalid = rx_tvalid"], params: ["prefix =
-  rx_"]}`, as `decode` does (`help decode`). Streams can then be rows.
+- `view`: the visible range, `{"time": "60ns", "to": "480ns"}`; default the whole trace.
+- `scope` (`help names`).
+- `unit`: the time unit of the answers, `ns`, or `auto` for the one that fits (`help times`).
+- A key the tool doesn't take, at the top, is an error naming those it does; inside an entry the
+  validator names the key it didn't take. The session file's `version` and `trail` are not
+  declared: the trail is your calls.
+- A key of the wrong kind, a string where a list goes, is an error naming the kind it takes.
 - With no window open, `present` writes a session file that `wtf <trace>` shows when the user
   opens the trace: tell them so. The user also sees each query and change you make as a step
   (`:trail`), with its time, so each query is part of what they see.
@@ -351,12 +362,12 @@ The `:` commands `command` runs on the workspace.
 **Recipes**
 
 - Add rows: `add <path|pattern>...`, below the selected row, joining its group; a scope becomes
-  a group of its direct signals, a struct or array one row. Remove: `rm <path|pattern>...`;
+  a group of its direct signals, a struct or array one row. Remove: `rm <name>...`;
   `rm /.*/` clears (`help patterns`).
 - Act on rows: `select <row> [<last row>]`, then `group <name>`, `rename <name>`, `ungroup`,
-  `radix <radix>`, `color <colour|off>` (`help radix`).
-- Name a state machine's values: `names <signal> <value>=<name>...`, as an FST enum table gives
-  them; `off` removes them.
+  `radix <radix>`, `color <color|off>` (`help radix`).
+- Name a state machine's values: `names <signal> <spec>`, as an FST enum table gives them;
+  `off` removes them.
 - Mark an event: `cursor <1-9> [time|off] [name=<text>] [note=<text>]`; without a time or keys,
   jump to that mark.
 - Look at a stretch: `fit [<from> <to>]` (all, or between cursors `'2 '3` or times);
@@ -364,6 +375,7 @@ The `:` commands `command` runs on the workspace.
 
 **Details**
 
-- Names and times: `scope <path>` (`help names`), `unit <ns|ps|...|auto>` (`help times`).
+- Names and times: `scope <path>` (`help names`), `unit <s|ms|us|ns|ps|fs|auto>` (`help times`).
+- The trace again after a new dump: `e`.
 - Decoding: `decode`, `protocol`, `signal` (`help decode`).
 - `undo`, `redo`. The answer lists the rows added and removed.

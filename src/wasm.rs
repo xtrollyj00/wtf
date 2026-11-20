@@ -347,12 +347,12 @@ mod tests {
             "/tests/data/simple.vcd"
         )))
         .unwrap();
-        ws.loaded.push(load());
+        ws.push_loaded(load());
         ws
     }
 
     fn stream<'a>(ws: &'a Workspace, name: &str) -> &'a Stream {
-        ws.streams
+        ws.streams()
             .iter()
             .find(|s| s.name == name)
             .expect("a stream of that name")
@@ -470,7 +470,7 @@ mod tests {
                 env!("CARGO_MANIFEST_DIR")
             )))
             .unwrap();
-            ws.loaded.push(
+            ws.push_loaded(
                 load_one(&PathBuf::from(concat!(
                     env!("CARGO_MANIFEST_DIR"),
                     "/tests/data/wasm/axis-wasm.wasm"
@@ -482,7 +482,7 @@ mod tests {
             command::run(&mut ws, &format!("decode w axis-wasm {roles}")).unwrap();
             let records = |prefix: &str| {
                 let mut all: Vec<_> = ws
-                    .streams
+                    .streams()
                     .iter()
                     .filter_map(|s| Some((s.name.strip_prefix(prefix)?, s)))
                     .map(|(name, s)| {
@@ -546,7 +546,7 @@ mod tests {
         ws.loader = Some(loader());
         wtf_core::command::run(&mut ws, &format!("protocol probe wasm={file}")).unwrap();
         wtf_core::command::run(&mut ws, "decode p probe clock=top.clk spin=3").unwrap();
-        assert!(ws.streams.iter().any(|s| s.name == "p.beat"));
+        assert!(ws.streams().iter().any(|s| s.name == "p.beat"));
         let text = wtf_core::session::to_toml(&ws);
         assert!(
             text.contains(&format!(
@@ -557,9 +557,8 @@ mod tests {
         // reading it back: the binary had loaded the file before applying, as it does for the paths
         // the session kept from the last time (`:e` asks no file)
         let mut back = Workspace::open(trace).unwrap();
-        back.loaded
-            .push(load_one(std::path::Path::new(file)).unwrap());
+        back.push_loaded(load_one(std::path::Path::new(file)).unwrap());
         assert_eq!(wtf_core::session::apply(&mut back, &text), Ok(vec![]));
-        assert!(back.streams.iter().any(|s| s.name == "p.beat"));
+        assert!(back.streams().iter().any(|s| s.name == "p.beat"));
     }
 }

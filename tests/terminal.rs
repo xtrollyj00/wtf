@@ -516,3 +516,62 @@ fn decode_form_checks_as_typed() {
         !s.contents().contains("the names match") && s.contents().contains("s.wr")
     });
 }
+
+/// An agent's `user_view` reads the open window over its link (spec §15 "The user's view"):
+/// the rows the window shows, as its session holds them.
+#[test]
+fn agent_reads_the_window() {
+    let args = session();
+    let mut t = Term::spawn("link", &args.iter().map(String::as_str).collect::<Vec<_>>());
+    t.wait("the rows", |s| line_of(s, "dma.state").is_some());
+    let mut mcp = Command::new(env!("CARGO_BIN_EXE_wtf"))
+        .arg("--mcp")
+        .env("XDG_RUNTIME_DIR", &t.dir)
+        .env("XDG_STATE_HOME", &t.dir)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut input = mcp.stdin.take().unwrap();
+    let mut output = std::io::BufReader::new(mcp.stdout.take().unwrap());
+    let mut call = |id: u32, method: &str, params: serde_json::Value| {
+        let msg =
+            serde_json::json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
+        writeln!(input, "{msg}").unwrap();
+        if id == 1 {
+            writeln!(
+                input,
+                r#"{{"jsonrpc":"2.0","method":"notifications/initialized"}}"#
+            )
+            .unwrap();
+        }
+        let mut line = String::new();
+        std::io::BufRead::read_line(&mut output, &mut line).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+        v["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string()
+    };
+    call(
+        1,
+        "initialize",
+        serde_json::json!({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}}),
+    );
+    call(
+        2,
+        "tools/call",
+        serde_json::json!({"name": "open", "arguments": {"trace": &args[0]}}),
+    );
+    let view = call(
+        3,
+        "tools/call",
+        serde_json::json!({"name": "user_view", "arguments": {}}),
+    );
+    assert!(view.starts_with("rows (> selected):\n> clk"), "{view}");
+    assert!(view.contains("dma.state"), "{view}");
+    drop(input);
+    mcp.wait().unwrap();
+    t.send(":q!\r");
+    assert!(t.child.wait().unwrap().success());
+}

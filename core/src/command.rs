@@ -6,114 +6,398 @@ use crate::rows::{self, Row};
 use crate::session;
 use crate::workspace::{Msg, Workspace};
 
+/// What a command's argument is, so a listing can say what to type there (`<time>`) and a
+/// completion can offer the values.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ArgKind {
+    Signal,
+    Scope,
+    Stream,
+    Protocol,
+    Role,
+    Field,
+    Radix,
+    Color,
+    HelpTopic,
+    Agent,
+    PickSource,
+    FilePath,
+    Row,
+    CursorIndex,
+    MarkRef,
+    Time,
+    Text,
+    KeyVal,
+    /// The values to pick from, `|` between them: `off|name=|note=`.
+    Lit(&'static str),
+}
+
+/// One `:` command: its name, its usage line, a description for the listings, what its arguments
+/// are and its handler. `run` looks the name up here instead of matching inline, so this table is
+/// the only place that names what the core runs (spec §7); the window's own commands (`:w`, `:q`,
+/// `:help`) are its `WINDOW` (`src/tui/commands.rs`), the only other list. A listing shows `desc`
+/// and the usage line without `usage: `; handlers report their own entry's `usage`, except `add`
+/// and `color`, whose usage is built at runtime (pattern syntax, color list); entries with no
+/// usage error (`e`, `scope`, `names`, `ungroup`, `undo`, `redo`, `rm`) carry it for the listings.
+pub struct Command {
+    pub name: &'static str,
+    pub usage: &'static str,
+    pub desc: &'static str,
+    /// The arguments, in order; empty when it takes none.
+    pub args: &'static [ArgKind],
+    /// The last argument takes more of the same: `...` after the placeholders.
+    pub trailing: bool,
+    /// The glyph a completion shows before it (`src/draw.rs`, `icon`).
+    pub icon: char,
+    pub run: fn(&mut Workspace, &Command, &str) -> Result<Option<Msg>, String>,
+}
+
+pub const COMMANDS: &[Command] = &[
+    Command {
+        name: "add",
+        usage: "usage: :add <path|pattern>...",
+        desc: "Add signals below the selected row (after a selected group); a scope becomes a group, e.g. :add top.cpu.*",
+        args: &[ArgKind::Signal],
+        trailing: true,
+        icon: '\u{eb31}',
+        run: do_add,
+    },
+    Command {
+        name: "e",
+        usage: "usage: :e",
+        desc: "Reload the trace, keeping signals, groups, cursor and zoom",
+        args: &[],
+        trailing: false,
+        icon: '\u{ea7b}',
+        run: do_reload,
+    },
+    Command {
+        name: "decode",
+        usage: "usage: :decode <name> <protocol> <role>=<signal>...",
+        desc: "Decode a protocol into streams, e.g. :decode rx axis clock=clk tvalid=rx_tvalid tready=rx_tready tdata=rx_tdata tlast=rx_tlast; alone, a form that fills it in",
+        args: &[ArgKind::Text, ArgKind::Protocol, ArgKind::Role],
+        trailing: true,
+        icon: '\u{eb2d}',
+        run: do_decode,
+    },
+    Command {
+        name: "signal",
+        usage: "usage: :signal <name> = <signal> | off",
+        desc: "Name a computed signal, e.g. :signal op = cmd[7:0] or :signal hdr = {a, b}; :signal op off removes it",
+        args: &[ArgKind::Text, ArgKind::Lit("=|off"), ArgKind::Signal],
+        trailing: true,
+        icon: '\u{eb31}',
+        run: do_signal,
+    },
+    Command {
+        name: "zoom",
+        usage: "zoom takes one time, per column (`zoom 1ns`); to show a range: fit",
+        desc: "Set the time per column, e.g. :zoom 1ns",
+        args: &[ArgKind::Time],
+        trailing: false,
+        icon: '\u{eb81}',
+        run: do_zoom,
+    },
+    Command {
+        name: "fit",
+        usage: "usage: :fit [<from> <to>]",
+        desc: "Zoom to the whole simulation, or between cursors or times, e.g. :fit '2 '3 or :fit 10ns 20ns",
+        args: &[ArgKind::MarkRef, ArgKind::MarkRef],
+        trailing: false,
+        icon: '\u{eb81}',
+        run: do_fit,
+    },
+    Command {
+        name: "scope",
+        usage: "usage: :scope [path]",
+        desc: "Resolve names under a scope first, e.g. :scope top.cpu makes state top.cpu.state; none without a path",
+        args: &[ArgKind::Scope],
+        trailing: false,
+        icon: '\u{ea73}',
+        run: do_scope,
+    },
+    Command {
+        name: "unit",
+        usage: "usage: :unit <s|ms|us|ns|ps|fs|auto>",
+        desc: "Set the time unit an agent's answers are given in; the window picks the one that fits",
+        args: &[ArgKind::Lit("s|ms|us|ns|ps|fs|auto")],
+        trailing: false,
+        icon: '\u{ea73}',
+        run: do_unit,
+    },
+    Command {
+        name: "radix",
+        usage: "usage: :radix <name>",
+        desc: "Set the radix: hex bin dec sdec oct ascii float enum, q4.12 / uq4.12 fixed point",
+        args: &[ArgKind::Radix],
+        trailing: false,
+        icon: '\u{ea73}',
+        run: do_radix,
+    },
+    Command {
+        name: "color",
+        usage: "usage: :color <color|off>",
+        desc: "Colour the selected row or group: red orange yellow green cyan blue magenta gray; off for the theme's",
+        args: &[ArgKind::Color],
+        trailing: false,
+        icon: '\u{ea73}',
+        run: do_color,
+    },
+    Command {
+        name: "group",
+        usage: "usage: :group <name>",
+        desc: "Group the selected rows (V selects them)",
+        args: &[ArgKind::Text],
+        trailing: false,
+        icon: '\u{ea73}',
+        run: do_group,
+    },
+    Command {
+        name: "protocol",
+        usage: "usage: :protocol <name> roles=<a,b> when=<expr> <field>=<expr>... | :protocol <name> wasm=<file>",
+        desc: "Define a protocol on its roles, a record per cycle where when holds, e.g. :protocol cmd roles=valid,ready,data when=valid && ready op=data[7:0]; :decode puts it on signals; alone, a form with the selected rows as roles; :protocol search, one filled in from the last clocked search",
+        args: &[ArgKind::Text, ArgKind::KeyVal],
+        trailing: true,
+        icon: '\u{eb2d}',
+        run: do_protocol,
+    },
+    Command {
+        name: "names",
+        usage: "usage: :names <signal> <value>=<name>...",
+        desc: "Name a signal's values, shown by the enum radix and searched by name, e.g. :names state 0=IDLE 1=BUSY; off removes them; alone, a card of the values the selected signal takes",
+        args: &[ArgKind::Signal, ArgKind::Text],
+        trailing: true,
+        icon: '\u{eb2d}',
+        run: do_names,
+    },
+    Command {
+        name: "rename",
+        usage: "usage: :rename <name>",
+        desc: "Rename the group the selected row is in",
+        args: &[ArgKind::Text],
+        trailing: false,
+        icon: '\u{ea73}',
+        run: do_rename,
+    },
+    Command {
+        name: "ungroup",
+        usage: "usage: :ungroup",
+        desc: "Dissolve the group the selected row is in, keeping its signals",
+        args: &[],
+        trailing: false,
+        icon: '\u{ea73}',
+        run: do_ungroup,
+    },
+    Command {
+        name: "select",
+        usage: "usage: :select <row> [<last row>]",
+        desc: "Select a signal or group by name, or the rows from one to another",
+        args: &[ArgKind::Row, ArgKind::Row],
+        trailing: false,
+        icon: '\u{ea73}',
+        run: do_select,
+    },
+    Command {
+        name: "cursor",
+        usage: "usage: :cursor <1-9> [time|off] [name=<text>] [note=<text>]",
+        desc: "Put mark n at a time (1: the cursor), name it, remove it, or jump to it, e.g. :cursor 2 120ns name=bad write",
+        args: &[
+            ArgKind::CursorIndex,
+            ArgKind::Lit("off|name=|note="),
+            ArgKind::Lit("name=|note="),
+        ],
+        trailing: true,
+        icon: '\u{eaa5}',
+        run: do_cursor,
+    },
+    Command {
+        name: "undo",
+        usage: "usage: :undo",
+        desc: "Undo the last change to the rows",
+        args: &[],
+        trailing: false,
+        icon: '\u{ea82}',
+        run: do_undo,
+    },
+    Command {
+        name: "redo",
+        usage: "usage: :redo",
+        desc: "Redo a change undone with :undo",
+        args: &[],
+        trailing: false,
+        icon: '\u{ea82}',
+        run: do_redo,
+    },
+    Command {
+        name: "rm",
+        usage: "usage: :rm [path|pattern]...",
+        desc: "Remove matching rows, or the selected row; :rm ** removes all",
+        args: &[ArgKind::Signal],
+        trailing: true,
+        icon: '\u{ea73}',
+        run: do_rm,
+    },
+];
+
+/// The table entry for `name`, if `run` answers it.
+pub fn lookup(name: &str) -> Option<&'static Command> {
+    COMMANDS.iter().find(|c| c.name == name)
+}
+
 /// Run a `:` command on the workspace; some answer with a message (`:e`, or `:add` naming what
 /// it couldn't add). The window's own commands (`:w`, `:q`, `:help`) are the terminal UI's.
 pub fn run(app: &mut Workspace, line: &str) -> Result<Option<Msg>, String> {
     let line = line.trim();
     let (cmd, arg) = line.split_once(char::is_whitespace).unwrap_or((line, ""));
     let arg = arg.trim();
-    let fpt = app.trace.fs_per_tick;
-    match cmd {
-        "add" => return add(app, arg),
-        "e" => return app.reload().map(Some),
-        "decode" => return decode(app, arg).map(|m| Some((m, false))),
-        // `:signal <name> off` removes it, as `:decode <name> off` does
-        "signal" if word(arg).1.trim() == "off" => {
-            let name = word(arg).0;
-            app.remove_signal(name)?;
-            return Ok(Some((format!("{name}: removed"), false)));
-        }
-        _ => {}
+    // the empty line does nothing; a bare time jumps there, as before
+    if cmd.is_empty() {
+        return Ok(None);
     }
-    match cmd {
-        "" => Ok(()),
-        _ if cmd.starts_with(|c: char| c.is_ascii_digit() || c == '.') => {
-            let t = crate::time::parse(cmd, fpt)?;
-            app.jump(t.round() as u64, false);
-            Ok(())
-        }
-        "zoom" => {
-            if arg.split_whitespace().count() > 1 {
-                return Err(format!(
-                    "zoom takes one time, per column (`zoom 1ns`); to show a range: fit {arg}"
-                ));
-            }
-            let t = crate::time::parse(arg, fpt)?;
-            if t <= 0.0 {
-                return Err("zoom must be above zero".into());
-            }
-            app.view.set_zoom(t);
-            Ok(())
-        }
-        "fit" => fit(app, arg),
-        "scope" => app.set_scope(arg),
-        "unit" => {
-            app.unit = match arg {
-                "auto" => None,
-                u => Some(
-                    crate::time::unit_named(u)
-                        .map_err(|_| "usage: :unit <s|ms|us|ns|ps|fs|auto>")?,
-                ),
-            };
-            Ok(())
-        }
-        "radix" => {
-            let r = radix::parse_name(arg).ok_or_else(|| format!("unknown radix: {arg}"))?;
-            app.set_radix(Some(r))
-        }
-        "color" if arg.is_empty() => Err(format!("usage: :color <{}|off>", rows::COLORS.join("|"))),
-        "color" if arg == "off" => app.set_color(None),
-        "color" => app.set_color(Some(rows::color_named(arg)?)),
-        "group" if arg.is_empty() => Err("usage: :group <name>".into()),
-        "group" => app.group(arg),
-        "signal" => {
-            let (name, expr) = arg
-                .split_once('=')
-                .ok_or("usage: :signal <name> = <signal>, or :signal <name> off")?;
-            app.define(name, expr).map(drop)
-        }
-        "protocol" => protocol(app, arg),
-        "names" => {
-            let (sig, spec) = arg.split_once(char::is_whitespace).unwrap_or((arg, ""));
-            app.name_values(sig, spec)
-        }
-        "rename" if arg.is_empty() => Err("usage: :rename <name>".into()),
-        "rename" => {
-            let h = app
-                .rows
-                .get(app.sel)
-                .and_then(|_| rows::header_of(&app.rows, app.sel))
-                .ok_or("not in a group")?;
-            if let Row::Group { name, .. } = &mut app.rows[h] {
-                *name = arg.to_string();
-            }
-            Ok(())
-        }
-        "ungroup" => {
-            let h = app
-                .rows
-                .get(app.sel)
-                .and_then(|_| rows::header_of(&app.rows, app.sel))
-                .ok_or("not in a group")?;
-            let end = rows::group_end(&app.rows, h);
-            for r in &mut app.rows[h + 1..end] {
-                if let Row::Signal(s) = r {
-                    s.grouped = false;
-                }
-            }
-            app.rows.remove(h);
-            app.sel = h;
-            app.fix_sel();
-            Ok(())
-        }
-        "select" => select(app, arg),
-        "cursor" => cursor(app, arg),
-        "undo" => app.undo(),
-        "redo" => app.redo(),
-        "rm" => rm(app, arg),
-        _ => Err(format!("unknown command: {cmd}")),
+    if cmd.starts_with(|c: char| c.is_ascii_digit() || c == '.') {
+        let t = crate::time::parse(cmd, app.trace.fs_per_tick)?;
+        app.jump(t.round() as u64, false);
+        return Ok(None);
     }
-    .map(|()| None)
+    match lookup(cmd) {
+        Some(c) => (c.run)(app, c, arg),
+        None => Err(format!("unknown command: {cmd}")),
+    }
+}
+
+fn do_add(app: &mut Workspace, _: &Command, arg: &str) -> Result<Option<Msg>, String> {
+    add(app, arg)
+}
+
+fn do_reload(app: &mut Workspace, _: &Command, _arg: &str) -> Result<Option<Msg>, String> {
+    app.reload().map(Some)
+}
+
+fn do_decode(app: &mut Workspace, _: &Command, arg: &str) -> Result<Option<Msg>, String> {
+    decode(app, arg).map(|m| Some(Msg::Info(m)))
+}
+
+fn do_signal(app: &mut Workspace, cmd: &Command, arg: &str) -> Result<Option<Msg>, String> {
+    // `:signal <name> off` removes it, as `:decode <name> off` does
+    if word(arg).1.trim() == "off" {
+        let name = word(arg).0;
+        app.remove_signal(name)?;
+        return Ok(Some(Msg::Info(format!("{name}: removed"))));
+    }
+    let (name, expr) = arg.split_once('=').ok_or(cmd.usage)?;
+    app.define(name, expr).map(|_| None)
+}
+
+fn do_zoom(app: &mut Workspace, cmd: &Command, arg: &str) -> Result<Option<Msg>, String> {
+    if arg.split_whitespace().count() > 1 {
+        return Err(format!("{} {arg}", cmd.usage));
+    }
+    let t = crate::time::parse(arg, app.trace.fs_per_tick)?;
+    if t <= 0.0 {
+        return Err("zoom must be above zero".into());
+    }
+    app.view.set_zoom(t);
+    Ok(None)
+}
+
+fn do_fit(app: &mut Workspace, _: &Command, arg: &str) -> Result<Option<Msg>, String> {
+    fit(app, arg).map(|()| None)
+}
+
+fn do_scope(app: &mut Workspace, _: &Command, arg: &str) -> Result<Option<Msg>, String> {
+    app.set_scope(arg).map(|()| None)
+}
+
+fn do_unit(app: &mut Workspace, cmd: &Command, arg: &str) -> Result<Option<Msg>, String> {
+    app.unit = match arg {
+        "auto" => None,
+        u => Some(crate::time::unit_named(u).map_err(|_| cmd.usage.to_string())?),
+    };
+    Ok(None)
+}
+
+fn do_radix(app: &mut Workspace, _: &Command, arg: &str) -> Result<Option<Msg>, String> {
+    let r = radix::parse_name(arg).ok_or_else(|| format!("unknown radix: {arg}"))?;
+    app.set_radix(Some(r)).map(|()| None)
+}
+
+fn do_color(app: &mut Workspace, _: &Command, arg: &str) -> Result<Option<Msg>, String> {
+    if arg.is_empty() {
+        return Err(format!("usage: :color <{}|off>", rows::COLORS.join("|")));
+    }
+    if arg == "off" {
+        return app.set_color(None).map(|()| None);
+    }
+    app.set_color(Some(rows::color_named(arg)?)).map(|()| None)
+}
+
+fn do_group(app: &mut Workspace, cmd: &Command, arg: &str) -> Result<Option<Msg>, String> {
+    if arg.is_empty() {
+        return Err(cmd.usage.into());
+    }
+    app.group(arg).map(|()| None)
+}
+
+fn do_protocol(app: &mut Workspace, _: &Command, arg: &str) -> Result<Option<Msg>, String> {
+    protocol(app, arg).map(|()| None)
+}
+
+fn do_names(app: &mut Workspace, _: &Command, arg: &str) -> Result<Option<Msg>, String> {
+    let (sig, spec) = arg.split_once(char::is_whitespace).unwrap_or((arg, ""));
+    app.name_values(sig, spec).map(|()| None)
+}
+
+fn do_rename(app: &mut Workspace, cmd: &Command, arg: &str) -> Result<Option<Msg>, String> {
+    if arg.is_empty() {
+        return Err(cmd.usage.into());
+    }
+    let h = app
+        .rows
+        .get(app.sel)
+        .and_then(|_| rows::header_of(&app.rows, app.sel))
+        .ok_or("not in a group")?;
+    if let Row::Group { name, .. } = &mut app.rows[h] {
+        *name = arg.to_string();
+    }
+    Ok(None)
+}
+
+fn do_ungroup(app: &mut Workspace, _: &Command, _arg: &str) -> Result<Option<Msg>, String> {
+    let h = app
+        .rows
+        .get(app.sel)
+        .and_then(|_| rows::header_of(&app.rows, app.sel))
+        .ok_or("not in a group")?;
+    let end = rows::group_end(&app.rows, h);
+    for r in &mut app.rows[h + 1..end] {
+        if let Row::Signal(s) = r {
+            s.grouped = false;
+        }
+    }
+    app.rows.remove(h);
+    app.sel = h;
+    app.fix_sel();
+    Ok(None)
+}
+
+fn do_select(app: &mut Workspace, _: &Command, arg: &str) -> Result<Option<Msg>, String> {
+    select(app, arg).map(|()| None)
+}
+
+fn do_cursor(app: &mut Workspace, _: &Command, arg: &str) -> Result<Option<Msg>, String> {
+    cursor(app, arg).map(|()| None)
+}
+
+fn do_undo(app: &mut Workspace, _: &Command, _arg: &str) -> Result<Option<Msg>, String> {
+    app.undo().map(|()| None)
+}
+
+fn do_redo(app: &mut Workspace, _: &Command, _arg: &str) -> Result<Option<Msg>, String> {
+    app.redo().map(|()| None)
+}
+
+fn do_rm(app: &mut Workspace, _: &Command, arg: &str) -> Result<Option<Msg>, String> {
+    rm(app, arg).map(|()| None)
 }
 
 /// `:decode name protocol key=value...`: an instance (`[[decode]]`); `clock=` is its clock,
@@ -127,7 +411,7 @@ pub fn parse_decode(
     arg: &str,
     from: crate::protocol::Sources<'_>,
 ) -> Result<crate::stream::Decode, String> {
-    let usage = "usage: :decode <name> <protocol> <role>=<signal>...";
+    let usage = lookup("decode").expect("in COMMANDS").usage;
     let (name, rest) = word(arg);
     let (protocol, rest) = word(rest);
     if protocol.is_empty() {
@@ -138,16 +422,19 @@ pub fn parse_decode(
         .iter()
         .position(|p| p.0 == "clock")
         .map_or(String::new(), |i| pairs.remove(i).1);
-    let on_streams = matches!(protocol, "frame" | "pair" | "check");
-    let (signals, params) = pairs.into_iter().partition(|(k, _)| match on_streams {
-        true => matches!(k.as_str(), "input" | "request" | "response"),
-        // a built-in's params (`mode=0`, `baud=115200`) aren't roles
-        false => {
-            k != "prefix"
-                && !from
-                    .get(protocol)
-                    .is_some_and(|p| p.def().params().contains(&k.as_str()))
+    // the card says what is a role: a signal protocol's roles, or all but `prefix` for one
+    // the registry doesn't name (which fails in `add_decode`); on streams, the union of their
+    // roles, so a misplaced key keeps its head error (`frame` has no role `request`)
+    let any = from.get(protocol);
+    let (signals, params) = pairs.into_iter().partition(|(k, _)| match &any {
+        Some(crate::protocol::Any::OnStreams(_)) => {
+            matches!(k.as_str(), "input" | "request" | "response")
         }
+        // a session sampler takes no params: every key but `prefix` is a role
+        Some(crate::protocol::Any::Sampled(_)) => k != "prefix",
+        // a built-in's params (`mode=0`, `baud=115200`) aren't roles
+        Some(a) => k != "prefix" && !a.params().contains(&k.as_str()),
+        None => k != "prefix",
     });
     Ok(crate::stream::Decode {
         name: name.into(),
@@ -171,14 +458,20 @@ fn decode(app: &mut Workspace, arg: &str) -> Result<String, String> {
     // its results first, then violations, then the streams they are made from (spec §16 "Results")
     let made = app.streams_of_decode(name);
     let list = |kind: u8| {
-        let of = |i: usize| match (app.intermediate(i), app.streams[i].violations) {
+        let of = |i: usize| match (app.intermediate(i), app.streams()[i].violations) {
             (true, _) => 2,
             (_, true) => 1,
             _ => 0,
         };
         made.iter()
             .filter(|&&i| of(i) == kind)
-            .map(|&i| format!("{} {}", app.streams[i].name, app.streams[i].records.len()))
+            .map(|&i| {
+                format!(
+                    "{} {}",
+                    app.streams()[i].name,
+                    app.streams()[i].records.len()
+                )
+            })
             .collect::<Vec<_>>()
             .join(", ")
     };
@@ -198,7 +491,7 @@ fn decode(app: &mut Workspace, arg: &str) -> Result<String, String> {
 /// on its roles, no signals; `:decode` puts it on signals at a clock. The other keys are its
 /// fields in order.
 fn protocol(app: &mut Workspace, arg: &str) -> Result<(), String> {
-    let usage = "usage: :protocol <name> roles=<a,b> when=<expr> <field>=<expr>... | :protocol <name> wasm=<file>";
+    let usage = lookup("protocol").expect("in COMMANDS").usage;
     let (name, rest) = word(arg);
     if name.is_empty() {
         return Err(usage.into());
@@ -322,7 +615,8 @@ fn select(app: &mut Workspace, arg: &str) -> Result<(), String> {
             .ok_or(format!("not shown: {name}"))
     };
     let mut names = arg.split_whitespace();
-    let first = row(names.next().ok_or("usage: :select <row> [<last row>]")?)?;
+    let usage = lookup("select").expect("in COMMANDS").usage;
+    let first = row(names.next().ok_or(usage)?)?;
     let last = names.next().map(row).transpose()?;
     app.sel = last.unwrap_or(first);
     app.bit = None;
@@ -336,7 +630,7 @@ fn select(app: &mut Workspace, arg: &str) -> Result<(), String> {
 /// `:cursor n time` puts mark n there (`:cursor 1 time` moves the cursor), `:cursor n off` removes
 /// mark n, and `:cursor n` jumps to it (spec §9).
 fn cursor(app: &mut Workspace, arg: &str) -> Result<(), String> {
-    let usage = "usage: :cursor <1-9> [time|off] [name=<text>] [note=<text>]";
+    let usage = lookup("cursor").expect("in COMMANDS").usage;
     let (n, rest) = arg.split_once(char::is_whitespace).unwrap_or((arg, ""));
     let i = n
         .parse::<usize>()
@@ -359,7 +653,7 @@ fn cursor(app: &mut Workspace, arg: &str) -> Result<(), String> {
     }
     match what {
         "" if keys.is_empty() => return app.goto_mark(i),
-        "" if app.marks[i].is_none() => {
+        "" if app.marks()[i].is_none() => {
             return Err(format!(
                 "no cursor {}: give it a time first (:cursor {} <time> ...)",
                 i + 1,
@@ -376,22 +670,16 @@ fn cursor(app: &mut Workspace, arg: &str) -> Result<(), String> {
                 .min(app.trace.end());
             match i {
                 0 => app.jump(t, false),
-                i => {
-                    // a mark moved keeps its name; a new one has none
-                    if app.marks[i].is_none() {
-                        app.labels[i] = Default::default();
-                    }
-                    app.marks[i] = Some(t)
-                }
+                i => app.put_mark(i, t),
             }
         }
     }
     for (k, v) in keys {
-        let l = &app.labels[i];
-        app.labels[i] = match k.as_str() {
-            "name" => crate::workspace::Label::new(&v, &l.note),
-            _ => crate::workspace::Label::new(&l.name, &v),
-        };
+        let old = app.marks()[i].as_ref().expect("checked above").clone();
+        match k.as_str() {
+            "name" => app.label_mark(i, &v, &old.note),
+            _ => app.label_mark(i, &old.name, &v),
+        }
     }
     Ok(())
 }
@@ -430,7 +718,10 @@ fn fit(app: &mut Workspace, arg: &str) -> Result<(), String> {
             app.view.start = a.min(b);
             app.view.show_until(a.max(b));
         }
-        _ => return Err("usage: :fit, or :fit <from> <to> as cursors ('2 '3) or times".into()),
+        _ => {
+            let usage = lookup("fit").expect("in COMMANDS").usage;
+            return Err(format!("{usage}, as cursors ('2 '3) or times"));
+        }
     }
     Ok(())
 }
@@ -446,7 +737,7 @@ pub fn save(app: &mut Workspace, arg: &str) -> Result<Msg, String> {
     app.saved = session::layout_toml(app);
     let msg = format!("written: {}", path.display());
     app.session_path = path;
-    Ok((msg, false))
+    Ok(Msg::Info(msg))
 }
 
 /// Vars an `:add` / `:rm` argument names: an exact path, a pattern in the workspace's syntax, or
@@ -574,7 +865,7 @@ pub fn add(app: &mut Workspace, arg: &str) -> Result<Option<Msg>, String> {
     match errors.len() {
         0 => Ok(None),
         n if n == words.len() => Err(errors.join("; ")),
-        _ => Ok(Some((errors.join("; "), true))),
+        _ => Ok(Some(Msg::Warn(errors.join("; ")))),
     }
 }
 

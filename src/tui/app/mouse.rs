@@ -1,7 +1,7 @@
 //! The mouse (spec §2 "Mouse" and "Menu", §5 "Signal panel"): what is on top takes it, the rows
 //! last. Where things are comes from the last screen drawn (`Hit`), so the geometry has one home.
 
-use super::{A, App, Mode};
+use super::{A, App, Mode, Overlay};
 use crate::draw::{Marked, RowLine, gl};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use wtf_core::radix;
 use wtf_core::rows::{self, Row};
 use wtf_core::time::{self, Tick};
+use wtf_core::workspace::Msg;
 
 /// A second click on the same thing within this is a double click.
 const DOUBLE: Duration = Duration::from_millis(500);
@@ -102,7 +103,7 @@ pub enum Held {
         line: (usize, Option<u32>),
         toggle: bool,
         moved: bool,
-        mark: wtf_core::workspace::Mark,
+        mark: wtf_core::workspace::Checkpoint,
         rows: Vec<Row>,
         sel: (usize, Option<u32>),
         at: (usize, usize),
@@ -122,7 +123,7 @@ pub enum Held {
         from: u64,
         moved: bool,
         was: Tick,
-        mark: wtf_core::workspace::Mark,
+        mark: wtf_core::workspace::Checkpoint,
     },
 }
 
@@ -205,79 +206,37 @@ impl App {
     pub fn mouse_at(&mut self, m: MouseEvent, now: Instant) {
         let at = (m.column as usize, m.row as usize);
         self.pointer = Some(at);
-        if self.menu.is_some() {
-            return self.menu_mouse(m, at, now);
-        }
-        // the leader menu: a click on an entry picks it, anywhere else closes the menu
-        if let Some(path) = &self.leader {
-            if m.kind == MouseEventKind::Down(MouseButton::Left)
-                || m.kind == MouseEventKind::Down(MouseButton::Right)
-            {
-                let hit = self
-                    .hit
-                    .leader
-                    .iter()
-                    .find(|(r, _)| inside(Some(*r), at.0, at.1))
-                    .map(|&(_, k)| k);
-                match hit.filter(|_| m.kind == MouseEventKind::Down(MouseButton::Left)) {
-                    Some(k) => {
-                        let mut next = path.clone();
-                        next.push(k);
-                        let mark = self.ws.mark();
-                        self.leader_pick(next);
-                        self.ws.record(mark);
-                    }
-                    None => self.leader = None,
+        // whatever is over the rows takes the mouse, else the leader menu, else the mode
+        match self.overlay {
+            Some(Overlay::Menu(_)) => return self.menu_mouse(m, at, now),
+            // the leader menu sits between the boxes and the mode
+            _ if self.leader.is_some() => return self.leader_mouse(m, at),
+            _ if matches!(self.mode, Mode::Command | Mode::Search) => {
+                return self.line_mouse(m, at, now);
+            }
+            Some(Overlay::Help) | Some(Overlay::Examine(_)) => return self.box_mouse(m, at),
+            Some(Overlay::Browser(_)) => return self.browser_mouse(m, at, now),
+            Some(Overlay::Records(_)) => return self.records_mouse(m, at, now),
+            Some(Overlay::Messages(i)) => return self.messages_mouse(i, m, at),
+            Some(Overlay::Picker(_)) => {
+                let cp = self.ws.checkpoint();
+                self.picker_mouse(m, at, now);
+                return self.ws.record(cp);
+            }
+            Some(Overlay::Decodes(_)) => return self.decodes_mouse(m, at, now),
+            Some(Overlay::Form(_)) => return self.form_mouse(m, at),
+            // a click ends the name being typed as Enter does, keeping it, one undo step, then
+            // does what it does (spec §5)
+            Some(Overlay::Naming(_)) if matches!(m.kind, MouseEventKind::Down(_)) => {
+                self.naming_key(KeyEvent::from(KeyCode::Enter));
+                // an empty name: Enter warned and kept typing; the name it had comes back
+                if matches!(self.overlay, Some(Overlay::Naming(_))) {
+                    self.msg = None;
+                    self.naming_key(KeyEvent::from(KeyCode::Esc));
                 }
             }
-            return;
-        }
-        if matches!(self.mode, Mode::Command | Mode::Search) {
-            return self.line_mouse(m, at, now);
-        }
-        if self.help || self.examine.is_some() {
-            return self.box_mouse(m, at);
-        }
-        if self.browser.is_some() {
-            return self.browser_mouse(m, at, now);
-        }
-        if self.records.is_some() {
-            return self.records_mouse(m, at, now);
-        }
-        // `:messages`: the wheel moves, a click outside closes
-        if let Some(i) = self.messages {
-            let last = self.notes.len().saturating_sub(1);
-            match m.kind {
-                MouseEventKind::ScrollDown => self.messages = Some((i + 1).min(last)),
-                MouseEventKind::ScrollUp => self.messages = Some(i.saturating_sub(1)),
-                MouseEventKind::Down(_) if !inside(self.hit.boxed, at.0, at.1) => {
-                    self.messages = None
-                }
-                _ => {}
-            }
-            return;
-        }
-        if self.picker.is_some() {
-            let mark = self.ws.mark();
-            self.picker_mouse(m, at, now);
-            return self.ws.record(mark);
-        }
-        if self.decodes.is_some() {
-            return self.decodes_mouse(m, at, now);
-        }
-        // the decode form: a click on a field fills that one in; nothing under it takes the mouse
-        if let Some(f) = &mut self.form {
-            if m.kind == MouseEventKind::Down(MouseButton::Left)
-                && let Some(&(_, i)) = self
-                    .hit
-                    .records
-                    .iter()
-                    .find(|(y, _)| *y == at.1)
-                    .filter(|_| inside(self.hit.boxed, at.0, at.1))
-            {
-                f.at = i;
-            }
-            return;
+            // moving or scrolling leaves it: the rows keep the mouse
+            Some(Overlay::Naming(_)) | None => {}
         }
         // the status line's button opens and closes the panel
         if m.kind == MouseEventKind::Down(MouseButton::Left) && inside(self.hit.button, at.0, at.1)
@@ -288,18 +247,18 @@ impl App {
             return;
         }
         if self.panel_shown() {
-            let mark = self.ws.mark();
+            let cp = self.ws.checkpoint();
             self.panel_mouse(m, at, now);
-            return self.ws.record(mark);
+            return self.ws.record(cp);
         }
         // a row or a mark being moved is one undo step, recorded when it is let go
         if matches!(self.held, Some(Held::Move { .. } | Held::Mark { .. })) {
             return self.rows_mouse(m, at);
         }
         if self.mode == Mode::Normal {
-            let mark = self.ws.mark();
+            let cp = self.ws.checkpoint();
             self.rows_mouse(m, at);
-            self.ws.record(mark);
+            self.ws.record(cp);
         }
     }
 
@@ -348,14 +307,14 @@ impl App {
                     let was = if i == 0 {
                         self.ws.view.cursor
                     } else {
-                        self.ws.marks[i].unwrap_or(0)
+                        self.ws.marks()[i].as_ref().map(|m| m.time).unwrap_or(0)
                     };
                     self.held = Some(Held::Mark {
                         i,
                         from,
                         moved: false,
                         was,
-                        mark: self.ws.mark(),
+                        mark: self.ws.checkpoint(),
                     });
                     return;
                 }
@@ -380,7 +339,7 @@ impl App {
                             line.0..line.0 + 1
                         };
                         let block = rows::block(&self.ws.rows, r.start, r.end - 1);
-                        let (mark, rows) = (self.ws.mark(), self.ws.rows.clone());
+                        let (cp, rows) = (self.ws.checkpoint(), self.ws.rows.clone());
                         self.held = Some(Held::Move {
                             row: block.start,
                             len: block.len(),
@@ -388,7 +347,7 @@ impl App {
                             line,
                             toggle: was,
                             moved: false,
-                            mark,
+                            mark: cp,
                             rows,
                             sel,
                             at: (x, y),
@@ -432,7 +391,7 @@ impl App {
                         self.does("Zoom out", A::ZoomOut),
                     ],
                 };
-                self.menu = Some(Menu::new((x, y), items));
+                self.overlay = Some(Overlay::Menu(Menu::new((x, y), items)));
             }
             MouseEventKind::Down(MouseButton::Right) => {
                 if let Some((line, _)) = hit {
@@ -448,7 +407,7 @@ impl App {
                             .min(self.ws.view.end)
                     });
                     let items = self.row_items(t);
-                    self.menu = Some(Menu::new((x, y), items));
+                    self.overlay = Some(Overlay::Menu(Menu::new((x, y), items)));
                 } else if y >= self.hit.head && y < self.hit.body {
                     let (undo, redo) = self.ws.can_undo();
                     let mut items = vec![self.does("Add signals…", A::Panel)];
@@ -458,7 +417,7 @@ impl App {
                     if redo {
                         items.push(self.does("Redo", A::Redo));
                     }
-                    self.menu = Some(Menu::new((x, y), items));
+                    self.overlay = Some(Overlay::Menu(Menu::new((x, y), items)));
                 }
             }
             _ => {}
@@ -515,22 +474,19 @@ impl App {
                         gl().dash,
                         time::format(v.col_start(b + 1).min(v.end), fpt)
                     );
-                    self.msg = Some((text, false));
+                    self.msg = Some(Msg::Info(text));
                 }
             }
             Some(Held::Mark { i, from, moved, .. }) if *i > 0 => {
                 *moved |= c != *from;
                 if *moved {
                     let (i, t) = (*i, self.ws.view.col_start(c).min(self.ws.view.end));
-                    self.ws.marks[i] = Some(t);
-                    self.msg = Some((
-                        format!(
-                            "mark {} at {} {dot} Esc cancels",
-                            i + 1,
-                            time::format(t, fpt)
-                        ),
-                        false,
-                    ));
+                    self.ws.put_mark(i, t);
+                    self.msg = Some(Msg::Info(format!(
+                        "mark {} at {} {dot} Esc cancels",
+                        i + 1,
+                        time::format(t, fpt)
+                    )));
                 }
             }
             _ => {}
@@ -589,7 +545,7 @@ impl App {
                 .map(|n| n.trim().trim_start_matches(['▾', '▸', ' ']).to_string())
                 .unwrap_or_default(),
         };
-        self.msg = Some((format!("moving {what} {} Esc cancels", gl().dot), false));
+        self.msg = Some(Msg::Info(format!("moving {what} {} Esc cancels", gl().dot)));
     }
 
     /// The button let go on the rows: a click, or the end of a drag.
@@ -611,9 +567,9 @@ impl App {
                     self.ws.toggle_group();
                 }
             }
-            Held::Move { mark, .. } => {
+            Held::Move { mark: cp, .. } => {
                 self.msg = None;
-                self.ws.record(mark);
+                self.ws.record(cp);
             }
             Held::Zoom {
                 from,
@@ -635,9 +591,9 @@ impl App {
                 let r = self.ws.goto_mark(i);
                 self.report(r);
             }
-            Held::Mark { mark, .. } => {
+            Held::Mark { mark: cp, .. } => {
                 self.msg = None;
-                self.ws.record(mark);
+                self.ws.record(cp);
             }
         }
     }
@@ -650,7 +606,7 @@ impl App {
                 (self.ws.sel, self.ws.bit) = sel;
             }
             Some(Held::Zoom { view, .. }) => self.ws.view = view,
-            Some(Held::Mark { i, was, .. }) if i > 0 => self.ws.marks[i] = Some(was),
+            Some(Held::Mark { i, was, .. }) if i > 0 => self.ws.put_mark(i, was),
             _ => {}
         }
         self.msg = None;
@@ -662,13 +618,50 @@ impl App {
         self.ws.anchor = None;
     }
 
+    /// The leader menu: a click on an entry picks it, anywhere else closes the menu.
+    fn leader_mouse(&mut self, m: MouseEvent, (x, y): (usize, usize)) {
+        let Some(path) = &self.leader else { return };
+        if m.kind != MouseEventKind::Down(MouseButton::Left)
+            && m.kind != MouseEventKind::Down(MouseButton::Right)
+        {
+            return;
+        }
+        let hit = self
+            .hit
+            .leader
+            .iter()
+            .find(|(r, _)| inside(Some(*r), x, y))
+            .map(|&(_, k)| k);
+        match hit.filter(|_| m.kind == MouseEventKind::Down(MouseButton::Left)) {
+            Some(k) => {
+                let mut next = path.clone();
+                next.push(k);
+                let cp = self.ws.checkpoint();
+                self.leader_pick(next);
+                self.ws.record(cp);
+            }
+            None => self.leader = None,
+        }
+    }
+
+    /// `:messages`: the wheel moves, a click outside closes.
+    fn messages_mouse(&mut self, i: usize, m: MouseEvent, (x, y): (usize, usize)) {
+        let last = self.notes.len().saturating_sub(1);
+        match m.kind {
+            MouseEventKind::ScrollDown => self.overlay = Some(Overlay::Messages((i + 1).min(last))),
+            MouseEventKind::ScrollUp => self.overlay = Some(Overlay::Messages(i.saturating_sub(1))),
+            MouseEventKind::Down(_) if !inside(self.hit.boxed, x, y) => self.overlay = None,
+            _ => {}
+        }
+    }
+
     /// The `e` and `?` boxes: the wheel scrolls, a click outside closes.
     fn box_mouse(&mut self, m: MouseEvent, (x, y): (usize, usize)) {
         match m.kind {
             MouseEventKind::ScrollDown => self.scroll += 1,
             MouseEventKind::ScrollUp => self.scroll = self.scroll.saturating_sub(1),
             MouseEventKind::Down(_) if !inside(self.hit.boxed, x, y) => {
-                (self.help, self.examine, self.scroll) = (false, None, 0)
+                (self.overlay, self.scroll) = (None, 0)
             }
             _ => {}
         }
@@ -683,12 +676,12 @@ impl App {
             MouseEventKind::ScrollUp => {
                 self.records_key(key(KeyCode::Char('k'), KeyModifiers::NONE))
             }
-            MouseEventKind::Down(_) if !inside(self.hit.boxed, x, y) => self.records = None,
+            MouseEventKind::Down(_) if !inside(self.hit.boxed, x, y) => self.overlay = None,
             MouseEventKind::Down(MouseButton::Left) => {
                 let Some(&(_, k)) = self.hit.records.iter().find(|(ly, _)| *ly == y) else {
                     return;
                 };
-                if let Some(r) = &mut self.records {
+                if let Some(Overlay::Records(r)) = &mut self.overlay {
                     r.hl = k;
                 }
                 if self.double(Target::Record(k), now) {
@@ -770,7 +763,7 @@ impl App {
                 if let Some(n) = self.hit.node(y) {
                     self.panel.sel = n;
                     let items = self.panel_items();
-                    self.menu = Some(Menu::new((x, y), items));
+                    self.overlay = Some(Overlay::Menu(Menu::new((x, y), items)));
                 }
             }
             MouseEventKind::Drag(MouseButton::Left) => self.drag_to(x, y),
@@ -859,7 +852,7 @@ impl App {
         } else {
             "release to cancel".into()
         };
-        self.msg = (!text.is_empty()).then_some((text, false));
+        self.msg = (!text.is_empty()).then_some(Msg::Info(text));
     }
 
     /// What the label at the pointer says (`state`, `3`), and whether to draw it: over the rows.
@@ -1025,7 +1018,9 @@ impl App {
             .rev()
             .find(|(_, r)| inside(Some(**r), x, y))
             .map(|(k, r)| (k, y as isize - r.y as isize - 1));
-        let Some(menu) = &mut self.menu else { return };
+        let Some(Overlay::Menu(menu)) = &mut self.overlay else {
+            return;
+        };
         match (m.kind, found) {
             (MouseEventKind::Moved | MouseEventKind::Drag(_), Some((k, i))) => {
                 let target = if k == 1 { menu.inner() } else { &mut *menu };
@@ -1044,7 +1039,7 @@ impl App {
                 }
             }
             (MouseEventKind::Down(b), None) => {
-                self.menu = None;
+                self.overlay = None;
                 if b == MouseButton::Right {
                     self.mouse_at(m, now);
                 }
@@ -1056,7 +1051,9 @@ impl App {
     /// The keys in a menu: `j` / `k` move, `Enter` runs, `l` opens a second menu, `h` closes it,
     /// `Esc` closes the second menu, then the menu; `q` closes it. Other keys do nothing.
     pub fn menu_key(&mut self, k: KeyEvent) {
-        let Some(menu) = &mut self.menu else { return };
+        let Some(Overlay::Menu(menu)) = &mut self.overlay else {
+            return;
+        };
         let inner = menu.inner();
         let n = inner.items.len();
         match k.code {
@@ -1075,14 +1072,16 @@ impl App {
                 self.menu_run()
             }
             KeyCode::Char('h') | KeyCode::Esc if menu.sub.is_some() => menu.sub = None,
-            KeyCode::Esc | KeyCode::Char('q') => self.menu = None,
+            KeyCode::Esc | KeyCode::Char('q') => self.overlay = None,
             _ => {}
         }
     }
 
     /// Run the highlighted item of the innermost menu: open its second menu, or do it and close.
     fn menu_run(&mut self) {
-        let Some(menu) = &mut self.menu else { return };
+        let Some(Overlay::Menu(menu)) = &mut self.overlay else {
+            return;
+        };
         let (pos, inner) = match &mut menu.sub {
             Some((p, m)) => (Some(*p), &mut **m),
             None => (None, &mut *menu),
@@ -1095,11 +1094,11 @@ impl App {
             }
             return;
         }
-        self.menu = None;
-        let mark = self.ws.mark();
+        self.overlay = None;
+        let cp = self.ws.checkpoint();
         let r = self.act(act);
         self.report(r);
-        self.ws.record(mark);
+        self.ws.record(cp);
     }
 
     fn act(&mut self, act: Act) -> Result<(), String> {
@@ -1115,7 +1114,7 @@ impl App {
             }
             Act::CopyTime(t) => {
                 let text = time::format(t, self.ws.trace.fs_per_tick);
-                self.msg = Some((format!("copied: {text}"), false));
+                self.msg = Some(Msg::Info(format!("copied: {text}")));
                 self.yank = Some(text);
             }
             Act::Run(c) => return self.run(&c),

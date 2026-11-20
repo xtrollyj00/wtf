@@ -5,9 +5,9 @@
 //! the fields (spec §5 "Protocol form").
 
 use crate::draw::{gl, pal, put};
-use crate::tui::app::App;
+use crate::tui::app::{App, Overlay};
 use crate::tui::keys::{self, Fixed, Key};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
 use ratatui::buffer::Buffer;
@@ -15,8 +15,8 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use wtf_core::protocol::Found;
 use wtf_core::stream::Decode;
-use wtf_core::workspace::Workspace;
 use wtf_core::workspace::reason::Reasons;
+use wtf_core::workspace::{Msg, Workspace};
 
 /// The suggestions a field offers at most.
 pub const HINTS: usize = 20;
@@ -121,12 +121,11 @@ pub enum Fill {
     Close,
 }
 
-/// The protocols the form decodes: the built-in ones, the protocols loaded from files, then the
-/// session's own (spec §16). `frame`, `pair` and `check` work on streams and rules: their
-/// `:decode` line is typed.
+/// The protocols the form decodes, those signals play (`Sources::on_signals`): `frame`, `pair`
+/// and `check` work on streams and rules, their `:decode` line is typed (spec §16).
 pub fn protocols(ws: &Workspace) -> Vec<String> {
     ws.sources()
-        .names()
+        .on_signals()
         .into_iter()
         .map(str::to_string)
         .collect()
@@ -318,20 +317,38 @@ impl Form {
             });
         };
         if let Some(any) = ws.sources().get(&name) {
-            let def = any.def();
-            if def.clocked() {
-                add("clock", Kind::Clock);
+            match any.def() {
+                Some(def) => {
+                    if def.clocked() {
+                        add("clock", Kind::Clock);
+                    }
+                    add("prefix", Kind::Prefix);
+                    let (required, optional) = def.roles();
+                    required
+                        .into_iter()
+                        .for_each(|r| add(r, Kind::Role { required: true }));
+                    optional
+                        .into_iter()
+                        .for_each(|r| add(r, Kind::Role { required: false }));
+                    def.params().iter().for_each(|p| add(p, Kind::Param));
+                }
+                // a session sampler or an on-stream protocol: its roles are streams,
+                // and there is no prefix (spec §16)
+                None => {
+                    let (required, _) = any.roles();
+                    if any.clocked() {
+                        add("clock", Kind::Clock);
+                    }
+                    required
+                        .into_iter()
+                        .for_each(|r| add(r, Kind::Role { required: true }));
+                    any.params().into_iter().for_each(|p| add(p, Kind::Param));
+                }
             }
-            add("prefix", Kind::Prefix);
-            let (required, optional) = def.roles();
-            required
-                .into_iter()
-                .for_each(|r| add(r, Kind::Role { required: true }));
-            optional
-                .into_iter()
-                .for_each(|r| add(r, Kind::Role { required: false }));
-            def.params().iter().for_each(|p| add(p, Kind::Param));
-        } else if let Some(p) = ws.protocols.iter().find(|p| p.name == name) {
+        }
+        // (a session entry whose file isn't loaded answers nothing from the registry: the
+        // session's own entry gives its roles.)
+        else if let Some(p) = ws.protocols().iter().find(|p| p.name == name) {
             add("clock", Kind::Clock);
             p.roles
                 .iter()
@@ -617,7 +634,12 @@ impl App {
                 Vec::new(),
             ),
         };
-        self.form = Some(Form::new(&mut self.ws, &d, &self.found, &from));
+        self.overlay = Some(Overlay::Form(Form::new(
+            &mut self.ws,
+            &d,
+            &self.found,
+            &from,
+        )));
         self.form_check();
         Ok(())
     }
@@ -632,7 +654,12 @@ impl App {
             params: Vec::new(),
         };
         let from = self.range_vars();
-        self.form = Some(Form::new(&mut self.ws, &d, &self.found, &from));
+        self.overlay = Some(Overlay::Form(Form::new(
+            &mut self.ws,
+            &d,
+            &self.found,
+            &from,
+        )));
         self.form_check();
     }
 
@@ -676,7 +703,7 @@ impl App {
             .collect();
         let mut f = Form::protocol(&mut self.ws, &wtf_core::stream::Sampler::default(), &roles);
         f.suggest(&mut self.ws, &self.found);
-        self.form = Some(f);
+        self.overlay = Some(Overlay::Form(f));
         self.form_check();
         Ok(())
     }
@@ -708,7 +735,7 @@ impl App {
         let mut f = Form::protocol(&mut self.ws, &p, &d.signals);
         f.then = Some(d.clock);
         f.suggest(&mut self.ws, &self.found);
-        self.form = Some(f);
+        self.overlay = Some(Overlay::Form(f));
         self.form_check();
         Ok(())
     }
@@ -735,10 +762,10 @@ impl App {
         let show = |b: &str| {
             (wtf_core::radix::RADIXES[s.look.radix].format)(&format!("{b:0>width$}"), s.look.frac)
         };
-        self.form = Some(Form::names(
+        self.overlay = Some(Overlay::Form(Form::names(
             &path,
             taken.into_iter().map(|t| (show(&t.bits), t)).collect(),
-        ));
+        )));
         Ok(())
     }
 
@@ -746,14 +773,14 @@ impl App {
     pub fn edit_decode(&mut self, name: &str) -> Result<(), String> {
         let d = self
             .ws
-            .decodes
+            .decodes()
             .iter()
             .find(|d| d.name == name)
             .cloned()
             .ok_or_else(|| format!("no decode {name}"))?;
         let mut f = Form::new(&mut self.ws, &d, &self.found, &[]);
         (f.editing, f.at) = (Some(name.to_string()), 1);
-        self.form = Some(f);
+        self.overlay = Some(Overlay::Form(f));
         self.form_check();
         Ok(())
     }
@@ -761,7 +788,7 @@ impl App {
     /// The form has the keys; they are fixed. A character the table doesn't have types into the
     /// field.
     pub fn form_key(&mut self, k: KeyEvent) {
-        let Some(f) = &mut self.form else { return };
+        let f = form(&mut self.overlay);
         let act = keys::fixed(Self::FORM_KEYS, k);
         let second = |f: &Form| f.fields.get(1).map_or(String::new(), |x| x.value.clone());
         let before = (f.at, f.fields[f.at].value.clone(), second(f));
@@ -772,7 +799,7 @@ impl App {
                 }
                 _ => return,
             },
-            Some(Fill::Close) => return self.form = None,
+            Some(Fill::Close) => return self.overlay = None,
             Some(Fill::Run) => return self.form_run(),
             Some(Fill::Next) => f.at = (f.at + 1) % f.fields.len(),
             Some(Fill::Prev) => f.at = (f.at + f.fields.len() - 1) % f.fields.len(),
@@ -810,17 +837,20 @@ impl App {
                 } else {
                     query
                 };
-                if self.open_picker("signals").is_ok()
-                    && let Some(p) = &mut self.picker
-                {
-                    p.fill = Some(i);
-                    p.set_query(&query);
+                match self.open_picker("signals") {
+                    Ok(()) => {
+                        if let Some(Overlay::Picker(p)) = &mut self.overlay {
+                            p.fill = Some(i);
+                            p.set_query(&query);
+                        }
+                    }
+                    Err(e) => self.msg = Some(wtf_core::workspace::Msg::Warn(e)),
                 }
                 return;
             }
             Some(Fill::Choose) => return,
         }
-        let Some(f) = &mut self.form else { return };
+        let f = form(&mut self.overlay);
         // the protocol form's rows follow its roles, and an empty field follows the last
         if second(f) != before.2 || (f.protocol && f.fields[f.at].value != before.1) {
             f.reshape(&self.ws);
@@ -837,9 +867,25 @@ impl App {
         }
     }
 
+    /// The mouse over the form: a click on a field fills that one in; nothing under it takes the
+    /// mouse.
+    pub fn form_mouse(&mut self, m: MouseEvent, (x, y): (usize, usize)) {
+        let inside = self
+            .hit
+            .boxed
+            .is_some_and(|r| r.contains((x as u16, y as u16).into()));
+        let f = form(&mut self.overlay);
+        if m.kind == MouseEventKind::Down(MouseButton::Left)
+            && let Some(&(_, i)) = self.hit.records.iter().find(|(ly, _)| *ly == y)
+            && inside
+        {
+            f.at = i;
+        }
+    }
+
     /// The picker's signal for field `i`, picked with `Ctrl-Space`.
     pub fn form_fill(&mut self, i: usize, path: String) {
-        let Some(f) = &mut self.form else { return };
+        let f = form(&mut self.overlay);
         if let Some(field) = f.fields.get_mut(i) {
             field.value = path;
             (f.at, f.error) = (i, None);
@@ -851,7 +897,7 @@ impl App {
     /// Check the form's names, as typed: they name signals, and the instance's name is new.
     /// Reading no value, it is quick on any trace (spec §5 "Decode form").
     pub fn form_check(&mut self) {
-        let Some(f) = &mut self.form else { return };
+        let f = form(&mut self.overlay);
         // the names are checked as `Enter` gives them
         if f.missing().is_some() || f.names.is_some() {
             return f.check = Ok(());
@@ -860,10 +906,10 @@ impl App {
         let taken = match f.protocol {
             true => {
                 self.ws.sources().get(&name).is_some()
-                    || self.ws.protocols.iter().any(|p| p.name == name)
+                    || self.ws.protocols().iter().any(|p| p.name == name)
             }
             false => {
-                self.ws.decodes.iter().any(|d| d.name == name)
+                self.ws.decodes().iter().any(|d| d.name == name)
                     && f.editing.as_deref() != Some(name.as_str())
             }
         };
@@ -895,7 +941,7 @@ impl App {
                 }
             }
         };
-        if let Some(f) = &mut self.form {
+        if let Some(Overlay::Form(f)) = &mut self.overlay {
             f.check = r;
         }
     }
@@ -903,7 +949,7 @@ impl App {
     /// `Enter`: run the line, the results added as a group as the interfaces picker does, and
     /// close; an error stays on the field it names.
     fn form_run(&mut self) {
-        let Some(f) = &mut self.form else { return };
+        let f = form(&mut self.overlay);
         if let Some(m) = f.missing() {
             let at = match () {
                 _ if f.value("name").is_empty() => 0,
@@ -941,11 +987,11 @@ impl App {
             let line = f.line();
             return match wtf_core::command::run(&mut self.ws, &line) {
                 Ok(_) => {
-                    self.form = None;
-                    self.msg = Some((line, false));
+                    self.overlay = None;
+                    self.msg = Some(Msg::Info(line));
                 }
                 Err(e) => {
-                    let f = self.form.as_mut().expect("checked above");
+                    let f = form(&mut self.overlay);
                     f.error = Some(Wrong {
                         text: e,
                         fields: Vec::new(),
@@ -965,11 +1011,10 @@ impl App {
                 .and_then(|d| self.ws.redecode(d))
                 .map(|failed| {
                     self.msg = Some(match failed.is_empty() {
-                        true => (format!("{name}: decoded again"), false),
-                        false => (
-                            format!("{name}: decoded again, but its readers failed: {failed}"),
-                            true,
-                        ),
+                        true => Msg::Info(format!("{name}: decoded again")),
+                        false => Msg::Warn(format!(
+                            "{name}: decoded again, but its readers failed: {failed}"
+                        )),
                     });
                 }),
             // from a search's matches: on to their records
@@ -979,10 +1024,12 @@ impl App {
             false => self.decode_and_show(&line, &name),
         };
         match r {
-            Ok(()) => self.form = None,
+            // on to the records: the browser the decode opened stays
+            Ok(()) if matches!(self.overlay, Some(Overlay::Form(_))) => self.overlay = None,
+            Ok(()) => {}
             // a decode run's own error names no field: it is the value walk's, not the check's
             Err(e) => {
-                let f = self.form.as_mut().expect("checked above");
+                let f = form(&mut self.overlay);
                 f.error = Some(Wrong {
                     text: e,
                     fields: Vec::new(),
@@ -997,10 +1044,10 @@ impl App {
     /// the roles' signals filled in. A name taken is refused, never replaced; an error stays on the
     /// field it names.
     fn protocol_run(&mut self) {
-        let Some(f) = &mut self.form else { return };
+        let f = form(&mut self.overlay);
         let (line, name) = (f.line(), f.value("name").to_string());
         // `:protocol` checks only names; the form's check read the expressions against the signals
-        let r = match self.ws.protocols.iter().any(|p| p.name == name) {
+        let r = match self.ws.protocols().iter().any(|p| p.name == name) {
             true => Err(Wrong {
                 text: format!("{name}: the name is taken; give another"),
                 fields: vec![0],
@@ -1013,7 +1060,7 @@ impl App {
                     fields: Vec::new(),
                 }),
         };
-        let f = self.form.as_mut().expect("checked above");
+        let f = form(&mut self.overlay);
         match r {
             Ok(()) => {
                 let then = f.then.clone();
@@ -1027,10 +1074,12 @@ impl App {
                     signals: f.role_signals(),
                     params: Vec::new(),
                 };
-                self.msg = Some((format!("protocol {name} defined: put it on signals"), false));
+                self.msg = Some(Msg::Info(format!(
+                    "protocol {name} defined: put it on signals"
+                )));
                 let mut f = Form::new(&mut self.ws, &d, &self.found, &[]);
                 f.then = then;
-                self.form = Some(f);
+                self.overlay = Some(Overlay::Form(f));
                 self.form_check();
             }
             Err(w) => {
@@ -1053,10 +1102,18 @@ impl App {
     }
 }
 
+/// The open form: the form's keys, mouse, checks and drawing all run with it open.
+fn form(o: &mut Option<Overlay>) -> &mut Form {
+    match o {
+        Some(Overlay::Form(f)) => f,
+        _ => unreachable!("the form is open"),
+    }
+}
+
 /// Draws the form: a card in the middle with a line per field (a role the prefix plays shows its
 /// signal dim), then what is wrong with the names, and the line `Enter` runs.
 pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
-    let Some(f) = &app.form else { return };
+    let f = form(&mut app.overlay);
     let (bw, bh) = (w.saturating_sub(4).min(90), body.saturating_sub(2));
     if bw < 40 || bh < 10 {
         return;
@@ -1140,7 +1197,7 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
     );
     let keys = keys.as_str();
     crate::tui::render::card_frame(buf, r, pal().dim, &title, "", keys);
-    let Some(f) = &mut app.form else { return };
+    let f = form(&mut app.overlay);
     // the fields, scrolled to show the one being filled in
     if f.at < f.top {
         f.top = f.at;
@@ -1211,7 +1268,7 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
                 .ws
                 .sources()
                 .get(field.value.trim())
-                .map(|p| p.def().about().to_string()),
+                .and_then(|p| p.def().map(|d| d.about().to_string())),
             Kind::Param if field.value.is_empty() => Some("default".into()),
             Kind::Value { count } => Some(format!(
                 "{count} {}",
@@ -1377,7 +1434,10 @@ mod tests {
     }
 
     fn form(a: &App) -> &Form {
-        a.form.as_ref().expect("the form")
+        let Some(Overlay::Form(f)) = &a.overlay else {
+            panic!("no form")
+        };
+        f
     }
 
     /// Filled in by typing and suggestions, the form checks the names as typed, reading no value,
@@ -1411,12 +1471,15 @@ mod tests {
             form(&a).line(),
             "decode s axilite clock=top.aclk prefix=s_axi_"
         );
-        let f = a.form.take().unwrap();
+        let f = match a.overlay.take() {
+            Some(Overlay::Form(f)) => f,
+            _ => panic!("no form"),
+        };
         assert_eq!(
             f.by_prefix(&mut a.ws, 4).as_deref(),
             Some("top.s_axi_awvalid")
         );
-        a.form = Some(f);
+        a.overlay = Some(Overlay::Form(f));
         // the names match; nothing decoded or read yet
         assert_eq!(form(&a).check, Ok(()));
         let read = |a: &App| {
@@ -1425,10 +1488,10 @@ mod tests {
                 .get("top.s_axi_awaddr")
                 .is_some_and(|&v| a.ws.trace.loaded(v))
         };
-        assert!(a.ws.decodes.is_empty() && a.ws.streams.is_empty() && !read(&a));
+        assert!(a.ws.decodes().is_empty() && a.ws.streams().is_empty() && !read(&a));
         a.keys("\n").unwrap();
-        assert!(a.form.is_none());
-        assert_eq!((a.ws.decodes.len(), read(&a)), (1, true));
+        assert!(!matches!(a.overlay, Some(Overlay::Form(_))));
+        assert_eq!((a.ws.decodes().len(), read(&a)), (1, true));
         assert!(
             a.ws.rows
                 .iter()
@@ -1453,7 +1516,7 @@ mod tests {
         );
         a.keys("\n").unwrap();
         assert_eq!(form(&a).fields[form(&a).at].key, "awvalid");
-        assert!(a.ws.decodes.is_empty());
+        assert!(a.ws.decodes().is_empty());
         // made, then the same name again
         a.keys("<Esc>:decode s axilite clock=aclk prefix=s_axi_\n:decode\ns\taxilite\t")
             .unwrap();
@@ -1523,6 +1586,29 @@ mod tests {
         assert!(!crate::snapshot(&mut a, 40, Some(20)).contains("decode"));
     }
 
+    /// A trace without signals: `Ctrl-Space` on a signal field says why no picker opens.
+    #[test]
+    fn picks_no_signal() {
+        let path = std::env::temp_dir().join(format!("wtf-novars-{}.vcd", std::process::id()));
+        std::fs::write(
+            &path,
+            "$timescale 1ns $end\n$enddefinitions $end\n#0\n#10\n",
+        )
+        .unwrap();
+        let t = wtf_core::trace::Trace::open(&path).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        let mut a = App::new(wtf_core::workspace::Workspace::new(t, "x".into()));
+        a.keys(":decode\ns\taxilite\t\t\t").unwrap();
+        assert_eq!(form(&a).fields[form(&a).at].key, "awvalid");
+        a.keys("<C-Space>").unwrap();
+        let m = a.msg.as_ref().unwrap();
+        assert!(
+            m.is_warn() && m.text() == "no signals in this trace",
+            "{m:?}"
+        );
+        assert!(matches!(a.overlay, Some(Overlay::Form(_))));
+    }
+
     /// `Ctrl-Space` on a signal field opens the signals picker on the role's name; `Enter` there
     /// fills the field and goes back to the form. On the protocol, it goes to the next one.
     #[test]
@@ -1531,19 +1617,35 @@ mod tests {
         a.keys(":decode\ns\taxilite\t\t\t").unwrap();
         assert_eq!(form(&a).fields[form(&a).at].key, "awvalid");
         a.keys("<C-Space>").unwrap();
-        let p = a.picker.as_ref().expect("the picker");
-        assert_eq!((p.fill, p.query.as_str()), (Some(form(&a).at), "awvalid"));
+        let Some(Overlay::Picker(p)) = &a.overlay else {
+            panic!("no picker")
+        };
+        let at = p.back.as_ref().expect("the form back").at;
+        assert_eq!((p.fill, p.query.as_str()), (Some(at), "awvalid"));
+        // the form stays in sight under the picker: its keys line shows below the box, and the
+        // picker's title names the field it fills
+        let s = crate::snapshot(&mut a, 100, Some(40));
+        assert!(
+            s.contains("Enter run  Esc close") && s.contains(" fill awvalid "),
+            "{s}"
+        );
         a.keys("\n").unwrap();
-        assert!(a.picker.is_none());
+        assert!(!matches!(a.overlay, Some(Overlay::Picker(_))));
         assert_eq!(form(&a).fields[4].value, "top.s_axi_awvalid");
         // Ctrl-s and Tab do nothing in it: a signal for the field, nothing else
         a.keys("<C-Space><C-s>\t").unwrap();
         assert_eq!(
-            a.picker.as_ref().map(|p| (p.source, p.marked.len())),
-            Some((0, 0))
+            match &a.overlay {
+                Some(Overlay::Picker(p)) => Some((p.source, p.marked.len())),
+                _ => None,
+            },
+            Some((crate::tui::picker::Source::Signals, 0))
         );
         a.keys("<Esc>").unwrap();
-        assert!(a.picker.is_none() && a.form.is_some());
+        assert!(
+            !matches!(a.overlay, Some(Overlay::Picker(_)))
+                && matches!(a.overlay, Some(Overlay::Form(_)))
+        );
         a.keys("<S-Tab><S-Tab><S-Tab><C-Space>").unwrap();
         assert_eq!(form(&a).fields[1].value, "axi4");
     }
@@ -1628,7 +1730,7 @@ mod tests {
         assert_eq!(form(&a).check, Ok(()));
         a.keys("\n").unwrap();
         assert_eq!(
-            a.ws.streams
+            a.ws.streams()
                 .iter()
                 .map(|s| (s.name.as_str(), s.records.len()))
                 .collect::<Vec<_>>(),
@@ -1650,7 +1752,7 @@ mod tests {
             (
                 form(&a).fields[0].value.as_str(),
                 form(&a).at,
-                a.picker.is_none()
+                !matches!(a.overlay, Some(Overlay::Picker(_)))
             ),
             ("s", 0, true)
         );
@@ -1685,7 +1787,7 @@ mod tests {
         });
         assert_eq!(form(&a).at, i);
         a.keys("<Esc>").unwrap();
-        assert!(a.form.is_none());
+        assert!(!matches!(a.overlay, Some(Overlay::Form(_))));
     }
     /// The protocol form (spec §5 "Protocol form"): the selected rows its roles, named without
     /// the start they share; `when` and the fields completed and checked as typed; `Enter`
@@ -1740,7 +1842,7 @@ mod tests {
         insta::assert_snapshot!("protocol_form", crate::snapshot(&mut a, 100, Some(24)));
         // defined, then the decode form on it
         a.keys("\n").unwrap();
-        assert_eq!(a.ws.protocols.len(), 1);
+        assert_eq!(a.ws.protocols().len(), 1);
         let f = form(&a);
         assert!(!f.protocol && f.fields[1].value == "w" && f.at == 0);
         assert_eq!(
@@ -1751,9 +1853,9 @@ mod tests {
             Some("top.s_axi_wready")
         );
         a.keys("x\t\taclk\n").unwrap();
-        assert!(a.form.is_none(), "{:?}", a.msg);
+        assert!(!matches!(a.overlay, Some(Overlay::Form(_))), "{:?}", a.msg);
         assert_eq!(
-            a.ws.streams
+            a.ws.streams()
                 .iter()
                 .map(|s| (s.name.as_str(), s.records.len()))
                 .collect::<Vec<_>>(),
@@ -1775,7 +1877,7 @@ mod tests {
         a.run("add top.aclk top.s_axi_wdata").unwrap();
         a.keys("/@aclk s_axi_wvalid && s_axi_wready\n").unwrap();
         assert_eq!(
-            a.msg.as_ref().map(|m| m.0.as_str()),
+            a.msg.as_ref().map(|m| m.text()),
             Some("match 1 of 2; Space d m: records of them")
         );
         a.keys(" dm").unwrap();
@@ -1791,12 +1893,17 @@ mod tests {
             "decode s ev clock=aclk s_axi_wvalid=s_axi_wvalid s_axi_wready=s_axi_wready s_axi_wdata=top.s_axi_wdata"
         );
         a.keys("\n").unwrap();
-        assert!(a.form.is_none() && a.browser.is_some(), "{:?}", a.msg);
+        assert!(
+            !matches!(a.overlay, Some(Overlay::Form(_)))
+                && matches!(a.overlay, Some(Overlay::Browser(_))),
+            "{:?}",
+            a.msg
+        );
         // hints off: the count alone
         a.hints = false;
         a.keys("<Esc>/@aclk s_axi_wvalid\n").unwrap();
         assert!(
-            a.msg.as_ref().is_some_and(|m| m.0.ends_with(" of 2")),
+            a.msg.as_ref().is_some_and(|m| m.text().ends_with(" of 2")),
             "{:?}",
             a.msg
         );
@@ -1823,7 +1930,7 @@ mod tests {
         assert_eq!(form(&a).line(), "names top.cpu.state 0x0=IDLE 0x2=BUSY");
         insta::assert_snapshot!("value_names_card", crate::snapshot(&mut a, 100, Some(16)));
         a.keys("\n").unwrap();
-        assert!(a.form.is_none(), "{:?}", a.msg);
+        assert!(!matches!(a.overlay, Some(Overlay::Form(_))), "{:?}", a.msg);
         assert_eq!(
             a.ws.value_names,
             [("top.cpu.state".to_string(), "0x0=IDLE 0x2=BUSY".to_string())]
@@ -1888,13 +1995,13 @@ mod tests {
         assert!(w.text.starts_with("when: go is no role"), "{}", w.text);
         assert_eq!(w.fields, [4]);
         a.keys("\n").unwrap();
-        assert_eq!((form(&a).at, a.ws.protocols.len()), (4, 0));
+        assert_eq!((form(&a).at, a.ws.protocols().len()), (4, 0));
         // a role without a signal: not checked, defined as it is
         a.keys("<C-u>valid\t<S-Tab><S-Tab><C-u>").unwrap();
         assert_eq!(form(&a).check, Ok(()));
         assert!(crate::snapshot(&mut a, 100, Some(24)).contains("a signal for each role checks"));
         a.keys("\n").unwrap();
-        assert_eq!((a.ws.protocols.len(), form(&a).protocol), (1, false));
+        assert_eq!((a.ws.protocols().len(), form(&a).protocol), (1, false));
         // the name taken now
         a.keys("<Esc>:protocol\np\tvalid\t\tvalid").unwrap();
         assert_eq!(
@@ -1907,7 +2014,7 @@ mod tests {
         assert_eq!(form(&a).shown().map(|w| w.fields.clone()), Some(vec![0]));
         // Enter keeps the form and the protocol already there
         a.keys("\n").unwrap();
-        assert_eq!((a.ws.protocols.len(), form(&a).protocol), (1, true));
+        assert_eq!((a.ws.protocols().len(), form(&a).protocol), (1, true));
         assert_eq!(
             super::role_names(&["rx_valid".into(), "rx_data[3]".into()]),
             ["valid", "data_3"]
@@ -1931,17 +2038,13 @@ mod tests {
             row: y,
             modifiers: crossterm::event::KeyModifiers::NONE,
         });
-        let menu = a.menu.as_ref().expect("the menu");
-        let k = menu
+        let k = crate::tests::menu(&a)
             .items
             .iter()
             .position(|i| i.label == "Decode as")
             .expect("Decode as");
         a.keys(&format!("{}<CR>", "j".repeat(k + 1))).unwrap();
-        let sub: Vec<String> = a
-            .menu
-            .as_ref()
-            .unwrap()
+        let sub: Vec<String> = crate::tests::menu(&a)
             .sub
             .as_ref()
             .unwrap()

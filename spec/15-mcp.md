@@ -13,7 +13,7 @@ reuse wtf's own pieces:
 | `values(signals, from, to, radix, unit)` | the value at `from`, then each change up to `to` (without `to`, inside the span `from` stands for), as `time value` lines; a struct, record or array its whole value, then each signal in it (`pkt.valid:`, `pkt.pair.hi:`) |
 | `find(expr, from, to, backward, count, show, count_only, unit)` | match times of a search expression (section 8), `@clk` included, as a table |
 | `render(signals, from, to, width, unit)` | the signals drawn as text, as on the screen (`--snapshot`); without signals, the workspace. The name and value columns keep their default widest (30, 20): the server reads no config file, so an answer doesn't depend on the user's |
-| `workspace(scope, signals, protocols, decode, rows, cursors, range)` | set up the whole workspace in one call |
+| `workspace(scope, unit, view, cursors, signal, names, protocol, decode, rows)` | set up the whole workspace in one call |
 | `protocols(name)` | what can be decoded and how; for one protocol its roles, params and streams |
 | `records(stream, from, to, where, group_by, count, count_only, unit)` | the records of a stream, or of a set of streams (a decode's name: its results), as a table |
 | `command(line)` | run a `:` command on the agent's workspace (milestone 7) |
@@ -108,17 +108,14 @@ reuse wtf's own pieces:
   in `records`, `values` and `render` takes the span's start, `to` its end (`values` without `to`:
   the span's, so a change inside it is a line of its own); `find` searches after
   the span's end (before its start, backward), and `find` `to` takes the whole span. `workspace`
-  `range` takes spans, its cursors keep the time written. The TUI's times are points.
+  `view` takes spans, its cursors keep the time written. The TUI's times are points.
 - The core keeps times as ticks and never picks a unit: the interfaces pass the unit and the
   precision to its one formatter. So a duration a decoder works out (a pair's `delay`) is a time
   field, ticks, shown in the answer's unit, and compared with a time (`where: "delay == 40ns"`); a
   value with a time unit is a time wherever a search takes values. Its field signal
   (`bus.wr.delay`) shows as a time too, in a row and in `values`, in the unit that fits it.
 - A signal's radix can be given with its name, `awaddr:dec`, wherever tools take signals.
-- Rows in `workspace` can also take a colour (section 14), after the radix or alone:
-  `awaddr:hex:red`, `wvalid:red`, to point the user at the guilty signal when presented. A row's
-  `fields` give lines under it theirs the same way (`{"signal": "pkt", "fields":
-  ["pkt.pair.hi:dec:red"]}`), named as `open` names levels; `view` lists them.
+- A `workspace` row can also take a radix and a colour (section 14): `{"signal": "awaddr", "radix": "hex", "color": "red"}`, to point the user at the guilty signal when presented. A row's `fields` give lines under it theirs the same way (`{"field": "pkt.pair.hi", "radix": "dec", "color": "red"}`), named as `open` names levels; `view` lists them.
 - `find` answers as a tab-separated table with a header. With a clock, consecutive matching
   cycles are one row: `from`, `last`, `cycles`. `show` adds a column per signal with its value on
   each match, as the clock edge samples it (one row per cycle), so `@clk awvalid && awready` with
@@ -146,24 +143,33 @@ reuse wtf's own pieces:
   `radix` sets the radix of every number field (`dec`; a time or text field is skipped), or of
   some (`addr:dec, strb:bin`), in the table and in `group_by`. Naming a time or text field is an
   error. Streams are declared in `workspace` with
-  `protocols`: `{"name": "cmd", "roles": ["valid", "ready", "cmd"], "when": "valid && ready",
-  "fields": ["op = cmd[7:0]"]}` (definitions on roles, no clock), `decode` puts them on signals:
-  `{"name": "c0", "protocol": "cmd", "clock": "clk", "signals": ["valid = cmd_valid", "ready =
-  cmd_ready", "cmd = cmd"]}`, and
-  `signals` names computed signals: `["op = cmd[7:0]"]`.
+  `protocol`: `{"name": "cmd", "roles": ["valid", "ready", "cmd"], "when": "valid && ready",
+  "fields": [{"op": "cmd[7:0]"}]}` (definitions on roles, no clock), `decode` puts them on signals:
+  `{"name": "c0", "protocol": "cmd", "clock": "clk", "signals": [{"valid": "cmd_valid"}]}`, and
+  `signal` names computed signals: `[{"name": "op", "expr": "cmd[7:0]"}]`.
 - `workspace` declares the whole workspace in JSON, replacing it as one undo step, so the agent
   writes the state it wants instead of editing toward it:
-  `{"scope": "dut", "rows": ["s_axi_aclk", {"group": "write", "rows": ["s_axi_awaddr:hex",
-  "s_axi_awvalid"]}], "cursors": {"1": "80ns", "2": "390ns"}, "range": ["60ns",
-  "480ns"]}`. A mark may say what it shows: `"2": {"time": "390ns", "name": "first bad write",
-  "note": "AW came before W"}` (section 9); `view` lists the name and note after its time. A struct, record or array is a row as any signal (`"pkt"`, folded); `{"signal":
-  "grid", "open": ["grid", "grid[1]"]}` opens levels of it, as a session's `open`. It is the
-  session (section 11) in another shape, and goes through the same checks. Its rows, cursors,
-  range and scope replace the workspace's; its `signals`, `protocols` and `decode` are added,
-  each replacing one of the same name, and those it doesn't name stay, so an interface decoded
-  with `command` before is kept. `user_view` with `adopt` keeps them the same way.
-  Every unknown or ambiguous name, bad radix and bad time is reported at once and nothing
-  changes, so one retry fixes them. It answers as `view` does.
+  `{"scope": "dut", "rows": [{"signal": "s_axi_aclk"}, {"group": "write", "rows":
+  [{"signal": "s_axi_awaddr", "radix": "hex"}, {"signal": "s_axi_awvalid"}]}],
+  "cursors": {"1": "80ns", "2": "390ns"}, "view": {"time": "60ns", "to": "480ns"}}`.
+  A mark may say what it shows: `"2": {"time": "390ns", "name": "first bad write",
+  "note": "AW came before W"}` (section 9); `view` lists the name and note after its time. A struct, record or array is a row as any signal (`{"signal": "pkt"}`, folded);
+  `{"signal": "grid", "open": ["grid", "grid[1]"]}` opens levels of it, as a session's
+  `open`. It is the session (section 11) itself, and the session validator checks it, so a name, radix,
+  time, unit or mark it gets wrong is worded as wtf words it for a session file. Its rows,
+  cursors, view and scope replace the workspace's; its `signal`, `protocol`, `names` and
+  `decode` are added, each replacing one of the same name, and those it doesn't name stay, so
+  an interface decoded with `command` before is kept. `user_view` with `adopt` keeps them the
+  same way. Every unknown or ambiguous name (the scope's too), bad radix and bad time is reported
+  at once, each once, and nothing changes (the marks with their names and notes stay), so one
+  retry fixes them; the declaration's own problems come first, then the validator's, each named
+  for the part it is about. A row names what the declaration makes before a trace signal its
+  name ends. `unit` sets the workspace's time unit (`auto`: the one that fits). A key it doesn't
+  take, at the top or in any entry (a signal, protocol, decode, names, row, field, group member
+  or mark), is an error naming the entry and the keys it takes;
+  the session file's `version` and `trail` aren't declared. A key of the wrong JSON kind, a string
+  where a list goes, is an error naming the key, the kind it takes and an example. It answers as
+  `view` does.
 - `command` answers with the rows it added and removed, so a pattern that caught too much shows.
   Each command is one undo step, as in the window.
 - A name ambiguous in the trace means the one directly in the workspace's scope (`command` `scope
@@ -189,7 +195,10 @@ reuse wtf's own pieces:
   match (`**.*fifo*` for a signal named so, `**.*fifo*.*` for the signals in a scope named so).
 - Every other tool works on the current workspace; until `open`, they say to open a trace first.
 - Session files aren't loaded; the agent starts from an empty workspace (or adopts the user's view).
-- `command` refuses `:w`, `:q`, `:e` and `:help`, which belong to the user's window.
+- `command` refuses the window's own commands (the window's list in spec §7: `:w`, `:q`, `:e`,
+  `:help`, `:trail`, `:records`, `:pick`, …), not a closed list: what the core does not answer
+  there is a window's to run. Where the agent has a tool for it (`:records`, `:help`), the
+  refusal names that tool.
 - `protocols` is the agent's documentation, generated from the registry so it can't drift: the
   list of protocols (built in, on streams, the workspace's own), and for one its roles, params, the
   streams it makes with their fields (worked out from its steps), the values of its violation
@@ -216,8 +225,10 @@ reuse wtf's own pieces:
 - `command` decodes without touching the rows (`decode`, `protocol`, `signal`). `decode` answers
   with the streams it made and their records, results first, then violations, then what they are
   made from (`bus: records bus.wr 2, bus.rd 8; violations bus.errors 2, ...; made from bus.aw 2,
-  ...`, section 16 "Results"), then where to read more; the window shows
-  that line on its status line.
+  ...`, section 16 "Results"), then where to read more: `records <stream>` lists a decode's
+  stream, `records <name>` its records and violations in order, `protocols` says what each stream
+  and field is, and `pair` matches a stream with another (`help decode`). The window shows that
+  line on its status line.
 
 ### Workspaces, present and the link
 
@@ -280,7 +291,8 @@ the trace or changes the workspace (`find`, `records`, `values`, `render`, `comm
 expression, `records`' stream and `where`, a command's line, ...), the first line of the answer
 (`values`: its first value too, `data: 40ns 0x2A`; `error: ...` for an error; `declared` for `workspace`, whose answer is a `view`), and the time it is about: the `time` or `from` asked, or the first
 time a `find` or `records` answer lists. Lookups (`help`, `info`, `signals`, `view`, `sessions`,
-`protocols`, `user_view`) and `open` and `present` are no steps. A trail keeps
+`protocols`, `user_view`) and `open` and `present` are no steps. A call of a step tool whose
+arguments don't parse is a step too, with an empty ask and the error. A trail keeps
 the last 200 steps.
 
 - The session a window reads from an agent's workspace carries the trail as `[[trail]]` tables

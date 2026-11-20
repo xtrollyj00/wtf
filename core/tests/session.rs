@@ -26,7 +26,7 @@ fn round_trip() {
     let text = session::to_toml(&ws);
     assert!(text.starts_with("# wtf session\nversion = 1\n"), "{text}");
     assert!(
-        text.contains("radix = \"dec\", color = \"red\"")
+        text.contains("radix = \"dec\"\ncolor = \"red\"")
             && text.contains("open = [\"state\"]")
             && text.contains("[cursors]\n1 = \"35ns\"\n2 = \"35ns\"\n3 = \"50ns\"\n"),
         "{text}"
@@ -38,15 +38,24 @@ fn round_trip() {
     wtf_core::command::run(&mut back, "cursor 3 name=done note=\"last \"").unwrap();
     let text = session::to_toml(&back);
     assert!(
-        text.contains("2 = \"35ns\"\n3 = { time = \"50ns\", name = \"done\", note = \"last\" }\n"),
+        text.contains(
+            "2 = \"35ns\"\n\n[cursors.3]\ntime = \"50ns\"\nname = \"done\"\nnote = \"last\"\n"
+        ),
         "{text}"
     );
     let mut again = open();
     assert_eq!(session::apply(&mut again, &text), Ok(vec![]));
     assert_eq!(session::to_toml(&again), text);
+    // the marks' times, not their names: `back` was renamed above
+    let times = |ws: &wtf_core::workspace::Workspace| {
+        ws.marks()
+            .iter()
+            .map(|m| m.as_ref().map(|m| m.time))
+            .collect::<Vec<_>>()
+    };
     assert_eq!(
-        (&back.rows, back.marks, back.view.cursor),
-        (&ws.rows, ws.marks, 35)
+        (&back.rows, times(&back), back.view.cursor),
+        (&ws.rows, times(&ws), 35)
     );
     assert_eq!(back.scope.as_deref(), Some("top.cpu"));
     assert!(text.contains("unit = \"ps\"\n"), "{text}");
@@ -154,7 +163,12 @@ fn field_looks() {
         text.contains(
             r#"color = "red"
 open = ["pkt", "pkt.pair"]
-fields = [{ field = "pkt.pair.hi", radix = "dec", color = "blue" }]"#
+
+[[rows.fields]]
+field = "pkt.pair.hi"
+radix = "dec"
+color = "blue"
+"#
         ),
         "{text}"
     );
@@ -204,19 +218,19 @@ fn warns_and_keeps_going() {
     assert_eq!(
         warn,
         [
-            "bad time unit: furlong (s, ms, us, ns, ps, fs)",
-            "unknown radix: roman",
-            "radix q4.4 doesn't fit top.clk",
-            "unknown colour: pink (colours: red, orange, yellow, green, cyan, blue, magenta, gray)",
+            "unit: bad time unit: furlong (s, ms, us, ns, ps, fs)",
+            "rows: top.cpu.data: unknown radix: roman (radixes: hex, bin, dec, sdec, oct, ascii)",
+            "rows: top.clk: radix q4.4 doesn't fit top.clk",
+            "rows: top.clk: unknown colour: pink (colours: red, orange, yellow, green, cyan, blue, magenta, gray)",
             "nested group flattened: inner",
-            "rows: entry without signal or group",
-            "unknown key: rows.label",
+            "rows [5]: entry without signal or group",
+            "rows [5]: unknown key: label (keys: signal, group)",
             "not in trace: top.gone",
             "view.zoom: bad time",
-            "bad time: soon (a number and a unit, 20ns or 1.5us; a plain number is file ticks)",
-            "unknown key: view.speed",
+            "view.time: bad time: soon (a number and a unit, 20ns or 1.5us; a plain number is file ticks)",
+            "view: unknown key: speed (keys: time, to, zoom)",
             "cursors: no cursor 12 (1-9)",
-            "unknown key: colour",
+            "session: unknown key: colour (keys: version, scope, unit, signal, names, protocol, decode, rows, view, cursors, trail)",
         ]
     );
     // what could be read was: a signal shown twice only once
@@ -244,12 +258,91 @@ fn refuses_what_it_cant_read() {
         session::apply(&mut ws, "rows = 3"),
         Ok(vec!["rows: must be a list".to_string()])
     );
+    // a trail that isn't a list warns as `rows` does, and the session still loads
+    assert_eq!(
+        session::apply(&mut ws, "trail = \"oops\""),
+        Ok(vec!["trail: must be a list".to_string()])
+    );
     // a time as plain ticks, and one that isn't a time
     assert_eq!(
         session::apply(&mut ws, "[cursors]\n1 = 30\n2 = true"),
-        Ok(vec!["bad time".to_string()])
+        Ok(vec!["cursors.2: bad time".to_string()])
     );
-    assert_eq!((ws.view.cursor, ws.marks[1]), (30, None));
+    assert_eq!(
+        (ws.view.cursor, ws.marks()[1].as_ref().map(|m| m.time)),
+        (30, None)
+    );
+    // a section in the wrong shape holds nothing and says so where it sits
+    for (bad, msg) in [
+        ("scope = 3", "scope: must be a string"),
+        ("unit = 3", "unit: must be a string"),
+        ("signal = 3", "signal: must be a list"),
+        ("names = 3", "names: must be a list"),
+        ("protocol = 3", "protocol: must be a list"),
+        ("decode = 3", "decode: must be a list"),
+        ("view = 3", "view: must be a table"),
+        ("cursors = 3", "cursors: must be a table"),
+    ] {
+        assert_eq!(session::apply(&mut open(), bad), Ok(vec![msg.to_string()]));
+    }
+    // at its place in the file, with the rest of the session still loaded
+    let mut next = open();
+    let warn = session::apply(
+        &mut next,
+        "unit = \"ns\"\nsignal = 3\n[[rows]]\nsignal = \"top.clk\"",
+    )
+    .unwrap();
+    assert_eq!(warn, ["signal: must be a list"]);
+    assert!(next.unit.is_some());
+    assert_eq!(names(&next), ["clk"]);
+    // a nested `rows` that isn't a list names the group it sits in
+    assert_eq!(
+        session::apply(&mut open(), "[[rows]]\ngroup = \"g\"\nrows = 3"),
+        Ok(vec!["rows [1].rows: must be a list".to_string()])
+    );
+}
+
+/// A key an entry doesn't take warns as one of the file's does (spec §11); the entry still loads.
+#[test]
+fn unknown_entry_keys_warn() {
+    let mut ws = open();
+    let text = r#"
+        [[signal]]
+        name = "low"
+        expr = "top.cpu.data[3:0]"
+        colour = "red"
+        [[trail]]
+        tool = "find"
+        ask = "top.cpu.busy"
+        answer = "1 matches"
+        when = "now"
+        [[signal]]
+        name = ""
+        expr = "top.clk"
+        [[rows]]
+        signal = "top.clk"
+        colour = "red"
+        radix = "enum"
+        fields = [{ field = "x", colour = "red" }]
+        [[rows]]
+        group = "g"
+        colapsed = true
+    "#;
+    assert_eq!(
+        session::apply(&mut ws, text).unwrap(),
+        [
+            "signal low: unknown key: colour (keys: name, expr)",
+            "signal [2]: needs a name and an expr",
+            "rows: top.clk: enum: the file names no values of top.clk",
+            "top.clk has no field x",
+            "rows: top.clk: field x: unknown key: colour (keys: field, radix, color)",
+            "rows: top.clk: unknown key: colour (keys: signal, radix, color, open, fields)",
+            "rows [2]: unknown key: colapsed (keys: group, collapsed, rows)",
+            "trail [1]: unknown key: when (keys: tool, ask, answer, time)",
+        ]
+    );
+    assert!(ws.signals.iter().any(|s| s.0 == "low"));
+    assert_eq!(ws.trail.len(), 1);
 }
 
 #[test]
@@ -263,8 +356,11 @@ fn files() {
     let mut ws = with(&["top.clk"]);
     ws.session_path = session::default_path(&trace);
     assert!(ws.modified());
-    let (msg, _) = wtf_core::command::save(&mut ws, "").unwrap();
-    assert_eq!(msg, format!("written: {}", ws.session_path.display()));
+    let msg = wtf_core::command::save(&mut ws, "").unwrap();
+    assert_eq!(
+        msg.text(),
+        format!("written: {}", ws.session_path.display())
+    );
     assert!(!ws.modified());
     // :w <file> makes that the session file in use
     let other = dir.0.join("other.toml");
@@ -281,10 +377,10 @@ fn files() {
 #[test]
 fn wasm_protocol_round_trip() {
     let mut ws = open();
-    ws.loaded.push(loaded("probe", &[]));
+    ws.push_loaded(loaded("probe", &[]));
     let text = "\n[[protocol]]\nname = \"probe\"\nwasm = \"dir/probe.wasm\"\n";
     assert_eq!(session::apply(&mut ws, text), Ok(vec![]));
-    let p = ws.protocols.iter().find(|p| p.name == "probe").unwrap();
+    let p = ws.protocols().iter().find(|p| p.name == "probe").unwrap();
     assert_eq!(
         (p.wasm.as_deref(), p.when.as_str(), p.roles.len()),
         (Some("dir/probe.wasm"), "", 0)
@@ -312,5 +408,198 @@ fn wasm_protocol_without_the_load() {
     assert!(
         session::to_toml(&ws)
             .contains("[[protocol]]\nname = \"probe\"\nwasm = \"dir/probe.wasm\"\n")
+    );
+    // and `protocols probe` says why it has no card
+    assert_eq!(
+        wtf_core::protocol::describe("probe", ws.sources()),
+        Ok("probe: wasm dir/probe.wasm is not loaded".into())
+    );
+}
+
+/// The trail is last, so a link's view is the shared file without it (spec §11).
+#[test]
+fn trail_comes_last() {
+    let mut ws = open();
+    let text =
+        "[cursors]\n1 = \"20ns\"\n\n[[trail]]\ntool = \"find\"\nask = \"q\"\nanswer = \"a\"\n";
+    assert_eq!(session::apply(&mut ws, text), Ok(vec![]));
+    assert_eq!(ws.trail.len(), 1);
+    let link = session::to_link_toml(&ws);
+    assert_eq!(session::without_trail(&link), session::to_shared_toml(&ws));
+    assert!(
+        link.contains("\n[[trail]]\ntool = \"find\"\nask = \"q\"\nanswer = \"a\"\n"),
+        "{link}"
+    );
+}
+
+/// Splitting the trail off skips a `"""` string that holds the same line.
+#[test]
+fn trail_split_skips_strings() {
+    let text = "version = 1\n\n[cursors.3]\ntime = \"20ns\"\nnote = \"\"\"\na\n[[trail]]\nb\"\"\"\n\n[[trail]]\ntool = \"find\"\nask = \"q\"\nanswer = \"a\"\n";
+    assert_eq!(
+        session::without_trail(text),
+        "version = 1\n\n[cursors.3]\ntime = \"20ns\"\nnote = \"\"\"\na\n[[trail]]\nb\"\"\"\n"
+    );
+    assert_eq!(session::read_trail(&open(), text).len(), 1);
+}
+
+/// A note with `"""` in one line is written as a literal string: the trail still splits off.
+#[test]
+fn trail_split_one_line_quotes() {
+    let mut ws = open();
+    let text = "[cursors.3]\ntime = \"20ns\"\nnote = 'say \"\"\" here'\n\n[[trail]]\ntool = \"find\"\nask = \"q\"\nanswer = \"a\"\n";
+    assert_eq!(session::apply(&mut ws, text), Ok(vec![]));
+    let link = session::to_link_toml(&ws);
+    assert!(link.contains("say \"\"\" here"), "{link}");
+    assert_eq!(session::without_trail(&link), session::to_shared_toml(&ws));
+}
+
+/// A row that is neither a signal nor a group is dropped, and says so.
+#[test]
+fn row_with_bad_signal_warns() {
+    let mut ws = open();
+    let warn = session::apply(&mut ws, "[[rows]]\nsignal = 3\n").unwrap();
+    assert_eq!(warn, ["rows [1]: entry without signal or group"]);
+    assert!(ws.rows.is_empty());
+}
+
+/// A hand-written file describes without failing: junk rows skip, unparseable times clear, and
+/// the cursor is listed even when the file names none.
+#[test]
+fn describe_skips_gracefully() {
+    use toml::Value;
+    let ws = open();
+    assert!(!ws.modified()); // a fresh window: the layout has no version line
+    let mut f = session::File::default();
+    f.rows
+        .push(session::model::Row::Other(Value::String("x".into())));
+    f.cursors.insert("2".into(), Value::String("soon".into()));
+    f.cursors.insert("x".into(), Value::String("1ns".into()));
+    let names: Vec<String> = Vec::new();
+    let show = |t: u64| format!("{t}");
+    let text = session::describe(
+        &f,
+        &session::Describe {
+            names: &names,
+            sel: 999,
+            show: &show,
+            visible: (String::from("0"), String::from("0")),
+            trace: &ws.trace,
+        },
+    );
+    assert_eq!(
+        text,
+        "rows (> selected):\ncursors, in time:\n  1: 0\nvisible: 0 - 0\n"
+    );
+}
+
+/// An entry without what it needs warns where it sits and is skipped; the rest loads (spec §11).
+#[test]
+fn entries_missing_what_they_need() {
+    let mut ws = open();
+    let text = r#"
+        scope = "top.nowhere"
+        [[names]]
+        values = "0=IDLE"
+        [cursors]
+        2 = { name = "start" }
+        3 = { time = "soon" }
+        [[rows]]
+        signal = "cpu.data"
+        [[trail]]
+        tool = "find"
+        ask = "top.cpu.busy"
+    "#;
+    wtf_core::command::run(&mut ws, "cursor 3 50ns").unwrap();
+    assert_eq!(
+        session::apply(&mut ws, text).unwrap(),
+        [
+            "no scope top.nowhere",
+            "names [1]: needs a signal and values",
+            "cursors.2: needs a time",
+            "cursors.3.time: bad time: soon (a number and a unit, 20ns or 1.5us; a plain number is file ticks)",
+            "trail [1]: a step needs a tool, an ask and an answer",
+        ]
+    );
+    // a row named by its path's ending is the signal's
+    assert_eq!(names(&ws), ["data"]);
+    assert!(ws.marks()[1].is_none() && ws.marks()[2].is_none());
+}
+
+/// A named mark without a note writes only its name, and reads back the same (spec §11).
+#[test]
+fn mark_name_without_note() {
+    let mut ws = open();
+    wtf_core::command::run(&mut ws, "cursor 2 35ns name=start").unwrap();
+    let text = session::to_toml(&ws);
+    assert!(
+        text.ends_with("[cursors.2]\ntime = \"35ns\"\nname = \"start\"\n"),
+        "{text}"
+    );
+    // with no trail to split off, the text is the whole file
+    assert_eq!(session::without_trail(&text), text);
+    let mut back = open();
+    assert_eq!(session::apply(&mut back, &text), Ok(vec![]));
+    let m = back.marks()[1].as_ref().unwrap();
+    assert_eq!(
+        (m.time, m.name.as_str(), m.note.as_str()),
+        (35, "start", "")
+    );
+}
+
+/// What `view` says of a hand-written file: cursors in any form, a row not in the trace, fields
+/// it can and can't name, and a group with no rows.
+#[test]
+fn describe_hand_written() {
+    let ws = wtf_core::workspace::Workspace::open(&std::path::PathBuf::from(format!(
+        "{}/../tests/data/types-verilator-structs.fst",
+        env!("CARGO_MANIFEST_DIR")
+    )))
+    .unwrap();
+    let f: session::File = toml::from_str(
+        r#"
+        [cursors]
+        1 = { time = "5ns" }
+        2 = 20
+        3 = true
+        12 = "1ns"
+        [[rows]]
+        signal = "types.gone"
+        [[rows]]
+        signal = "types.pkt"
+        fields = [{ field = "pkt.valid" }, { field = "pkt.state", radix = "roman" }]
+        [[rows]]
+        signal = "types.pkts[0]"
+        fields = [{ field = "pkts[0]x" }]
+        [[rows]]
+        group = "g"
+    "#,
+    )
+    .unwrap();
+    let names = ["gone", "pkt", "pkts[0]", "g"].map(String::from);
+    let show = |t: u64| format!("{t}");
+    let text = session::describe(
+        &f,
+        &session::Describe {
+            names: &names,
+            sel: 0,
+            show: &show,
+            visible: (String::from("0"), String::from("30")),
+            trace: &ws.trace,
+        },
+    );
+    // a bad field radix shows the field's own default (state's enum); 1 on a table reads 0
+    assert_eq!(
+        text,
+        "rows (> selected):
+> gone  types.gone
+  pkt  types.pkt  hex  (fields: pkt.valid, pkt.state:enum)
+  pkts[0]  types.pkts[0]  hex
+  g
+cursors, in time:
+  1: 0
+  2: 20, +20 after 1
+visible: 0 - 30
+"
     );
 }

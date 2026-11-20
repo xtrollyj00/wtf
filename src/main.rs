@@ -1,5 +1,6 @@
 mod config;
 mod draw;
+mod guide;
 mod history;
 mod live;
 mod mcp;
@@ -168,7 +169,7 @@ fn start(
     snapshot: Option<(u16, Option<u16>)>,
     ansi: bool,
     keys: Option<&str>,
-    palette: draw::Palette,
+    palette: theme::Palette,
     keymap: (tui::keys::Keymap, std::time::Duration, bool),
     warnings: &[String],
     loaded: &[Arc<protocol::Loaded>],
@@ -214,7 +215,7 @@ fn start(
         if let Some(id) = follow
             && let Err(e) = app.run(&format!("follow {id}"))
         {
-            app.msg = Some((e, true));
+            app.msg = Some(workspace::Msg::Warn(e));
         }
         (app.keymap, app.which_delay, app.hints) = keymap;
         history::opened(&path, session.as_deref(), false);
@@ -232,7 +233,7 @@ fn open(
 ) -> Result<App, String> {
     let mut app = App::new(workspace::Workspace::open(path)?);
     // the config dir's protocols: a session's decode of one reads them, and so does `protocols`
-    app.ws.loaded = loaded.to_vec();
+    app.ws.set_loaded(loaded.to_vec());
     app.ws.loader = Some(wasm::loader());
 
     // -S may name a file that doesn't exist yet: that starts an empty session, and :w creates it.
@@ -260,7 +261,7 @@ fn open(
         }
     }
     // interfaces a built-in protocol decodes, said once when nothing is decoded yet (spec §4)
-    if offer.is_none() && app.ws.decodes.is_empty() && !app.found.is_empty() {
+    if offer.is_none() && app.ws.decodes().is_empty() && !app.found.is_empty() {
         let what: Vec<String> = app
             .found
             .iter()
@@ -270,16 +271,20 @@ fn open(
         offer = Some(format!("found: {}; {key} decodes", what.join(", ")));
     }
     if !warnings.is_empty() {
-        app.msg = Some((warnings.join("; "), true));
+        app.msg = Some(workspace::Msg::Warn(warnings.join("; ")));
     } else if let Some(o) = offer {
-        app.msg = Some((o, false));
+        app.msg = Some(workspace::Msg::Info(o));
     }
     Ok(app)
 }
 
 /// The configured palette, or none where `NO_COLOR` is set.
-fn set_palette(p: draw::Palette) {
-    draw::set_palette(if no_color() { draw::Palette::mono() } else { p });
+fn set_palette(p: theme::Palette) {
+    draw::set_palette(if no_color() {
+        theme::Palette::mono()
+    } else {
+        p
+    });
 }
 
 /// `NO_COLOR` set and not empty, as no-color.org says.
@@ -328,6 +333,27 @@ mod tests {
         app
     }
 
+    fn browser(app: &App) -> &tui::browser::Browser {
+        let Some(app::Overlay::Browser(b)) = &app.overlay else {
+            panic!("no browser")
+        };
+        b
+    }
+
+    fn picker(app: &App) -> &tui::picker::Picker {
+        let Some(app::Overlay::Picker(p)) = &app.overlay else {
+            panic!("no picker")
+        };
+        p
+    }
+
+    pub(crate) fn menu(app: &App) -> &tui::app::Menu {
+        let Some(app::Overlay::Menu(m)) = &app.overlay else {
+            panic!("no menu")
+        };
+        m
+    }
+
     fn keys(app: &mut App, s: &str) {
         app.keys(s).unwrap();
     }
@@ -364,7 +390,7 @@ mod tests {
             app.msg
                 .as_ref()
                 .unwrap()
-                .0
+                .text()
                 .starts_with("unit sets the time unit of an agent's answers")
         );
         assert_eq!(app.ws.unit, None);
@@ -375,12 +401,48 @@ mod tests {
     }
 
     #[test]
+    fn run_guards() {
+        let mut app = open("vcd", None);
+        // the window keeps its own: the refusal text is the core's advice, shown as is
+        let e = app.run("unit ns").unwrap_err();
+        assert_eq!(
+            e,
+            "unit sets the time unit of an agent's answers; the window picks what fits"
+        );
+        // a window command that needs a state the core cannot know about
+        let e = app.run("protocol search").unwrap_err();
+        assert_eq!(e, "no clocked search: search with /@clk <expr> first");
+        // with arguments `:decode` is the core's, not the form's
+        assert_eq!(
+            app.run("decode rx").unwrap_err(),
+            "usage: :decode <name> <protocol> <role>=<signal>..."
+        );
+        assert!(app.overlay.is_none());
+        // alone, the form's
+        app.run("decode").unwrap();
+        assert!(matches!(app.overlay, Some(app::Overlay::Form(_))));
+    }
+
+    #[test]
+    fn window_commands_match() {
+        let mut tui: Vec<_> = commands::WINDOW
+            .iter()
+            .filter(|w| matches!(w.when, commands::When::Window))
+            .map(|w| w.name)
+            .collect();
+        let mut mcp = crate::mcp::WINDOW_COMMANDS.to_vec();
+        tui.sort_unstable();
+        mcp.sort_unstable();
+        assert_eq!(tui, mcp);
+    }
+
+    #[test]
     fn add_walk_zoom() {
         let mut app = open("vcd", None);
         keys(&mut app, ":add top.cpu\n");
         assert_eq!(app.ws.rows.len(), 4); // a group: header and three signals
         keys(&mut app, ":add top.cpu.*\n");
-        assert_eq!(app.msg.as_ref().unwrap().0, "already shown: top.cpu.*");
+        assert_eq!(app.msg.as_ref().unwrap().text(), "already shown: top.cpu.*");
         keys(&mut app, "kww");
         assert_eq!(app.ws.view.cursor, 20);
         keys(&mut app, "3z");
@@ -396,15 +458,15 @@ mod tests {
         keys(&mut app, ":rm\n:rm top.cpu.state\n");
         assert_eq!(app.ws.rows.len(), 2);
         keys(&mut app, ":rm\n:rm\n");
-        assert_eq!(app.msg.as_ref().unwrap().0, "no rows");
+        assert_eq!(app.msg.as_ref().unwrap().text(), "no rows");
         keys(&mut app, ":add top.cpu\n");
         keys(&mut app, ":bogus\n");
-        assert_eq!(app.msg.as_ref().unwrap().0, "unknown command: bogus");
+        assert_eq!(app.msg.as_ref().unwrap().text(), "unknown command: bogus");
         keys(&mut app, ":42ns\n");
         assert_eq!(app.ws.view.cursor, 42);
         keys(&mut app, "q");
         assert_eq!(
-            app.msg.as_ref().unwrap().0,
+            app.msg.as_ref().unwrap().text(),
             "unsaved session (:w to save, :q! to quit)"
         );
         keys(&mut app, ":q!\n");
@@ -490,18 +552,31 @@ mod tests {
         keys(&mut app, "bux\x08<Tab>s");
         assert_eq!(names(&app).split(',').next(), Some("▾ bus"));
         keys(&mut app, "\n");
-        assert!(app.naming.is_none() && !snapshot(&mut app, 80, Some(16)).contains("NAME"));
+        assert!(
+            !matches!(app.overlay, Some(app::Overlay::Naming(_)))
+                && !snapshot(&mut app, 80, Some(16)).contains("NAME")
+        );
         keys(&mut app, "u");
         assert_eq!(names(&app).split(',').next(), Some("▾ group"));
         keys(&mut app, "<C-r>");
         // R: empty is refused, Esc puts back the name it had
         keys(&mut app, "R<C-u>\n");
         assert_eq!(
-            (app.naming.is_some(), app.msg.as_ref().map(|m| m.0.as_str())),
+            (
+                matches!(app.overlay, Some(app::Overlay::Naming(_))),
+                app.msg.as_ref().map(|m| m.text())
+            ),
             (true, Some("a group needs a name; Esc keeps the one it had"))
         );
         keys(&mut app, "x\x1b");
         assert_eq!(names(&app).split(',').next(), Some("▾ bus"));
+        // an agent's present takes the header away while it is named: the naming ends
+        keys(&mut app, "R");
+        app.present(&session::to_link_toml(&open("vcd", None).ws))
+            .unwrap();
+        keys(&mut app, "x");
+        assert!(app.overlay.is_none() && app.ws.rows.is_empty());
+        keys(&mut app, "u");
         // <: a member out, after the group; on the header, the group dissolved
         keys(&mut app, "jj<");
         assert_eq!(
@@ -509,21 +584,18 @@ mod tests {
             "▾ bus,  clk,  cpu.state,rst,data,busy,dma.state"
         );
         keys(&mut app, "<");
-        assert_eq!(
-            app.msg.as_ref().map(|m| m.0.as_str()),
-            Some("not in a group")
-        );
+        assert_eq!(app.msg.as_ref().map(|m| m.text()), Some("not in a group"));
         keys(&mut app, "kkk<");
         assert_eq!(names(&app), "clk,cpu.state,rst,data,busy,dma.state");
         keys(&mut app, "R");
         assert_eq!(
-            app.msg.as_ref().map(|m| m.0.as_str()),
+            app.msg.as_ref().map(|m| m.text()),
             Some("not in a group: > groups the row")
         );
         // nothing removed yet; then dd and p / P
         keys(&mut app, "p");
         assert_eq!(
-            app.msg.as_ref().map(|m| m.0.as_str()),
+            app.msg.as_ref().map(|m| m.text()),
             Some("nothing to put: dd removes rows, then p puts them below a row")
         );
         keys(&mut app, "jjdd");
@@ -555,16 +627,13 @@ mod tests {
             .map(|&(y, ..)| y as u16 + 1)
             .unwrap();
         right(&mut app, 2, y);
-        let labels = |app: &App| {
-            app.menu
-                .as_ref()
-                .map(|m| {
-                    m.items
-                        .iter()
-                        .map(|i| format!("{} {}", i.label, i.key))
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default()
+        let labels = |app: &App| match &app.overlay {
+            Some(app::Overlay::Menu(m)) => m
+                .items
+                .iter()
+                .map(|i| format!("{} {}", i.label, i.key))
+                .collect::<Vec<_>>(),
+            _ => Vec::new(),
         };
         assert!(
             labels(&app).contains(&"Out of the group <".into())
@@ -616,7 +685,7 @@ mod tests {
         );
         keys(&mut app, "kVj:group g\n");
         assert_eq!(
-            app.msg.as_ref().unwrap().0,
+            app.msg.as_ref().unwrap().text(),
             "groups can't be nested yet: the selection has a group's header"
         );
         keys(&mut app, "\x1bjjjj:group g\n");
@@ -677,7 +746,7 @@ mod tests {
         assert_eq!(app.ws.sel, 0);
         keys(&mut app, ":select busy dma.state\n:group g\n");
         assert_eq!(
-            app.msg.as_ref().unwrap().0,
+            app.msg.as_ref().unwrap().text(),
             "the selection is partly in group all: select rows all in it or all outside"
         );
     }
@@ -710,7 +779,7 @@ mod tests {
         keys(&mut app, "ajl\n");
         assert_eq!(names(&app), "▾ cpu,  state,  data,  busy");
         keys(&mut app, "\n");
-        assert_eq!(app.msg.as_ref().unwrap().0, "already shown: top.cpu");
+        assert_eq!(app.msg.as_ref().unwrap().text(), "already shown: top.cpu");
         keys(&mut app, "jjjjlj\n");
         assert_eq!(names(&app), "▾ cpu,  cpu.state,  data,  busy,  dma.state");
         keys(&mut app, "/c l\x08\x08lk\n\n");
@@ -727,7 +796,7 @@ mod tests {
         assert_eq!(app.panel.nodes[app.panel.sel].path, "top.dma.state");
         keys(&mut app, "N/nope\n");
         assert_eq!(app.panel.nodes[app.panel.sel].path, "top.cpu.state");
-        assert_eq!(app.msg.as_ref().unwrap().0, "not found: nope");
+        assert_eq!(app.msg.as_ref().unwrap().text(), "not found: nope");
         keys(&mut app, "\x1b");
         assert!(!app.adding && app.mode == app::Mode::Normal);
         keys(&mut app, "u\x12\x1b");
@@ -736,6 +805,66 @@ mod tests {
             "▾ cpu,  cpu.state,  data,  busy,  dma.state,  clk,  rst"
         );
         assert!(app.mode == app::Mode::Normal);
+    }
+
+    /// The panel's keys on what is shown already, or with nothing to go to, warn (spec §5).
+    #[test]
+    fn panel_warns() {
+        let mut app = open("vcd", None);
+        let warned = |app: &App| {
+            let m = app.msg.as_ref().unwrap();
+            assert!(m.is_warn(), "{m:?}");
+            m.text().to_string()
+        };
+        keys(&mut app, "an");
+        assert_eq!(warned(&app), "no search yet");
+        keys(&mut app, "/nope\n");
+        app.msg = None;
+        keys(&mut app, "n");
+        assert_eq!(warned(&app), "not found: nope");
+        // top.cpu as a group, its scope highlighted
+        keys(&mut app, "\x1bajl\n");
+        assert_eq!(names(&app), "▾ cpu,  state,  data,  busy");
+        keys(&mut app, " ");
+        assert_eq!(warned(&app), "nothing to mark: already shown");
+        keys(&mut app, "\x07");
+        assert_eq!(warned(&app), "nothing to add: already shown");
+        keys(&mut app, "V\n");
+        assert_eq!(warned(&app), "nothing to add: already shown");
+        keys(&mut app, "/data\x01");
+        assert_eq!(warned(&app), "nothing to mark");
+        assert_eq!(names(&app), "▾ cpu,  state,  data,  busy");
+    }
+
+    /// `:agent` shows the session an agent left; a part that doesn't fit is a warning (spec §15
+    /// "Present").
+    #[test]
+    fn agent_file_warns() {
+        let dir = std::env::temp_dir().join(format!("wtf-agent-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut app = open("vcd", None);
+        app.ws.trace_path = dir.join("simple.vcd");
+        std::fs::write(
+            session::agent_path(&app.ws.trace_path),
+            "version = 1\n[[rows]]\nsignal = \"top.clk\"\n[[rows]]\nsignal = \"top.nope\"\n",
+        )
+        .unwrap();
+        keys(&mut app, ":agent\n");
+        let m = app.msg.as_ref().unwrap();
+        assert!(m.is_warn(), "{m:?}");
+        assert_eq!(
+            m.text(),
+            "agent: presented 1 signals, 1 cursors; not in trace: top.nope; u gives your own view"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// `:q` quits a session with nothing to save.
+    #[test]
+    fn quits_when_saved() {
+        let mut app = open("vcd", None);
+        keys(&mut app, "q");
+        assert!(app.quit);
     }
 
     #[test]
@@ -843,7 +972,10 @@ mod tests {
         // e on a folded struct and array: the fields, nested, without opening it
         keys(&mut app, "k<CR>kkke");
         assert_eq!(
-            app.examine.clone(),
+            match &app.overlay {
+                Some(app::Overlay::Examine(e)) => Some(e.clone()),
+                _ => None,
+            },
             Some(app::Examine {
                 title: "types.pkt".into(),
                 at: "10ns".into(),
@@ -903,7 +1035,7 @@ mod tests {
                 && app.ws.bit.is_none()
         );
         keys(&mut app, "u");
-        assert_eq!(app.msg.as_ref().unwrap().0, "already at oldest change");
+        assert_eq!(app.msg.as_ref().unwrap().text(), "already at oldest change");
     }
 
     #[test]
@@ -911,7 +1043,11 @@ mod tests {
         // spec §15 "Joining", "Following", "Trail": an agent on the trace joins; its steps arrive
         // without moving the view; followed, its changes are shown; leaving stops the following
         let mut app = open("vcd", None);
-        let msg = |app: &App| app.msg.as_ref().map_or(String::new(), |m| m.0.clone());
+        let msg = |app: &App| {
+            app.msg
+                .as_ref()
+                .map_or(String::new(), |m| m.text().to_string())
+        };
         keys(&mut app, ":trail\n");
         assert!(msg(&app).starts_with("no trail yet"));
         app.msg = None;
@@ -962,13 +1098,21 @@ mod tests {
         );
         app.msg = None;
         keys(&mut app, ":trail\n");
-        let r = app.records.as_ref().unwrap();
+        let Some(app::Overlay::Records(r)) = &app.overlay else {
+            panic!("no records")
+        };
         assert_eq!(
             (r.title.as_str(), r.hl, r.items[1].0),
             ("3 steps", 2, Some(20))
         );
         keys(&mut app, "k<CR>");
-        assert_eq!((app.records.is_none(), app.ws.view.cursor), (true, 20));
+        assert_eq!(
+            (
+                !matches!(app.overlay, Some(app::Overlay::Records(_))),
+                app.ws.view.cursor
+            ),
+            (true, 20)
+        );
         // followed (as :follow does it): the agent's changes show, the user's moves stay till then
         let text = session::to_link_toml(&agent.ws);
         let own = session::to_shared_toml(&app.ws);
@@ -1083,6 +1227,19 @@ mod tests {
         );
         assert!(app.agents_now(vec![]));
         assert_eq!(msg(&app), "agent 4123-2 left");
+        // a step that failed is a warning
+        let mut third = open("vcd", None);
+        let joined = |a: &App| vec![("4123-3".to_string(), session::to_link_toml(&a.ws))];
+        assert!(app.agents_now(joined(&third)));
+        third
+            .ws
+            .add_step(step("find", "top.nope", "error: no signal top.nope", None));
+        assert!(app.agents_now(joined(&third)));
+        assert!(app.msg.as_ref().unwrap().is_warn());
+        assert_eq!(
+            msg(&app),
+            "agent: find top.nope  ·  error: no signal top.nope"
+        );
     }
 
     #[test]
@@ -1091,13 +1248,13 @@ mod tests {
         // data: 0x96 @20
         keys(&mut app, ":25ns\njjjyy");
         assert_eq!(app.yank.take().as_deref(), Some("0x96"));
-        assert_eq!(app.msg.as_ref().unwrap().0, "copied: 0x96");
+        assert_eq!(app.msg.as_ref().unwrap().text(), "copied: 0x96");
         keys(&mut app, "yt");
         assert_eq!(app.yank.take().as_deref(), Some("25ns"));
         keys(&mut app, "kkyy");
         assert!(matches!(app.ws.rows[app.ws.sel], rows::Row::Group { .. }));
         assert_eq!(
-            (app.yank.take(), app.msg.as_ref().unwrap().0.as_str()),
+            (app.yank.take(), app.msg.as_ref().unwrap().text()),
             (None, "select a signal to copy its value")
         );
         // on a stream's row, its record at the cursor
@@ -1127,7 +1284,7 @@ mod tests {
         assert!(!app.watch(new(2), at(900)));
         assert!(!app.watch(new(2), at(1800)));
         assert!(app.watch(new(2), at(1900)));
-        assert_eq!(app.msg.as_ref().unwrap().0, "reloaded");
+        assert_eq!(app.msg.as_ref().unwrap().text(), "reloaded");
         // reloaded: the file as it is now is the one seen
         assert!(!app.watch(tui::app::stamp(&app.ws.trace_path), at(5000)));
         // gone (a run deleting it first) is not a change
@@ -1137,7 +1294,7 @@ mod tests {
         app.ws.trace_path = "tests/data/gone.vcd".into();
         assert!(!app.watch(new(3), at(7000)));
         assert!(app.watch(new(3), at(8000)));
-        assert!(app.msg.as_ref().unwrap().1, "{:?}", app.msg);
+        assert!(app.msg.as_ref().unwrap().is_warn(), "{:?}", app.msg);
         assert_eq!(session::to_toml(&app.ws), before);
         assert_eq!(app.ws.trace.end(), 80);
     }
@@ -1158,7 +1315,7 @@ mod tests {
         keys(&mut app, "rk<CR>k<CR>3z:30ns\n");
         keys(&mut app, &format!(":w {}\n", file.display()));
         assert_eq!(
-            app.msg.as_ref().unwrap().0,
+            app.msg.as_ref().unwrap().text(),
             format!("written: {}", file.display())
         );
         assert!(!app.ws.modified() && app.ws.session_path == file);
@@ -1180,12 +1337,12 @@ mod tests {
         );
         // :e keeps everything; a file that can't be read changes nothing
         keys(&mut app, ":e\n");
-        assert_eq!(app.msg.as_ref().unwrap().0, "reloaded");
+        assert_eq!(app.msg.as_ref().unwrap().text(), "reloaded");
         assert!(!app.ws.modified());
         assert_eq!(session::to_toml(&back.ws), session::to_toml(&app.ws));
         app.ws.trace_path = dir.join("gone.fst");
         keys(&mut app, ":e\n");
-        assert!(app.msg.as_ref().unwrap().1);
+        assert!(app.msg.as_ref().unwrap().is_warn());
         assert_eq!(session::to_toml(&back.ws), session::to_toml(&app.ws));
         // a failed save leaves no file behind and keeps [+]
         keys(&mut app, "dd");
@@ -1193,7 +1350,7 @@ mod tests {
             &mut app,
             &format!(":w {}\n", dir.join("no/such/dir.toml").display()),
         );
-        assert!(app.msg.as_ref().unwrap().1 && app.ws.modified());
+        assert!(app.msg.as_ref().unwrap().is_warn() && app.ws.modified());
         keys(&mut app, ":wq\n");
         assert!(app.quit && !app.ws.modified());
         std::fs::remove_dir_all(&dir).unwrap();
@@ -1204,7 +1361,11 @@ mod tests {
         // handshake.vcd: valid 65 - 85 dropped without ready, data changed at 75 while stalled
         let t = trace::Trace::open("tests/data/handshake.vcd".as_ref()).unwrap();
         let mut app = App::new(workspace::Workspace::new(t, "handshake".into()));
-        let msg = |app: &App| app.msg.as_ref().map_or(String::new(), |m| m.0.clone());
+        let msg = |app: &App| {
+            app.msg
+                .as_ref()
+                .map_or(String::new(), |m| m.text().to_string())
+        };
         keys(&mut app, "/@clk fell(valid) && !past(ready)\n");
         assert_eq!(app.ws.view.cursor, 85);
         keys(&mut app, "n");
@@ -1227,7 +1388,11 @@ mod tests {
     #[test]
     fn value_search() {
         let mut app = open("vcd", Some(SESSION));
-        let msg = |app: &App| app.msg.as_ref().map_or(String::new(), |m| m.0.clone());
+        let msg = |app: &App| {
+            app.msg
+                .as_ref()
+                .map_or(String::new(), |m| m.text().to_string())
+        };
         // data: x, 0x43 @10, 0x96 @20, 0xE1 @30, 0x3A..0x7F @40..44, z @50, 0x40 @60
         keys(&mut app, "jjjgg/0x96\n");
         assert_eq!(app.ws.view.cursor, 20);
@@ -1297,12 +1462,12 @@ mod tests {
         assert_eq!((app.ws.sel, app.ws.anchor), (2, None));
         // a range, then grouped: the commands an agent uses for V and :group
         keys(&mut app, ":select top.clk nope\n");
-        assert_eq!(app.msg.as_ref().unwrap().0, "unknown signal: nope");
+        assert_eq!(app.msg.as_ref().unwrap().text(), "unknown signal: nope");
         keys(&mut app, ":select cpu.state data\n");
         assert_eq!((app.ws.sel, app.ws.anchor), (3, Some(2)));
         keys(&mut app, ":select top.clk dma.state\n:group edge\n");
         assert_eq!(
-            app.msg.as_ref().unwrap().0,
+            app.msg.as_ref().unwrap().text(),
             "groups can't be nested yet: the selection has a group's header"
         );
         keys(&mut app, ":select top.dma.state\n:group edge\n");
@@ -1311,7 +1476,7 @@ mod tests {
             "clk,▾ cpu,  cpu.state,  data,  busy,▾ edge,  dma.state"
         );
         keys(&mut app, ":select cpu\n:radix dec\n:select rst\n");
-        assert_eq!(app.msg.as_ref().unwrap().0, "not shown: rst");
+        assert_eq!(app.msg.as_ref().unwrap().text(), "not shown: rst");
     }
 
     #[test]
@@ -1343,7 +1508,11 @@ mod tests {
     #[test]
     fn cursors() {
         let mut app = open("vcd", Some(SESSION));
-        let msg = |app: &App| app.msg.as_ref().map_or(String::new(), |m| m.0.clone());
+        let msg = |app: &App| {
+            app.msg
+                .as_ref()
+                .map_or(String::new(), |m| m.text().to_string())
+        };
         let at = |app: &App| {
             app.ws
                 .cursor_list()
@@ -1410,7 +1579,7 @@ mod tests {
         app.ws.view.set_cursor(10);
         app.ws.view.start = 0;
         keys(&mut app, "''");
-        assert_eq!(app.msg.as_ref().unwrap().0, "no jump to go back from");
+        assert_eq!(app.msg.as_ref().unwrap().text(), "no jump to go back from");
         // '2 centres on mark 2, though it was on screen; looking around moves cursor 1 only
         keys(&mut app, "'2");
         assert_eq!((app.ws.view.cursor, app.ws.view.col_of(30)), (30, Some(10)));
@@ -1432,7 +1601,11 @@ mod tests {
     #[test]
     fn radixes() {
         let mut app = open("vcd", Some(SESSION));
-        let msg = |app: &App| app.msg.as_ref().map_or(String::new(), |m| m.0.clone());
+        let msg = |app: &App| {
+            app.msg
+                .as_ref()
+                .map_or(String::new(), |m| m.text().to_string())
+        };
         let value = |app: &App| {
             let s = app.ws.rows[app.ws.sel].sig().unwrap();
             wtf_core::rows::label(
@@ -1494,7 +1667,7 @@ mod tests {
                 .is_none_or(|last| !l.contains('\x1b') || last.starts_with("0m"))
         }));
         // and without colour, the cursor column reversed
-        draw::set_palette(draw::Palette::mono());
+        draw::set_palette(theme::Palette::mono());
         assert!(draw::ansi(&super::screen(&mut a, 80, None)).contains("\x1b[0;1;7m"));
     }
 
@@ -1789,7 +1962,7 @@ mod tests {
         ev(&mut app, drag, 50, 13, 10);
         assert_eq!(app.ws.sel, 5);
         assert_eq!(
-            app.msg.as_ref().unwrap().0,
+            app.msg.as_ref().unwrap().text(),
             "drop to add rst below dma.state · Esc cancels"
         );
         insta::assert_snapshot!("mouse_drag_out", snapshot(&mut app, 100, Some(22)));
@@ -1810,14 +1983,14 @@ mod tests {
         // dropped on the status line: nothing
         ev(&mut app, down, 6, y, 200);
         ev(&mut app, drag, 50, 21, 210);
-        assert_eq!(app.msg.as_ref().unwrap().0, "release to cancel");
+        assert_eq!(app.msg.as_ref().unwrap().text(), "release to cancel");
         ev(&mut app, up, 50, 21, 220);
         assert!(!app.ws.shown(rst) && app.msg.is_none());
         // a drag inside the panel marks nothing; out at a slant, it takes only the line pressed
         let ly = line(&app, "top.cpu");
         ev(&mut app, down, 6, ly, 300);
         ev(&mut app, drag, 6, y, 310);
-        assert_eq!(app.msg.as_ref().unwrap().0, "release to cancel");
+        assert_eq!(app.msg.as_ref().unwrap().text(), "release to cancel");
         ev(&mut app, up, 6, y, 320);
         assert!(app.panel.marked.is_empty() && app.panel.anchor.is_none() && app.panel_shown());
         ev(&mut app, down, 6, y, 330);
@@ -1872,7 +2045,7 @@ mod tests {
             names(&app),
             "▾ cpu,  cpu.state,  data,  busy,  clk,dma.state"
         );
-        assert_eq!(app.msg.as_ref().unwrap().0, "moving clk · Esc cancels");
+        assert_eq!(app.msg.as_ref().unwrap().text(), "moving clk · Esc cancels");
         // drawn lifted: the name in the accent, the waveform tinted; clk is now on lines 9 and 10
         let buf = screen(&mut app, 100, Some(22));
         assert!(buf[(2, 10)].bg == draw::pal().cursor && buf[(60, 9)].bg == draw::pal().cursor_dim);
@@ -1941,7 +2114,7 @@ mod tests {
         ev(&mut app, drag, 3, 1, 4310);
         assert_eq!(names(&app), "data,busy,clk,▾ cpu,  cpu.state,dma.state");
         assert_eq!(
-            (app.ws.selection(), app.msg.as_ref().unwrap().0.as_str()),
+            (app.ws.selection(), app.msg.as_ref().unwrap().text()),
             (0..2, "moving 2 rows · Esc cancels")
         );
         let buf = screen(&mut app, 100, Some(22));
@@ -1992,7 +2165,7 @@ mod tests {
         ev(&mut app, down, 30, 0, 0);
         ev(&mut app, drag, 50, 0, 10);
         assert!(
-            app.msg.as_ref().unwrap().0.starts_with("zoom to "),
+            app.msg.as_ref().unwrap().text().starts_with("zoom to "),
             "{:?}",
             app.msg
         );
@@ -2031,14 +2204,9 @@ mod tests {
         screen(&mut app, 100, Some(22));
         let v = app.ws.view.clone();
         right(&mut app, 50, 0);
-        let labels = |app: &App| {
-            app.menu
-                .as_ref()
-                .unwrap()
-                .items
-                .iter()
-                .map(|i| i.label.clone())
-                .collect::<Vec<_>>()
+        let labels = |app: &App| match &app.overlay {
+            Some(app::Overlay::Menu(m)) => m.items.iter().map(|i| i.label.clone()).collect(),
+            _ => Vec::new(),
         };
         assert_eq!(labels(&app), ["Zoom to fit", "Zoom in", "Zoom out"]);
         keys(&mut app, "jj<CR>");
@@ -2051,10 +2219,15 @@ mod tests {
         keys(&mut app, "m:30ns<CR>");
         screen(&mut app, 100, Some(22));
         let x = |app: &App| {
-            (app.wave_x as u64 + app.ws.view.col_of(app.ws.marks[1].unwrap()).unwrap()) as u16
+            (app.wave_x as u64
+                + app
+                    .ws
+                    .view
+                    .col_of(app.ws.marks()[1].as_ref().unwrap().time)
+                    .unwrap()) as u16
         };
         let x1 = x(&app);
-        let m2 = app.ws.marks[1].unwrap();
+        let m2 = app.ws.marks()[1].as_ref().unwrap().time;
         click(&mut app, x1, 1, NONE, t0, 200);
         assert_eq!(app.ws.view.cursor, m2);
         screen(&mut app, 100, Some(22));
@@ -2065,30 +2238,36 @@ mod tests {
         let t = app.ws.view.col_start(x2 as u64 + 10 - app.wave_x as u64);
         assert_eq!(
             (
-                app.ws.marks[1],
-                app.msg.as_ref().unwrap().0.starts_with("mark 2 at ")
+                app.ws.marks()[1].as_ref().map(|m| m.time),
+                app.msg.as_ref().unwrap().text().starts_with("mark 2 at ")
             ),
             (Some(t), true)
         );
         ev(&mut app, up, x2 + 10, 1, 320);
-        assert_eq!((app.ws.marks[1], app.ws.view.cursor), (Some(t), m2));
+        assert_eq!(
+            (
+                app.ws.marks()[1].as_ref().map(|m| m.time),
+                app.ws.view.cursor
+            ),
+            (Some(t), m2)
+        );
         // the drag is one undo step (spec §5 "Undo")
         keys(&mut app, "u");
-        assert_eq!(app.ws.marks[1], Some(m2));
+        assert_eq!(app.ws.marks()[1].as_ref().map(|m| m.time), Some(m2));
         keys(&mut app, "<C-r>");
-        assert_eq!(app.ws.marks[1], Some(t));
+        assert_eq!(app.ws.marks()[1].as_ref().map(|m| m.time), Some(t));
         screen(&mut app, 100, Some(22));
         let x3 = x(&app);
         ev(&mut app, down, x3, 1, 400);
         ev(&mut app, drag, 90, 1, 410);
         keys(&mut app, "<Esc>");
-        assert_eq!(app.ws.marks[1], Some(t));
+        assert_eq!(app.ws.marks()[1].as_ref().map(|m| m.time), Some(t));
         ev(&mut app, up, 90, 1, 420);
         let x4 = x(&app);
         right(&mut app, x4, 1);
         assert_eq!(labels(&app), ["Jump to", "Remove mark"]);
         keys(&mut app, "jj<CR>");
-        assert_eq!(app.ws.marks[1], None);
+        assert_eq!(app.ws.marks()[1], None);
         // a waveform's menu has the time keys: Next change is w
         screen(&mut app, 100, Some(22));
         app.ws.view.cursor = 10;
@@ -2159,9 +2338,9 @@ mod tests {
         assert_eq!(app.scroll, 1);
         let b = app.hit.boxed.unwrap();
         click(&mut app, b.x + 1, b.y + 1, NONE, t0, 0);
-        assert!(app.help);
+        assert!(matches!(app.overlay, Some(app::Overlay::Help)));
         click(&mut app, 0, 11, NONE, t0, 1000);
-        assert!(!app.help);
+        assert!(!matches!(app.overlay, Some(app::Overlay::Help)));
         // a completion: a click completes it, a second soon after runs it
         keys(&mut app, "zzzz");
         let zoom = (app.ws.view.ticks, app.ws.view.cols);
@@ -2359,14 +2538,14 @@ mod tests {
         screen(&mut app, 100, Some(22));
         let &(y, k) = app.hit.records.last().unwrap();
         click(&mut app, 40, y as u16, NONE, t0, 0);
-        assert_eq!(app.browser.as_ref().unwrap().hl, k);
+        assert_eq!(browser(&app).hl, k);
         app.mouse(at(MouseEventKind::ScrollUp, 40, 5, NONE));
-        assert_eq!(app.browser.as_ref().unwrap().hl, k - 1);
+        assert_eq!(browser(&app).hl, k - 1);
         // a double click jumps to the record's start
-        let b = app.browser.as_ref().unwrap();
+        let b = browser(&app);
         let start = app
             .ws
-            .streams
+            .streams()
             .iter()
             .find(|s| s.name == "beat")
             .unwrap()
@@ -2374,20 +2553,17 @@ mod tests {
             .start;
         click(&mut app, 40, y as u16, NONE, t0, 1000);
         click(&mut app, 40, y as u16, NONE, t0, 1100);
-        assert!(app.browser.is_none());
+        assert!(!matches!(app.overlay, Some(app::Overlay::Browser(_))));
         assert_eq!(app.ws.view.cursor, start);
         app.run("records beat").unwrap();
         screen(&mut app, 100, Some(22));
         click(&mut app, 0, 0, NONE, t0, 2000);
-        assert!(app.browser.is_none());
+        assert!(!matches!(app.overlay, Some(app::Overlay::Browser(_))));
     }
 
     /// Run the open menu's item `label`: `j` down to it, then `Enter`.
     fn pick(app: &mut App, label: &str) {
-        let k = app
-            .menu
-            .as_ref()
-            .unwrap()
+        let k = menu(app)
             .items
             .iter()
             .position(|i| i.label == label)
@@ -2409,7 +2585,7 @@ mod tests {
         screen(&mut app, 100, Some(22));
         right(&mut app, 60, 8);
         pick(&mut app, "Examine");
-        assert!(app.examine.is_some());
+        assert!(matches!(app.overlay, Some(app::Overlay::Examine(_))));
         keys(&mut app, "<Esc>");
         // copying the value and the time clicked
         right(&mut app, 60, 8);
@@ -2417,20 +2593,13 @@ mod tests {
         assert!(app.yank.take().is_some());
         right(&mut app, 60, 8);
         pick(&mut app, "Copy time");
-        assert!(app.msg.as_ref().unwrap().0.starts_with("copied: ") && app.yank.take().is_some());
+        assert!(
+            app.msg.as_ref().unwrap().text().starts_with("copied: ") && app.yank.take().is_some()
+        );
         // fixed point opens the command line to type its bits
         right(&mut app, 60, 8);
         pick(&mut app, "Radix");
-        let sub = app
-            .menu
-            .as_ref()
-            .unwrap()
-            .sub
-            .as_ref()
-            .unwrap()
-            .1
-            .items
-            .len();
+        let sub = menu(&app).sub.as_ref().unwrap().1.items.len();
         keys(&mut app, &format!("{}<CR>", "j".repeat(sub)));
         assert_eq!(
             (app.mode, app.line.as_str()),
@@ -2457,12 +2626,37 @@ mod tests {
         click(&mut app, 3, 8, KeyModifiers::CONTROL, t0, 1000);
         right(&mut app, 3, 6);
         pick(&mut app, "Group");
-        assert!(app.naming.is_some());
+        assert!(matches!(app.overlay, Some(app::Overlay::Naming(_))));
         keys(&mut app, "<Esc>u");
         // a header: Rename types its name in place, as `R`; Fold folds it
         right(&mut app, 3, 4);
         pick(&mut app, "Rename");
-        assert_eq!(app.naming.as_ref().map(|n| n.was.as_str()), Some("cpu"));
+        assert_eq!(
+            match &app.overlay {
+                Some(app::Overlay::Naming(n)) => Some(n.was.as_str()),
+                _ => None,
+            },
+            Some("cpu")
+        );
+        // a click while typing ends it as Enter does: the name typed, one undo step (spec §5)
+        keys(&mut app, "xy");
+        right(&mut app, 3, 4);
+        assert!(
+            matches!(&app.ws.rows[1], rows::Row::Group { name, .. } if name == "xy")
+                && !matches!(app.overlay, Some(app::Overlay::Naming(_)))
+        );
+        // the click went on to open the menu; undone, the name is cpu again
+        keys(&mut app, "<Esc>u");
+        assert!(matches!(&app.ws.rows[1], rows::Row::Group { name, .. } if name == "cpu"));
+        // an empty name can't be kept: a click gives back the one it had
+        right(&mut app, 3, 4);
+        pick(&mut app, "Rename");
+        keys(&mut app, "<C-u>");
+        right(&mut app, 3, 4);
+        assert!(
+            matches!(&app.ws.rows[1], rows::Row::Group { name, .. } if name == "cpu")
+                && !matches!(app.overlay, Some(app::Overlay::Naming(_)))
+        );
         keys(&mut app, "<Esc>");
         right(&mut app, 3, 4);
         pick(&mut app, "Fold");
@@ -2494,13 +2688,9 @@ mod tests {
         // k moves up; a right click outside opens the menu there
         right(&mut app, 5, y);
         keys(&mut app, "jjk");
-        assert_eq!(app.menu.as_ref().unwrap().hl, Some(0));
+        assert_eq!(menu(&app).hl, Some(0));
         right(&mut app, 5, y + 1);
-        assert!(
-            app.menu
-                .as_ref()
-                .is_some_and(|m| m.at == (5, y as usize + 1))
-        );
+        assert!(matches!(&app.overlay, Some(app::Overlay::Menu(m)) if m.at == (5, y as usize + 1)));
     }
 
     #[test]
@@ -2551,13 +2741,79 @@ mod tests {
         app.mouse(at(MouseEventKind::Down(MouseButton::Left), x, 1, NONE));
         app.mouse(at(MouseEventKind::Drag(MouseButton::Left), x + 10, 1, NONE));
         keys(&mut app, "<Esc>");
-        assert_eq!((app.ws.view.cursor, app.ws.marks[1]), (30, Some(0)));
+        assert_eq!(
+            (
+                app.ws.view.cursor,
+                app.ws.marks()[1].as_ref().map(|m| m.time)
+            ),
+            (30, Some(0))
+        );
         // the wheel in the help box scrolls it both ways
         keys(&mut app, "?");
         screen(&mut app, 60, Some(12));
         app.mouse(at(MouseEventKind::ScrollDown, 30, 5, NONE));
         app.mouse(at(MouseEventKind::ScrollUp, 30, 5, NONE));
         assert_eq!(app.scroll, 0);
+    }
+
+    /// The `:trail` box with the mouse: the wheel moves, a click highlights, a double click
+    /// jumps, a click outside closes.
+    #[test]
+    fn mouse_trail() {
+        let mut app = open("vcd", Some(SESSION));
+        let step = |ask: &str, time| wtf_core::workspace::Step {
+            tool: "find".into(),
+            ask: ask.into(),
+            answer: "1 matches".into(),
+            time,
+        };
+        app.ws.trail = vec![step("top.rst", Some(0)), step("top.cpu.busy", Some(20))];
+        keys(&mut app, ":trail\n");
+        let hl = |app: &App| match &app.overlay {
+            Some(app::Overlay::Records(r)) => r.hl,
+            _ => panic!("no trail"),
+        };
+        screen(&mut app, 100, Some(16));
+        app.mouse(at(MouseEventKind::ScrollDown, 50, 8, NONE));
+        assert_eq!(hl(&app), 1);
+        app.mouse(at(MouseEventKind::ScrollUp, 50, 8, NONE));
+        assert_eq!(hl(&app), 0);
+        let y = app.hit.records.iter().find(|r| r.1 == 1).unwrap().0 as u16;
+        let t0 = Instant::now();
+        click(&mut app, 50, y, NONE, t0, 0);
+        assert_eq!(hl(&app), 1);
+        click(&mut app, 50, y, NONE, t0, 100);
+        assert!(app.overlay.is_none());
+        assert_eq!(app.ws.view.cursor, 20);
+        keys(&mut app, "5l:trail\n");
+        screen(&mut app, 100, Some(16));
+        app.mouse(at(MouseEventKind::Down(MouseButton::Left), 0, 0, NONE));
+        assert!(app.overlay.is_none() && app.ws.view.cursor == 25);
+    }
+
+    /// A long trail scrolls with its highlight, back to the top on `g`.
+    #[test]
+    fn trail_scrolls() {
+        let mut app = open("vcd", None);
+        app.ws.trail = (0..30)
+            .map(|i| wtf_core::workspace::Step {
+                tool: "find".into(),
+                ask: format!("top.clk {i}"),
+                answer: "1 matches".into(),
+                time: Some(i),
+            })
+            .collect();
+        keys(&mut app, ":trail\n");
+        let top = |app: &mut App| {
+            screen(app, 100, Some(12));
+            match &app.overlay {
+                Some(app::Overlay::Records(r)) => r.top,
+                _ => panic!("no trail"),
+            }
+        };
+        assert!(top(&mut app) > 0);
+        keys(&mut app, "g");
+        assert_eq!(top(&mut app), 0);
     }
 
     #[test]
@@ -2568,14 +2824,9 @@ mod tests {
         right(&mut app, 60, 8);
         assert_eq!(app.ws.sel, 3);
         insta::assert_snapshot!("mouse_menu", snapshot(&mut app, 100, Some(22)));
-        let labels = |app: &App| {
-            app.menu
-                .as_ref()
-                .unwrap()
-                .items
-                .iter()
-                .map(|i| i.label.clone())
-                .collect::<Vec<_>>()
+        let labels = |app: &App| match &app.overlay {
+            Some(app::Overlay::Menu(m)) => m.items.iter().map(|i| i.label.clone()).collect(),
+            _ => Vec::new(),
         };
         assert_eq!(
             labels(&app),
@@ -2598,12 +2849,12 @@ mod tests {
         // the pointer highlights; Radix opens its second menu; dec sets it
         let r = app.hit.menus[0];
         app.mouse(at(MouseEventKind::Moved, r.x + 2, r.y + 3, NONE));
-        assert_eq!(app.menu.as_ref().unwrap().hl, Some(2));
+        assert_eq!(menu(&app).hl, Some(2));
         click(&mut app, r.x + 2, r.y + 3, NONE, Instant::now(), 0);
         insta::assert_snapshot!("mouse_menu_radix", snapshot(&mut app, 100, Some(22)));
         let s = app.hit.menus[1];
         click(&mut app, s.x + 2, s.y + 3, NONE, Instant::now(), 1000);
-        assert!(app.menu.is_none());
+        assert!(!matches!(app.overlay, Some(app::Overlay::Menu(_))));
         assert!(
             matches!(&app.ws.rows[3], rows::Row::Signal(s) if radix::RADIXES[s.look.radix].name == "dec")
         );
@@ -2611,15 +2862,15 @@ mod tests {
         screen(&mut app, 100, Some(22));
         right(&mut app, 60, 8);
         keys(&mut app, "jjjjl");
-        assert!(app.menu.as_ref().unwrap().sub.is_some(), "Colour");
+        assert!(menu(&app).sub.is_some(), "Colour");
         keys(&mut app, "h");
-        assert!(app.menu.as_ref().unwrap().sub.is_none());
+        assert!(menu(&app).sub.is_none());
         keys(&mut app, "lj<CR>");
         assert!(matches!(&app.ws.rows[3], rows::Row::Signal(s) if s.look.color == Some(0)));
         keys(&mut app, "u");
         right(&mut app, 60, 8);
         keys(&mut app, "x<Esc>");
-        assert!(app.menu.is_none());
+        assert!(!matches!(app.overlay, Some(app::Overlay::Menu(_))));
         assert_eq!(
             app.ws.view.cols, app.ws.view.cols,
             "x went to the menu, not zoom"
@@ -2631,13 +2882,19 @@ mod tests {
         );
         right(&mut app, 60, 8);
         pick(&mut app, "Mark here");
-        assert_eq!((app.ws.marks[1], app.ws.view.cursor), (Some(t), cursor));
+        assert_eq!(
+            (
+                app.ws.marks()[1].as_ref().map(|m| m.time),
+                app.ws.view.cursor
+            ),
+            (Some(t), cursor)
+        );
         // after a clocked search: its matches' records
         keys(&mut app, "/@clk busy<CR>");
         right(&mut app, 60, 8);
         pick(&mut app, "Records of the matches");
         assert!(
-            app.form.as_ref().is_some_and(|f| f.protocol),
+            matches!(&app.overlay, Some(app::Overlay::Form(f)) if f.protocol),
             "{:?}",
             app.msg
         );
@@ -2667,17 +2924,17 @@ mod tests {
         right(&mut app, 50, 15);
         click(&mut app, 50, 0, NONE, Instant::now(), 2000);
         assert!(
-            app.menu.is_none() && app.ws.view.cursor == cursor,
+            !matches!(app.overlay, Some(app::Overlay::Menu(_))) && app.ws.view.cursor == cursor,
             "a click outside only closes"
         );
         right(&mut app, 50, 15);
         keys(&mut app, "<CR>");
         assert!(
-            app.menu.is_some() && app.ws.rows.len() == 6,
+            matches!(app.overlay, Some(app::Overlay::Menu(_))) && app.ws.rows.len() == 6,
             "nothing highlighted yet"
         );
         keys(&mut app, "q");
-        assert!(app.menu.is_none());
+        assert!(!matches!(app.overlay, Some(app::Overlay::Menu(_))));
         // the panel's lines: their keys
         right(&mut app, 50, 15);
         keys(&mut app, "j<CR>");
@@ -2714,14 +2971,7 @@ mod tests {
             .find(|l| l.1 == (app.ws.sel, app.ws.bit))
             .unwrap();
         right(&mut app, 2, y as u16);
-        let labels: Vec<String> = app
-            .menu
-            .as_ref()
-            .unwrap()
-            .items
-            .iter()
-            .map(|i| i.label.clone())
-            .collect();
+        let labels: Vec<String> = menu(&app).items.iter().map(|i| i.label.clone()).collect();
         assert_eq!(
             labels,
             [
@@ -2854,7 +3104,7 @@ mod tests {
                 .contains("bad time")
         );
         keys(&mut app, ":messages\n");
-        assert_eq!(app.messages, Some(4));
+        assert!(matches!(app.overlay, Some(app::Overlay::Messages(4))));
         keys(&mut app, "ky");
         assert_eq!(
             app.yank.as_deref(),
@@ -2870,7 +3120,7 @@ mod tests {
             "{screen}"
         );
         keys(&mut app, "q");
-        assert!(app.messages.is_none());
+        assert!(!matches!(app.overlay, Some(app::Overlay::Messages(_))));
     }
 
     #[test]
@@ -2892,15 +3142,32 @@ mod tests {
         // at once when it already shows, or with no wait
         app.which_delay = Duration::ZERO;
         keys(&mut app, "3");
-        let screen = snapshot(&mut app, 80, Some(30));
+        let counted = snapshot(&mut app, 80, Some(30));
         assert!(
-            screen.contains(" 3  ") && screen.contains("put mark N") && screen.contains("zoom in"),
-            "{screen}"
+            counted.contains(" 3  ")
+                && counted.contains("put mark N")
+                && counted.contains("zoom in"),
+            "{counted}"
         );
         keys(&mut app, "<Esc>g");
         assert!(snapshot(&mut app, 80, Some(14)).contains("g → start of the trace"));
         keys(&mut app, "g");
         assert!(!app.which_key && app.pending().is_empty());
+        // a right-click menu is over the rows: the card waits until it closes (spec §2 "Which-key")
+        keys(&mut app, "g");
+        assert!(app.which_key);
+        screen(&mut app, 100, Some(22));
+        right(&mut app, 50, 0);
+        let over_menu = snapshot(&mut app, 100, Some(22));
+        assert!(
+            over_menu.contains("Zoom to fit") && !over_menu.contains("Esc close"),
+            "{over_menu}"
+        );
+        keys(&mut app, "<Esc>");
+        assert!(app.overlay.is_none() && app.which_key);
+        let back = snapshot(&mut app, 100, Some(22));
+        assert!(back.contains("Esc close"), "{back}");
+        keys(&mut app, "<Esc>");
     }
 
     #[test]
@@ -2919,7 +3186,7 @@ mod tests {
         keys(&mut app, "<Esc>yt");
         snapshot(&mut app, 100, Some(16));
         keys(&mut app, "<Space>n");
-        assert!(app.leader.is_none() && app.messages.is_some());
+        assert!(app.leader.is_none() && matches!(app.overlay, Some(app::Overlay::Messages(_))));
         keys(&mut app, "<Esc>");
         // a key with no entry closes it; a click on an entry picks it, outside closes
         keys(&mut app, "<Space>Z");
@@ -2938,6 +3205,9 @@ mod tests {
             r.y,
             NONE,
         ));
+        assert!(snapshot(&mut app, 100, Some(16)).contains("Space q  session"));
+        // the pointer moving over it does nothing
+        app.mouse(at(MouseEventKind::Moved, 5, 0, NONE));
         assert!(snapshot(&mut app, 100, Some(16)).contains("Space q  session"));
         app.mouse(at(MouseEventKind::Down(MouseButton::Left), 5, 0, NONE));
         assert!(app.leader.is_none());
@@ -2980,9 +3250,13 @@ mod tests {
         keys(&mut app, "?");
         insta::assert_snapshot!(snapshot(&mut app, 100, Some(20)));
         keys(&mut app, "jl");
-        assert!(app.help && app.ws.view.cursor == 12 && app.ws.sel == 0); // the box takes no other keys
+        assert!(
+            matches!(app.overlay, Some(app::Overlay::Help))
+                && app.ws.view.cursor == 12
+                && app.ws.sel == 0
+        ); // the box takes no other keys
         keys(&mut app, "q");
-        assert!(!app.help && !app.quit);
+        assert!(!matches!(app.overlay, Some(app::Overlay::Help)) && !app.quit);
         // too long for a small screen: the whole width, scrolled by j k, G to the end
         keys(&mut app, "?");
         assert!(snapshot(&mut app, 60, Some(20)).contains(" 1–17 of "));
@@ -2994,12 +3268,19 @@ mod tests {
         );
         keys(&mut app, "q?");
         assert_eq!(app.scroll, 0);
+        // Ctrl-d / Ctrl-u by ten, k back one, g to the top
+        keys(&mut app, "<C-d><C-d>k");
+        assert_eq!(app.scroll, 19);
+        keys(&mut app, "<C-u>");
+        assert_eq!(app.scroll, 9);
+        keys(&mut app, "g");
+        assert_eq!(app.scroll, 0);
         keys(&mut app, "q");
         keys(&mut app, "\x1ba?");
         assert!(snapshot(&mut app, 100, Some(20)).contains("help · signal panel"));
         keys(&mut app, "?\x1b:help\n");
         assert!(
-            app.help
+            matches!(app.overlay, Some(app::Overlay::Help))
                 && app.mode == app::Mode::Normal
                 && snapshot(&mut app, 100, Some(20)).contains("help · keys")
         );
@@ -3013,7 +3294,9 @@ mod tests {
         // Enter on a text jumps nowhere
         let cursor = app.ws.view.cursor;
         keys(&mut app, "\n");
-        assert!(app.records.is_some() && app.ws.view.cursor == cursor);
+        assert!(
+            matches!(app.overlay, Some(app::Overlay::Records(_))) && app.ws.view.cursor == cursor
+        );
         keys(&mut app, "G");
         let screen = snapshot(&mut app, 100, Some(12));
         assert!(
@@ -3023,7 +3306,7 @@ mod tests {
         );
         keys(&mut app, "\x1b:help nope\n");
         assert_eq!(
-            app.msg.as_ref().unwrap().0,
+            app.msg.as_ref().unwrap().text(),
             "no help topic nope; topics: names patterns times radix expressions decode wasm records workspace commands"
         );
     }
@@ -3197,7 +3480,7 @@ mod tests {
         };
         // without colour the cursor's column keeps the waveform: a glyph only where it is blank,
         // reversed only in its time on the axis
-        draw::set_palette(draw::Palette::mono());
+        draw::set_palette(theme::Palette::mono());
         let buf = screen(&mut open("vcd", Some(SESSION)), 100);
         let x = (0..100)
             .find(|&x| buf[(x, 0)].modifier.contains(Modifier::REVERSED))
@@ -3278,7 +3561,7 @@ mod tests {
             &mut app,
             ":decode resp hs clock=clk valid=resp_valid id=resp_id\n:decode lat pair request=req response=resp id=id\n:records lat\n",
         );
-        let b = app.browser.as_ref().unwrap();
+        let b = browser(&app);
         assert_eq!(
             (b.tabs.clone(), b.tab, b.all.clone()),
             (
@@ -3292,7 +3575,7 @@ mod tests {
             )
         );
         keys(&mut app, "<Esc>:records lat lat.unmatched\n");
-        assert_eq!(app.browser.as_ref().unwrap().tab, 0);
+        assert_eq!(browser(&app).tab, 0);
     }
 
     #[test]
@@ -3300,7 +3583,11 @@ mod tests {
         // spec §5 "Records": an interface the file has, no decode yet: the line that decodes it
         let t = trace::Trace::open("tests/data/axilite.vcd".as_ref()).unwrap();
         let mut app = App::new(workspace::Workspace::new(t, "axilite".into()));
-        let msg = |app: &App| app.msg.as_ref().map_or(String::new(), |m| m.0.clone());
+        let msg = |app: &App| {
+            app.msg
+                .as_ref()
+                .map_or(String::new(), |m| m.text().to_string())
+        };
         let line = ":decode s_axi axilite clock=top.aclk prefix=top.s_axi_";
         keys(&mut app, ":records s_axi.wr\n");
         assert_eq!(
@@ -3318,7 +3605,7 @@ mod tests {
         );
         keys(&mut app, &format!("{line}\n"));
         keys(&mut app, ":pick records s_axi\n");
-        let p = app.picker.as_ref().unwrap();
+        let p = picker(&app);
         assert!(
             p.entries.iter().any(|e| e.text.starts_with("s_axi.wr #0")),
             "{:?}",
@@ -3331,7 +3618,11 @@ mod tests {
         // spec §5 "Records": the browser filters as typed, sorts, groups, and Enter jumps
         let t = trace::Trace::open("tests/data/axis.vcd".as_ref()).unwrap();
         let mut app = App::new(workspace::Workspace::new(t, "axis".into()));
-        let msg = |app: &App| app.msg.as_ref().map_or(String::new(), |m| m.0.clone());
+        let msg = |app: &App| {
+            app.msg
+                .as_ref()
+                .map_or(String::new(), |m| m.text().to_string())
+        };
         keys(&mut app, ":records rx.frame\n");
         assert_eq!(
             msg(&app),
@@ -3347,7 +3638,7 @@ mod tests {
             "unknown stream: rx.fram (streams: rx.beat, rx.frame, rx.errors; or a decode's name for its results)"
         );
         keys(&mut app, ":records rx.frame where len ==\n");
-        assert!(app.browser.is_none() && !msg(&app).is_empty());
+        assert!(!matches!(app.overlay, Some(app::Overlay::Browser(_))) && !msg(&app).is_empty());
         keys(&mut app, ":records rx.frame where len == 99\n");
         assert!(snapshot(&mut app, 100, Some(16)).contains("no records match"));
         keys(
@@ -3359,18 +3650,18 @@ mod tests {
         // typing filters at once; a filter that does not parse keeps the rows it had (all, once
         // cleared) and says why
         keys(&mut app, "/<C-u>len <");
-        let b = app.browser.as_ref().unwrap();
+        let b = browser(&app);
         assert!(b.error.is_some() && b.rows.len() == 4, "{:?}", b.error);
         keys(&mut app, " 8<CR>");
-        let b = app.browser.as_ref().unwrap();
+        let b = browser(&app);
         assert!(b.error.is_none() && !b.typing && b.rows.len() == 2 && b.total == 4);
         // s sorts by the next column (from start, the order they come in), S reverses
         keys(&mut app, "/<C-u><CR>sS");
-        let b = app.browser.as_ref().unwrap();
+        let b = browser(&app);
         assert_eq!(b.sort, (2, true));
         let st = app
             .ws
-            .streams
+            .streams()
             .iter()
             .find(|s| s.name == "rx.frame")
             .unwrap();
@@ -3387,18 +3678,18 @@ mod tests {
             "= groups by the sorted column, a field: s sorts by one"
         );
         keys(&mut app, "s=");
-        let b = app.browser.as_ref().unwrap();
+        let b = browser(&app);
         assert!(b.group && !b.groups.is_empty());
         let count = b.groups[0].count;
         keys(&mut app, "<CR>");
-        let b = app.browser.as_ref().unwrap();
+        let b = browser(&app);
         assert!(
             !b.group && b.rows.len() == count && b.filter.contains("=="),
             "{}",
             b.filter
         );
         // Tab goes through the decode's sets: all its results, then each stream
-        let b = app.browser.as_ref().unwrap();
+        let b = browser(&app);
         assert_eq!(
             &b.tabs[..],
             ["rx", "rx.frame", "rx.errors", "rx.beat"].map(String::from)
@@ -3406,18 +3697,18 @@ mod tests {
         // the row it was opened from is the stream it shows, whatever its place in the sets
         assert_eq!(b.tabs[b.tab], "rx.frame");
         keys(&mut app, "<Tab><Tab>");
-        let b = app.browser.as_ref().unwrap();
+        let b = browser(&app);
         assert_eq!((b.tabs[b.tab].as_str(), b.streams.len()), ("rx.beat", 1));
         keys(&mut app, "\x1b");
         // Enter jumps to the highlighted record and selects its stream's row
         keys(&mut app, ":records rx.frame where len >= 8\nj\n");
-        assert!(app.browser.is_none());
+        assert!(!matches!(app.overlay, Some(app::Overlay::Browser(_))));
         assert_eq!(app.ws.view.cursor, 65); // the third frame, 8 bytes
         assert_eq!(app.ws.sel, 0);
         keys(&mut app, "''");
         assert_eq!(app.ws.view.cursor, 0);
         keys(&mut app, ":records rx.frame\nGk\x1b");
-        assert!(app.browser.is_none());
+        assert!(!matches!(app.overlay, Some(app::Overlay::Browser(_))));
         assert_eq!(app.ws.view.cursor, 0);
     }
 
@@ -3446,14 +3737,14 @@ mod tests {
         );
         let rows = app.ws.rows.len();
         keys(&mut app, "<BS><BS><BS><BS><BS>state<Tab><Tab><CR>");
-        assert!(app.picker.is_none());
+        assert!(!matches!(app.overlay, Some(app::Overlay::Picker(_))));
         assert_eq!(app.ws.rows.len(), rows + 2);
         keys(&mut app, "u");
         assert_eq!(app.ws.rows.len(), rows);
         // a shown signal is not added twice
         keys(&mut app, ":pick signals\ntop.clk<CR>");
         assert_eq!(
-            (app.ws.rows.len(), app.msg.as_ref().unwrap().0.as_str()),
+            (app.ws.rows.len(), app.msg.as_ref().unwrap().text()),
             (rows, "nothing to add: already shown")
         );
         assert!(
@@ -3462,7 +3753,7 @@ mod tests {
                 .starts_with("no picker source nope")
         );
         // without colour the matched characters are still told apart
-        draw::set_palette(draw::Palette::mono());
+        draw::set_palette(theme::Palette::mono());
         keys(&mut app, ":pick signals\nzzz<BS><BS><BS>state");
         let buf = screen(&mut app, 100, Some(20));
         draw::set_palette(theme::builtin("dark", true).unwrap());
@@ -3478,7 +3769,7 @@ mod tests {
         let mut app = App::new(workspace::Workspace::new(t, "axilite".into()));
         assert!(snapshot(&mut app, 100, None).contains("Decode an interface 1 found"));
         keys(&mut app, "<Space>dd");
-        let p = app.picker.as_ref().unwrap();
+        let p = picker(&app);
         assert_eq!(
             p.entries
                 .iter()
@@ -3494,7 +3785,8 @@ mod tests {
         );
         keys(&mut app, "<CR>");
         assert!(
-            app.picker.is_none() && app.ws.decodes.iter().any(|d| d.name == "s_axi"),
+            !matches!(app.overlay, Some(app::Overlay::Picker(_)))
+                && app.ws.decodes().iter().any(|d| d.name == "s_axi"),
             "{:?}",
             app.msg
         );
@@ -3510,14 +3802,14 @@ mod tests {
         );
         keys(&mut app, "<Space>dd");
         assert!(
-            app.picker.as_ref().unwrap().entries[0]
+            picker(&app).entries[0]
                 .preview
                 .iter()
                 .any(|l| l.starts_with("decoded already as s_axi"))
         );
         keys(&mut app, "<CR>");
         // decoded already: the records browser on all its results, a column per field
-        let b = app.browser.as_ref().unwrap();
+        let b = browser(&app);
         assert_eq!(
             (b.tabs[b.tab].as_str(), b.streams.len()),
             ("s_axi", 5),
@@ -3529,7 +3821,7 @@ mod tests {
         keys(&mut app, "ll");
         let screen = snapshot(&mut app, 110, Some(16));
         assert!(
-            screen.contains("stream    n    delay") && app.browser.as_ref().unwrap().left == 2,
+            screen.contains("stream    n    delay") && browser(&app).left == 2,
             "{screen}"
         );
         keys(&mut app, "h\x1b");
@@ -3546,7 +3838,11 @@ mod tests {
     #[test]
     fn picker_sources() {
         let mut app = open("vcd", Some(SESSION));
-        let msg = |app: &App| app.msg.as_ref().map_or(String::new(), |m| m.0.clone());
+        let msg = |app: &App| {
+            app.msg
+                .as_ref()
+                .map_or(String::new(), |m| m.text().to_string())
+        };
         let step = |tool: &str, ask: &str, answer: &str, time| wtf_core::workspace::Step {
             tool: tool.into(),
             ask: ask.into(),
@@ -3582,17 +3878,27 @@ mod tests {
         keys(&mut app, ":pick trail\n");
         insta::assert_snapshot!(snapshot(&mut app, 100, Some(16)));
         keys(&mut app, "<C-p><CR>");
-        assert_eq!((app.picker.is_none(), app.ws.view.cursor), (true, 20));
+        assert_eq!(
+            (
+                !matches!(app.overlay, Some(app::Overlay::Picker(_))),
+                app.ws.view.cursor
+            ),
+            (true, 20)
+        );
         // marks: Enter jumps; Ctrl-s goes to the next source
         keys(&mut app, ":cursor 2 60ns name=late\n:pick marks\n");
-        assert_eq!(app.picker.as_ref().unwrap().entries.len(), 2);
+        assert_eq!(picker(&app).entries.len(), 2);
         keys(&mut app, "late<CR>");
         assert_eq!(app.ws.view.cursor, 60);
         keys(&mut app, ":pick marks\n<C-s>");
-        let p = app.picker.as_ref().unwrap();
+        let p = picker(&app);
         assert_eq!(
             (p.source, p.shown.len(), p.empty.as_str()),
-            (2, 0, "no streams yet: make one with :decode or :protocol")
+            (
+                tui::picker::Source::Records,
+                0,
+                "no streams yet: make one with :decode or :protocol"
+            )
         );
         // commands: Enter puts it on the command line
         keys(&mut app, "<C-s>zoo<CR>");
@@ -3601,7 +3907,7 @@ mod tests {
             (tui::app::Mode::Command, "zoom ")
         );
         keys(&mut app, "<Esc>:pick commands\n<Esc>");
-        assert!(app.picker.is_none() && msg(&app).is_empty());
+        assert!(!matches!(app.overlay, Some(app::Overlay::Picker(_))) && msg(&app).is_empty());
     }
 
     #[test]
@@ -3615,7 +3921,7 @@ mod tests {
         app.run("add top.aclk").unwrap();
         app.run("select aclk").unwrap();
         app.open_picker("records").unwrap();
-        let p = app.picker.as_ref().unwrap();
+        let p = picker(&app);
         assert!(p.stream.is_none());
         assert!(
             p.entries.iter().any(|e| e.text.starts_with("bus.aw #0"))
@@ -3630,10 +3936,10 @@ mod tests {
             })
             .collect();
         assert!(times.windows(2).all(|w| w[0] <= w[1]));
-        app.picker = None;
+        app.overlay = None;
         keys(&mut app, ":select bus.rd\n");
         app.open_picker("records").unwrap();
-        let p = app.picker.as_ref().unwrap();
+        let p = picker(&app);
         assert_eq!(p.stream.as_deref(), Some("bus.rd"));
         assert!(p.entries.iter().all(|e| e.text.starts_with('#')));
     }
@@ -3648,14 +3954,20 @@ mod tests {
         let rows = app.ws.rows.len();
         // a click highlights, a double click picks
         click(&mut app, 20, y as u16, NONE, t0, 0);
-        assert!(app.picker.is_some());
+        assert!(matches!(app.overlay, Some(app::Overlay::Picker(_))));
         click(&mut app, 20, y as u16, NONE, t0, 100);
-        assert_eq!((app.picker.is_none(), app.ws.rows.len()), (true, rows + 1));
+        assert_eq!(
+            (
+                !matches!(app.overlay, Some(app::Overlay::Picker(_))),
+                app.ws.rows.len()
+            ),
+            (true, rows + 1)
+        );
         // a click outside closes it
         keys(&mut app, ":pick signals\n");
         snapshot(&mut app, 100, Some(20));
         click(&mut app, 0, 0, NONE, t0, 1000);
-        assert!(app.picker.is_none());
+        assert!(!matches!(app.overlay, Some(app::Overlay::Picker(_))));
     }
 
     #[test]
@@ -3669,9 +3981,8 @@ mod tests {
         // what it made, violations apart
         assert_eq!(
             app.msg,
-            Some((
+            Some(workspace::Msg::Info(
                 "rx: records rx.frame 4; violations rx.errors 2; made from rx.beat 7".into(),
-                false
             ))
         );
         keys(&mut app, ":add rx.frame rx.errors\n:fit\n");
@@ -3716,11 +4027,16 @@ mod tests {
         keys(&mut app, "e");
         insta::assert_snapshot!(snapshot(&mut app, 100, Some(16)));
         keys(&mut app, "jl\x1b");
-        assert!(app.examine.is_none() && app.ws.view.cursor == 65); // the box takes no other keys
+        assert!(!matches!(app.overlay, Some(app::Overlay::Examine(_))) && app.ws.view.cursor == 65); // the box takes no other keys
         // any other signal: its value in the row's radix
         keys(&mut app, ":add top.tdata\ne");
         assert_eq!(
-            app.examine.clone().map(|e| (e.title, e.at, e.lines)),
+            match &app.overlay {
+                Some(app::Overlay::Examine(e)) => {
+                    Some((e.title.clone(), e.at.clone(), e.lines.clone()))
+                }
+                _ => None,
+            },
             Some((
                 "top.tdata".to_string(),
                 "65ns".to_string(),
@@ -3738,9 +4054,12 @@ mod tests {
             &mut app,
             ":decode stall check clock=clk bad=tvalid && !tready\n",
         );
-        assert_eq!(app.msg, Some(("stall: violations stall 4".into(), false)));
         assert_eq!(
-            app.ws.decodes.last().unwrap().params,
+            app.msg,
+            Some(workspace::Msg::Info("stall: violations stall 4".into()))
+        );
+        assert_eq!(
+            app.ws.decodes().last().unwrap().params,
             [("bad".to_string(), "tvalid && !tready".to_string())]
         );
         keys(&mut app, ":decode x axis tvalid=nope\n");
@@ -3748,7 +4067,7 @@ mod tests {
         assert!(
             app.msg
                 .as_ref()
-                .is_some_and(|(m, err)| *err && m.contains("tvalid: unknown signal: nope")),
+                .is_some_and(|m| m.is_warn() && m.text().contains("tvalid: unknown signal: nope")),
             "{:?}",
             app.msg
         );
@@ -3799,10 +4118,10 @@ signal = "stall"
         );
         let examine = |app: &mut App, row: &str, at: &str| {
             keys(app, &format!(":select {row}\n:{at}\ne"));
-            let seen = app
-                .examine
-                .clone()
-                .unwrap_or_else(|| panic!("no box: {:?}", app.msg));
+            let seen = match &app.overlay {
+                Some(app::Overlay::Examine(e)) => e.clone(),
+                _ => panic!("no box: {:?}", app.msg),
+            };
             keys(app, "\x1b");
             seen
         };
@@ -3827,7 +4146,7 @@ signal = "stall"
         );
         let first = app
             .ws
-            .streams
+            .streams()
             .iter()
             .find(|s| s.name == "stall")
             .unwrap()
@@ -3861,7 +4180,7 @@ signal = "stall"
         );
         let s = app
             .ws
-            .streams
+            .streams()
             .iter()
             .find(|s| s.name == "rx.errors")
             .unwrap();

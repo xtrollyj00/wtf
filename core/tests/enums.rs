@@ -165,10 +165,10 @@ fn names_lost_on_reload() {
             .collect::<String>(),
     )
     .unwrap();
-    let (msg, _) = ws.reload().unwrap();
+    let msg = ws.reload().unwrap();
     std::fs::remove_dir_all(&dir).unwrap();
     assert_eq!(
-        msg,
+        msg.text(),
         "reloaded; not in trace: names of top.dma.state (unknown signal: top.dma.state (nearest: top.state, top.cpu.state))"
     );
 }
@@ -229,4 +229,18 @@ fn values_taken() {
         ws.values_taken("top.wide").unwrap_err(),
         "top.wide takes more than 256 values; name some with :names"
     );
+}
+
+/// A failed declaration that named the values of a signal the file names gives the file's names
+/// back, not none (spec §15: a failed declaration changes nothing).
+#[test]
+fn failed_attempt_keeps_file_names() {
+    let mut ws = open();
+    let r: Result<(), String> = ws.attempt(|ws| {
+        ws.name_values("top.state", "0=A 1=B")?;
+        Err("late".into())
+    });
+    assert_eq!(r, Err("late".into()));
+    assert_eq!(shown(&ws, 10), "READ");
+    assert!(ws.value_names.is_empty());
 }

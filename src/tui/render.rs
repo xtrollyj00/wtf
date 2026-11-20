@@ -2,7 +2,7 @@
 //! the `?` box, the launch guide, the status line and the command line around them.
 
 use crate::draw::{self, ROW_LINES, gl, pal, put};
-use crate::tui::app::{App, Held, Mode};
+use crate::tui::app::{App, Held, Mode, Overlay};
 use crate::tui::keys::Action as A;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -49,7 +49,7 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
     right.area.x = area.x + pw as u16;
     buf.merge(&right);
     // a group's name being typed: a caret after it on its header (spec §6)
-    if let Some(n) = &app.naming
+    if let Some(Overlay::Naming(n)) = &app.overlay
         && let Some(&(ly, _, _)) = app
             .hit
             .lines
@@ -135,16 +135,7 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
         );
     }
     // under what has the keys, so they don't show around its edges
-    let covered = app.help
-        || app.examine.is_some()
-        || app.records.is_some()
-        || app.browser.is_some()
-        || app.messages.is_some()
-        || app.menu.is_some()
-        || app.leader.is_some()
-        || app.picker.is_some()
-        || app.form.is_some()
-        || app.decodes.is_some();
+    let covered = app.overlay.is_some() || app.leader.is_some();
     app.hit.notes = if covered {
         Vec::new()
     } else {
@@ -152,143 +143,150 @@ pub fn draw(app: &mut App, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
     };
     let drawn = app.hit.notes.len();
     app.hit.unshown = drawn == 0 && !app.shown_notes(std::time::Instant::now()).is_empty();
-    if app.help {
-        let mut scroll = app.scroll;
-        app.hit.boxed = help(app, buf, w, body, &mut scroll);
-        app.scroll = scroll;
-    }
-    if let Some(ex) = &app.examine {
-        // as a hover: beside the cursor, under the selected row
-        let x = app.wave_x
-            + app
-                .ws
-                .view
-                .col_of(app.ws.view.cursor)
-                .map_or(0, |c| c as usize);
-        let y = app
-            .hit
-            .lines
-            .iter()
-            .find(|(_, (r, b), _)| *r == app.ws.sel && *b == app.ws.bit)
-            .map(|l| l.0);
-        let nw = ex
-            .lines
-            .iter()
-            .map(|(n, _)| n.chars().count())
-            .max()
-            .unwrap_or(0);
-        let name = Style::new().fg(pal().hues[5]);
-        let lines: Vec<Line> = ex
-            .lines
-            .iter()
-            .map(|(n, v)| match n.is_empty() {
-                true => vec![(v.clone(), Style::new())],
-                false => vec![(format!("{n:<nw$}  "), name), (v.clone(), Style::new())],
-            })
-            .collect();
-        let title = match draw::kind(&app.ws, ex.of.0, ex.of.1) {
-            Some((c, col)) => vec![
-                (format!("{c} "), Style::new().fg(col)),
-                (
-                    ex.title.clone(),
-                    Style::new().fg(pal().cursor).add_modifier(Modifier::BOLD),
-                ),
-            ],
-            None => float_title(' ', &ex.title),
-        };
-        app.hit.boxed = boxed(
-            buf,
-            w,
-            body,
-            &title,
-            &format!("{}{}", icon_text(draw::icon::CLOCK), ex.at),
-            &lines,
-            "e Esc close",
-            &mut app.scroll,
-            y.map(|y| (x, y)),
-        );
-    }
-    if let Some(r) = &mut app.records {
-        // the title line and a blank, then as many lines as fit; records scroll to show the
-        // highlight, a text by the line (`hl` is its first line shown)
-        let text = r.title.is_empty();
-        r.page = body.saturating_sub(if text { 2 } else { 3 }).max(1);
-        if text {
-            r.hl = r.hl.min(r.items.len().saturating_sub(r.page));
-            r.top = r.hl;
-        } else if r.hl < r.top {
-            r.top = r.hl;
-        } else if r.hl >= r.top + r.page {
-            r.top = r.hl + 1 - r.page;
+    // the float over the rows: one match, so a new view that forgets to draw itself fails to compile
+    match &mut app.overlay {
+        Some(Overlay::Help) => {
+            let mut scroll = app.scroll;
+            app.hit.boxed = help(app, buf, w, body, &mut scroll);
+            app.scroll = scroll;
         }
-        // as wide as the widest line, so the box keeps its size while scrolling
-        let ww = r
-            .items
-            .iter()
-            .map(|i| i.1.chars().count() + 2)
-            .max()
-            .unwrap_or(0);
-        let mut lines = if text {
-            Vec::new()
-        } else {
-            vec![format!("{:<ww$}", r.title)]
-        };
-        for (k, (_, l)) in r.items.iter().enumerate().skip(r.top).take(r.page) {
-            lines.push(match text {
-                true => format!("{l:<ww$}"),
-                false => format!(
-                    "{}{l}",
-                    if k == r.hl {
-                        format!("{} ", gl().hl)
-                    } else {
-                        "  ".into()
-                    }
-                ),
-            });
-        }
-        let shown = (r.top..r.items.len()).take(r.page);
-        app.hit.boxed = boxed(
-            buf,
-            w,
-            body,
-            &float_title(
-                if text {
-                    draw::icon::INFO
-                } else {
-                    draw::icon::RECORD
-                },
-                &r.name,
-            ),
-            "",
-            &plain(&lines),
-            if text {
-                "j k scroll  Esc close"
-            } else {
-                "Enter jump  Esc close"
-            },
-            &mut 0,
-            None,
-        );
-        if let Some(b) = app.hit.boxed.filter(|_| !text) {
-            // under the title line
-            app.hit.records = shown
-                .enumerate()
-                .map(|(k, i)| (b.y as usize + 2 + k, i))
+        Some(Overlay::Examine(ex)) => {
+            // as a hover: beside the cursor, under the selected row
+            let x = app.wave_x
+                + app
+                    .ws
+                    .view
+                    .col_of(app.ws.view.cursor)
+                    .map_or(0, |c| c as usize);
+            let y = app
+                .hit
+                .lines
+                .iter()
+                .find(|(_, (r, b), _)| *r == app.ws.sel && *b == app.ws.bit)
+                .map(|l| l.0);
+            let nw = ex
+                .lines
+                .iter()
+                .map(|(n, _)| n.chars().count())
+                .max()
+                .unwrap_or(0);
+            let name = Style::new().fg(pal().hues[5]);
+            let lines: Vec<Line> = ex
+                .lines
+                .iter()
+                .map(|(n, v)| match n.is_empty() {
+                    true => vec![(v.clone(), Style::new())],
+                    false => vec![(format!("{n:<nw$}  "), name), (v.clone(), Style::new())],
+                })
                 .collect();
+            let title = match draw::kind(&app.ws, ex.of.0, ex.of.1) {
+                Some((c, col)) => vec![
+                    (format!("{c} "), Style::new().fg(col)),
+                    (
+                        ex.title.clone(),
+                        Style::new().fg(pal().cursor).add_modifier(Modifier::BOLD),
+                    ),
+                ],
+                None => float_title(' ', &ex.title),
+            };
+            app.hit.boxed = boxed(
+                buf,
+                w,
+                body,
+                &title,
+                &format!("{}{}", icon_text(draw::icon::CLOCK), ex.at),
+                &lines,
+                "e Esc close",
+                &mut app.scroll,
+                y.map(|y| (x, y)),
+            );
         }
+        Some(Overlay::Records(r)) => {
+            // the title line and a blank, then as many lines as fit; records scroll to show the
+            // highlight, a text by the line (`hl` is its first line shown)
+            let text = r.title.is_empty();
+            r.page = body.saturating_sub(if text { 2 } else { 3 }).max(1);
+            if text {
+                r.hl = r.hl.min(r.items.len().saturating_sub(r.page));
+                r.top = r.hl;
+            } else if r.hl < r.top {
+                r.top = r.hl;
+            } else if r.hl >= r.top + r.page {
+                r.top = r.hl + 1 - r.page;
+            }
+            // as wide as the widest line, so the box keeps its size while scrolling
+            let ww = r
+                .items
+                .iter()
+                .map(|i| i.1.chars().count() + 2)
+                .max()
+                .unwrap_or(0);
+            let mut lines = if text {
+                Vec::new()
+            } else {
+                vec![format!("{:<ww$}", r.title)]
+            };
+            for (k, (_, l)) in r.items.iter().enumerate().skip(r.top).take(r.page) {
+                lines.push(match text {
+                    true => format!("{l:<ww$}"),
+                    false => format!(
+                        "{}{l}",
+                        if k == r.hl {
+                            format!("{} ", gl().hl)
+                        } else {
+                            "  ".into()
+                        }
+                    ),
+                });
+            }
+            let shown = (r.top..r.items.len()).take(r.page);
+            app.hit.boxed = boxed(
+                buf,
+                w,
+                body,
+                &float_title(
+                    if text {
+                        draw::icon::INFO
+                    } else {
+                        draw::icon::RECORD
+                    },
+                    &r.name,
+                ),
+                "",
+                &plain(&lines),
+                if text {
+                    "j k scroll  Esc close"
+                } else {
+                    "Enter jump  Esc close"
+                },
+                &mut 0,
+                None,
+            );
+            if let Some(b) = app.hit.boxed.filter(|_| !text) {
+                // under the title line
+                app.hit.records = shown
+                    .enumerate()
+                    .map(|(k, i)| (b.y as usize + 2 + k, i))
+                    .collect();
+            }
+        }
+        Some(Overlay::Browser(_)) => crate::tui::browser::draw(app, buf, w, body),
+        Some(Overlay::Messages(_)) => messages(app, buf, w, body),
+        Some(Overlay::Decodes(_)) => crate::tui::decodes::draw(app, buf, w, body),
+        Some(Overlay::Picker(_)) => {
+            form_under(app, buf, w, body);
+            crate::tui::picker::draw(app, buf, w, body)
+        }
+        Some(Overlay::Form(_)) => crate::tui::form::draw(app, buf, w, body),
+        Some(Overlay::Menu(_)) => menu(app, buf, w, body),
+        // the caret on a group's header is drawn with the rows, above
+        Some(Overlay::Naming(_)) | None => {}
     }
-    crate::tui::browser::draw(app, buf, w, body);
-    messages(app, buf, w, body);
-    crate::tui::decodes::draw(app, buf, w, body);
-    crate::tui::form::draw(app, buf, w, body);
-    crate::tui::picker::draw(app, buf, w, body);
     if app.leader.is_some() {
         leader(app, buf, w, body);
-    } else if app.which_key {
+    } else if app.which_key && !matches!(app.overlay, Some(Overlay::Menu(_))) {
+        // a right-click menu is on top; the keys pending show again once it closes
         which_key(app, buf, w, body);
-    }
-    if app.menu.is_some() {
-        menu(app, buf, w, body);
     }
     let at = if matches!(app.mode, Mode::Command | Mode::Search) {
         command_line(app, buf, w, h)
@@ -826,7 +824,9 @@ fn float_title(ic: char, name: &str) -> Vec<(String, Style)> {
 /// The right click's menu (spec §2 "Menu"), with its corner at the pointer moved to fit, and
 /// its second menu beside the item that opened it.
 fn menu(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
-    let Some(m) = &app.menu else { return };
+    let Some(Overlay::Menu(m)) = &app.overlay else {
+        return;
+    };
     let main = card(buf, w, body, m.at, &m.items, m.hl, true);
     app.hit.menus = main.into_iter().collect();
     if let (Some(r), Some((p, sub))) = (main, &m.sub) {
@@ -975,11 +975,29 @@ fn notes(app: &App, buf: &mut Buffer, w: usize, body: usize) -> Vec<(Rect, std::
     drawn
 }
 
+/// The form a picker was opened from, drawn under it (the picker fades it), so the field being
+/// filled stays in sight (spec §5 "Decode form").
+fn form_under(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
+    let Some(Overlay::Picker(p)) = &mut app.overlay else {
+        return;
+    };
+    let Some(f) = p.back.take() else { return };
+    let picker = app.overlay.replace(Overlay::Form(*f));
+    crate::tui::form::draw(app, buf, w, body);
+    if let Some(Overlay::Form(f)) = std::mem::replace(&mut app.overlay, picker)
+        && let Some(Overlay::Picker(p)) = &mut app.overlay
+    {
+        p.back = Some(Box::new(f));
+    }
+}
+
 /// `:messages` (spec §4): a panel across the bottom, a message a line: its clock time, an icon
 /// and who caused it in the kind's colour, the text; the highlight scrolled into view.
 fn messages(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
     use crate::draw::icon;
-    let Some(hl) = app.messages else { return };
+    let Some(Overlay::Messages(hl)) = app.overlay else {
+        return;
+    };
     let page = app.notes.len().min(10).min(body.saturating_sub(4));
     if page == 0 || w < 30 {
         return;
@@ -1223,10 +1241,16 @@ fn which_key(app: &App, buf: &mut Buffer, w: usize, body: usize) {
             for (i, t) in ws.cursor_list() {
                 let (name, ic) = match i {
                     0 => ("cursor".into(), (icon::CLOCK, pal().hues[4])),
-                    _ if ws.labels[i].name.is_empty() => {
-                        (format!("mark {}", i + 1), (icon::MARK, pal().bus))
-                    }
-                    _ => (ws.labels[i].name.clone(), (icon::MARK, pal().bus)),
+                    _ => (
+                        wtf_core::workspace::Mark::title(
+                            i,
+                            ws.marks()[i]
+                                .as_ref()
+                                .map(|m| m.name.as_str())
+                                .unwrap_or(""),
+                        ),
+                        (icon::MARK, pal().bus),
+                    ),
                 };
                 lines.push((
                     format!("{k}{}", i + 1),
@@ -1702,9 +1726,9 @@ fn status(app: &App, buf: &mut Buffer, w: usize, y: usize) -> Rect {
     };
     let (panel, sel) = (pal().panel, pal().selected);
     put(buf, 0, y, &" ".repeat(w), Style::new());
-    let mode = if app.naming.is_some() {
+    let mode = if matches!(app.overlay, Some(Overlay::Naming(_))) {
         "NAME"
-    } else if app.picker.is_some() {
+    } else if matches!(app.overlay, Some(Overlay::Picker(_))) {
         "PICK"
     } else if app.panel_shown() {
         "SIGNALS"
@@ -1723,7 +1747,7 @@ fn status(app: &App, buf: &mut Buffer, w: usize, y: usize) -> Rect {
     // as wide as the longest, so the button doesn't move when the mode changes
     x += put_seg(buf, x, y, &format!("{mode:<7}"), badge);
     // typing a group's name: what the keys do, in place of the keys pending
-    let pending = if app.naming.is_some() {
+    let pending = if matches!(app.overlay, Some(Overlay::Naming(_))) {
         "Enter keeps the name  Esc as it was".to_string()
     } else {
         app.pending()
@@ -1804,7 +1828,7 @@ fn status(app: &App, buf: &mut Buffer, w: usize, y: usize) -> Rect {
     let msg = app.msg.as_ref().filter(|_| app.hit.unshown);
     let mid = match app.ws.label_at_cursor() {
         // a message no card could show
-        _ if msg.is_some() => msg.unwrap().0.clone(),
+        _ if msg.is_some() => msg.unwrap().text().to_string(),
         Some((i, l)) => {
             let text = [l.name.as_str(), l.note.as_str()]
                 .into_iter()
@@ -1856,7 +1880,7 @@ fn status(app: &App, buf: &mut Buffer, w: usize, y: usize) -> Rect {
         x + 1,
         y,
         &mid,
-        if msg.is_some_and(|m| m.1) {
+        if msg.is_some_and(|m| m.is_warn()) {
             crate::draw::red()
         } else if msg.is_some() {
             Style::new()
@@ -1947,6 +1971,7 @@ fn command_line(app: &mut App, buf: &mut Buffer, w: usize, h: usize) -> Option<(
         }
     };
     let what = comp.as_ref().map_or("", |c| c.what);
+    let kind = comp.as_ref().and_then(|c| c.kind);
     let ix = if gl().icons { 2 } else { 0 };
     let uw = items
         .iter()
@@ -1994,7 +2019,7 @@ fn command_line(app: &mut App, buf: &mut Buffer, w: usize, h: usize) -> Option<(
         if k == app.hl {
             put(buf, lx + 1, ly, &gl().hl.to_string(), row.fg(pal().cursor));
         }
-        if let Some(ic) = draw::icon(crate::tui::commands::item_icon(what, c)) {
+        if let Some(ic) = draw::icon(crate::tui::commands::item_icon(kind, c)) {
             put(buf, lx + 2, ly, &ic.to_string(), row.fg(pal().hues[5]));
         }
         let x = lx + 2 + ix;
@@ -2142,7 +2167,7 @@ mod tests {
         assert!(icons(&crate::snapshot(&mut a, 100, Some(16))) > 2);
         a.keys("<Esc>").unwrap();
         a.keys("e").unwrap();
-        assert!(a.examine.is_some());
+        assert!(matches!(a.overlay, Some(Overlay::Examine(_))));
         assert!(icons(&crate::snapshot(&mut a, 100, Some(16))) > 0);
         a.keys("<Esc>").unwrap();
         // which-key over the jump key lists the cursor and the marks, each with its chip

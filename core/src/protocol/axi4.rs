@@ -273,7 +273,7 @@ fn stream(channels: &Handshakes, records: &[Vec<Record>], name: &'static str) ->
     }
 }
 
-/// The burst's decoder: `frame` over the channel, its params owned (`decode::make` takes them so).
+/// The burst's decoder: `frame` over the channel, its params owned (`Frame::new` takes them so).
 fn burst_decoder(
     fields: &[Field],
     params: &[(&str, &str)],
@@ -283,7 +283,7 @@ fn burst_decoder(
         .iter()
         .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
         .collect();
-    decode::make("frame", fields, &params, fs_per_tick)
+    decode::Frame::new(fields, &params, fs_per_tick).map(|f| Box::new(f) as Box<dyn Decoder>)
 }
 
 /// An instance: the channels it has, its schema, and the sides to finish.

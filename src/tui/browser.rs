@@ -4,7 +4,7 @@
 //! only. `Tab` goes through the sets of the decode: all its results, then each stream.
 
 use crate::draw::{gl, pal, put};
-use crate::tui::app::App;
+use crate::tui::app::{App, Overlay};
 use crate::tui::keys::{self, Fixed, Key};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::buffer::Buffer;
@@ -15,8 +15,8 @@ use wtf_core::rows::Row;
 use wtf_core::stream::{At, Group, Set};
 use wtf_core::time;
 use wtf_core::trace::Val;
-use wtf_core::workspace::Workspace;
 use wtf_core::workspace::unknown::NoStream;
+use wtf_core::workspace::{Msg, Workspace};
 
 /// A column's widest, so a frame's bytes don't take the table.
 const CELL: usize = 24;
@@ -61,7 +61,7 @@ impl Browser {
         let streams = ws.stream_set(names).unwrap_or_default();
         // the decode every stream named is of
         let of = |i: usize| {
-            ws.decodes
+            ws.decodes()
                 .iter()
                 .find(|d| ws.streams_of_decode(&d.name).contains(&i))
                 .map(|d| d.name.clone())
@@ -81,18 +81,18 @@ impl Browser {
                 each.extend(rest);
                 // a stream named as its decode (`pair`, `check`, `frame`) is that stream alone, so
                 // the results are then named one by one
-                let a = match ws.streams.iter().any(|s| &s.name == d) {
+                let a = match ws.streams().iter().any(|s| &s.name == d) {
                     true => ws
                         .results(d)
                         .iter()
-                        .map(|&i| ws.streams[i].name.as_str())
+                        .map(|&i| ws.streams()[i].name.as_str())
                         .collect::<Vec<_>>()
                         .join(" "),
                     false => d.clone(),
                 };
                 all = Some(a.clone());
                 std::iter::once(a)
-                    .chain(each.into_iter().map(|i| ws.streams[i].name.clone()))
+                    .chain(each.into_iter().map(|i| ws.streams()[i].name.clone()))
                     .collect()
             }
             None => vec![names.to_string()],
@@ -142,7 +142,7 @@ impl Browser {
     }
 
     fn set<'a>(&self, ws: &'a Workspace) -> Set<'a> {
-        Set::new(self.streams.iter().map(|&i| &ws.streams[i]).collect())
+        Set::new(self.streams.iter().map(|&i| &ws.streams()[i]).collect())
     }
 
     /// The columns before the fields: the stream (when several), the number, start and length.
@@ -337,7 +337,7 @@ pub fn no_stream(ws: &Workspace, e: &NoStream) -> String {
                 how.join("; or ")
             )
         }
-        _ if ws.streams.is_empty() => {
+        _ if ws.streams().is_empty() => {
             "no streams yet: make one with :decode or :protocol".to_string()
         }
         e => e.to_string(),
@@ -360,12 +360,12 @@ impl App {
         if let Some(e) = b.error.take() {
             return Err(e);
         }
-        self.browser = Some(b);
+        self.overlay = Some(Overlay::Browser(b));
         Ok(())
     }
 
     fn browser_refresh(&mut self) {
-        if let Some(b) = &mut self.browser {
+        if let Some(Overlay::Browser(b)) = &mut self.overlay {
             b.refresh(&self.ws);
         }
     }
@@ -438,7 +438,9 @@ impl App {
 
     /// The browser has the keys; they are fixed (spec §5 "Records").
     pub fn browser_key(&mut self, k: KeyEvent) {
-        let Some(b) = &mut self.browser else { return };
+        let Some(Overlay::Browser(b)) = &mut self.overlay else {
+            return;
+        };
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
         if b.typing {
             match k.code {
@@ -455,7 +457,7 @@ impl App {
             return;
         };
         match act {
-            Browse::Close => self.browser = None,
+            Browse::Close => self.overlay = None,
             Browse::Down => b.step(1),
             Browse::Up => b.step(-1),
             Browse::PageDown => b.step(b.page as isize),
@@ -476,9 +478,8 @@ impl App {
                 self.browser_refresh();
             }
             Browse::Group if b.sort.0 < b.fixed() => {
-                self.msg = Some((
+                self.msg = Some(Msg::Warn(
                     "= groups by the sorted column, a field: s sorts by one".into(),
-                    true,
                 ))
             }
             Browse::Group => {
@@ -500,7 +501,7 @@ impl App {
             }
             Browse::Pick => self.browser_pick(),
         }
-        if let Some(b) = &mut self.browser {
+        if let Some(Overlay::Browser(b)) = &mut self.overlay {
             b.hl = b.hl.min(b.len().saturating_sub(1));
         }
     }
@@ -508,7 +509,9 @@ impl App {
     /// `Enter`: on a group, keep its records only (its field equal to its value); on a record,
     /// jump to its start, select its stream's row and close.
     fn browser_pick(&mut self) {
-        let Some(b) = &mut self.browser else { return };
+        let Some(Overlay::Browser(b)) = &mut self.overlay else {
+            return;
+        };
         let set = b.set(&self.ws);
         let fpt = self.ws.trace.fs_per_tick;
         if b.group {
@@ -518,10 +521,10 @@ impl App {
             if !matches!(&g.values[0], Some(Val::Bits(v)) if v.chars().all(|c| c == '0' || c == '1'))
                 && !matches!(&g.values[0], Some(Val::Text(t)) if !t.is_empty() && !t.contains(char::is_whitespace))
             {
-                return self.msg = Some((
-                    format!("{}: this value can't be written in a filter", c.name),
-                    true,
-                ));
+                return self.msg = Some(Msg::Warn(format!(
+                    "{}: this value can't be written in a filter",
+                    c.name
+                )));
             }
             let value = wtf_core::stream::value_text(&c.field, &g.values[0], fpt, None, None);
             let this = format!("{} == {value}", c.name);
@@ -534,7 +537,7 @@ impl App {
         }
         let Some(&at) = b.rows.get(b.hl) else { return };
         let (t, name) = (set.record(at).start, set.streams[at.0].name.clone());
-        self.browser = None;
+        self.overlay = None;
         if let Some(r) =
             self.ws.rows.iter().position(
                 |row| matches!(row, Row::Signal(s) if self.ws.trace.vars[s.var].path == name),
@@ -552,11 +555,13 @@ impl App {
             .hit
             .boxed
             .is_some_and(|r| r.contains((x as u16, y as u16).into()));
-        let Some(b) = &mut self.browser else { return };
+        let Some(Overlay::Browser(b)) = &mut self.overlay else {
+            return;
+        };
         match m.kind {
             MouseEventKind::ScrollDown => b.step(1),
             MouseEventKind::ScrollUp => b.step(-1),
-            MouseEventKind::Down(_) if !inside => self.browser = None,
+            MouseEventKind::Down(_) if !inside => self.overlay = None,
             MouseEventKind::Down(MouseButton::Left) => {
                 let Some(&(_, k)) = self.hit.records.iter().find(|(ly, _)| *ly == y) else {
                     return;
@@ -574,7 +579,9 @@ impl App {
 /// Draws the browser: a card over the waveforms, the tabs and the filter under its title, the
 /// column names, then the records or groups scrolled to the highlight (spec §5 "Records").
 pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
-    let Some(b) = &mut app.browser else { return };
+    let Some(Overlay::Browser(b)) = &mut app.overlay else {
+        return;
+    };
     let set = b.set(&app.ws);
     let fpt = app.ws.trace.fs_per_tick;
     let (bw, bh) = (w.saturating_sub(4).min(140), body.saturating_sub(2));
@@ -748,14 +755,9 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
             put(buf, x0 + 1, y, &gl().hl.to_string(), line.fg(pal().cursor));
         }
         // a record of violations in its severity's colour, red without one
-        let viol = (!b.group)
-            .then(|| b.rows[k])
-            .filter(|at| set.streams[at.0].violations)
-            .map(|at| {
-                set.streams[at.0]
-                    .severity_at(set.record(at).start)
-                    .map_or(pal().unknown, crate::draw::severity_color)
-            });
+        let viol = (!b.group).then(|| b.rows[k]).and_then(|at| {
+            crate::draw::violation_color(Some(set.streams[at.0]), set.record(at).start)
+        });
         let cells = b.cells(&set, k, fpt);
         let mut x = ix + 2;
         for &c in &shown {
@@ -823,11 +825,14 @@ mod tests {
     }
 
     fn b(app: &App) -> &Browser {
-        app.browser.as_ref().unwrap()
+        let Some(Overlay::Browser(b)) = &app.overlay else {
+            panic!("no browser")
+        };
+        b
     }
 
     fn msg(app: &App) -> String {
-        app.msg.as_ref().map_or(String::new(), |m| m.0.clone())
+        app.msg.as_ref().map_or(String::new(), |m| m.text().into())
     }
 
     #[test]

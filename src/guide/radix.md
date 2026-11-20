@@ -8,7 +8,8 @@ Form
 Recipes
 - Every signal of a call in decimal: the call's `radix` `dec`.
 - One signal in another radix: `data:dec`, wherever tools take signals.
-- A row with a radix and a colour: `awaddr:hex:red`, `wvalid:red` (`help workspace`).
+- A row with a radix and a colour: `{"signal": "awaddr", "radix": "hex", "color": "red"}`
+  (`help workspace`).
 
 Details
 - The default is enum where the file names values, otherwise hex; 1-bit signals always show

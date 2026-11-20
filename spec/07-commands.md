@@ -14,10 +14,11 @@
 | `:ungroup` | dissolve the group the selected row is in; its signals stay where they are |
 | `:select <row> [<last row>]` | select a signal (named as in `:add`) or group, or the rows from one to another, as `V` does |
 | `:cursor <n> [time\|off] [name=<text>] [note=<text>]` | put cursor `n` at a time (`:cursor 1 <time>` moves the cursor, others place a mark), remove mark `n`, or without a time jump to mark `n` (`:cursor 1` centers the screen on the cursor). `name=` and `note=` say what a mark shows (section 9), with a time or on a mark that exists; each runs to the next key, an empty one clears it |
-| `:scope [path]` | names resolve under this scope first, wherever signals are named (search, `:add`, `:select`, the agent's tools): with `:scope top.cpu`, `state` is `top.cpu.state` though `top.dma.state` exists; saved in the session; without a path, no scope |
+| `:scope [path]` | names resolve under this scope first, wherever signals are named (search, `:add`, `:select`, the agent's tools): with `:scope top.cpu`, `state` is `top.cpu.state` though `top.dma.state` exists; saved in the session, and a path that is no scope says so, with the nearest scopes; without a path, no scope |
 | `:radix <name>` | set the radix of the selected line (a row, or a field under it), group or `V` range (section 10), e.g. `:radix dec` |
 | `:names <signal> <value>=<name>...` | name values of a whole bus or bit signal, for the `enum` radix (section 10), e.g. `:names state 0=IDLE 1=BUSY 'h2=DONE`; values as a search takes them, checked against the width; rows showing the signal switch to `enum`. `:names <signal> off` removes the names. Saved in the session and given again on `:e`. Alone it opens the value-names card on the selected signal (section 5) |
 | `:color <name\|off>` | set the colour of the selected line, group or `V` range (section 14): `red`, `orange`, `yellow`, `green`, `cyan`, `blue`, `magenta`, `gray`; `off` for the theme's |
+| `:unit <unit>` | the unit an agent's answers are given in (section 15): `s`, `ms`, `us`, `ns`, `ps`, `fs`, or `auto` for the unit the clocks fit. The window refuses it: it picks the unit that fits |
 | `:undo` / `:redo` | undo / redo a change to the session layout |
 | `:fit [<from> <to>]` | zoom so the whole simulation fits on screen; with two cursors or times (`:fit '2 '3`, `:fit 10ns 20ns`, either order), zoom so the range between them fits. A cursor is `'N` as in marks (`'1` is the cursor). Zoom goes in steps, so a little more than the range may show, never less |
 | `:e` | reload the file, keeping signals, groups, cursor and zoom |
@@ -38,6 +39,14 @@ A pattern here is a glob: `*` within a level of the path, `**` across. An agent'
 the same commands with a regex in slashes instead (section 15).
 
 The command line shows the description column of this table next to each matching command.
+
+The core names every command in one table, each with its usage and its description, and every
+listing reads it: `:` on an empty line, `:pick commands`, the `help commands` topic, the site's
+keys page. The window adds one list of its own for what only a window has (`:w`, `:wq`, `:q`,
+`:q!`, `:help`, `:agent`, `:messages`, `:trail`, `:decodes`, `:records`, `:pick`, `:follow`), and
+says which of the core's commands it answers itself: `:e` is the window's reload, `:decode`,
+`:protocol` and `:names` without arguments open a form, `:protocol search` fills it from the last
+search, and `:unit` is refused. A bare `:<time>` is line syntax, not a command.
 
 Times accept `fs`, `ps`, `ns`, `us`, `ms`, `s`. A number without a unit means file ticks.
 

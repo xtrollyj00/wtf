@@ -79,6 +79,7 @@ interfaces a built-in protocol decodes (decode them: exact records, handshake ch
 
 command {"line": "decode s_axi axilite clock=top.aclk prefix=top.s_axi_"}
 s_axi: records s_axi.wr 1, s_axi.rd 2; violations s_axi.errors 1, s_axi.wr.unmatched 0, s_axi.rd.unmatched 0; made from s_axi.aw 1, s_axi.w 1, s_axi.b 1, s_axi.ar 2, s_axi.r 2
+`records <stream>` lists one, `records <name>` its records and violations in order; `protocols` says what each stream and field is; `pair` matches a stream with another (`help decode`)
 
 records {"stream": "s_axi"}
 4 of 4
@@ -92,7 +93,7 @@ s_axi.errors   0 195ns 205ns                                 r_resp
 The second read, at 175ns, is the one at address `0x40`, and its response is `0x2`. The
 `s_axi.errors` record at 195ns names the `r_resp` rule.
 
-The answer lines above are the server's own, with the hint line after `decode` left out.
+The answer lines above are the server's own.
 
 ## Set it up
 

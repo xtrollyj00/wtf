@@ -1,8 +1,8 @@
 //! The config file (spec §19): glyph set, theme, single colours and keys, read once at start. A bad
 //! entry is skipped with a warning for the status line; nothing in it stops wtf.
 
-use crate::draw::{self, Palette};
-use crate::theme;
+use crate::draw;
+use crate::theme::{self, Palette};
 use crate::tui::keys::Keymap;
 use std::path::{Path, PathBuf};
 

@@ -17,6 +17,7 @@ pub mod start;
 
 use crate::live;
 use app::App;
+use wtf_core::workspace::Msg;
 
 /// Run the window until it quits: draw, then answer keys, the mouse, agents and the trace file
 /// changing on disk.
@@ -25,7 +26,7 @@ pub fn run(app: &mut App) -> Result<(), String> {
     let live = match live::window(&std::process::id().to_string(), &app.ws.trace_path) {
         Ok(l) => Some(l),
         Err(e) => {
-            app.msg = Some((format!("no link for agents: {e}"), true));
+            app.msg = Some(Msg::Warn(format!("no link for agents: {e}")));
             None
         }
     };
@@ -69,7 +70,10 @@ pub fn run(app: &mut App) -> Result<(), String> {
             while !crossterm::event::poll(std::time::Duration::from_millis(50))? {
                 if let Some(inc) = live.as_ref().and_then(|(_, rx)| rx.try_recv().ok()) {
                     let answer = match inc.request {
-                        live::Request::Get => Ok(crate::mcp::link_answer(&app.ws)),
+                        live::Request::Get => Ok(live::link_answer(
+                            &crate::guide::describe(&app.ws, None),
+                            &wtf_core::session::to_link_toml(&app.ws),
+                        )),
                         live::Request::Put(text) => app.take_present(&text),
                     };
                     let _ = inc.reply.send(answer);
