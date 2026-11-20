@@ -2387,6 +2387,170 @@ fn protocols_loaded_from_the_config_dir() {
     );
 }
 
+/// A `workspace` protocol from a file: loaded by the MCP, named by its stem, with no roles, `when`
+/// or `fields` of its own; every entry's mistake at once, the file named once (spec §15, §19).
+#[test]
+fn workspace_declares_a_protocol_from_a_file() {
+    let dir = Dir::new("decl-wasm");
+    let probe = dir.0.join("probe.wasm");
+    std::fs::copy("tests/data/wasm/probe.wasm", &probe).unwrap();
+    // a file named for a built-in loads, and is refused as one
+    let axis = dir.0.join("axis.wasm");
+    std::fs::copy("tests/data/wasm/probe.wasm", &axis).unwrap();
+    let gone = dir.0.join("gone.wasm");
+    let (probe, axis, gone) = (
+        probe.to_str().unwrap(),
+        axis.to_str().unwrap(),
+        gone.to_str().unwrap(),
+    );
+    let mut s = Server::start(&dir.0);
+    s.ok("open", json!({"trace": simple()}));
+    let err = s
+        .tool(
+            "workspace",
+            json!({"protocol": [
+                {"wasm": probe},
+                {"name": "p", "wasm": probe},
+                {"name": "probe", "wasm": probe, "roles": "v"},
+                {"name": "axis", "wasm": axis},
+                {"name": "gone", "wasm": gone},
+            ]}),
+        )
+        .unwrap_err();
+    assert_eq!(
+        err,
+        [
+            "protocol: an entry needs a name string".to_string(),
+            format!("wasm {probe} holds probe, not p: name it probe"),
+            "protocol probe from a file takes no roles, when or fields".into(),
+            "protocol axis: axis is a built-in protocol".into(),
+            format!("{gone}: no such file"),
+        ]
+        .join("\n")
+    );
+    // the right entry loads, and a decode in the same declaration uses it; empty lists say nothing
+    s.ok(
+        "workspace",
+        json!({
+            "protocol": [{"name": "probe", "wasm": probe, "roles": [], "fields": []}],
+            "decode": [{"name": "p", "protocol": "probe", "clock": "top.clk"}],
+        }),
+    );
+    let beats = s.ok("records", json!({"stream": "p.beat", "count_only": true}));
+    assert!(beats.starts_with("7 records, first 5ns"), "{beats}");
+}
+
+/// Each wrong shape a declaration can take is named, with how to write it, in a group's rows too
+/// (spec §15).
+#[test]
+fn workspace_names_wrong_shapes() {
+    let dir = Dir::new("decl-shapes");
+    let mut s = Server::start(&dir.0);
+    s.ok("open", json!({"trace": simple()}));
+    for (args, err) in [
+        (
+            json!({"rows": [3, {"group": "g", "rows": ["top.clk"]}]}),
+            "rows: 3 is not a row: write {\"signal\": ...} or {\"group\": ..., \"rows\": [...]}\nrows: \"top.clk\" is not a row: write {\"signal\": \"top.clk\"}",
+        ),
+        (
+            json!({"rows": [{"group": "g", "rows": "top.clk"}]}),
+            "rows [1].rows: must be a list",
+        ),
+        // a list that isn't one of pairs is left for the validator to want a table
+        (
+            json!({"decode": [{"name": "d", "protocol": "axis", "clock": "top.clk", "signals": ["tvalid"]}]}),
+            "decode d: needs a name, a protocol, signals and params as tables",
+        ),
+        (
+            json!({"scope": true}),
+            "scope must be a string, not a boolean: write it as \"top\"; see `help workspace`",
+        ),
+        (
+            json!({"cursors": {}, "view": {"time": "0ns", "to": "10ns"}, "names": {}, "unit": {}}),
+            "unit must be a string, not a table: write it as \"ns\"; see `help workspace`",
+        ),
+    ] {
+        assert_eq!(s.tool("workspace", args), Err(err.into()));
+    }
+}
+
+/// A unit no answer is given in is refused by every tool that takes one, the units listed.
+#[test]
+fn bad_unit_refused_everywhere() {
+    let dir = Dir::new("bad-unit");
+    let mut s = Server::start(&dir.0);
+    s.ok("open", json!({"trace": simple()}));
+    s.ok(
+        "command",
+        json!({"line": "protocol b roles=busy,data when=busy d=data"}),
+    );
+    s.ok(
+        "command",
+        json!({"line": "decode f b clock=top.clk busy=top.cpu.busy data=top.cpu.data"}),
+    );
+    let bad = Err("bad time unit: parsec (s, ms, us, ns, ps, fs)".to_string());
+    for (tool, args) in [
+        (
+            "values",
+            json!({"signals": ["top.clk"], "from": "0ns", "unit": "parsec"}),
+        ),
+        ("records", json!({"stream": "f", "unit": "parsec"})),
+        (
+            "find",
+            json!({"expr": "top.cpu.busy", "count_only": true, "unit": "parsec"}),
+        ),
+    ] {
+        assert_eq!(s.tool(tool, args), bad, "{tool}");
+    }
+}
+
+/// `count_only` stops at a million matches and says so, rather than scan a huge trace (spec §15).
+#[test]
+fn find_count_stops_at_a_million() {
+    let dir = Dir::new("million");
+    let trace = dir.0.join("toggle.vcd");
+    let mut vcd = String::from(
+        "$timescale 1ns $end\n$scope module top $end\n$var wire 1 ! x $end\n$upscope $end\n$enddefinitions $end\n",
+    );
+    for t in 0..2_000_002u32 {
+        vcd += &format!("#{t}\n{}!\n", (t + 1) % 2);
+    }
+    std::fs::write(&trace, vcd).unwrap();
+    let mut s = Server::start(&dir.0);
+    s.ok("open", json!({"trace": trace}));
+    assert_eq!(
+        s.ok("find", json!({"expr": "top.x", "count_only": true})),
+        "1000000 matches, first 2ns, last 2000000ns (stopped counting there)"
+    );
+}
+
+/// A tool the server doesn't have is a protocol error, not a step on the trail (spec §15 "Trail").
+#[test]
+fn unknown_tool_is_no_step() {
+    let dir = Dir::new("no-tool");
+    let mut s = Server::start(&dir.0);
+    s.ok("open", json!({"trace": simple()}));
+    let r = s.call("tools/call", json!({"name": "nope", "arguments": {}}));
+    assert!(r.is_null(), "{r}");
+    assert!(trail_steps(&dir.0, s.child.id(), 1).is_empty());
+}
+
+/// A command that adds many rows lists the first 20 and counts the rest (spec §15).
+#[test]
+fn command_lists_twenty_rows_changed() {
+    let dir = Dir::new("many-rows");
+    let mut s = Server::start(&dir.0);
+    s.ok(
+        "open",
+        json!({"trace": std::fs::canonicalize("tests/data/axi4.vcd").unwrap()}),
+    );
+    let added = s.ok("command", json!({"line": "add /./"}));
+    assert!(
+        added.starts_with("added 26: ") && added.ends_with(", and 6 more"),
+        "{added}"
+    );
+}
+
 /// A trace in fs whose clock and signals lag by a femtosecond or two, as a real capture's: once a clock
 /// is searched, answers are in its unit, whole numbers of it; a finer unit gives them exactly.
 /// `records` `where` on a `pair`: its two sides compared field with field, as a scoreboard does,
