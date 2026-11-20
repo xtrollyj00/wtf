@@ -342,106 +342,107 @@ impl App {
         let (cmd, arg) = line.split_once(char::is_whitespace).unwrap_or((line, ""));
         let arg = arg.trim();
         // which commands are the window's own is WINDOW's to say; the rest are the core's (spec §7)
-        let msg = match window_for(cmd, arg) {
-            Some(WindowCmd {
-                when: When::Refuse(text),
-                ..
-            }) => return Err(text.to_string()),
-            Some(w) => match w.name {
-                "help" if arg.is_empty() => {
-                    self.overlay = Some(Overlay::Help);
-                    None
-                }
-                // the agents' reference, one source for both (spec §15)
-                "help" => {
-                    let topics = || {
-                        crate::guide::TOPICS
-                            .iter()
-                            .map(|t| t.0)
-                            .collect::<Vec<_>>()
-                            .join(" ")
-                    };
-                    let text = crate::guide::answer(Some(arg), wtf_core::pattern::Syntax::Glob)
-                        .map_err(|_| format!("no help topic {}; topics: {}", arg, topics()))?;
-                    let items = text.lines().map(|l| (None, l.to_string())).collect();
-                    let name = format!("help {} {}", gl().dot, arg.to_lowercase());
-                    self.overlay = Some(Overlay::Records(Records {
-                        name,
-                        title: String::new(),
-                        items,
-                        hl: 0,
-                        top: 0,
-                        page: 1,
-                    }));
-                    None
-                }
-                // the agent's steps, newest last; Enter jumps to a step's time (spec §15 "Trail")
-                "trail" => {
-                    if self.ws.trail.is_empty() {
-                        return Err(
-                            "no trail yet: the steps of an agent working on this trace show here"
-                                .into(),
-                        );
-                    }
-                    let items: Vec<_> = self
-                        .ws
-                        .trail
+        let w = window_for(cmd, arg);
+        if let Some(WindowCmd {
+            when: When::Refuse(text),
+            ..
+        }) = w
+        {
+            return Err(text.to_string());
+        }
+        let msg = match w.map(|w| w.name) {
+            Some("help") if arg.is_empty() => {
+                self.overlay = Some(Overlay::Help);
+                None
+            }
+            // the agents' reference, one source for both (spec §15)
+            Some("help") => {
+                let topics = || {
+                    crate::guide::TOPICS
                         .iter()
-                        .map(|s| (s.time, Self::step_line(s)))
-                        .collect();
-                    let (title, hl) = (format!("{} steps", items.len()), items.len() - 1);
-                    self.overlay = Some(Overlay::Records(Records {
-                        name: "trail".into(),
-                        title,
-                        items,
-                        hl,
-                        top: 0,
-                        page: 1,
-                    }));
-                    None
+                        .map(|t| t.0)
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                };
+                let text = crate::guide::answer(Some(arg), wtf_core::pattern::Syntax::Glob)
+                    .map_err(|_| format!("no help topic {}; topics: {}", arg, topics()))?;
+                let items = text.lines().map(|l| (None, l.to_string())).collect();
+                let name = format!("help {} {}", gl().dot, arg.to_lowercase());
+                self.overlay = Some(Overlay::Records(Records {
+                    name,
+                    title: String::new(),
+                    items,
+                    hl: 0,
+                    top: 0,
+                    page: 1,
+                }));
+                None
+            }
+            // the agent's steps, newest last; Enter jumps to a step's time (spec §15 "Trail")
+            Some("trail") => {
+                if self.ws.trail.is_empty() {
+                    return Err(
+                        "no trail yet: the steps of an agent working on this trace show here"
+                            .into(),
+                    );
                 }
-                // every message, with its time and who caused it (spec §4 "Notifications")
-                "messages" => {
-                    self.note_msg();
-                    if self.notes.is_empty() {
-                        return Err("no messages yet".into());
-                    }
-                    self.overlay = Some(Overlay::Messages(self.notes.len() - 1));
-                    None
+                let items: Vec<_> = self
+                    .ws
+                    .trail
+                    .iter()
+                    .map(|s| (s.time, Self::step_line(s)))
+                    .collect();
+                let (title, hl) = (format!("{} steps", items.len()), items.len() - 1);
+                self.overlay = Some(Overlay::Records(Records {
+                    name: "trail".into(),
+                    title,
+                    items,
+                    hl,
+                    top: 0,
+                    page: 1,
+                }));
+                None
+            }
+            // every message, with its time and who caused it (spec §4 "Notifications")
+            Some("messages") => {
+                self.note_msg();
+                if self.notes.is_empty() {
+                    return Err("no messages yet".into());
                 }
-                "w" => Some(command::save(&mut self.ws, arg)?),
-                "wq" => {
-                    command::save(&mut self.ws, arg)?;
-                    self.quit = true;
-                    None
+                self.overlay = Some(Overlay::Messages(self.notes.len() - 1));
+                None
+            }
+            Some("w") => Some(command::save(&mut self.ws, arg)?),
+            Some("wq") => {
+                command::save(&mut self.ws, arg)?;
+                self.quit = true;
+                None
+            }
+            Some("q") => {
+                if self.ws.modified() {
+                    return Err("unsaved session (:w to save, :q! to quit)".into());
                 }
-                "q" => {
-                    if self.ws.modified() {
-                        return Err("unsaved session (:w to save, :q! to quit)".into());
-                    }
-                    self.quit = true;
-                    None
-                }
-                "q!" => {
-                    self.quit = true;
-                    None
-                }
-                // `:e` reloads the trace and rebuilds the signal panel (spec §7)
-                "e" => return self.reload(),
-                "follow" => return self.set_follow(arg),
-                "agent" => return self.show_agent_file(),
-                "records" => return self.open_browser(arg),
-                "pick" => return self.open_picker(arg),
-                "decode" => return self.open_form(""),
-                // alone, a protocol's form; `search` fills it from the clocked search (spec §5)
-                "protocol" if arg.is_empty() => return self.open_protocol_form(),
-                "protocol" => return self.protocol_of_search(),
-                "names" => return self.open_names(),
-                "decodes" => return self.open_decodes(),
-                // a WINDOW row with no body here: the core answers `unknown command`
-                _ => command::run(&mut self.ws, line)?,
-            },
-            None => command::run(&mut self.ws, line)?,
+                self.quit = true;
+                None
+            }
+            Some("q!") => {
+                self.quit = true;
+                None
+            }
+            // `:e` reloads the trace and rebuilds the signal panel (spec §7)
+            Some("e") => return self.reload(),
+            Some("follow") => return self.set_follow(arg),
+            Some("agent") => return self.show_agent_file(),
+            Some("records") => return self.open_browser(arg),
+            Some("pick") => return self.open_picker(arg),
+            Some("decode") => return self.open_form(""),
+            // alone, a protocol's form; `search` fills it from the clocked search (spec §5)
+            Some("protocol") if arg.is_empty() => return self.open_protocol_form(),
+            Some("protocol") => return self.protocol_of_search(),
+            Some("names") => return self.open_names(),
+            Some("decodes") => return self.open_decodes(),
+            // the core's, and a WINDOW row with no body here: the core answers `unknown command`
+            _ => command::run(&mut self.ws, line)?,
         };
         if msg.is_some() {
             self.msg = msg;
@@ -658,7 +659,7 @@ impl App {
             Some(Overlay::Examine(_)) => return self.box_key(false, k),
             Some(Overlay::Browser(_)) => return self.browser_key(k),
             Some(Overlay::Records(_)) => return self.records_key(k),
-            Some(Overlay::Messages(_)) => return self.messages_key(k),
+            Some(Overlay::Messages(i)) => return self.messages_key(i, k),
             Some(Overlay::Naming(_)) => return self.naming_key(k),
             // these three change the workspace, so their keys are one undo step
             Some(Overlay::Picker(_)) => return self.undoable(Self::picker_key, k),
@@ -1116,10 +1117,7 @@ impl App {
 
     /// `:messages` has the keys: `j` / `k` move, `g` / `G` to the first / last, `y` copies the
     /// line's text, `Enter` on an agent's step opens the trail, `Esc` / `q` close.
-    fn messages_key(&mut self, k: KeyEvent) {
-        let Some(Overlay::Messages(i)) = self.overlay else {
-            return;
-        };
+    fn messages_key(&mut self, i: usize, k: KeyEvent) {
         let last = self.notes.len().saturating_sub(1);
         if k.code == KeyCode::Enter && self.notes.get(i).is_some_and(|n| n.step.is_some()) {
             self.overlay = None;

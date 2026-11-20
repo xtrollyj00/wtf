@@ -570,6 +570,13 @@ mod tests {
         );
         keys(&mut app, "x\x1b");
         assert_eq!(names(&app).split(',').next(), Some("▾ bus"));
+        // an agent's present takes the header away while it is named: the naming ends
+        keys(&mut app, "R");
+        app.present(&session::to_link_toml(&open("vcd", None).ws))
+            .unwrap();
+        keys(&mut app, "x");
+        assert!(app.overlay.is_none() && app.ws.rows.is_empty());
+        keys(&mut app, "u");
         // <: a member out, after the group; on the header, the group dissolved
         keys(&mut app, "jj<");
         assert_eq!(
@@ -798,6 +805,66 @@ mod tests {
             "▾ cpu,  cpu.state,  data,  busy,  dma.state,  clk,  rst"
         );
         assert!(app.mode == app::Mode::Normal);
+    }
+
+    /// The panel's keys on what is shown already, or with nothing to go to, warn (spec §5).
+    #[test]
+    fn panel_warns() {
+        let mut app = open("vcd", None);
+        let warned = |app: &App| {
+            let m = app.msg.as_ref().unwrap();
+            assert!(m.is_warn(), "{m:?}");
+            m.text().to_string()
+        };
+        keys(&mut app, "an");
+        assert_eq!(warned(&app), "no search yet");
+        keys(&mut app, "/nope\n");
+        app.msg = None;
+        keys(&mut app, "n");
+        assert_eq!(warned(&app), "not found: nope");
+        // top.cpu as a group, its scope highlighted
+        keys(&mut app, "\x1bajl\n");
+        assert_eq!(names(&app), "▾ cpu,  state,  data,  busy");
+        keys(&mut app, " ");
+        assert_eq!(warned(&app), "nothing to mark: already shown");
+        keys(&mut app, "\x07");
+        assert_eq!(warned(&app), "nothing to add: already shown");
+        keys(&mut app, "V\n");
+        assert_eq!(warned(&app), "nothing to add: already shown");
+        keys(&mut app, "/data\x01");
+        assert_eq!(warned(&app), "nothing to mark");
+        assert_eq!(names(&app), "▾ cpu,  state,  data,  busy");
+    }
+
+    /// `:agent` shows the session an agent left; a part that doesn't fit is a warning (spec §15
+    /// "Present").
+    #[test]
+    fn agent_file_warns() {
+        let dir = std::env::temp_dir().join(format!("wtf-agent-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut app = open("vcd", None);
+        app.ws.trace_path = dir.join("simple.vcd");
+        std::fs::write(
+            session::agent_path(&app.ws.trace_path),
+            "version = 1\n[[rows]]\nsignal = \"top.clk\"\n[[rows]]\nsignal = \"top.nope\"\n",
+        )
+        .unwrap();
+        keys(&mut app, ":agent\n");
+        let m = app.msg.as_ref().unwrap();
+        assert!(m.is_warn(), "{m:?}");
+        assert_eq!(
+            m.text(),
+            "agent: presented 1 signals, 1 cursors; not in trace: top.nope; u gives your own view"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// `:q` quits a session with nothing to save.
+    #[test]
+    fn quits_when_saved() {
+        let mut app = open("vcd", None);
+        keys(&mut app, "q");
+        assert!(app.quit);
     }
 
     #[test]
@@ -1160,6 +1227,19 @@ mod tests {
         );
         assert!(app.agents_now(vec![]));
         assert_eq!(msg(&app), "agent 4123-2 left");
+        // a step that failed is a warning
+        let mut third = open("vcd", None);
+        let joined = |a: &App| vec![("4123-3".to_string(), session::to_link_toml(&a.ws))];
+        assert!(app.agents_now(joined(&third)));
+        third
+            .ws
+            .add_step(step("find", "top.nope", "error: no signal top.nope", None));
+        assert!(app.agents_now(joined(&third)));
+        assert!(app.msg.as_ref().unwrap().is_warn());
+        assert_eq!(
+            msg(&app),
+            "agent: find top.nope  ·  error: no signal top.nope"
+        );
     }
 
     #[test]
@@ -3124,6 +3204,13 @@ mod tests {
             "{screen}"
         );
         keys(&mut app, "q?");
+        assert_eq!(app.scroll, 0);
+        // Ctrl-d / Ctrl-u by ten, k back one, g to the top
+        keys(&mut app, "<C-d><C-d>k");
+        assert_eq!(app.scroll, 19);
+        keys(&mut app, "<C-u>");
+        assert_eq!(app.scroll, 9);
+        keys(&mut app, "g");
         assert_eq!(app.scroll, 0);
         keys(&mut app, "q");
         keys(&mut app, "\x1ba?");
