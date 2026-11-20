@@ -788,9 +788,7 @@ impl App {
     /// The form has the keys; they are fixed. A character the table doesn't have types into the
     /// field.
     pub fn form_key(&mut self, k: KeyEvent) {
-        let Some(Overlay::Form(f)) = &mut self.overlay else {
-            return;
-        };
+        let f = form(&mut self.overlay);
         let act = keys::fixed(Self::FORM_KEYS, k);
         let second = |f: &Form| f.fields.get(1).map_or(String::new(), |x| x.value.clone());
         let before = (f.at, f.fields[f.at].value.clone(), second(f));
@@ -852,9 +850,7 @@ impl App {
             }
             Some(Fill::Choose) => return,
         }
-        let Some(Overlay::Form(f)) = &mut self.overlay else {
-            return;
-        };
+        let f = form(&mut self.overlay);
         // the protocol form's rows follow its roles, and an empty field follows the last
         if second(f) != before.2 || (f.protocol && f.fields[f.at].value != before.1) {
             f.reshape(&self.ws);
@@ -878,9 +874,7 @@ impl App {
             .hit
             .boxed
             .is_some_and(|r| r.contains((x as u16, y as u16).into()));
-        let Some(Overlay::Form(f)) = &mut self.overlay else {
-            return;
-        };
+        let f = form(&mut self.overlay);
         if m.kind == MouseEventKind::Down(MouseButton::Left)
             && let Some(&(_, i)) = self.hit.records.iter().find(|(ly, _)| *ly == y)
             && inside
@@ -891,9 +885,7 @@ impl App {
 
     /// The picker's signal for field `i`, picked with `Ctrl-Space`.
     pub fn form_fill(&mut self, i: usize, path: String) {
-        let Some(Overlay::Form(f)) = &mut self.overlay else {
-            return;
-        };
+        let f = form(&mut self.overlay);
         if let Some(field) = f.fields.get_mut(i) {
             field.value = path;
             (f.at, f.error) = (i, None);
@@ -905,9 +897,7 @@ impl App {
     /// Check the form's names, as typed: they name signals, and the instance's name is new.
     /// Reading no value, it is quick on any trace (spec §5 "Decode form").
     pub fn form_check(&mut self) {
-        let Some(Overlay::Form(f)) = &mut self.overlay else {
-            return;
-        };
+        let f = form(&mut self.overlay);
         // the names are checked as `Enter` gives them
         if f.missing().is_some() || f.names.is_some() {
             return f.check = Ok(());
@@ -959,9 +949,7 @@ impl App {
     /// `Enter`: run the line, the results added as a group as the interfaces picker does, and
     /// close; an error stays on the field it names.
     fn form_run(&mut self) {
-        let Some(Overlay::Form(f)) = &mut self.overlay else {
-            return;
-        };
+        let f = form(&mut self.overlay);
         if let Some(m) = f.missing() {
             let at = match () {
                 _ if f.value("name").is_empty() => 0,
@@ -1003,9 +991,7 @@ impl App {
                     self.msg = Some(Msg::Info(line));
                 }
                 Err(e) => {
-                    let Some(Overlay::Form(f)) = &mut self.overlay else {
-                        unreachable!("checked above")
-                    };
+                    let f = form(&mut self.overlay);
                     f.error = Some(Wrong {
                         text: e,
                         fields: Vec::new(),
@@ -1043,9 +1029,7 @@ impl App {
             Ok(()) => {}
             // a decode run's own error names no field: it is the value walk's, not the check's
             Err(e) => {
-                let Some(Overlay::Form(f)) = &mut self.overlay else {
-                    unreachable!("checked above")
-                };
+                let f = form(&mut self.overlay);
                 f.error = Some(Wrong {
                     text: e,
                     fields: Vec::new(),
@@ -1060,9 +1044,7 @@ impl App {
     /// the roles' signals filled in. A name taken is refused, never replaced; an error stays on the
     /// field it names.
     fn protocol_run(&mut self) {
-        let Some(Overlay::Form(f)) = &mut self.overlay else {
-            return;
-        };
+        let f = form(&mut self.overlay);
         let (line, name) = (f.line(), f.value("name").to_string());
         // `:protocol` checks only names; the form's check read the expressions against the signals
         let r = match self.ws.protocols().iter().any(|p| p.name == name) {
@@ -1078,9 +1060,7 @@ impl App {
                     fields: Vec::new(),
                 }),
         };
-        let Some(Overlay::Form(f)) = &mut self.overlay else {
-            unreachable!("checked above")
-        };
+        let f = form(&mut self.overlay);
         match r {
             Ok(()) => {
                 let then = f.then.clone();
@@ -1122,12 +1102,18 @@ impl App {
     }
 }
 
+/// The open form: the form's keys, mouse, checks and drawing all run with it open.
+fn form(o: &mut Option<Overlay>) -> &mut Form {
+    match o {
+        Some(Overlay::Form(f)) => f,
+        _ => unreachable!("the form is open"),
+    }
+}
+
 /// Draws the form: a card in the middle with a line per field (a role the prefix plays shows its
 /// signal dim), then what is wrong with the names, and the line `Enter` runs.
 pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
-    let Some(Overlay::Form(f)) = &app.overlay else {
-        return;
-    };
+    let f = form(&mut app.overlay);
     let (bw, bh) = (w.saturating_sub(4).min(90), body.saturating_sub(2));
     if bw < 40 || bh < 10 {
         return;
@@ -1211,9 +1197,7 @@ pub fn draw(app: &mut App, buf: &mut Buffer, w: usize, body: usize) {
     );
     let keys = keys.as_str();
     crate::tui::render::card_frame(buf, r, pal().dim, &title, "", keys);
-    let Some(Overlay::Form(f)) = &mut app.overlay else {
-        return;
-    };
+    let f = form(&mut app.overlay);
     // the fields, scrolled to show the one being filled in
     if f.at < f.top {
         f.top = f.at;
