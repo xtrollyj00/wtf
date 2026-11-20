@@ -442,7 +442,8 @@ impl Any {
         }
     }
 
-    /// One instance, from the roles the `:decode` line gives and its params.
+    /// One instance of a signal protocol (one with a `def`), from the roles the `:decode` line
+    /// gives and its params.
     pub fn make(
         &self,
         given: &Given,
@@ -452,17 +453,14 @@ impl Any {
         match self {
             Any::Builtin(def) => (def.make)(given, params, fs_per_tick),
             Any::Loaded(l) => (l.make)(given, params, fs_per_tick),
-            Any::Sampled(p) => Err(format!("{} is sampled, not made", p.name)),
-            Any::OnStreams(_) => Err("an on-stream protocol is run, not made".into()),
+            Any::Sampled(_) | Any::OnStreams(_) => unreachable!("only a signal protocol is made"),
         }
     }
 
-    /// Its streams, worked out with every role given.
+    /// Its streams, worked out with every role given; a signal protocol's, as `make`.
     pub fn streams(&self) -> Vec<About<String>> {
-        match self.def() {
-            Some(def) => made_streams(def, |given, params, fpt| self.make(given, params, fpt)),
-            None => Vec::new(),
-        }
+        let def = self.def().expect("only a signal protocol makes streams");
+        made_streams(def, |given, params, fpt| self.make(given, params, fpt))
     }
 }
 
@@ -642,9 +640,12 @@ fn sampler_line(p: &Sampler) -> String {
 pub fn describe(name: &str, sources: Sources<'_>) -> Result<String, String> {
     match sources.get(name) {
         Some(any) => Ok(describe_any(name, &any)),
-        // an unloaded wasm= file: get filters it, but it still describes
+        // an unloaded wasm= file: get filters it; its card is the file's, so there is none
         None => match sources.session.iter().find(|p| p.name == name) {
-            Some(p) => Ok(describe_any(name, &Any::Sampled(p.clone()))),
+            Some(p) => Ok(format!(
+                "{name}: wasm {} is not loaded",
+                p.wasm.as_deref().unwrap_or_default()
+            )),
             None => Err(unknown(name, sources)),
         },
     }

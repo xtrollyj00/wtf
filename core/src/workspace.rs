@@ -1260,8 +1260,9 @@ impl Workspace {
         self.protocols.clear();
         let mut missing = Vec::new();
         for (p, e) in self.again(protocols, |ws, p| ws.add_protocol(p).map(drop)) {
+            // kept already: only a wasm entry whose file is not loaded fails here, and
+            // `add_protocol` defines it all the same
             missing.push(format!("{} ({e})", p.name));
-            self.protocols.push(p);
         }
         for (d, e) in self.again(decodes, |ws, d| ws.add_decode(d).map(drop)) {
             missing.push(format!("{} ({e})", d.name));
