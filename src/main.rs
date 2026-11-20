@@ -2791,6 +2791,31 @@ mod tests {
         assert!(app.overlay.is_none() && app.ws.view.cursor == 25);
     }
 
+    /// A long trail scrolls with its highlight, back to the top on `g`.
+    #[test]
+    fn trail_scrolls() {
+        let mut app = open("vcd", None);
+        app.ws.trail = (0..30)
+            .map(|i| wtf_core::workspace::Step {
+                tool: "find".into(),
+                ask: format!("top.clk {i}"),
+                answer: "1 matches".into(),
+                time: Some(i),
+            })
+            .collect();
+        keys(&mut app, ":trail\n");
+        let top = |app: &mut App| {
+            screen(app, 100, Some(12));
+            match &app.overlay {
+                Some(app::Overlay::Records(r)) => r.top,
+                _ => panic!("no trail"),
+            }
+        };
+        assert!(top(&mut app) > 0);
+        keys(&mut app, "g");
+        assert_eq!(top(&mut app), 0);
+    }
+
     #[test]
     fn mouse_menu() {
         let mut app = open("vcd", Some(SESSION));
