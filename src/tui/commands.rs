@@ -263,14 +263,11 @@ pub fn entry(name: &str) -> Option<Listed> {
 }
 
 /// The usage line as a listing shows it: the error line without `usage: `, and for the one that
-/// says what to do instead (`zoom`'s) its arguments' placeholders.
+/// says what to do instead (`zoom`'s, the only one) its time argument.
 fn shown(c: &command::Command) -> String {
     match c.usage.strip_prefix("usage: ") {
         Some(u) => u.to_string(),
-        None => {
-            let args: Vec<&str> = c.args.iter().map(|a| a.placeholder()).collect();
-            format!(":{} {}", c.name, args.join(" "))
-        }
+        None => format!(":{} <time>", c.name),
     }
 }
 

@@ -32,33 +32,6 @@ pub enum ArgKind {
     Lit(&'static str),
 }
 
-impl ArgKind {
-    /// What a listing shows for it: a placeholder in `<...>`, or what a `Lit` says.
-    pub fn placeholder(self) -> &'static str {
-        match self {
-            ArgKind::Signal => "<path|pattern>",
-            ArgKind::Scope => "<scope>",
-            ArgKind::Stream => "<streams>",
-            ArgKind::Protocol => "<protocol>",
-            ArgKind::Role => "<role>=<signal>",
-            ArgKind::Field => "<expr>",
-            ArgKind::Radix => "<radix>",
-            ArgKind::Color => "<color|off>",
-            ArgKind::HelpTopic => "<topic>",
-            ArgKind::Agent => "<id|off>",
-            ArgKind::PickSource => "<source>",
-            ArgKind::FilePath => "<file>",
-            ArgKind::Row => "<row>",
-            ArgKind::CursorIndex => "<1-9>",
-            ArgKind::MarkRef => "<from|to>",
-            ArgKind::Time => "<time>",
-            ArgKind::Text => "<name>",
-            ArgKind::KeyVal => "<key>=<value>",
-            ArgKind::Lit(s) => s,
-        }
-    }
-}
-
 /// One `:` command: its name, its usage line, a description for the listings, what its arguments
 /// are and its handler. `run` looks the name up here instead of matching inline, so this table is
 /// the only place that names what the core runs (spec §7); the window's own commands (`:w`, `:q`,

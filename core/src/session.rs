@@ -967,12 +967,13 @@ fn file_of(app: &Workspace, shared: bool, trail: bool) -> File {
     }
     for (i, t) in app.cursor_list() {
         let t = Value::String(time::format_exact(t, fpt));
-        if i == 0 {
-            f.cursors.insert("1".into(), t);
-        } else if let Some(m) = app.marks()[i].as_ref() {
-            if m.name.is_empty() && m.note.is_empty() {
-                f.cursors.insert((i + 1).to_string(), t);
-            } else {
+        // the cursor, and a mark with no name or note, are a time; a named mark a table
+        let named = app.marks()[i]
+            .as_ref()
+            .filter(|m| i > 0 && !(m.name.is_empty() && m.note.is_empty()));
+        let value = match named {
+            None => t,
+            Some(m) => {
                 let mut mark = Table::new();
                 mark.insert("time".into(), t);
                 if !m.name.is_empty() {
@@ -981,9 +982,10 @@ fn file_of(app: &Workspace, shared: bool, trail: bool) -> File {
                 if !m.note.is_empty() {
                     mark.insert("note".into(), Value::String(m.note.clone()));
                 }
-                f.cursors.insert((i + 1).to_string(), Value::Table(mark));
+                Value::Table(mark)
             }
-        }
+        };
+        f.cursors.insert((i + 1).to_string(), value);
     }
     if trail && !app.trail.is_empty() {
         f.trail = app
