@@ -2871,6 +2871,13 @@ fn loaded_protocols() {
         "decode <name> beats clock=<clk> prefix=<prefix>\n\none beat a cycle, from a file\nRoles: valid\nStreams: beat"
     );
 
+    // the roles and the clock a `:decode` line gives it are its card's
+    let any = ws.sources().get("beats").unwrap();
+    assert_eq!(
+        (any.roles(), any.params(), any.clocked()),
+        ((vec!["valid"], vec![]), vec![], true)
+    );
+
     // decoded on signals: its factory makes the instance
     ws.add_decode(decode("b", "beats", "aclk", &[], &[("prefix", "s_axi_aw")]))
         .unwrap();
@@ -3121,4 +3128,26 @@ fn protocol_from_a_file() {
         ]
     );
     assert!(ws.streams().is_empty());
+}
+
+/// A protocol on streams: its roles are the streams it reads, its params its own, and its card
+/// is its prose (spec §16).
+#[test]
+fn on_stream_protocol_card() {
+    use wtf_core::protocol;
+    let ws = open("reqresp.vcd");
+    let any = ws.sources().get("pair").unwrap();
+    assert_eq!(
+        (any.roles(), any.params(), any.clocked()),
+        (
+            (vec!["request", "response"], vec![]),
+            vec!["id", "req_id", "resp_id"],
+            false
+        )
+    );
+    let text = protocol::describe("pair", ws.sources()).unwrap();
+    assert!(
+        text.starts_with("pair: each response with its request, by order or by an id field, with the delay\nroles: request, response (streams)\n"),
+        "{text}"
+    );
 }

@@ -1116,3 +1116,67 @@ fn attempt_drops_added_decodes() {
     assert_eq!(names(&ws), before);
     assert_eq!(ws.streams()[0].records.as_ptr(), records);
 }
+
+/// A failed `attempt` that took value names away gives them back (spec §15).
+#[test]
+fn attempt_gives_back_value_names() {
+    let mut ws = open();
+    ws.name_values("top.cpu.data", "0=zero").unwrap();
+    let r: Result<(), String> = ws.attempt(|ws| {
+        ws.name_values("top.cpu.data", "off")?;
+        Err("late".into())
+    });
+    assert_eq!(r, Err("late".into()));
+    assert_eq!(
+        ws.value_names,
+        [("top.cpu.data".to_string(), "0=zero".to_string())]
+    );
+    assert!(ws.trace.vars[var(&ws, "top.cpu.data")].names.is_some());
+}
+
+/// A failed `attempt` that removed a decode makes the decoding again from the definitions, as
+/// `:e` does (spec §15).
+#[test]
+fn attempt_remakes_removed_decodes() {
+    use wtf_core::stream::Decode;
+    let mut ws = Workspace::open(&fixture("vcd").with_file_name("axilite.vcd")).unwrap();
+    ws.add_decode(Decode {
+        name: "s".into(),
+        protocol: "axilite".into(),
+        clock: "aclk".into(),
+        signals: vec![],
+        params: vec![("prefix".into(), "s_axi_".into())],
+    })
+    .unwrap();
+    let names =
+        |ws: &Workspace| -> Vec<String> { ws.streams().iter().map(|s| s.name.clone()).collect() };
+    let before = names(&ws);
+    let r: Result<(), String> = ws.attempt(|ws| {
+        ws.remove_decode("s")?;
+        Err("late".into())
+    });
+    assert_eq!(r, Err("late".into()));
+    assert_eq!(ws.decodes().len(), 1);
+    assert_eq!(names(&ws), before);
+}
+
+/// `:e` with a session protocol whose wasm file is not loaded keeps its entry, once, and lists
+/// it (spec §11: the next `:e` tries the file again).
+#[test]
+fn reload_keeps_an_unloaded_wasm_protocol() {
+    let mut ws = open();
+    let text = "[[protocol]]\nname = \"probe\"\nwasm = \"dir/probe.wasm\"\n";
+    wtf_core::session::apply(&mut ws, text).unwrap();
+    let msg = ws.reload().unwrap();
+    assert_eq!(
+        msg.text(),
+        "reloaded; not in trace: probe (wasm dir/probe.wasm is not loaded)"
+    );
+    assert_eq!(
+        ws.protocols()
+            .iter()
+            .map(|p| p.name.as_str())
+            .collect::<Vec<_>>(),
+        ["probe"]
+    );
+}

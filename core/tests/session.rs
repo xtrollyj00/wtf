@@ -274,6 +274,8 @@ fn refuses_what_it_cant_read() {
     );
     // a section in the wrong shape holds nothing and says so where it sits
     for (bad, msg) in [
+        ("scope = 3", "scope: must be a string"),
+        ("unit = 3", "unit: must be a string"),
         ("signal = 3", "signal: must be a list"),
         ("names = 3", "names: must be a list"),
         ("protocol = 3", "protocol: must be a list"),
@@ -407,6 +409,11 @@ fn wasm_protocol_without_the_load() {
         session::to_toml(&ws)
             .contains("[[protocol]]\nname = \"probe\"\nwasm = \"dir/probe.wasm\"\n")
     );
+    // and `protocols probe` says why it has no card
+    assert_eq!(
+        wtf_core::protocol::describe("probe", ws.sources()),
+        Ok("probe: wasm dir/probe.wasm is not loaded".into())
+    );
 }
 
 /// The trail is last, so a link's view is the shared file without it (spec §11).
@@ -483,5 +490,116 @@ fn describe_skips_gracefully() {
     assert_eq!(
         text,
         "rows (> selected):\ncursors, in time:\n  1: 0\nvisible: 0 - 0\n"
+    );
+}
+
+/// An entry without what it needs warns where it sits and is skipped; the rest loads (spec §11).
+#[test]
+fn entries_missing_what_they_need() {
+    let mut ws = open();
+    let text = r#"
+        scope = "top.nowhere"
+        [[names]]
+        values = "0=IDLE"
+        [cursors]
+        2 = { name = "start" }
+        3 = { time = "soon" }
+        [[rows]]
+        signal = "cpu.data"
+        [[trail]]
+        tool = "find"
+        ask = "top.cpu.busy"
+    "#;
+    wtf_core::command::run(&mut ws, "cursor 3 50ns").unwrap();
+    assert_eq!(
+        session::apply(&mut ws, text).unwrap(),
+        [
+            "no scope top.nowhere",
+            "names [1]: needs a signal and values",
+            "cursors.2: needs a time",
+            "cursors.3.time: bad time: soon (a number and a unit, 20ns or 1.5us; a plain number is file ticks)",
+            "trail [1]: a step needs a tool, an ask and an answer",
+        ]
+    );
+    // a row named by its path's ending is the signal's
+    assert_eq!(names(&ws), ["data"]);
+    assert!(ws.marks()[1].is_none() && ws.marks()[2].is_none());
+}
+
+/// A named mark without a note writes only its name, and reads back the same (spec §11).
+#[test]
+fn mark_name_without_note() {
+    let mut ws = open();
+    wtf_core::command::run(&mut ws, "cursor 2 35ns name=start").unwrap();
+    let text = session::to_toml(&ws);
+    assert!(
+        text.ends_with("[cursors.2]\ntime = \"35ns\"\nname = \"start\"\n"),
+        "{text}"
+    );
+    // with no trail to split off, the text is the whole file
+    assert_eq!(session::without_trail(&text), text);
+    let mut back = open();
+    assert_eq!(session::apply(&mut back, &text), Ok(vec![]));
+    let m = back.marks()[1].as_ref().unwrap();
+    assert_eq!(
+        (m.time, m.name.as_str(), m.note.as_str()),
+        (35, "start", "")
+    );
+}
+
+/// What `view` says of a hand-written file: cursors in any form, a row not in the trace, fields
+/// it can and can't name, and a group with no rows.
+#[test]
+fn describe_hand_written() {
+    let ws = wtf_core::workspace::Workspace::open(&std::path::PathBuf::from(format!(
+        "{}/../tests/data/types-verilator-structs.fst",
+        env!("CARGO_MANIFEST_DIR")
+    )))
+    .unwrap();
+    let f: session::File = toml::from_str(
+        r#"
+        [cursors]
+        1 = { time = "5ns" }
+        2 = 20
+        3 = true
+        12 = "1ns"
+        [[rows]]
+        signal = "types.gone"
+        [[rows]]
+        signal = "types.pkt"
+        fields = [{ field = "pkt.valid" }, { field = "pkt.state", radix = "roman" }]
+        [[rows]]
+        signal = "types.pkts[0]"
+        fields = [{ field = "pkts[0]x" }]
+        [[rows]]
+        group = "g"
+    "#,
+    )
+    .unwrap();
+    let names = ["gone", "pkt", "pkts[0]", "g"].map(String::from);
+    let show = |t: u64| format!("{t}");
+    let text = session::describe(
+        &f,
+        &session::Describe {
+            names: &names,
+            sel: 0,
+            show: &show,
+            visible: (String::from("0"), String::from("30")),
+            trace: &ws.trace,
+        },
+    );
+    // a bad field radix shows the field's own default (state's enum); 1 on a table reads 0
+    assert_eq!(
+        text,
+        "rows (> selected):
+> gone  types.gone
+  pkt  types.pkt  hex  (fields: pkt.valid, pkt.state:enum)
+  pkts[0]  types.pkts[0]  hex
+  g
+cursors, in time:
+  1: 0
+  2: 20, +20 after 1
+visible: 0 - 30
+"
     );
 }
