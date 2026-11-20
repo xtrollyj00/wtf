@@ -43,18 +43,17 @@ pub struct WindowCmd {
     pub when: When,
 }
 
-/// A row with nothing to list, only what the window does: `:e` reloads the window's file.
-const fn guard(name: &'static str, when: When) -> WindowCmd {
-    WindowCmd {
-        name,
-        usage: "",
-        desc: "",
-        args: &[],
-        trailing: false,
-        icon: '\0',
-        when,
-    }
-}
+/// A row with nothing to list, only what the window does (`:e` reloads the window's file):
+/// `WindowCmd { name, when, ..GUARD }`.
+const GUARD: WindowCmd = WindowCmd {
+    name: "",
+    usage: "",
+    desc: "",
+    args: &[],
+    trailing: false,
+    icon: '\0',
+    when: When::Window,
+};
 
 pub const WINDOW: &[WindowCmd] = &[
     WindowCmd {
@@ -166,15 +165,38 @@ pub const WINDOW: &[WindowCmd] = &[
         when: When::Window,
     },
     // and what the window takes from the core first, with nothing of its own to list
-    guard("e", When::Window),
-    guard("decode", When::Empty),
-    guard("protocol", When::Empty),
-    guard("protocol", When::Is("search")),
-    guard("names", When::Empty),
-    guard(
-        "unit",
-        When::Refuse("unit sets the time unit of an agent's answers; the window picks what fits"),
-    ),
+    WindowCmd {
+        name: "e",
+        when: When::Window,
+        ..GUARD
+    },
+    WindowCmd {
+        name: "decode",
+        when: When::Empty,
+        ..GUARD
+    },
+    WindowCmd {
+        name: "protocol",
+        when: When::Empty,
+        ..GUARD
+    },
+    WindowCmd {
+        name: "protocol",
+        when: When::Is("search"),
+        ..GUARD
+    },
+    WindowCmd {
+        name: "names",
+        when: When::Empty,
+        ..GUARD
+    },
+    WindowCmd {
+        name: "unit",
+        when: When::Refuse(
+            "unit sets the time unit of an agent's answers; the window picks what fits",
+        ),
+        ..GUARD
+    },
 ];
 
 /// What the window does with `cmd` and `arg` before the core runs it (spec §7). None: the core's.
@@ -838,19 +860,12 @@ fn protocols(word: &str, ws: &wtf_core::workspace::Workspace) -> Vec<Item> {
     let sources = ws.sources();
     let about = |n: &str| -> String {
         match sources.get(n) {
-            Some(any) => match any.def() {
-                Some(def) => def.about().to_string(),
-                // a session sampler reads like the session's own; the on-stream
-                // protocols carry their own about
-                None => match any {
-                    protocol::Any::Sampled(_) => "in this session".into(),
-                    protocol::Any::OnStreams(d) => d.about.to_string(),
-                    protocol::Any::Builtin(_) | protocol::Any::Loaded(_) => {
-                        unreachable!("a signal protocol has a card")
-                    }
-                },
-            },
-            None => "in this session".into(),
+            Some(protocol::Any::OnStreams(d)) => d.about.to_string(),
+            // a session sampler, without a card, reads like the session's own
+            any => any
+                .as_ref()
+                .and_then(|a| a.def())
+                .map_or("in this session".into(), |d| d.about().to_string()),
         }
     };
     let found = protocol::detect(&ws.trace);
@@ -1019,6 +1034,13 @@ mod tests {
         assert_eq!(names("records bus.rd w"), ["where "]);
         assert!(names("records bus.rd where !(add").contains(&"!(addr ".to_string()));
         assert_eq!(names("select bus.r"), ["bus.rd "]);
+        // a stream for :records; :pick names one for records only; a time is the user's to write
+        assert_eq!(names("records bus.r")[..2], ["bus.r", "bus.rd"]);
+        assert_eq!(names("add top.acl"), ["top.aclk"]);
+        assert_eq!(names("color re"), ["red", "green", "orange"]);
+        assert_eq!(names("pick sig"), ["signals"]);
+        assert_eq!(names("pick signals bus"), [""; 0]);
+        assert_eq!(names("zoom 5"), [""; 0]);
     }
 
     /// `:scope` offers what the design says has something under it (spec §15).
@@ -1083,6 +1105,11 @@ mod tests {
         assert_eq!(then(&app, "pair").unwrap(), "");
         app.run("protocol cmd roles=valid,data when=valid").unwrap();
         assert_eq!(names(&app, "decode x cmd da"), ["data="]);
+        let c = complete("decode x cm", &app);
+        assert_eq!(
+            (c.items[0].label.as_str(), c.items[0].desc.as_str()),
+            ("cmd", "in this session")
+        );
         // rows: signals and groups; marks with their times once put
         app.run("add top.aclk").unwrap();
         app.run("group g").unwrap();
