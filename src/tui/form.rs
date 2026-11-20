@@ -2038,19 +2038,13 @@ mod tests {
             row: y,
             modifiers: crossterm::event::KeyModifiers::NONE,
         });
-        let Some(Overlay::Menu(menu)) = &a.overlay else {
-            panic!("no menu")
-        };
-        let k = menu
+        let k = crate::tests::menu(&a)
             .items
             .iter()
             .position(|i| i.label == "Decode as")
             .expect("Decode as");
         a.keys(&format!("{}<CR>", "j".repeat(k + 1))).unwrap();
-        let Some(Overlay::Menu(m)) = &a.overlay else {
-            panic!("no menu")
-        };
-        let sub: Vec<String> = m
+        let sub: Vec<String> = crate::tests::menu(&a)
             .sub
             .as_ref()
             .unwrap()

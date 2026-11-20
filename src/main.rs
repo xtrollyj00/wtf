@@ -347,7 +347,7 @@ mod tests {
         p
     }
 
-    fn menu(app: &App) -> &tui::app::Menu {
+    pub(crate) fn menu(app: &App) -> &tui::app::Menu {
         let Some(app::Overlay::Menu(m)) = &app.overlay else {
             panic!("no menu")
         };

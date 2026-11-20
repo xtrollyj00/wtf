@@ -1329,10 +1329,7 @@ mod tests {
     }
 
     fn hl(app: &App) -> usize {
-        let Some(Overlay::Picker(p)) = &app.overlay else {
-            panic!("no picker")
-        };
-        p.hl
+        pk(app).hl
     }
 
     #[test]
@@ -1349,10 +1346,7 @@ mod tests {
         key(&mut app, KeyCode::Char('p'), ctrl);
         key(&mut app, KeyCode::Up, none);
         assert_eq!(hl(&app), 0, "stops at the first");
-        let Some(Overlay::Picker(p)) = &app.overlay else {
-            panic!("no picker")
-        };
-        let page = p.page;
+        let page = pk(&app).page;
         assert!((1..5).contains(&page));
         key(&mut app, KeyCode::PageDown, none);
         assert_eq!(hl(&app), page);
