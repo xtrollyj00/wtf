@@ -84,21 +84,17 @@ pub(super) fn declare(app: &mut Workspace, a: &WorkspaceArgs) -> Result<(), Stri
                 "protocol {name} from a file takes no roles, when or fields"
             ));
         } else {
-            match app.loader.clone() {
-                Some(load) => match load(w) {
-                    Ok(loaded) => match app.add_loaded(loaded, w) {
-                        Ok(()) => kept.push(session::Protocol {
-                            name: Some(Value::String(name.into())),
-                            wasm: Some(Value::String(w.into())),
-                            ..Default::default()
-                        }),
-                        Err(e) => errors.push(format!("protocol {name}: {e}")),
-                    },
-                    Err(e) => errors.push(format!("{w}: {e}")),
+            // the error names the file already
+            match crate::wasm::load_one(std::path::Path::new(w)) {
+                Ok(loaded) => match app.add_loaded(loaded, w) {
+                    Ok(()) => kept.push(session::Protocol {
+                        name: Some(Value::String(name.into())),
+                        wasm: Some(Value::String(w.into())),
+                        ..Default::default()
+                    }),
+                    Err(e) => errors.push(format!("protocol {name}: {e}")),
                 },
-                None => errors.push(format!(
-                    "{w}: this wtf has no host for protocols from files"
-                )),
+                Err(e) => errors.push(e),
             }
         }
     }
@@ -116,25 +112,6 @@ pub(super) fn declare(app: &mut Workspace, a: &WorkspaceArgs) -> Result<(), Stri
             &mut errors,
         );
     }
-    // a row that is neither a signal nor a group is the one wrong shape the typed file still
-    // carries: say how to write it (spec §15)
-    let mut rows = Vec::with_capacity(file.rows.len());
-    for row in std::mem::take(&mut file.rows) {
-        match row {
-            session::model::Row::Other(v) => {
-                let json = rmcp::serde_json::to_string(&v).unwrap_or_default();
-                errors.push(if v.is_str() {
-                    format!("rows: {json} is not a row: write {{\"signal\": {json}}}")
-                } else {
-                    format!(
-                        "rows: {json} is not a row: write {{\"signal\": ...}} or {{\"group\": ..., \"rows\": [...]}}"
-                    )
-                });
-            }
-            row => rows.push(row),
-        }
-    }
-    file.rows = rows;
     // what the declaration itself makes, unknown until the validator makes it: a decode's stream
     // and its fields, a computed signal — a row may show one (the rows come after them)
     let made: Vec<String> = file
@@ -238,7 +215,19 @@ fn resolve_rows(
                     .filter_map(|r| Value::try_from(r).ok())
                     .collect();
             }
-            session::model::Row::Other(_) => {}
+            // neither a signal nor a group, the one wrong shape the typed file still carries, in
+            // a group too: say how to write it (spec §15)
+            session::model::Row::Other(v) => {
+                let json = rmcp::serde_json::to_string(v).unwrap_or_default();
+                errors.push(if v.is_str() {
+                    format!("rows: {json} is not a row: write {{\"signal\": {json}}}")
+                } else {
+                    format!(
+                        "rows: {json} is not a row: write {{\"signal\": ...}} or {{\"group\": ..., \"rows\": [...]}}"
+                    )
+                });
+                return false;
+            }
         }
         true
     });

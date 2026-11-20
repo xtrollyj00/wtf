@@ -1478,10 +1478,8 @@ impl ServerHandler for Wtf {
                     None => None,
                 }
             }
-            // rmcp answers arguments that don't parse with an invalid-params error
-            Err(e) if trail::STEPS.contains(&tool.as_str()) => {
-                Some(trail::step(&tool, "", &e.message, true, None))
-            }
+            // arguments that don't parse are an error result above (rmcp 3.9); an `Err` is an
+            // unknown tool, no step
             _ => None,
         };
         if let (Some(step), Ok(w)) = (step, current(self)) {
