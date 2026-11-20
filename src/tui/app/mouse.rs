@@ -217,7 +217,7 @@ impl App {
             Some(Overlay::Help) | Some(Overlay::Examine(_)) => return self.box_mouse(m, at),
             Some(Overlay::Browser(_)) => return self.browser_mouse(m, at, now),
             Some(Overlay::Records(_)) => return self.records_mouse(m, at, now),
-            Some(Overlay::Messages(_)) => return self.messages_mouse(m, at),
+            Some(Overlay::Messages(i)) => return self.messages_mouse(i, m, at),
             Some(Overlay::Picker(_)) => {
                 let cp = self.ws.checkpoint();
                 self.picker_mouse(m, at, now);
@@ -645,10 +645,7 @@ impl App {
     }
 
     /// `:messages`: the wheel moves, a click outside closes.
-    fn messages_mouse(&mut self, m: MouseEvent, (x, y): (usize, usize)) {
-        let Some(Overlay::Messages(i)) = self.overlay else {
-            return;
-        };
+    fn messages_mouse(&mut self, i: usize, m: MouseEvent, (x, y): (usize, usize)) {
         let last = self.notes.len().saturating_sub(1);
         match m.kind {
             MouseEventKind::ScrollDown => self.overlay = Some(Overlay::Messages((i + 1).min(last))),

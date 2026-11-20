@@ -2756,6 +2756,41 @@ mod tests {
         assert_eq!(app.scroll, 0);
     }
 
+    /// The `:trail` box with the mouse: the wheel moves, a click highlights, a double click
+    /// jumps, a click outside closes.
+    #[test]
+    fn mouse_trail() {
+        let mut app = open("vcd", Some(SESSION));
+        let step = |ask: &str, time| wtf_core::workspace::Step {
+            tool: "find".into(),
+            ask: ask.into(),
+            answer: "1 matches".into(),
+            time,
+        };
+        app.ws.trail = vec![step("top.rst", Some(0)), step("top.cpu.busy", Some(20))];
+        keys(&mut app, ":trail\n");
+        let hl = |app: &App| match &app.overlay {
+            Some(app::Overlay::Records(r)) => r.hl,
+            _ => panic!("no trail"),
+        };
+        screen(&mut app, 100, Some(16));
+        app.mouse(at(MouseEventKind::ScrollDown, 50, 8, NONE));
+        assert_eq!(hl(&app), 1);
+        app.mouse(at(MouseEventKind::ScrollUp, 50, 8, NONE));
+        assert_eq!(hl(&app), 0);
+        let y = app.hit.records.iter().find(|r| r.1 == 1).unwrap().0 as u16;
+        let t0 = Instant::now();
+        click(&mut app, 50, y, NONE, t0, 0);
+        assert_eq!(hl(&app), 1);
+        click(&mut app, 50, y, NONE, t0, 100);
+        assert!(app.overlay.is_none());
+        assert_eq!(app.ws.view.cursor, 20);
+        keys(&mut app, "5l:trail\n");
+        screen(&mut app, 100, Some(16));
+        app.mouse(at(MouseEventKind::Down(MouseButton::Left), 0, 0, NONE));
+        assert!(app.overlay.is_none() && app.ws.view.cursor == 25);
+    }
+
     #[test]
     fn mouse_menu() {
         let mut app = open("vcd", Some(SESSION));
@@ -3145,6 +3180,9 @@ mod tests {
             r.y,
             NONE,
         ));
+        assert!(snapshot(&mut app, 100, Some(16)).contains("Space q  session"));
+        // the pointer moving over it does nothing
+        app.mouse(at(MouseEventKind::Moved, 5, 0, NONE));
         assert!(snapshot(&mut app, 100, Some(16)).contains("Space q  session"));
         app.mouse(at(MouseEventKind::Down(MouseButton::Left), 5, 0, NONE));
         assert!(app.leader.is_none());
