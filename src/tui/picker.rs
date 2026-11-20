@@ -1581,6 +1581,18 @@ mod tests {
         );
     }
 
+    /// A stream with no records says so.
+    #[test]
+    fn picker_no_records() {
+        let mut a = app("axilite.vcd");
+        a.run("decode bus axilite clock=aclk prefix=s_axi_")
+            .unwrap();
+        assert_eq!(
+            a.open_picker("records bus.rd.unmatched"),
+            Err("no records".into())
+        );
+    }
+
     #[test]
     fn picker_empty_small_and_undecoded() {
         let mut a = app("axilite.vcd");
@@ -1589,6 +1601,9 @@ mod tests {
             key(&mut a, KeyCode::Char(c), KeyModifiers::NONE);
         }
         assert!(crate::snapshot(&mut a, 100, Some(20)).contains("nothing matches"));
+        // Enter on nothing: the picker stays
+        key(&mut a, KeyCode::Enter, KeyModifiers::NONE);
+        assert!(matches!(a.overlay, Some(Overlay::Picker(_))));
         // too small for the box: the rows alone
         assert!(!crate::snapshot(&mut a, 30, Some(8)).contains("nothing matches"));
         // an interface not decoded yet, with the icons
