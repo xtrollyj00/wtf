@@ -505,6 +505,7 @@ impl App {
         };
         if out.is_empty() {
             return Err(match p.source {
+                Source::Signals => "no signals in this trace",
                 Source::Records => "no records",
                 Source::Sessions => "no agent is working on this machine",
                 Source::Interfaces => {

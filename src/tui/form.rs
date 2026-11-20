@@ -1586,6 +1586,29 @@ mod tests {
         assert!(!crate::snapshot(&mut a, 40, Some(20)).contains("decode"));
     }
 
+    /// A trace without signals: `Ctrl-Space` on a signal field says why no picker opens.
+    #[test]
+    fn picks_no_signal() {
+        let path = std::env::temp_dir().join(format!("wtf-novars-{}.vcd", std::process::id()));
+        std::fs::write(
+            &path,
+            "$timescale 1ns $end\n$enddefinitions $end\n#0\n#10\n",
+        )
+        .unwrap();
+        let t = wtf_core::trace::Trace::open(&path).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        let mut a = App::new(wtf_core::workspace::Workspace::new(t, "x".into()));
+        a.keys(":decode\ns\taxilite\t\t\t").unwrap();
+        assert_eq!(form(&a).fields[form(&a).at].key, "awvalid");
+        a.keys("<C-Space>").unwrap();
+        let m = a.msg.as_ref().unwrap();
+        assert!(
+            m.is_warn() && m.text() == "no signals in this trace",
+            "{m:?}"
+        );
+        assert!(matches!(a.overlay, Some(Overlay::Form(_))));
+    }
+
     /// `Ctrl-Space` on a signal field opens the signals picker on the role's name; `Enter` there
     /// fills the field and goes back to the form. On the protocol, it goes to the next one.
     #[test]
