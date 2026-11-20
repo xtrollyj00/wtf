@@ -143,13 +143,15 @@ signal = "top.stream.data"
   (`16.432us`, `2.595000001us`), read back to the same tick. A zoom finer than one tick per column
   is written as a fraction of a tick.
 - Unknown keys, at the top or in any entry (`[[signal]]`, `[[decode]]`, `[[trail]]`, ...), are
-  skipped with a warning, so files with extra settings still load. A `rows` or `trail` that
+  skipped with a warning naming the entry and the keys it takes (`rows: top.clk: unknown key:
+  colour (keys: signal, radix, color, open, fields)`), so files with extra settings still load. A `rows` or `trail` that
   isn't a list is skipped with a warning too; the steps a window holds then stay, as they do for
   any section in the wrong shape: a list where a table belongs, or a table where a list does,
   holds nothing and says so (`unit: must be a string`, `view: must be a table`).
 - Every warning names what it is about, and the rest of the session still loads: `unit: bad time
   unit: xs (s, ms, us, ns, ps, fs)`, `cursors.2.time: bad time: soon (...)`, `rows: top.clk:
-  unknown radix: roman (radixes: hex, bin, dec, sdec, oct)`. A section's entries by their place
+  unknown radix: roman (radixes: hex, bin, dec, sdec, oct)`, `rows: top.clk: enum: the file names
+  no values of top.clk`. A section's entries by their place
   in it, from 1: `signal [2]: needs a name and an expr`, `rows [5]: entry without signal or
   group`, and a group's own rows on top of the group's place (`rows [1].rows: must be a list`).
 

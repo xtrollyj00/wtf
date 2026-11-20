@@ -76,7 +76,7 @@ fn fit_a_range() {
     );
     assert_eq!(
         run(&mut ws, "fit 10ns"),
-        Err("usage: :fit, or :fit <from> <to> as cursors ('2 '3) or times".into())
+        Err("usage: :fit [<from> <to>], as cursors ('2 '3) or times".into())
     );
 }
 
@@ -478,7 +478,6 @@ fn command_table_is_the_dispatch() {
         ("select", "select"),
         ("signal foo", "signal"),
         ("cursor 10 1ns", "cursor"),
-        ("fit 10ns", "fit"),
         ("decode", "decode"),
         ("protocol", "protocol"),
     ] {
@@ -488,6 +487,8 @@ fn command_table_is_the_dispatch() {
             "{line} usage drifted"
         );
     }
+    // fit's says what its two arguments may be after it
+    assert!(usage_of("fit 10ns").starts_with(command::lookup("fit").unwrap().usage));
     assert_eq!(
         usage_of("zoom 0ns 40ns"),
         format!("{} 0ns 40ns", command::lookup("zoom").unwrap().usage)

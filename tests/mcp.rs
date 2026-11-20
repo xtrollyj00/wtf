@@ -923,13 +923,13 @@ fn workspace_fails_whole() {
     );
     // then the validator's: one unknown-key line per entry that carries one, keyed by where in the
     // file it sits (a `rows` entry has no name of its own), the group member's among the rows'
-    for needle in ["signal.colour", "rows.colour", "cursors.2.label"] {
-        assert!(
-            lines
-                .iter()
-                .any(|l| l.starts_with("unknown key: ") && l.contains(needle)),
-            "{err}"
-        );
+    for line in [
+        "signal op: unknown key: colour (keys: name, expr)",
+        "rows: top.clk: unknown key: colour (keys: signal, radix, color, open, fields)",
+        "rows: top.rst: unknown key: colour (keys: signal, radix, color, open, fields)",
+        "cursors.2: unknown key: label (keys: time, name, note)",
+    ] {
+        assert!(lines.contains(&line), "{err}");
     }
     assert_eq!(lines.len(), 6, "{err}");
     // a bad scope is one mistake among the others, its nearest scopes listed
@@ -970,6 +970,41 @@ fn workspace_fails_whole() {
             && last.contains("error: rows must be a list, not a number"),
         "{steps:?}"
     );
+}
+
+/// A failed declaration keeps the marks with their names and notes; a row names what the
+/// declaration makes before a trace path ending the same; each mistake is said once (spec §15).
+#[test]
+fn workspace_failure_keeps_marks() {
+    let dir = Dir::new("decl-marks");
+    let mut s = Server::start(&dir.0);
+    s.ok("open", json!({"trace": simple()}));
+    s.ok(
+        "workspace",
+        json!({"rows": [{"signal": "top.clk"}], "cursors": {"2": {"time": "20ns", "name": "a", "note": "b"}, "3": "40ns"}}),
+    );
+    let before = s.ok("view", json!({}));
+    assert_eq!(
+        s.tool(
+            "workspace",
+            json!({"rows": [{"signal": "top.nope"}], "unit": "xs"})
+        ),
+        Err(
+            "unit: bad time unit: xs (s, ms, us, ns, ps, fs or auto)\nunknown signal: top.nope"
+                .into()
+        )
+    );
+    assert_eq!(s.ok("view", json!({})), before);
+    assert!(
+        before.contains("2: 20ns, +20ns after 1, \"a\": b"),
+        "{before}"
+    );
+    // `busy` also ends top.cpu.busy: the row is the signal declared here
+    let shown = s.ok(
+        "workspace",
+        json!({"signal": [{"name": "busy", "expr": "top.clk"}], "rows": [{"signal": "busy"}]}),
+    );
+    assert!(shown.contains("> busy  busy\n"), "{shown}");
 }
 
 #[test]
@@ -1153,7 +1188,7 @@ fn window_commands_refused() {
     let mut s = Server::start(&dir.0);
     s.ok("open", json!({"trace": simple()}));
     // every command of the window's own list, not a closed few (spec §7, §15)
-    for line in [":trail", ":records clk", ":pick"] {
+    for line in [":trail", ":decodes", ":pick"] {
         let e = s.tool("command", json!({"line": line})).unwrap_err();
         let cmd = line
             .trim_start_matches(':')
@@ -1794,7 +1829,7 @@ fn records_of_a_declared_stream() {
         "rows": [{"signal": "nope2"}],
     });
     let bad = s.tool("workspace", decl);
-    assert_eq!(bad, Err("protocol e: field y is a string\nunknown signal: nope2\ndecode e0: e0.x: nope is no role: e names only its roles (v) and fields\nnot in trace: nope2".into()));
+    assert_eq!(bad, Err("protocol e: field y is a string\nunknown signal: nope2\ndecode e0: e0.x: nope is no role: e names only its roles (v) and fields".into()));
 }
 
 /// Protocols and decodes declared in the session's shape, through `workspace` (spec §15).
@@ -3013,5 +3048,21 @@ fn axis_errors_filter_by_severity() {
     assert!(
         g.contains("3 × severity=warning") && g.contains("2 × severity=error"),
         "{g}"
+    );
+}
+
+/// A window command the agent has a tool for names that tool (spec §15).
+#[test]
+fn window_commands_name_the_tool() {
+    let dir = Dir::new("refused_tool");
+    let mut s = Server::start(&dir.0);
+    s.ok("open", json!({"trace": simple()}));
+    assert_eq!(
+        s.tool("command", json!({"line": ":records clk"})),
+        Err(":records belongs to the user's window; use the `records` tool".into())
+    );
+    assert_eq!(
+        s.tool("command", json!({"line": "help names"})),
+        Err(":help belongs to the user's window; use the `help` tool".into())
     );
 }

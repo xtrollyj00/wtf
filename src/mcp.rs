@@ -1230,9 +1230,15 @@ impl Wtf {
             let cmd = line.split_whitespace().next().unwrap_or("");
             // the window's own commands are not this tool's (spec §15)
             if WINDOW_COMMANDS.contains(&cmd) {
-                return Err(format!(
-                    ":{cmd} belongs to the user's window; use `present` to show the workspace, `open` with no arguments to reopen the trace"
-                ));
+                // where the agent has a tool of its own for it, name that
+                return Err(match cmd {
+                    "records" | "help" => {
+                        format!(":{cmd} belongs to the user's window; use the `{cmd}` tool")
+                    }
+                    _ => format!(
+                        ":{cmd} belongs to the user's window; use `present` to show the workspace, `open` with no arguments to reopen the trace"
+                    ),
+                });
             }
             let rows = |app: &Workspace| -> Vec<String> {
                 let row = |r: &Row| match r {

@@ -43,6 +43,12 @@ pub(super) fn declare(app: &mut Workspace, a: &WorkspaceArgs) -> Result<(), Stri
     if auto {
         file.unit = None;
     }
+    // so a unit the validator would refuse is refused here, `auto` among the units listed
+    if let Some(u) = file.unit.take_if(|u| time::unit_named(u).is_err()) {
+        errors.push(format!(
+            "unit: bad time unit: {u} (s, ms, us, ns, ps, fs or auto)"
+        ));
+    }
     // a protocol from a file is loaded here — only the MCP has the host — and its card is the
     // file's, so roles, `when` and `fields` are refused; the stem is the protocol's name (spec §19)
     let mut kept = Vec::with_capacity(file.protocol.len());
@@ -203,23 +209,24 @@ fn pair_table(subject: &str, v: &mut Option<Value>, errors: &mut Vec<String>) {
 /// Each row's signal as the trace spells it: the MCP's rows are names, resolved under the
 /// declared scope (spec §15 "A name ambiguous in the trace"), so the errors are the ones a name
 /// gets. `made` names what the declaration itself makes (`decode`, `signal`): no path yet, since
-/// the validator makes them, so a row showing one is no mistake.
+/// the validator makes them, so a row showing one is no mistake. A row whose name doesn't resolve
+/// is reported here, its candidates listed, and taken out so the validator doesn't say it twice.
 fn resolve_rows(
     app: &mut Workspace,
     errors: &mut Vec<String>,
-    rows: &mut [session::model::Row],
+    rows: &mut Vec<session::model::Row>,
     made: &[String],
 ) {
-    for row in rows {
+    rows.retain_mut(|row| {
         match row {
-            session::model::Row::Signal(s) => {
-                if let Some(path) = row_path(app, errors, &s.signal, made) {
-                    s.signal = path;
-                }
-            }
+            session::model::Row::Signal(s) => match row_path(app, errors, &s.signal, made) {
+                Ok(Some(path)) => s.signal = path,
+                Ok(None) => {}
+                Err(()) => return false,
+            },
             session::model::Row::Group(g) => {
                 let Some(Value::Array(items)) = &mut g.rows else {
-                    continue;
+                    return true;
                 };
                 let mut members: Vec<session::model::Row> = std::mem::take(items)
                     .into_iter()
@@ -233,30 +240,37 @@ fn resolve_rows(
             }
             session::model::Row::Other(_) => {}
         }
-    }
+        true
+    });
 }
 
 /// The path a row's name resolves to: a bus, as a row shows one (a bit is a `values` column).
+/// `None` for a name the declaration makes; `Err` once the mistake is in `errors`.
 fn row_path(
     app: &mut Workspace,
     errors: &mut Vec<String>,
     name: &str,
     made: &[String],
-) -> Option<String> {
-    // a decode names its stream and its fields under it (`rx.frame.len`); the rows come after it
-    let made = made
-        .iter()
-        .any(|n| name == n || name.strip_prefix(n).is_some_and(|r| r.starts_with('.')));
+) -> Result<Option<String>, ()> {
+    // a decode names its stream and its fields under it (`rx.frame.len`); the rows come after it.
+    // Checked first: the trace may hold another var whose path ends the same way
+    if made.iter().any(|n| {
+        name == n
+            || name
+                .strip_prefix(n.as_str())
+                .is_some_and(|r| r.starts_with('.'))
+    }) {
+        return Ok(None);
+    }
     match app.resolve(name) {
-        Ok((v, None)) => Some(app.trace.vars[v].path.clone()),
-        _ if made => None,
+        Ok((v, None)) => Ok(Some(app.trace.vars[v].path.clone())),
         Ok(_) => {
             errors.push(format!("{name}: a bit can't be a row; add its bus"));
-            None
+            Err(())
         }
         Err(e) => {
             errors.push(e);
-            None
+            Err(())
         }
     }
 }

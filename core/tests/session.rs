@@ -224,13 +224,13 @@ fn warns_and_keeps_going() {
             "rows: top.clk: unknown colour: pink (colours: red, orange, yellow, green, cyan, blue, magenta, gray)",
             "nested group flattened: inner",
             "rows [5]: entry without signal or group",
-            "unknown key: rows.label",
+            "rows [5]: unknown key: label (keys: signal, group)",
             "not in trace: top.gone",
             "view.zoom: bad time",
             "view.time: bad time: soon (a number and a unit, 20ns or 1.5us; a plain number is file ticks)",
-            "unknown key: view.speed",
+            "view: unknown key: speed (keys: time, to, zoom)",
             "cursors: no cursor 12 (1-9)",
-            "unknown key: colour",
+            "session: unknown key: colour (keys: version, scope, unit, signal, names, protocol, decode, rows, view, cursors, trail)",
         ]
     );
     // what could be read was: a signal shown twice only once
@@ -314,10 +314,30 @@ fn unknown_entry_keys_warn() {
         ask = "top.cpu.busy"
         answer = "1 matches"
         when = "now"
+        [[signal]]
+        name = ""
+        expr = "top.clk"
+        [[rows]]
+        signal = "top.clk"
+        colour = "red"
+        radix = "enum"
+        fields = [{ field = "x", colour = "red" }]
+        [[rows]]
+        group = "g"
+        colapsed = true
     "#;
     assert_eq!(
         session::apply(&mut ws, text).unwrap(),
-        ["unknown key: signal.colour", "unknown key: trail.when"]
+        [
+            "signal low: unknown key: colour (keys: name, expr)",
+            "signal [2]: needs a name and an expr",
+            "rows: top.clk: enum: the file names no values of top.clk",
+            "top.clk has no field x",
+            "rows: top.clk: field x: unknown key: colour (keys: field, radix, color)",
+            "rows: top.clk: unknown key: colour (keys: signal, radix, color, open, fields)",
+            "rows [2]: unknown key: colapsed (keys: group, collapsed, rows)",
+            "trail [1]: unknown key: when (keys: tool, ask, answer, time)",
+        ]
     );
     assert!(ws.signals.iter().any(|s| s.0 == "low"));
     assert_eq!(ws.trail.len(), 1);

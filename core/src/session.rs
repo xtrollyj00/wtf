@@ -244,11 +244,18 @@ fn validate(app: &mut Workspace, file: File, shape: Shape) -> (Vec<String>, Comm
         warn.push("signal: must be a list".into());
     }
     for (i, s) in file.signal.into_iter().enumerate() {
-        unknown("signal.", &s.rest, &mut warn);
         let (name, expr) = (
-            s.name.as_ref().and_then(Value::as_str),
+            s.name
+                .as_ref()
+                .and_then(Value::as_str)
+                .filter(|n| !n.is_empty()),
             s.expr.as_ref().and_then(Value::as_str),
         );
+        let site = match name {
+            Some(n) => format!("signal {n}"),
+            None => format!("signal [{}]", i + 1),
+        };
+        unknown(&site, &s.rest, &["name", "expr"], &mut warn);
         match (name, expr) {
             (Some(n), Some(e)) => app
                 .define(n, e)
@@ -262,7 +269,11 @@ fn validate(app: &mut Workspace, file: File, shape: Shape) -> (Vec<String>, Comm
         warn.push("names: must be a list".into());
     }
     for (i, n) in file.names.into_iter().enumerate() {
-        unknown("names.", &n.rest, &mut warn);
+        let site = match n.signal.as_ref().and_then(Value::as_str) {
+            Some(sig) => format!("names {sig}"),
+            None => format!("names [{}]", i + 1),
+        };
+        unknown(&site, &n.rest, &["signal", "values"], &mut warn);
         match (
             n.signal.as_ref().and_then(Value::as_str),
             n.values.as_ref().and_then(Value::as_str),
@@ -293,8 +304,13 @@ fn validate(app: &mut Workspace, file: File, shape: Shape) -> (Vec<String>, Comm
         warn.push("protocol: must be a list".into());
     }
     for (i, p) in file.protocol.into_iter().enumerate() {
-        unknown("protocol.", &p.rest, &mut warn);
         let subject = named("protocol", text(&p.name), i);
+        unknown(
+            &subject,
+            &p.rest,
+            &["name", "roles", "when", "fields", "wasm"],
+            &mut warn,
+        );
         let roles = match p.roles.as_ref() {
             None => None,
             Some(r) => r.as_array().map(|r| {
@@ -357,8 +373,13 @@ fn validate(app: &mut Workspace, file: File, shape: Shape) -> (Vec<String>, Comm
         warn.push("decode: must be a list".into());
     }
     for (i, d) in file.decode.into_iter().enumerate() {
-        unknown("decode.", &d.rest, &mut warn);
         let subject = named("decode", text(&d.name), i);
+        unknown(
+            &subject,
+            &d.rest,
+            &["name", "protocol", "clock", "signals", "params"],
+            &mut warn,
+        );
         match (
             text(&d.name),
             text(&d.protocol),
@@ -425,7 +446,7 @@ fn validate(app: &mut Workspace, file: File, shape: Shape) -> (Vec<String>, Comm
     }
     commit.start = view.time.and_then(|v| time(&v, "view.time", &mut warn));
     commit.to = view.to.and_then(|v| time(&v, "view.to", &mut warn));
-    unknown("view.", &view.rest, &mut warn);
+    unknown("view", &view.rest, &["time", "to", "zoom"], &mut warn);
     if shape.cursors_bad {
         warn.push("cursors: must be a table".into());
     }
@@ -470,7 +491,12 @@ fn validate(app: &mut Workspace, file: File, shape: Shape) -> (Vec<String>, Comm
                         }
                         None => warn.push(format!("cursors.{k}: needs a time")),
                     }
-                    unknown(&format!("cursors.{k}."), &m, &mut warn);
+                    unknown(
+                        &format!("cursors.{k}"),
+                        &m,
+                        &["time", "name", "note"],
+                        &mut warn,
+                    );
                 }
                 v => {
                     let site = format!("cursors.{k}");
@@ -496,7 +522,15 @@ fn validate(app: &mut Workspace, file: File, shape: Shape) -> (Vec<String>, Comm
         steps(app, &file.trail, &mut trail, &mut warn);
         commit.trail = Some(trail);
     }
-    unknown("", &file.rest, &mut warn);
+    unknown(
+        "session",
+        &file.rest,
+        &[
+            "version", "scope", "unit", "signal", "names", "protocol", "decode", "rows", "view",
+            "cursors", "trail",
+        ],
+        &mut warn,
+    );
     (warn, commit)
 }
 
@@ -515,8 +549,12 @@ fn rows_of(
     };
     for (i, row) in rows.into_iter().enumerate() {
         let Value::Table(mut row) = row else { continue };
-        let site = format!("{site} [{}]", i + 1);
+        let mut site = format!("{site} [{}]", i + 1);
+        // the keys the entry takes, for one it doesn't: a signal's or a group's
+        let mut keys: &[&str] = &["signal", "group"];
         if let Some(Value::String(path)) = row.remove("signal") {
+            keys = &["signal", "radix", "color", "open", "fields"];
+            site = format!("rows: {path}");
             let levels: Vec<String> = match row.remove("open") {
                 Some(Value::Array(a)) => a
                     .iter()
@@ -577,6 +615,7 @@ fn rows_of(
                 }
             }
         } else if let Some(Value::String(name)) = row.remove("group") {
+            keys = &["group", "collapsed", "rows"];
             let collapsed = row
                 .remove("collapsed")
                 .and_then(|c| c.as_bool())
@@ -593,7 +632,7 @@ fn rows_of(
         } else {
             warn.push(format!("{site}: entry without signal or group"));
         }
-        unknown("rows.", &row, warn);
+        unknown(&site, &row, keys, warn);
     }
 }
 
@@ -620,6 +659,14 @@ fn look_keys(
                 "unknown radix: {name} (radixes: {})",
                 candidates.join(", ")
             )),
+            // enum fits any width: it misfits a signal no value names were given for
+            Err(RadixErr::Misfit(_))
+                if v.names.is_none()
+                    && radix::parse_name(r.as_str().unwrap_or(""))
+                        .is_some_and(|(r, _, _)| r == radix::ENUM) =>
+            {
+                warn.push(format!("enum: the file names no values of {path}"))
+            }
             Err(RadixErr::Misfit(shown)) => warn.push(format!("radix {shown} doesn't fit {path}")),
         }
     }
@@ -658,12 +705,22 @@ fn fields_of(app: &Workspace, sig: &mut Sig, fields: Value, path: &str, warn: &m
         }
         f.remove("radix");
         f.remove("color");
-        unknown("rows.fields.", &f, warn);
+        unknown(
+            &format!("rows: {path}: field {name}"),
+            &f,
+            &["field", "radix", "color"],
+            warn,
+        );
     }
 }
 
-fn unknown(prefix: &str, t: &Table, warn: &mut Vec<String>) {
-    warn.extend(t.keys().map(|k| format!("unknown key: {prefix}{k}")));
+/// The keys an entry doesn't take, each a warning naming where it sits and the keys it does take
+/// (spec §11): a misspelt key is a mistake to fix, not one dropped without a word.
+fn unknown(site: &str, t: &Table, keys: &[&str], warn: &mut Vec<String>) {
+    warn.extend(
+        t.keys()
+            .map(|k| format!("{site}: unknown key: {k} (keys: {})", keys.join(", "))),
+    );
 }
 
 /// A level open under a row, named from the row's name on (`pkts`, `pkts[1]`, `pkts[1].pair`; a
@@ -702,7 +759,12 @@ fn steps(
     let (fpt, end) = (app.trace.fs_per_tick, app.trace.end());
     let opt = |v: &Option<Value>| v.as_ref().and_then(Value::as_str).map(String::from);
     for (i, s) in steps.iter().enumerate() {
-        unknown("trail.", &s.rest, warn);
+        unknown(
+            &format!("trail [{}]", i + 1),
+            &s.rest,
+            &["tool", "ask", "answer", "time"],
+            warn,
+        );
         match (opt(&s.tool), opt(&s.ask), opt(&s.answer)) {
             (Some(tool), Some(ask), Some(answer)) => {
                 let time = opt(&s.time)

@@ -109,7 +109,7 @@ pub const COMMANDS: &[Command] = &[
     },
     Command {
         name: "signal",
-        usage: "usage: :signal <name> = <signal>, or :signal <name> off",
+        usage: "usage: :signal <name> = <signal> | off",
         desc: "Name a computed signal, e.g. :signal op = cmd[7:0] or :signal hdr = {a, b}; :signal op off removes it",
         args: &[ArgKind::Text, ArgKind::Lit("=|off"), ArgKind::Signal],
         trailing: true,
@@ -127,7 +127,7 @@ pub const COMMANDS: &[Command] = &[
     },
     Command {
         name: "fit",
-        usage: "usage: :fit, or :fit <from> <to> as cursors ('2 '3) or times",
+        usage: "usage: :fit [<from> <to>]",
         desc: "Zoom to the whole simulation, or between cursors or times, e.g. :fit '2 '3 or :fit 10ns 20ns",
         args: &[ArgKind::MarkRef, ArgKind::MarkRef],
         trailing: false,
@@ -136,7 +136,7 @@ pub const COMMANDS: &[Command] = &[
     },
     Command {
         name: "scope",
-        usage: "usage: :scope <scope>",
+        usage: "usage: :scope [path]",
         desc: "Resolve names under a scope first, e.g. :scope top.cpu makes state top.cpu.state; none without a path",
         args: &[ArgKind::Scope],
         trailing: false,
@@ -190,7 +190,7 @@ pub const COMMANDS: &[Command] = &[
     },
     Command {
         name: "names",
-        usage: "usage: :names <signal> <spec>",
+        usage: "usage: :names <signal> <value>=<name>...",
         desc: "Name a signal's values, shown by the enum radix and searched by name, e.g. :names state 0=IDLE 1=BUSY; off removes them; alone, a card of the values the selected signal takes",
         args: &[ArgKind::Signal, ArgKind::Text],
         trailing: true,
@@ -257,7 +257,7 @@ pub const COMMANDS: &[Command] = &[
     },
     Command {
         name: "rm",
-        usage: "usage: :rm <name>...",
+        usage: "usage: :rm [path|pattern]...",
         desc: "Remove matching rows, or the selected row; :rm ** removes all",
         args: &[ArgKind::Signal],
         trailing: true,
@@ -747,7 +747,7 @@ fn fit(app: &mut Workspace, arg: &str) -> Result<(), String> {
         }
         _ => {
             let usage = lookup("fit").expect("in COMMANDS").usage;
-            return Err(usage.into());
+            return Err(format!("{usage}, as cursors ('2 '3) or times"));
         }
     }
     Ok(())

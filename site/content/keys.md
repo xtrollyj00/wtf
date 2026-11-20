@@ -289,22 +289,22 @@ New signals go below the selected row, at the accent line.
 | `:add <path\|pattern>...` | Add signals below the selected row (after a selected group); a scope becomes a group, e.g. :add top.cpu.* |
 | `:e` | Reload the trace, keeping signals, groups, cursor and zoom |
 | `:decode <name> <protocol> <role>=<signal>...` | Decode a protocol into streams, e.g. :decode rx axis clock=clk tvalid=rx_tvalid tready=rx_tready tdata=rx_tdata tlast=rx_tlast; alone, a form that fills it in |
-| `:signal <name> = <signal>, or :signal <name> off` | Name a computed signal, e.g. :signal op = cmd[7:0] or :signal hdr = {a, b}; :signal op off removes it |
+| `:signal <name> = <signal> \| off` | Name a computed signal, e.g. :signal op = cmd[7:0] or :signal hdr = {a, b}; :signal op off removes it |
 | `:zoom <time>` | Set the time per column, e.g. :zoom 1ns |
-| `:fit, or :fit <from> <to> as cursors ('2 '3) or times` | Zoom to the whole simulation, or between cursors or times, e.g. :fit '2 '3 or :fit 10ns 20ns |
-| `:scope <scope>` | Resolve names under a scope first, e.g. :scope top.cpu makes state top.cpu.state; none without a path |
+| `:fit [<from> <to>]` | Zoom to the whole simulation, or between cursors or times, e.g. :fit '2 '3 or :fit 10ns 20ns |
+| `:scope [path]` | Resolve names under a scope first, e.g. :scope top.cpu makes state top.cpu.state; none without a path |
 | `:radix <name>` | Set the radix: hex bin dec sdec oct ascii float enum, q4.12 / uq4.12 fixed point |
 | `:color <color\|off>` | Colour the selected row or group: red orange yellow green cyan blue magenta gray; off for the theme's |
 | `:group <name>` | Group the selected rows (V selects them) |
 | `:protocol <name> roles=<a,b> when=<expr> <field>=<expr>... \| :protocol <name> wasm=<file>` | Define a protocol on its roles, a record per cycle where when holds, e.g. :protocol cmd roles=valid,ready,data when=valid && ready op=data[7:0]; :decode puts it on signals; alone, a form with the selected rows as roles; :protocol search, one filled in from the last clocked search |
-| `:names <signal> <spec>` | Name a signal's values, shown by the enum radix and searched by name, e.g. :names state 0=IDLE 1=BUSY; off removes them; alone, a card of the values the selected signal takes |
+| `:names <signal> <value>=<name>...` | Name a signal's values, shown by the enum radix and searched by name, e.g. :names state 0=IDLE 1=BUSY; off removes them; alone, a card of the values the selected signal takes |
 | `:rename <name>` | Rename the group the selected row is in |
 | `:ungroup` | Dissolve the group the selected row is in, keeping its signals |
 | `:select <row> [<last row>]` | Select a signal or group by name, or the rows from one to another |
 | `:cursor <1-9> [time\|off] [name=<text>] [note=<text>]` | Put mark n at a time (1: the cursor), name it, remove it, or jump to it, e.g. :cursor 2 120ns name=bad write |
 | `:undo` | Undo the last change to the rows |
 | `:redo` | Redo a change undone with :undo |
-| `:rm <name>...` | Remove matching rows, or the selected row; :rm ** removes all |
+| `:rm [path\|pattern]...` | Remove matching rows, or the selected row; :rm ** removes all |
 | `:records <streams> [where <expr>]` | Browse records as a table: a stream, a decode's results (:records bus), a glob; / filters, s sorts, = groups |
 | `:decodes` | List the decodes made: Enter opens records, a adds rows, e edits, dd removes |
 | `:pick <source>` | A fuzzy list with a preview: signals, marks, records <stream>, commands, sessions, trail, interfaces; Ctrl-s goes to the next |

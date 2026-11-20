@@ -161,10 +161,12 @@ reuse wtf's own pieces:
   `decode` are added, each replacing one of the same name, and those it doesn't name stay, so
   an interface decoded with `command` before is kept. `user_view` with `adopt` keeps them the
   same way. Every unknown or ambiguous name (the scope's too), bad radix and bad time is reported
-  at once and nothing changes, so one retry fixes them; the declaration's own problems come
-  first, then the validator's, each named for the part it is about. `unit` sets the workspace's
-  time unit (`auto`: the one that fits). A key it doesn't take, at the top or in any entry
-  (a signal, protocol, decode, names, row, field, group member or mark), is an error;
+  at once, each once, and nothing changes (the marks with their names and notes stay), so one
+  retry fixes them; the declaration's own problems come first, then the validator's, each named
+  for the part it is about. A row names what the declaration makes before a trace signal its
+  name ends. `unit` sets the workspace's time unit (`auto`: the one that fits). A key it doesn't
+  take, at the top or in any entry (a signal, protocol, decode, names, row, field, group member
+  or mark), is an error naming the entry and the keys it takes;
   the session file's `version` and `trail` aren't declared. A key of the wrong JSON kind, a string
   where a list goes, is an error naming the key, the kind it takes and an example. It answers as
   `view` does.
@@ -195,7 +197,8 @@ reuse wtf's own pieces:
 - Session files aren't loaded; the agent starts from an empty workspace (or adopts the user's view).
 - `command` refuses the window's own commands (the window's list in spec §7: `:w`, `:q`, `:e`,
   `:help`, `:trail`, `:records`, `:pick`, …), not a closed list: what the core does not answer
-  there is a window's to run.
+  there is a window's to run. Where the agent has a tool for it (`:records`, `:help`), the
+  refusal names that tool.
 - `protocols` is the agent's documentation, generated from the registry so it can't drift: the
   list of protocols (built in, on streams, the workspace's own), and for one its roles, params, the
   streams it makes with their fields (worked out from its steps), the values of its violation

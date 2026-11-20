@@ -1175,11 +1175,14 @@ impl Workspace {
         declare: impl FnOnce(&mut Self) -> Result<(), String>,
     ) -> Result<Msg, String> {
         let saved = std::mem::take(&mut self.saved);
+        // `begin` clears the marks before `attempt` takes its snapshot: a failure puts them back
+        let marks = self.marks.clone();
         let (before, cursor, back) = self.begin(keep_decoding);
         let done = self.attempt(declare);
         self.saved = saved;
         if let Err(e) = done {
             (self.view.cursor, self.back) = (cursor, back);
+            self.marks = marks;
             return Err(e);
         }
         Ok(self.end(before, Vec::new()))

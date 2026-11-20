@@ -9,7 +9,6 @@ use crate::draw::icon as ic;
 use crate::tui::picker::Source;
 
 /// What the window does with a `:` command before the core runs it (spec §7).
-#[allow(dead_code)] // phase 2 answers `Refuse`'s text on the status line
 pub enum When {
     /// The window's own: it answers and the core never sees it.
     Window,
@@ -179,7 +178,6 @@ pub const WINDOW: &[WindowCmd] = &[
 ];
 
 /// What the window does with `cmd` and `arg` before the core runs it (spec §7). None: the core's.
-#[allow(dead_code)] // phase 2 dispatches on it; until then only the listings and the tests ask
 pub fn window_for(cmd: &str, arg: &str) -> Option<&'static WindowCmd> {
     let arg = arg.trim();
     WINDOW.iter().find(|w| w.name == cmd && w.when.claims(arg))
@@ -209,68 +207,71 @@ pub fn at_time() -> Listed {
     }
 }
 
+/// The window refuses this core command (spec §7): no listing shows it.
+fn refused(name: &str) -> bool {
+    WINDOW
+        .iter()
+        .any(|w| w.name == name && matches!(w.when, When::Refuse(_)))
+}
+
+fn from_core(c: &'static command::Command) -> Listed {
+    Listed {
+        name: c.name,
+        usage: shown(c),
+        desc: c.desc,
+        args: c.args,
+        trailing: c.trailing,
+        icon: c.icon,
+    }
+}
+
+fn from_window(w: &'static WindowCmd) -> Listed {
+    Listed {
+        name: w.name,
+        usage: w.usage.to_string(),
+        desc: w.desc,
+        args: w.args,
+        trailing: w.trailing,
+        icon: w.icon,
+    }
+}
+
 /// Every `:` command a listing shows: the core's but for the one the window refuses, then the
 /// window's own (spec §7).
 pub fn listed() -> Vec<Listed> {
-    let refused = |name: &str| {
-        WINDOW
-            .iter()
-            .any(|w| w.name == name && matches!(w.when, When::Refuse(_)))
-    };
     let mut out: Vec<Listed> = command::COMMANDS
         .iter()
         .filter(|c| !refused(c.name))
-        .map(|c| Listed {
-            name: c.name,
-            usage: shown(c.name, c.usage, c.args),
-            desc: c.desc,
-            args: c.args,
-            trailing: c.trailing,
-            icon: c.icon,
-        })
+        .map(from_core)
         .collect();
     out.extend(
         WINDOW
             .iter()
             .filter(|w| command::lookup(w.name).is_none())
-            .map(|w| Listed {
-                name: w.name,
-                usage: w.usage.to_string(),
-                desc: w.desc,
-                args: w.args,
-                trailing: w.trailing,
-                icon: w.icon,
-            }),
+            .map(from_window),
     );
     out
 }
 
 /// The listed command of that name, if `:` has it.
 pub fn entry(name: &str) -> Option<Listed> {
-    listed().into_iter().find(|c| c.name == name)
+    match command::lookup(name) {
+        Some(c) if !refused(name) => Some(from_core(c)),
+        Some(_) => None,
+        None => WINDOW.iter().find(|w| w.name == name).map(from_window),
+    }
 }
 
-/// The usage line as a listing shows it: the error line without `usage: `, and the one that says
-/// what to do instead (`zoom`'s) as the form the command takes.
-fn shown(name: &str, usage: &str, args: &[ArgKind]) -> String {
-    match usage.strip_prefix("usage: ") {
+/// The usage line as a listing shows it: the error line without `usage: `, and for the one that
+/// says what to do instead (`zoom`'s) its arguments' placeholders.
+fn shown(c: &command::Command) -> String {
+    match c.usage.strip_prefix("usage: ") {
         Some(u) => u.to_string(),
-        None => format!(":{name} {}", placeholders(args, false)),
+        None => {
+            let args: Vec<&str> = c.args.iter().map(|a| a.placeholder()).collect();
+            format!(":{} {}", c.name, args.join(" "))
+        }
     }
-}
-
-/// What a command's arguments look like, joined: `<name> <protocol>`, `...` at the end when the
-/// last one takes more.
-fn placeholders(args: &[ArgKind], trailing: bool) -> String {
-    let mut s = args
-        .iter()
-        .map(|a| a.placeholder())
-        .collect::<Vec<_>>()
-        .join(" ");
-    if trailing && !args.is_empty() {
-        s.push_str("...");
-    }
-    s
 }
 
 /// What `Tab` can put on the command line (spec §4 "Command line"): the command being typed, or
@@ -380,9 +381,14 @@ fn commands(line: &str, end: usize, alone: bool) -> Completion {
     let items = found
         .into_iter()
         .map(|c| {
-            // what is still to type after the command itself
+            // the arguments still to type, from the usage: `:zoom <time>` -> `<time>`
             let then = if alone {
-                placeholders(c.args, c.trailing)
+                c.usage
+                    .trim_start_matches(':')
+                    .strip_prefix(c.name)
+                    .unwrap_or("")
+                    .trim_start()
+                    .to_string()
             } else {
                 String::new()
             };
@@ -749,7 +755,21 @@ fn arguments(c: &Listed, line: &str, app: &crate::tui::app::App) -> Completion {
             "",
             fuzzy(word, set.split('|'))
                 .into_iter()
-                .map(|v| item(format!("{v} "), ""))
+                // `name=` goes on with its value, no space; `=` is a word of its own
+                .map(|v| {
+                    let sp = if v != "=" && v.ends_with('=') {
+                        ""
+                    } else {
+                        " "
+                    };
+                    let desc = match v {
+                        "=" => "define it",
+                        "off" => "remove it",
+                        "where" => "only the records it holds for",
+                        _ => "",
+                    };
+                    item(format!("{v}{sp}"), desc)
+                })
                 .collect(),
         ),
         // a name, a time, the rest of a line: the user's to write
@@ -919,6 +939,10 @@ mod tests {
         assert_eq!(names("radix he"), ["hex"]);
         assert_eq!(names("signal op "), ["= ", "off "]);
         assert_eq!(names("signal op of"), ["off "]);
+        assert_eq!(names("cursor 2 na"), ["name="]);
+        let descs = |line: &str| complete(line, &app).items.into_iter().map(|i| i.desc);
+        assert!(descs("signal op ").eq(["define it", "remove it"]));
+        assert!(descs("records bus wh").eq(["only the records it holds for"]));
         // the interface found in the trace, with its whole line, before the protocol alone
         let c = complete("decode bus axil", &app);
         assert_eq!(c.what, "protocol");
@@ -980,7 +1004,7 @@ mod tests {
             names("cursor "),
             ["1 ", "2 ", "3 ", "4 ", "5 ", "6 ", "7 ", "8 ", "9 "]
         );
-        assert_eq!(names("cursor 2 n"), ["name= ", "note= "]);
+        assert_eq!(names("cursor 2 n"), ["name=", "note="]);
         assert_eq!(names("pick rec"), ["records "]);
         assert_eq!(names("follow "), ["off"]);
         // what exists once a decode has run: its streams, their fields after where, the rows
@@ -1085,6 +1109,56 @@ mod tests {
 
     /// The window's own commands are listed with the core's, once each, and the one it refuses
     /// is not (spec §7).
+    /// What `:<C-Space>` shows still to type after each command: its usage after `:name`, as
+    /// the listing shows it (spec §4 "Command line").
+    #[test]
+    fn hints_follow_the_usage() {
+        let hints: Vec<String> = listed()
+            .iter()
+            .map(|c| {
+                let it = commands(c.name, c.name.len(), true).items;
+                let it = it.iter().find(|i| i.text.trim_end() == c.name).unwrap();
+                format!("{} {}", c.name, it.then).trim_end().to_string()
+            })
+            .collect();
+        assert_eq!(
+            hints,
+            [
+                "add <path|pattern>...",
+                "e",
+                "decode <name> <protocol> <role>=<signal>...",
+                "signal <name> = <signal> | off",
+                "zoom <time>",
+                "fit [<from> <to>]",
+                "scope [path]",
+                "radix <name>",
+                "color <color|off>",
+                "group <name>",
+                "protocol <name> roles=<a,b> when=<expr> <field>=<expr>... | :protocol <name> wasm=<file>",
+                "names <signal> <value>=<name>...",
+                "rename <name>",
+                "ungroup",
+                "select <row> [<last row>]",
+                "cursor <1-9> [time|off] [name=<text>] [note=<text>]",
+                "undo",
+                "redo",
+                "rm [path|pattern]...",
+                "records <streams> [where <expr>]",
+                "decodes",
+                "pick <source>",
+                "messages",
+                "trail",
+                "agent",
+                "follow [<id>|off]",
+                "w [file]",
+                "wq",
+                "help [topic]",
+                "q",
+                "q!",
+            ]
+        );
+    }
+
     #[test]
     fn window_rows_are_listed() {
         let names: Vec<&str> = listed().iter().map(|c| c.name).collect();
