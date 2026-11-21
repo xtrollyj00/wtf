@@ -112,13 +112,13 @@ pub const RULES: &[axi::RuleKind] = &[
         suffix: "unknown",
         about: "a valid or ready is x or z out of reset",
         spec: "A2.3",
-        severity: Severity::Warning,
+        severity: Severity::Error,
     },
     axi::RuleKind {
         suffix: "payload_unknown",
         about: "a payload signal is x or z while its valid",
         spec: "A2.3",
-        severity: Severity::Warning,
+        severity: Severity::Error,
     },
     axi::RuleKind {
         suffix: "early",
@@ -255,7 +255,7 @@ pub const DEF: Def = Def {
         },
         RoleDef {
             name: "aresetn",
-            required: false,
+            required: true,
             default: None,
             about: "the reset, active low (reset_active=high: active high)",
         },
@@ -354,15 +354,13 @@ impl Protocol for Axilite {
         if wr {
             out.extend(
                 self.h
-                    .join("wr", "wr.unmatched", &["aw", "w"], "b", self.timeout)
-                    .unwrap_or_default(),
+                    .join("wr", "wr.unmatched", &["aw", "w"], "b", self.timeout),
             );
         }
         if rd {
             out.extend(
                 self.h
-                    .join("rd", "rd.unmatched", &["ar"], "r", self.timeout)
-                    .unwrap_or_default(),
+                    .join("rd", "rd.unmatched", &["ar"], "r", self.timeout),
             );
         }
         out

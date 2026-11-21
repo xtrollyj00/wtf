@@ -25,13 +25,13 @@ pub const RULES: &[Rule] = &[
     },
     Rule {
         name: "unknown",
-        severity: Severity::Warning,
+        severity: Severity::Error,
         spec: "2.2",
         about: "tvalid or tready is x or z out of reset",
     },
     Rule {
         name: "payload_unknown",
-        severity: Severity::Warning,
+        severity: Severity::Error,
         spec: "2.4",
         about: "a payload signal is x or z while tvalid",
     },
@@ -132,7 +132,7 @@ pub const DEF: Def = Def {
         },
         RoleDef {
             name: "aresetn",
-            required: false,
+            required: true,
             default: None,
             about: "the reset, active low (reset_active=high: active high)",
         },

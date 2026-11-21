@@ -102,7 +102,7 @@ const ROLES: &[RoleDef] = &[
     },
     RoleDef {
         name: "aresetn",
-        required: false,
+        required: true,
         fill: None,
         about: "the reset, active low (reset_active=high: active high)",
     },
@@ -124,13 +124,13 @@ const RULES: &[(&str, Severity, &str, &str)] = &[
     ),
     (
         "unknown",
-        Severity::Warning,
+        Severity::Error,
         "2.2",
         "tvalid or tready is x or z out of reset",
     ),
     (
         "payload_unknown",
-        Severity::Warning,
+        Severity::Error,
         "2.4",
         "a payload signal is x or z while tvalid",
     ),

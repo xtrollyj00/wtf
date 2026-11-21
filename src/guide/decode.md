@@ -36,14 +36,14 @@ Details
   `rule` field.
 - `axis` and `axilite` read a role they aren't given as a default (`axis`: `tready` 1, `tkeep`
   the bytes of `tdata`; `axilite`: `wstrb` all ones, `*prot` 0, `*resp` OKAY), so
-  `decode rx axis clock=clk tvalid=v tready=r tdata=d` makes `rx.beat`, `rx.frame` and
+  `decode rx axis clock=clk tvalid=v tready=r tdata=d aresetn=rst_n` makes `rx.beat`, `rx.frame` and
   `rx.errors`; a violation carries the `rule`, what it saw (`detail`) and its `severity` (error or
   warning), and `records rx.errors where severity == warning` keeps the warnings.
 - `axi4` and `axilite` read an absent role as AXI5's default (`protocols axi4` lists them);
-  `wlast`/`rlast` are optional, AxLEN framing a burst without them. A reset that is given is
-  checked (`aresetn`, `reset_active=high` on `axilite`: a valid in reset, or in its first cycle
-  out, is `<chan>_reset`); a burst's type, size, length or alignment, a LAST off its end and a
-  strobe outside the beat's lanes are errors, a SLVERR or DECERR a warning, an EXOKAY error.
+  `wlast`/`rlast` are optional, AxLEN framing a burst without them. All three AXI need `aresetn`
+  (`reset_active=high` if active high): a valid in reset or its first cycle out is `<chan>_reset`,
+  an x out of reset an error, so are a bad burst type, size, length or alignment, a LAST off its
+  end and a strobe outside the beat's lanes; a SLVERR or DECERR is a warning, an EXOKAY an error.
 - `decode <name> off` removes a decode, its streams and the rows showing them; one another decode
   reads stays, naming it. `decode` again replaces it; decoding doesn't touch the rows.
 - A protocol in the config dir's `protocols/` decodes as a built-in does (`protocols` lists them);

@@ -1262,7 +1262,7 @@ mod tests {
         let mut app = App::new(workspace::Workspace::new(t, "axis".into()));
         keys(
             &mut app,
-            ":decode rx axis clock=clk tvalid=tvalid tready=tready tdata=tdata tlast=tlast tkeep=tkeep\n:add rx.frame\n:70ns\nyy",
+            ":decode rx axis clock=clk tvalid=tvalid tready=tready tdata=tdata tlast=tlast tkeep=tkeep aresetn=aresetn\n:add rx.frame\n:70ns\nyy",
         );
         assert_eq!(
             app.yank.take().as_deref(),
@@ -3353,7 +3353,7 @@ mod tests {
         let mut axis = App::new(workspace::Workspace::new(t, "axis".into()));
         keys(
             &mut axis,
-            ":decode rx axis clock=clk tvalid=tvalid tready=tready tdata=tdata tlast=tlast tkeep=tkeep\n:add rx.frame\n:fit\n",
+            ":decode rx axis clock=clk tvalid=tvalid tready=tready tdata=tdata tlast=tlast tkeep=tkeep aresetn=aresetn\n:add rx.frame\n:fit\n",
         );
         for (name, g) in [("box", &draw::BOX), ("ascii", &draw::ASCII)] {
             draw::set_glyphs(g);
@@ -3588,7 +3588,8 @@ mod tests {
                 .as_ref()
                 .map_or(String::new(), |m| m.text().to_string())
         };
-        let line = ":decode s_axi axilite clock=top.aclk prefix=top.s_axi_";
+        let line =
+            ":decode s_axi axilite clock=top.aclk aresetn=top.s_axi_aresetn prefix=top.s_axi_";
         keys(&mut app, ":records s_axi.wr\n");
         assert_eq!(
             msg(&app),
@@ -3630,7 +3631,7 @@ mod tests {
         );
         keys(
             &mut app,
-            ":decode rx axis clock=clk tvalid=tvalid tready=tready tdata=tdata tlast=tlast tkeep=tkeep\n",
+            ":decode rx axis clock=clk tvalid=tvalid tready=tready tdata=tdata tlast=tlast tkeep=tkeep aresetn=aresetn\n",
         );
         keys(&mut app, ":records rx.fram\n");
         assert_eq!(
@@ -3777,12 +3778,8 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["s_axi top.s_axi_"]
         );
-        assert!(
-            p.entries[0]
-                .preview
-                .iter()
-                .any(|l| l == "decode s_axi axilite clock=top.aclk prefix=top.s_axi_")
-        );
+        assert!(p.entries[0].preview.iter().any(|l| l
+            == "decode s_axi axilite clock=top.aclk aresetn=top.s_axi_aresetn prefix=top.s_axi_"));
         keys(&mut app, "<CR>");
         assert!(
             !matches!(app.overlay, Some(app::Overlay::Picker(_)))
@@ -3976,7 +3973,7 @@ mod tests {
         let mut app = App::new(workspace::Workspace::new(t, "axis".into()));
         keys(
             &mut app,
-            ":decode rx axis clock=clk tvalid=tvalid tready=tready tdata=tdata tlast=tlast tkeep=tkeep\n",
+            ":decode rx axis clock=clk tvalid=tvalid tready=tready tdata=tdata tlast=tlast tkeep=tkeep aresetn=aresetn\n",
         );
         // what it made, violations apart
         assert_eq!(
@@ -4171,12 +4168,12 @@ signal = "stall"
 
     #[test]
     fn severity_rows() {
-        // axis_wakeup.vcd: warnings 5-15 wakeup_early, 35-55 unknown; errors 15-25 wakeup, 25-35 dropped
+        // axis_wakeup.vcd: a warning 5-15 wakeup_early; errors 15-25 wakeup, 25-35 dropped, 35-55 unknown
         let t = trace::Trace::open("tests/data/axis_wakeup.vcd".as_ref()).unwrap();
         let mut app = App::new(workspace::Workspace::new(t, "axis".into()));
         keys(
             &mut app,
-            ":decode rx axis clock=clk tvalid=tvalid tready=tready twakeup=twakeup\n:add rx.errors\n:fit\n",
+            ":decode rx axis clock=clk tvalid=tvalid tready=tready twakeup=twakeup aresetn=aresetn\n:add rx.errors\n:fit\n",
         );
         let s = app
             .ws
@@ -4191,7 +4188,7 @@ signal = "stall"
                 Some(Severity::Warning),
                 Some(Severity::Error),
                 Some(Severity::Error),
-                Some(Severity::Warning)
+                Some(Severity::Error)
             ]
         );
         let draw_fgs = |app: &mut App| {

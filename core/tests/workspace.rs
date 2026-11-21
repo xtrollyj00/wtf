@@ -19,7 +19,7 @@ fn kind_of_a_var() {
     let mut axis = Workspace::open(&fixture("vcd").with_file_name("axis.vcd")).unwrap();
     wtf_core::command::run(
         &mut axis,
-        "decode rx axis clock=clk tvalid=tvalid tready=tready tdata=tdata",
+        "decode rx axis clock=clk tvalid=tvalid tready=tready tdata=tdata aresetn=aresetn",
     )
     .unwrap();
     assert_eq!(axis.kind(var(&axis, "rx.beat"), None), Kind::Stream);

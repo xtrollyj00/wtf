@@ -230,8 +230,6 @@ impl Handshakes {
     /// A cycle's violations and handshakes, channel by channel.
     pub fn feed(&mut self, start: Tick, end: Tick, roles: &Roles<'_>) -> Vec<Out> {
         let rules = self.rules;
-        // a port whose responses carry EXOKAY splits SLVERR and DECERR from it
-        let split = rules.iter().any(|k| k.suffix == "exokay");
         let defer = self.defer;
         let mut out = Vec::new();
         // a port with a reset: a valid in it, or in the cycle it is released in, is the error, and
@@ -286,24 +284,26 @@ impl Handshakes {
             // an x or z says nothing: it is not also a valid that fell, nor a payload that moved
             // (A2.3 asks for every signal to be defined when it is sampled, and out of reset)
             for role in [&p.valid, &p.ready] {
-                if p.has("unknown") && roles.get(role).is_some_and(unknown) {
+                if p.has("unknown")
+                    && let Some(v) = roles.get(role).filter(|v| unknown(v))
+                {
                     out.push(violation(
                         rules,
                         p,
                         "unknown",
                         start,
                         end,
-                        format!("{role} is x or z out of reset"),
+                        format!("{role} is {} out of reset", shown(v)),
                     ));
                 }
             }
             // a payload of x is one row per cycle, not one per signal: the first one names it
             if valid == Some(true)
                 && p.has("payload_unknown")
-                && let Some((_, role)) = p
+                && let Some((role, v)) = p
                     .payload
                     .iter()
-                    .find(|(_, r)| roles.get(r).is_some_and(unknown))
+                    .find_map(|(_, r)| Some((r, roles.get(r).filter(|v| unknown(v))?)))
             {
                 out.push(violation(
                     rules,
@@ -311,7 +311,7 @@ impl Handshakes {
                     "payload_unknown",
                     start,
                     end,
-                    format!("{role} is x or z while {}", p.valid),
+                    format!("{role} is {} while {}", shown(v), p.valid),
                 ));
             }
             // a valid standing since before, with no ready then
@@ -349,16 +349,16 @@ impl Handshakes {
                 && ready == Some(true)
                 && let Some(v) = roles.get(resp)
             {
-                if split && is_resp_err(v) {
+                if let Some(err) = resp_err(v) {
                     out.push(violation(
                         rules,
                         p,
                         "resp",
                         start,
                         end,
-                        format!("{resp} is SLVERR or DECERR"),
+                        format!("{resp} is {err}"),
                     ));
-                } else if !defer && split && is_exokay(v) {
+                } else if !defer && is_exokay(v) {
                     out.push(violation(
                         rules,
                         p,
@@ -366,15 +366,6 @@ impl Handshakes {
                         start,
                         end,
                         format!("{resp} is EXOKAY"),
-                    ));
-                } else if !split && not_okay(v) {
-                    out.push(violation(
-                        rules,
-                        p,
-                        "resp",
-                        start,
-                        end,
-                        format!("{resp} is not OKAY"),
                     ));
                 }
             }
@@ -437,27 +428,25 @@ impl Handshakes {
         requests: &[&'static str],
         response: &'static str,
         timeout: Option<Tick>,
-    ) -> Result<Vec<Out>, String> {
+    ) -> Vec<Out> {
+        // the protocol joins only the channels its side has
         let stream = |chan: &str| {
-            let p = self
-                .present(chan)
-                .ok_or_else(|| format!("no {chan} channel given"))?;
-            Ok(Stream {
+            let p = self.present(chan).expect("the side's channels are given");
+            Stream {
                 name: p.chan.name.into(),
                 schema: p.fields.clone(),
                 records: p.records.clone(),
                 violations: false,
                 inputs: Vec::new(),
-            })
+            }
         };
         let early: &[Tick] = self.present(response).map_or(&[], |p| &p.early);
-        let response = stream(response)?;
-        let requests: Vec<(&str, Stream)> = requests
-            .iter()
-            .map(|&c| stream(c).map(|s| (c, s)))
-            .collect::<Result<_, String>>()?;
+        let response = stream(response);
+        let requests: Vec<(&str, Stream)> = requests.iter().map(|&c| (c, stream(c))).collect();
         let reqs: Vec<(&str, &Stream)> = requests.iter().map(|(c, s)| (*c, s)).collect();
-        let (done, mut rest) = decode::join(name, &reqs, &response, None, timeout)?;
+        // without an ID, join has nothing to look up, so it cannot fail
+        let (done, mut rest) =
+            decode::join(name, &reqs, &response, None, timeout).expect("a join by order");
         // an early response is `b_early` or `r_early` in errors, so its `no request` row would say
         // it twice; a late one, after `timeout`, is said here alone. `early` is in time order, as
         // `feed` pushed it
@@ -467,7 +456,7 @@ impl Handshakes {
         });
         let mut out = from_stream(name, &done);
         out.extend(from_stream(unmatched, &rest));
-        Ok(out)
+        out
     }
 
     /// AXI4: `early` and `exokay` are decided after the join, on the transactions it pairs, so
@@ -510,7 +499,7 @@ impl Handshakes {
         burst: Option<&str>,
         early_chan: &'static str,
         timeout: Option<Tick>,
-    ) -> Result<Vec<Out>, String> {
+    ) -> Vec<Out> {
         let n = requests
             .iter()
             .map(|r| r.1.records.len())
@@ -529,28 +518,24 @@ impl Handshakes {
                         .is_none_or(|r| r.1.records[k].end <= start)
                 })
         };
-        // a response takes its request by the ID both name
-        let key = match id {
-            Some((label, field, rfield)) => {
-                let i = requests
+        // a response takes its request by the ID both name: `make` gave both channels an `id`
+        let key = id.map(|(label, field, rfield)| {
+            let i = requests
+                .iter()
+                .position(|r| r.0 == label)
+                .expect("the ID's channel is a request");
+            let at = |schema: &[Field], name: &str| {
+                schema
                     .iter()
-                    .position(|r| r.0 == label)
-                    .ok_or_else(|| format!("join: no {label} channel given"))?;
-                let q = requests[i]
-                    .1
-                    .schema
-                    .iter()
-                    .position(|f| f.name == field)
-                    .ok_or_else(|| format!("join: {label} has no field {field}"))?;
-                let r = response
-                    .schema
-                    .iter()
-                    .position(|f| f.name == rfield)
-                    .ok_or_else(|| format!("join: {} has no field {rfield}", response.name))?;
-                Some((i, q, r))
-            }
-            None => None,
-        };
+                    .position(|f| f.name == name)
+                    .expect("make checked the ID fields")
+            };
+            (
+                i,
+                at(&requests[i].1.schema, field),
+                at(&response.schema, rfield),
+            )
+        });
         let req_key =
             |k: usize| key.and_then(|(i, q, _)| requests[i].1.records[k].fields[q].clone());
         let resp_key = |r: &Record| key.and_then(|(_, _, i)| r.fields[i].clone());
@@ -636,7 +621,8 @@ impl Handshakes {
             violations: response.violations,
             inputs: response.inputs.clone(),
         };
-        let (done, mut left) = decode::join(name, requests, &rest, id, timeout)?;
+        let (done, mut left) =
+            decode::join(name, requests, &rest, id, timeout).expect("the key's fields are there");
         for r in &mut left.records {
             if matches!(r.fields.first(), Some(Some(Val::Text(k))) if k == "no request") {
                 r.fields[0] = Some(Val::Text("timeout".into()));
@@ -644,7 +630,7 @@ impl Handshakes {
         }
         out.extend(from_stream(name, &done));
         out.extend(from_stream(unmatched, &left));
-        Ok(out)
+        out
     }
 }
 
@@ -695,15 +681,20 @@ pub fn from_stream(name: &'static str, s: &Stream) -> Vec<Out> {
         .collect()
 }
 
-/// A response that is not OKAY: any bit set (a response of x or z counts too).
-fn not_okay(v: &Val) -> bool {
-    matches!(v, Val::Bits(b) if b.bytes().any(|c| matches!(c, b'1' | b'h')))
-}
-
 /// Whether a signal's value is x, z or an unset bit: it says nothing, so no rule reads a meaning
 /// into it.
 pub(crate) fn unknown(v: &Val) -> bool {
     matches!(v, Val::Bits(b) if b.contains(['x', 'z', 'u', 'w', '-']))
+}
+
+/// An unknown value as a detail shows it: one letter when every bit is the same (`x`, `z`, `u`),
+/// its bits when they differ (`10xx`).
+fn shown(v: &Val) -> &str {
+    let (Val::Bits(b) | Val::Text(b)) = v;
+    match b.as_bytes() {
+        [first, rest @ ..] if rest.iter().all(|c| c == first) => &b[..1],
+        _ => b,
+    }
 }
 
 /// A response's two bits, from the lowest: `None` when either is x or z.
@@ -718,7 +709,24 @@ pub(crate) fn is_exokay(v: &Val) -> bool {
     resp_bits(v) == Some((true, false))
 }
 
-/// A response of SLVERR or DECERR (`2'b10` or `2'b11`).
-fn is_resp_err(v: &Val) -> bool {
-    matches!(resp_bits(v), Some((_, true)))
+/// A response's error, by name: SLVERR (`2'b10`) or DECERR (`2'b11`).
+fn resp_err(v: &Val) -> Option<&'static str> {
+    match resp_bits(v)? {
+        (false, true) => Some("SLVERR"),
+        (true, true) => Some("DECERR"),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shown_unknown() {
+        let bits = |b: &str| Val::Bits(b.into());
+        assert_eq!(shown(&bits("x")), "x");
+        assert_eq!(shown(&bits("zzzz")), "z");
+        assert_eq!(shown(&bits("10xx")), "10xx");
+    }
 }

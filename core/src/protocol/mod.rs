@@ -789,6 +789,8 @@ pub struct Found {
     pub prefix: String,
     pub protocol: &'static str,
     pub clock: Option<String>,
+    /// The reset, for a protocol with an `aresetn` role: its path, and whether it is active high.
+    pub reset: Option<(String, bool)>,
 }
 
 impl Found {
@@ -811,10 +813,21 @@ impl Found {
             (Some(c), true) => format!(" clock={c}"),
             (None, true) => " clock=<clk>".into(),
         };
+        let reset = match (&self.reset, self.needs_reset()) {
+            (_, false) => String::new(),
+            (Some((r, false)), true) => format!(" aresetn={r}"),
+            (Some((r, true)), true) => format!(" aresetn={r} reset_active=high"),
+            (None, true) => " aresetn=<rst>".into(),
+        };
         format!(
-            "decode {name} {}{clock} prefix={}",
+            "decode {name} {}{clock}{reset} prefix={}",
             self.protocol, self.prefix
         )
+    }
+
+    /// The protocol takes a reset (`aresetn`), which detection finds as it finds the clock.
+    pub fn needs_reset(&self) -> bool {
+        get(self.protocol).is_some_and(|p| p.roles.iter().any(|r| r.name == "aresetn"))
     }
 }
 
@@ -862,7 +875,8 @@ fn find(trace: &crate::trace::Trace) -> Vec<Found> {
                 .chain(optional.iter().copied())
                 .filter(|&r| there(r))
                 .count();
-            let all = p.needed(there).iter().all(|r| there(r));
+            // the reset is found as the clock is, in the scope rather than under the prefix
+            let all = p.needed(there).iter().all(|&r| r == "aresetn" || there(r));
             if present < 2 || !all {
                 continue;
             }
@@ -875,6 +889,7 @@ fn find(trace: &crate::trace::Trace) -> Vec<Found> {
                         prefix: prefix.into(),
                         protocol: name,
                         clock: clock_of(trace, prefix),
+                        reset: reset_of(trace, prefix),
                     };
                     scores[i] = present;
                 }
@@ -883,6 +898,7 @@ fn find(trace: &crate::trace::Trace) -> Vec<Found> {
                         prefix: prefix.into(),
                         protocol: name,
                         clock: clock_of(trace, prefix),
+                        reset: reset_of(trace, prefix),
                     });
                     scores.push(present);
                 }
@@ -891,6 +907,30 @@ fn find(trace: &crate::trace::Trace) -> Vec<Found> {
     }
     found.sort_by(|a, b| a.prefix.cmp(&b.prefix));
     found
+}
+
+/// The reset an interface likely has: `<prefix>aresetn`, else the one 1-bit signal in its scope
+/// named like a reset (`aresetn`, `rst_n`, `reset`), active low when its name ends in `n`.
+fn reset_of(trace: &crate::trace::Trace, prefix: &str) -> Option<(String, bool)> {
+    let own = format!("{prefix}aresetn");
+    if trace.by_path.contains_key(&own) {
+        return Some((own, false));
+    }
+    let scope = prefix.rsplit_once('.').map_or("", |s| s.0);
+    let mut resets = trace
+        .vars
+        .iter()
+        .filter(|v| v.width == Some(1))
+        .filter_map(|v| {
+            let (s, leaf) = v.path.rsplit_once('.')?;
+            let leaf = leaf.to_lowercase();
+            (s == scope && (leaf.contains("rst") || leaf.contains("reset")))
+                .then(|| (v.path.clone(), !leaf.ends_with('n')))
+        });
+    match (resets.next(), resets.next()) {
+        (Some(r), None) => Some(r),
+        _ => None,
+    }
 }
 
 /// The clock an interface likely runs on: `<prefix>aclk` or `<prefix>clk`, else the one 1-bit

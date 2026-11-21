@@ -199,13 +199,13 @@ const RULES: &[RuleKind] = &[
         suffix: "unknown",
         about: "a valid or ready is x or z out of reset",
         spec: "A2.3",
-        severity: Severity::Warning,
+        severity: Severity::Error,
     },
     RuleKind {
         suffix: "payload_unknown",
         about: "a payload signal is x or z while its valid",
         spec: "A2.3",
-        severity: Severity::Warning,
+        severity: Severity::Error,
     },
     RuleKind {
         suffix: "last",
@@ -405,9 +405,7 @@ impl Live {
             Answers::Channel(_) => Some(side.burst),
             Answers::Burst => None,
         };
-        // the fields are the ones `make` checked, so this cannot fail; a port the trace cannot
-        // join gets no join rather than a broken decode
-        if let Ok(joined) = channels.join_streams(
+        out.extend(channels.join_streams(
             side.name,
             side.unmatched,
             &requests,
@@ -416,9 +414,7 @@ impl Live {
             ended,
             early_chan,
             timeout,
-        ) {
-            out.extend(joined);
-        }
+        ));
         // A3.3: an EXOKAY is for an exclusive access; the join has `lock` and the response
         let exokay = exokays(side, channels, records, &burst, &fields, &out);
         out.extend(exokay);
@@ -492,22 +488,16 @@ fn exokays(
     // a normal access is the lock at 0: an x or z claims nothing
     let normal =
         |f: &[Option<Val>], lock: usize| matches!(&f[lock], Some(Val::Bits(b)) if b == "0");
-    let Some(lock) = at("lock") else {
-        return Vec::new();
-    };
+    let lock = at("lock").expect("lock has a default, so the join has it");
     let mut rows = Vec::new();
     match side.answers {
         Answers::Channel(code) => {
-            let Some(resp) = pos(code, "resp") else {
-                return rows;
-            };
+            let resp = pos(code, "resp").expect("bresp has a default");
             let answers = channel(records, code);
             for (_, end, _) in joined(out, side.name).filter(|(_, _, f)| normal(f, lock)) {
                 // a B ends its write, and its `resp` is the write's; the Bs are in time order
                 let i = answers.partition_point(|b| b.end < end);
-                let Some(b) = answers.get(i).filter(|b| b.end == end) else {
-                    continue;
-                };
+                let b = &answers[i];
                 if b.fields[resp].as_ref().is_some_and(axi::is_exokay) {
                     rows.push(channels.finish_violation(
                         code,
@@ -520,9 +510,7 @@ fn exokays(
             }
         }
         Answers::Burst => {
-            let Some(resp) = pos(side.channel, "resp") else {
-                return rows;
-            };
+            let resp = pos(side.channel, "resp").expect("rresp has a default");
             // a port without IDs pairs its reads in order (spec §16): no ID to compare
             let ids = match (
                 pos(side.channel, "id"),
@@ -537,13 +525,11 @@ fn exokays(
                 // the burst the join ended with: its window holds this read's beats; the bursts
                 // and the beats are in time order
                 let i = burst.records.partition_point(|r| r.end < end);
-                let Some(b) = burst.records[i..]
+                let b = burst.records[i..]
                     .iter()
                     .take_while(|r| r.end == end)
                     .find(|r| ids.is_none_or(|(_, key, key_at)| r.fields[key] == f[key_at]))
-                else {
-                    continue;
-                };
+                    .expect("a read ends with its burst");
                 let from = beats.partition_point(|beat| beat.start < b.start);
                 let to = beats.partition_point(|beat| beat.start < b.end);
                 let mine = beats[from..to]
@@ -571,21 +557,23 @@ fn burst_decoder(
     fields: &[Field],
     params: &[(&str, &str)],
     fs_per_tick: Option<u128>,
-) -> Result<Box<dyn Decoder>, String> {
+) -> Box<dyn Decoder> {
     let params: Vec<(String, String)> = params
         .iter()
         .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
         .collect();
-    decode::Frame::new(fields, &params, fs_per_tick).map(|f| Box::new(f) as Box<dyn Decoder>)
+    // `last` and `data` are always fields, `key` and `bytes` asked for only when they are
+    let frame = decode::Frame::new(fields, &params, fs_per_tick).expect("the burst's own fields");
+    Box::new(frame)
 }
 
-/// WDATA's width in bytes: the lanes `strb` can mark, `None` when the port gives no data width.
+/// WDATA's width in bytes: the lanes `strb` can mark, `None` when it is not whole bytes.
 fn strb_bus(channels: &Handshakes, chan: &str) -> Option<u64> {
+    // the side's channel is given, and its data is a required role
     channels
-        .desc(chan)?
-        .fields
-        .iter()
-        .find(|f| f.name == "data")?
+        .desc(chan)
+        .and_then(|d| d.fields.into_iter().find(|f| f.name == "data"))
+        .expect("the channel's data")
         .width
         .filter(|w| *w >= 8 && w % 8 == 0)
         .map(|w| u64::from(w / 8))
@@ -712,19 +700,17 @@ fn check_last(
     let mut out = Vec::new();
     for (beat, ord) in beats.iter().zip(ords) {
         let Some((k, i)) = *ord else { continue };
-        let Some(of) = lens.get(k).copied().flatten() else {
-            continue;
-        };
-        let Some(v) = beat.fields.get(last).cloned().flatten() else {
+        let Some(of) = lens[k] else { continue };
+        // a signal with no value yet says nothing
+        let Some(v) = beat.fields[last].clone() else {
             continue;
         };
         let Val::Bits(bits) = &v else { continue };
         if axi::unknown(&v) {
             continue;
         }
-        let Some(high) = bit_of(bits, 0) else {
-            continue;
-        };
+        // 0, 1, h or l: the x, z, u, w and - are `unknown`
+        let high = bit_of(bits, 0).expect("a known bit");
         let n = i + 1;
         let detail = match (high, n == of) {
             (true, false) => format!("{chan}last on beat {n} of {of}"),
@@ -753,19 +739,14 @@ fn check_strb(
         .map(|d| d.fields)
         .unwrap_or_default();
     let index = |name: &str| fields.iter().position(|f| f.name == name);
-    let (Some(a), Some(s), Some(t)) = (index("addr"), index("size"), index("burst")) else {
-        return Vec::new();
-    };
+    // addr is required, size and burst have defaults: the address channel has all three
+    let [a, s, t] = ["addr", "size", "burst"].map(|f| index(f).expect("a request field"));
     let requests = channel(records, side.address);
     let mut out = Vec::new();
     for (beat, ord) in beats.iter().zip(ords) {
         let Some((k, n)) = *ord else { continue };
-        let Some(of) = lens.get(k).copied().flatten() else {
-            continue;
-        };
-        let Some(request) = requests.get(k) else {
-            continue;
-        };
+        let Some(of) = lens[k] else { continue };
+        let request = &requests[k];
         let field = |i: usize| request.fields.get(i).and_then(|v| v.as_ref());
         let (Some(addr), Some(size), Some(burst)) =
             (number(field(a)), number(field(s)), number(field(t)))
@@ -979,7 +960,7 @@ impl Axi4 {
             if fields.iter().any(|f| f.name == role) {
                 frame_params.push((key, role));
             }
-            let frame = burst_decoder(&framed, &frame_params, fs_per_tick)?;
+            let frame = burst_decoder(&framed, &frame_params, fs_per_tick);
             let id = side
                 .pairs_id(&channels, &frame_params)
                 .then_some((side.address, "id", "id"));
@@ -1404,7 +1385,7 @@ pub const DEF: Def = Def {
         },
         RoleDef {
             name: "aresetn",
-            required: false,
+            required: true,
             default: None,
             about: "the reset, active low (reset_active=high: active high)",
         },

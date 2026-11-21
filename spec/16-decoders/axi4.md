@@ -3,8 +3,9 @@
 Arm's AXI5 (IHI 0022 issue L, Table B2.2), whose AXI4 interface class is what an AXI4 port wires:
 the five channels, a record per handshake, a W or R burst as a `frame` of its channel, and each
 burst paired with its address by ID. A signal the port doesn't give is what the table means by it,
-so a port that leaves out the sizes, the burst types, `wlast`, the protections, the responses or
-the reset still decodes; a role that is given is checked, and a reset that is given is honoured.
+so a port that leaves out the sizes, the burst types, `wlast`, the protections or the responses
+still decodes, and a role that is given is checked. The reset is required, as the table has every
+interface give it: it is what tells a valid of x at start-up, in reset, from one out of it.
 
 It is a `Protocol`, as `axis` is: its roles are read a cycle at a time, and each handshake's rules
 are decided there, with the clause and the severity each rule carries (16.1).
@@ -66,7 +67,7 @@ mean, given or not:
 | `wstrb` | no | all ones, one bit per `wdata` byte | which bytes of `wdata` are data |
 | `bresp` | no | OKAY | how the write went |
 | `rresp` | no | OKAY | how the read went |
-| `aresetn` | no | — | the reset, active low; `reset_active=high` for active high |
+| `aresetn` | yes | — | the reset, active low; `reset_active=high` for active high |
 
 Params: `timeout=<time>`, the wait after a request completes before it is `no response`
 (`timeout=1us`, section 16's decoder bullet); `reset_active`, `low` (the default) or `high`.
@@ -80,7 +81,7 @@ Rows group signals that mean the same.
 | signal | presence | default | role |
 | --- | --- | --- | --- |
 | `ACLK` | `Y` | — | the `clock=` argument: a handshake is one edge of it |
-| `ARESETn` | `Y` | — | `aresetn`, optional here: a trace without it decodes, reset rules off |
+| `ARESETn` | `Y` | — | `aresetn`: without it nothing tells reset from an x out of it |
 | `AWVALID` `WVALID` `BVALID` `ARVALID` `RVALID` | `Y` | — | the required `*valid` roles |
 | `AWREADY` `WREADY` `BREADY` `ARREADY` `RREADY` | `O`, since a credited transport has none | — | the required `*ready` roles: a handshake is what is decoded |
 | `AWADDR` `ARADDR` | `Y` | — | `awaddr`, `araddr` |
@@ -138,8 +139,8 @@ The rules, each with the clause of IHI 0022 issue L it comes from and the severi
 | `<c>_dropped`, `<c>` in `aw` `w` `b` `ar` `r` | A2.3 | error | a valid fell before its ready: it stays until the handshake | `axi4_shared_error_rules`, `axi4_bursts_by_id` |
 | `<c>_changed` | A2.3 | error | a payload signal changed while its valid was stalled | `axi4_shared_error_rules` |
 | `<c>_reset` | A2.1.2 | error | a valid while the interface is in reset, or in its first cycle out | `axi4_reset_takes_no_records`, `axi4_shared_error_rules` |
-| `<c>_unknown` | A2.3 | warning | a valid or ready is x or z out of reset | `axi4_unknown_valid`, `axi4_shared_error_rules` |
-| `<c>_payload_unknown` | A2.3 | warning | a payload signal is x or z while its valid | `axi4_unknown_valid`, `axi4_shared_error_rules` |
+| `<c>_unknown` | A2.3 | error | a valid or ready is x or z out of reset | `axi4_unknown_valid`, `axi4_shared_error_rules` |
+| `<c>_payload_unknown` | A2.3 | error | a payload signal is x or z while its valid | `axi4_unknown_valid`, `axi4_shared_error_rules`, `axi4_unknown_resp_is_no_response_rule` |
 | `b_resp` `r_resp` | A3.3 | warning | a SLVERR or DECERR response | `axi4_shared_error_rules`, `axi4_bursts_by_id` |
 | `b_early` `r_early` | A2.3.2 | error | a response before its request's handshakes | `axi4_b_early_mid_burst`, `axi4_b_early_same_cycle`, `axi4_b_after_last_beat`, `axi4_multi_beat_read_not_early` |
 | `b_exokay` `r_exokay` | A3.3 | error | an EXOKAY response to a non-exclusive access, with or without IDs | `axi4_exokay_non_exclusive_is_an_error`, `axi4_exokay_exclusive_is_silent`, `axi4_exokay_without_ids_is_an_error`, `axi4_shared_error_rules` |
@@ -152,19 +153,22 @@ The rules, each with the clause of IHI 0022 issue L it comes from and the severi
 | `w_last` `r_last` | A3.2 | error | LAST on a beat other than AxLEN+1, or missing on it | `axi4_wlast_vs_len`, `axi4_rlast_vs_len`, `axi4_burst_request_strobe_exclusive_rules` |
 | `w_strb` | A3.2.1 | error | a strobe high outside the beat's byte lanes | `axi4_w_strb`, `axi4_burst_request_strobe_exclusive_rules` |
 
-The `reset` rules fire only when `aresetn` is bound. The request rules (`burst`, `wrap`, `fixed`,
+The request rules (`burst`, `wrap`, `fixed`,
 `4k`, `size`, `exclusive`) are decided at the AW or AR handshake, from that address record; `last`
 and `strb` at the beat they are about. A rule whose inputs are x or z is not checked:
-`payload_unknown` says that instead. Details are of the shape:
+`payload_unknown` says that instead. An unknown value shows as one letter when its bits agree
+(`x`, `z`, `u`) and as its bits when they don't (`10xx`). Details are of the shape:
 
 ```
 awvalid in reset
 awvalid in the cycle reset is released
-awvalid is x or z out of reset
-awaddr is x or z while awvalid
+awvalid is x out of reset
+awaddr is x while awvalid
+awaddr is 0001xxxx while awvalid
 awvalid fell before awready
 awaddr changed while awvalid was stalled
-bresp is SLVERR or DECERR
+bresp is SLVERR
+rresp is DECERR
 bresp is EXOKAY to a non-exclusive write
 rresp is EXOKAY to a non-exclusive read
 response 2 before write 2's AW and W
@@ -199,7 +203,7 @@ The rest of the conformance, clause by clause:
 | A5.3, A5.6 | bursts pair by ID in the order they come, a burst's beats stay in order, different IDs interleave | `axi4_bursts_by_id` |
 | A6.3.3 | an exclusive access aligned, a power of two up to 128 bytes, at most 16 beats | `axi4_burst_request_strobe_exclusive_rules` |
 | Table B2.2 | the defaults above, an absent role being what AXI5 means by it | `axi4_required_roles`, `axi4_defaults_for_absent_roles`, `axi4_request_fields_without_rules` |
-| 16.2 | the unmatched kinds, and `timeout` | `axi4_late_response_is_timeout`, `axi4_unmatched_without_no_request` |
+| 16.2 | the unmatched kinds, and `timeout` | `axi4_late_response_is_timeout`, `axi4_unmatched_without_no_request`, `axi4_bad_timeout_is_refused` |
 | 16.2 | the card's rules, defaults and params | `axi4_protocols_describes_defaults_reset_rules` |
 
 Not implemented, and so reported by nothing:

@@ -24,7 +24,7 @@ so a port with only `tvalid` still decodes:
 | `tdest` | no | 0 | the packet's destination |
 | `tuser` | no | 0 | the beat's sideband |
 | `twakeup` | no | — | activity, to wake the clock (not given: no wakeup rules) |
-| `aresetn` | no | — | the reset, active low (`reset_active=high`: active high) |
+| `aresetn` | yes | — | the reset, active low (`reset_active=high`: active high): the spec's `ARESETn`, which every interface has |
 
 Params: `reset_active` (`low`, the default, or `high`).
 
@@ -48,8 +48,8 @@ The rules `errors` reports, a record per cycle each holds:
 | --- | --- | --- | --- | --- |
 | `dropped` | 2.2 | error | tvalid fell before tready: it must stay until the handshake | `axis_errors_are_the_injected_ones`, `axis_error_rules` |
 | `changed` | 2.2.1 | error | a payload signal changed while tvalid was stalled | `axis_errors_are_the_injected_ones` |
-| `unknown` | 2.2 | warning | tvalid or tready is x or z out of reset | `axis_warning_rules` |
-| `payload_unknown` | 2.4 | warning | a payload signal is x or z while tvalid | `axis_warning_rules` |
+| `unknown` | 2.2 | error | tvalid or tready is x or z out of reset | `axis_error_rules` |
+| `payload_unknown` | 2.4 | error | a payload signal is x or z while tvalid | `axis_error_rules` |
 | `keep` | 2.5.3 | error | tkeep is 0 where tstrb is 1 | `axis_error_rules` |
 | `reset` | 2.8.2 | error | tvalid while the interface is in reset, or in its first cycle out | `axis_reset_takes_no_beats` |
 | `wakeup` | 2.3 | error | twakeup fell while a transfer was stalled | `axis_error_rules` |

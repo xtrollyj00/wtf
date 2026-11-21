@@ -9,9 +9,11 @@ $var wire 4 & tkeep [3:0] $end
 $var wire 2 ' tid [1:0] $end
 $var wire 2 ( tdest [1:0] $end
 $var wire 4 ) tstrb [3:0] $end
+$var wire 1 ~~ aresetn $end
 $upscope $end
 $enddefinitions $end
 #0
+1~~
 0!
 0"
 1#

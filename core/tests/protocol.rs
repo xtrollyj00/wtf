@@ -38,6 +38,7 @@ const AXIS: &[(&str, &str)] = &[
     ("tdata", "tdata"),
     ("tlast", "tlast"),
     ("tkeep", "tkeep"),
+    ("aresetn", "aresetn"),
 ];
 
 fn stream<'a>(ws: &'a Workspace, name: &str) -> &'a Stream {
@@ -64,7 +65,7 @@ fn row(start: u64, end: u64, fields: &[&str]) -> (u64, u64, Vec<String>) {
     (start, end, fields.iter().map(|f| f.to_string()).collect())
 }
 
-/// The ten `<chan>_unknown` warnings axilite.vcd's valids and readys make: every one is x from 2ns
+/// The ten `<chan>_unknown` errors axilite.vcd's valids and readys make: every one is x from 2ns
 /// to the first edge at 10ns, so the one cycle that samples them breaks `unknown` alone.
 fn unknown_rows() -> Vec<(u64, u64, Vec<String>)> {
     let mut rows = Vec::new();
@@ -75,8 +76,8 @@ fn unknown_rows() -> Vec<(u64, u64, Vec<String>)> {
                 20,
                 &[
                     &format!("{c}_unknown"),
-                    &format!("{c}{side} is x or z out of reset"),
-                    "warning",
+                    &format!("{c}{side} is x out of reset"),
+                    "error",
                 ],
             ));
         }
@@ -132,8 +133,14 @@ fn axis_beats_and_frames() {
     wtf_core::command::run(&mut ws, "add rx.frame rx.frame.len").unwrap();
     // without tkeep a beat is all of tdata; without tlast there are no frames
     let mut ws = open("axis.vcd");
-    ws.add_decode(decode("a", "axis", "clk", &AXIS[..4], &[]))
-        .unwrap();
+    ws.add_decode(decode(
+        "a",
+        "axis",
+        "clk",
+        &[&AXIS[..4], &AXIS[5..]].concat(),
+        &[],
+    ))
+    .unwrap();
     assert_eq!(
         table(stream(&ws, "a.frame"))[0],
         row(
@@ -142,8 +149,14 @@ fn axis_beats_and_frames() {
             &["3", "12", "a0 00 00 00 a1 00 00 00 a2 00 00 00", "1"]
         )
     );
-    ws.add_decode(decode("b", "axis", "clk", &AXIS[..3], &[]))
-        .unwrap();
+    ws.add_decode(decode(
+        "b",
+        "axis",
+        "clk",
+        &[&AXIS[..3], &AXIS[5..]].concat(),
+        &[],
+    ))
+    .unwrap();
     // tlast not given reads 1: every beat ends its own packet
     assert_eq!(
         table(stream(&ws, "b.frame"))[0],
@@ -164,8 +177,7 @@ fn axis_stream_provenance() {
             .collect::<Vec<_>>()
     };
     // the line the TUI runs, and the sets its answer names
-    let line =
-        "decode rx axis clock=clk tvalid=tvalid tready=tready tdata=tdata tlast=tlast tkeep=tkeep";
+    let line = "decode rx axis clock=clk tvalid=tvalid tready=tready tdata=tdata tlast=tlast tkeep=tkeep aresetn=aresetn";
     assert_eq!(
         wtf_core::command::run(&mut ws, line),
         Ok(Some(Msg::Info(
@@ -220,8 +232,14 @@ fn axis_errors_are_the_injected_ones() {
         ]
     );
     // without tkeep / tlast the payload is what there is
-    ws.add_decode(decode("b", "axis", "clk", &AXIS[..3], &[]))
-        .unwrap();
+    ws.add_decode(decode(
+        "b",
+        "axis",
+        "clk",
+        &[&AXIS[..3], &AXIS[5..]].concat(),
+        &[],
+    ))
+    .unwrap();
     assert_eq!(table(stream(&ws, "b.errors")).len(), 2);
     ws.search("rx.errors.rule == changed", true, 1).unwrap();
     assert_eq!(ws.view.cursor, 125);
@@ -301,7 +319,7 @@ fn builtin_instance_errors() {
                 &[("x", "1")]
             )
         ),
-        "rx: no signal for tvalid (the file has: decode rx axis clock=top.clk prefix=top.); axis has no role tfoo; tdata: unknown signal: nope; axis has no param x (params: prefix, reset_active); no clock"
+        "rx: no signal for tvalid, aresetn (the file has: decode rx axis clock=top.clk aresetn=top.aresetn prefix=top.); axis has no role tfoo; tdata: unknown signal: nope; axis has no param x (params: prefix, reset_active); no clock"
     );
     assert_eq!(
         err(
@@ -513,7 +531,7 @@ fn axilite_payload_changed_while_stalled() {
     ws.add_decode(decode("s", "axilite", "aclk", &[], &[("prefix", "s_axi_")]))
         .unwrap();
     assert_eq!(
-        // axilite.vcd's x's are the ten `<chan>_unknown` warnings at 10..20ns: this is the tenth
+        // axilite.vcd's x's are the ten `<chan>_unknown` errors at 10..20ns: this is the tenth
         // row on
         table(stream(&ws, "s.errors"))[10],
         row(
@@ -530,7 +548,7 @@ fn axilite_payload_changed_while_stalled() {
 
 /// The faults of axilite_errors.vcd, one per rule: an awvalid through the reset and its release
 /// cycle, one dropped before awready, a wdata changed while stalled, an EXOKAY read, a B and an R
-/// before their requests. The warnings are the other half, pinned in
+/// before their requests, an x arvalid and an x wdata. The warnings are the other half, pinned in
 /// `tests/mcp.rs::axilite_warnings_filter_by_severity`.
 ///
 /// Two shapes the fixture is built around: the stray B is the last B, and the x wdata is in the
@@ -579,6 +597,16 @@ fn axilite_error_rules() {
                 200,
                 &["r_early", "response 4 before read 4's AR", "error"]
             ),
+            row(
+                200,
+                210,
+                &["ar_unknown", "arvalid is x out of reset", "error"]
+            ),
+            row(
+                220,
+                230,
+                &["w_payload_unknown", "wdata is x while wvalid", "error"]
+            ),
         ]
     );
 }
@@ -591,7 +619,7 @@ fn axilite_unknown_out_of_reset() {
     let mut ws = open("axilite.vcd");
     ws.add_decode(decode("s", "axilite", "aclk", &[], &[("prefix", "s_axi_")]))
         .unwrap();
-    // the clock's first edge is at 10ns, so one cycle samples the x's: all ten are warnings,
+    // the clock's first edge is at 10ns, so one cycle samples the x's: all ten are errors,
     // the two rules that really break come after them
     let errors = table(stream(&ws, "s.errors"));
     assert_eq!(errors.len(), 13);
@@ -600,7 +628,7 @@ fn axilite_unknown_out_of_reset() {
             .iter()
             .map(|(_, _, f)| f[2].as_str())
             .collect::<Vec<_>>(),
-        ["warning"; 10]
+        ["error"; 10]
     );
     assert_eq!((errors[0].0, errors[0].1), (10, 20));
     // a payload of x is the second rule, and it names the signal, not the valid
@@ -617,23 +645,14 @@ fn axilite_unknown_out_of_reset() {
         row(
             60,
             70,
-            &[
-                "w_payload_unknown",
-                "wdata is x or z while wvalid",
-                "warning"
-            ]
+            &["w_payload_unknown", "wdata is x while wvalid", "error"]
         )
     );
     // x in reset is no unknown: the reset is what the port says about it, and the cycle the x's
     // are in is inside the reset
     let mut text = std::fs::read_to_string(fixture("vcd").with_file_name("axilite.vcd")).unwrap();
-    text = text.replacen(
-        "$var wire 2 2 s_axi_rresp [1:0] $end\n",
-        "$var wire 2 2 s_axi_rresp [1:0] $end\n$var wire 1 3 s_axi_aresetn $end\n",
-        1,
-    );
-    text = text.replacen("#0\n1!\n", "#0\n1!\n03\n", 1);
-    text = text.replacen("#22\n", "#22\n13\n", 1);
+    text = text.replacen("#0\n1~~\n", "#0\n0~~\n", 1);
+    text = text.replacen("#22\n", "#22\n1~~\n", 1);
     let path = dir.0.join("reset.vcd");
     std::fs::write(&path, text).unwrap();
     let mut ws = Workspace::open(&path).unwrap();
@@ -642,11 +661,7 @@ fn axilite_unknown_out_of_reset() {
     assert_eq!(
         table(stream(&ws, "s.errors")),
         [
-            row(
-                180,
-                190,
-                &["r_resp", "rresp is SLVERR or DECERR", "warning"]
-            ),
+            row(180, 190, &["r_resp", "rresp is SLVERR", "warning"]),
             row(
                 210,
                 220,
@@ -663,7 +678,7 @@ fn axilite_unknown_out_of_reset() {
 
 /// AXI-Lite in axilite.vcd: two writes (the second's W before its AW), two reads (the second
 /// SLVERR), an AW valid dropped before its ready, a B with no write to answer (b_early), every
-/// valid and ready X before the first edge (ten unknown warnings), then six polling reads from
+/// valid and ready X before the first edge (ten unknown errors), then six polling reads from
 /// 260ns.
 #[test]
 fn axilite_transactions_and_errors() {
@@ -697,11 +712,7 @@ fn axilite_transactions_and_errors() {
     // the port's valids and readys are x from 2ns to the first edge at 10ns, so the one cycle
     // that samples them breaks `unknown` alone: x is no valid that fell
     let mut errors = unknown_rows();
-    errors.push(row(
-        180,
-        190,
-        &["r_resp", "rresp is SLVERR or DECERR", "warning"],
-    ));
+    errors.push(row(180, 190, &["r_resp", "rresp is SLVERR", "warning"]));
     errors.push(row(
         210,
         220,
@@ -801,11 +812,7 @@ fn axilite_exokay_is_an_error() {
     errors.extend([
         row(40, 50, &["b_exokay", "bresp is EXOKAY", "error"]),
         row(150, 160, &["r_exokay", "rresp is EXOKAY", "error"]),
-        row(
-            180,
-            190,
-            &["r_resp", "rresp is SLVERR or DECERR", "warning"],
-        ),
+        row(180, 190, &["r_resp", "rresp is SLVERR", "warning"]),
         row(
             210,
             220,
@@ -1907,7 +1914,7 @@ fn axi4_bursts_by_id() {
     assert_eq!(
         table(stream(&ws, "m.errors")),
         [
-            row(50, 60, &["b_resp", "bresp is SLVERR or DECERR", "warning"]),
+            row(50, 60, &["b_resp", "bresp is SLVERR", "warning"]),
             row(
                 140,
                 150,
@@ -1923,7 +1930,7 @@ fn axi4_bursts_by_id() {
     let mut plain = open("axi4.vcd");
     let roles = [
         "awvalid", "awready", "awaddr", "wvalid", "wready", "wdata", "wlast", "bvalid", "bready",
-        "bresp", "arvalid", "arready", "araddr", "rvalid", "rready", "rdata", "rlast",
+        "bresp", "arvalid", "arready", "araddr", "rvalid", "rready", "rdata", "rlast", "aresetn",
     ];
     let signals: Vec<(&str, String)> = roles.iter().map(|r| (*r, format!("m_axi_{r}"))).collect();
     let signals: Vec<(&str, &str)> = signals.iter().map(|(r, s)| (*r, s.as_str())).collect();
@@ -1949,7 +1956,7 @@ fn axi4_required_roles() {
         required,
         [
             "awvalid", "awready", "awaddr", "wvalid", "wready", "wdata", "bvalid", "bready",
-            "arvalid", "arready", "araddr", "rvalid", "rready", "rdata",
+            "arvalid", "arready", "araddr", "rvalid", "rready", "rdata", "aresetn",
         ]
     );
     assert_eq!(
@@ -1957,7 +1964,7 @@ fn axi4_required_roles() {
         [
             "wlast", "rlast", "awid", "awlen", "awsize", "awburst", "awprot", "awlock", "awcache",
             "awqos", "awregion", "wstrb", "bid", "bresp", "arid", "arlen", "arsize", "arburst",
-            "arprot", "arlock", "arcache", "arqos", "arregion", "rid", "rresp", "aresetn",
+            "arprot", "arlock", "arcache", "arqos", "arregion", "rid", "rresp",
         ]
     );
     assert_eq!(
@@ -1990,6 +1997,7 @@ fn axi4_required_roles() {
     let mut ws = open("axi4.vcd");
     let signals: Vec<(String, String)> = required[..8]
         .iter()
+        .chain(&["aresetn"])
         .map(|r| ((*r).to_string(), format!("m_axi_{r}")))
         .collect();
     let signals: Vec<(&str, &str)> = signals
@@ -2031,8 +2039,8 @@ fn axi4_required_roles() {
         .unwrap_err();
     assert_eq!(
         err,
-        "m: no signal for awaddr, wvalid, wready, wdata, bvalid, bready (the file has: \
-         decode m axi4 clock=top.aclk prefix=top.m_axi_)"
+        "m: no signal for awaddr, wvalid, wready, wdata, bvalid, bready, aresetn (the file has: \
+         decode m axi4 clock=top.aclk aresetn=top.m_axi_aresetn prefix=top.m_axi_)"
     );
 }
 
@@ -2196,7 +2204,7 @@ fn axi4_last_optional_axlen_framing() {
     let roles = [
         "awvalid", "awready", "awaddr", "awid", "awlen", "wvalid", "wready", "wdata", "wstrb",
         "bvalid", "bready", "bid", "bresp", "arvalid", "arready", "araddr", "arid", "arlen",
-        "rvalid", "rready", "rdata", "rid", "rresp",
+        "rvalid", "rready", "rdata", "rid", "rresp", "aresetn",
     ];
     let signals: Vec<(&str, String)> = roles.iter().map(|r| (*r, format!("m_axi_{r}"))).collect();
     let signals: Vec<(&str, &str)> = signals.iter().map(|(r, s)| (*r, s.as_str())).collect();
@@ -2306,6 +2314,7 @@ fn axi4_wlast_vs_len() {
         ("rvalid", "m_axi_rvalid"),
         ("rready", "m_axi_rready"),
         ("rdata", "m_axi_rdata"),
+        ("aresetn", "m_axi_aresetn"),
     ];
     let mut ws = open("axi4.vcd");
     ws.add_decode(decode("m", "axi4", "aclk", &given, &[]))
@@ -2412,7 +2421,7 @@ fn axi4_w_strb() {
 }
 
 /// axi4.vcd with awvalid x from 22ns to 32ns, sampled at the edge between write 1's AW and write
-/// 2's: x is no value to read, so that cycle is an `aw_unknown` warning and the handshakes are
+/// 2's: x is no value to read, so that cycle is an `aw_unknown` error and the handshakes are
 /// what the plain decode has.
 #[test]
 fn axi4_unknown_valid() {
@@ -2436,9 +2445,9 @@ fn axi4_unknown_valid() {
             row(
                 20,
                 30,
-                &["aw_unknown", "awvalid is x or z out of reset", "warning"]
+                &["aw_unknown", "awvalid is x out of reset", "error"]
             ),
-            row(50, 60, &["b_resp", "bresp is SLVERR or DECERR", "warning"]),
+            row(50, 60, &["b_resp", "bresp is SLVERR", "warning"]),
             row(
                 140,
                 150,
@@ -2449,6 +2458,53 @@ fn axi4_unknown_valid() {
     for s in ["m.aw", "m.wr"] {
         assert_eq!(table(stream(&ws, s)), table(stream(&plain, s)), "{s}");
     }
+}
+
+/// axi4.vcd with write 2's SLVERR `bresp` x instead: the response says nothing, so it is neither
+/// `b_resp` nor `b_exokay`, only `b_payload_unknown`; the write still pairs with its B.
+#[test]
+fn axi4_unknown_resp_is_no_response_rule() {
+    let dir = Dir::new("axi4-unknown-resp");
+    let path = dir.0.join("resp.vcd");
+    let text = std::fs::read_to_string(fixture("vcd").with_file_name("axi4.vcd")).unwrap();
+    let text = text.replacen("b10 /\n", "bxx /\n", 1);
+    assert!(text.contains("bxx /"));
+    std::fs::write(&path, text).unwrap();
+    let mut ws = Workspace::open(&path).unwrap();
+    ws.add_decode(decode("m", "axi4", "aclk", &[], &[("prefix", "m_axi_")]))
+        .unwrap();
+    assert_eq!(
+        table(stream(&ws, "m.errors")),
+        [
+            row(
+                50,
+                60,
+                &["b_payload_unknown", "bresp is x while bvalid", "error"]
+            ),
+            row(
+                140,
+                150,
+                &["ar_dropped", "arvalid fell before arready", "error"]
+            ),
+        ]
+    );
+    assert_eq!(table(stream(&ws, "m.wr")).len(), 2);
+}
+
+/// A `timeout` that is no time is refused when the decode is made, naming what it could not read.
+#[test]
+fn axi4_bad_timeout_is_refused() {
+    let mut ws = open("axi4.vcd");
+    let err = ws
+        .add_decode(decode(
+            "m",
+            "axi4",
+            "aclk",
+            &[],
+            &[("prefix", "m_axi_"), ("timeout", "soon")],
+        ))
+        .unwrap_err();
+    assert!(err.contains("join: timeout: "), "{err}");
 }
 
 /// Each AXI4 stream says the streams it was made from (spec §16: `from`).
@@ -2527,29 +2583,17 @@ fn axi4_shared_error_rules() {
                     "error"
                 ]
             ),
-            row(
-                330,
-                340,
-                &["b_resp", "bresp is SLVERR or DECERR", "warning"]
-            ),
-            row(
-                360,
-                370,
-                &["r_resp", "rresp is SLVERR or DECERR", "warning"]
-            ),
+            row(330, 340, &["b_resp", "bresp is SLVERR", "warning"]),
+            row(360, 370, &["r_resp", "rresp is DECERR", "warning"]),
             row(
                 380,
                 390,
-                &["ar_unknown", "arvalid is x or z out of reset", "warning"]
+                &["ar_unknown", "arvalid is x out of reset", "error"]
             ),
             row(
                 400,
                 410,
-                &[
-                    "w_payload_unknown",
-                    "wdata is x or z while wvalid",
-                    "warning"
-                ]
+                &["w_payload_unknown", "wdata is x while wvalid", "error"]
             ),
         ]
     );
@@ -2814,6 +2858,47 @@ fn uart_bytes_and_errors() {
     );
 }
 
+/// A port's reset is found as its clock is: in the scope when not under the prefix, active high
+/// unless its name ends in `n`; none, or two, leave `aresetn=<rst>` to fill in.
+#[test]
+fn detects_the_reset() {
+    let line = |resets: &[&str]| {
+        let dir = Dir::new(&format!("reset-{}", resets.join("-")));
+        let vcd = dir.0.join("r.vcd");
+        let mut text =
+            String::from("$timescale 1ns $end\n$scope module top $end\n$var wire 1 ! clk $end\n");
+        for (id, r) in "\"#$".chars().zip(["s_tvalid", "s_tready", "s_tdata"]) {
+            text += &format!("$var wire 1 {id} {r} $end\n");
+        }
+        for (id, r) in "%&".chars().zip(resets) {
+            text += &format!("$var wire 1 {id} {r} $end\n");
+        }
+        text += "$upscope $end\n$enddefinitions $end\n#0\n0!\n";
+        std::fs::write(&vcd, text).unwrap();
+        let t = wtf_core::trace::Trace::open(&vcd).unwrap();
+        wtf_core::protocol::detect(&t)
+            .iter()
+            .map(|f| f.decode_line())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        line(&["rst_n"]),
+        ["decode s axis clock=top.clk aresetn=top.rst_n prefix=top.s_"]
+    );
+    assert_eq!(
+        line(&["rst"]),
+        ["decode s axis clock=top.clk aresetn=top.rst reset_active=high prefix=top.s_"]
+    );
+    assert_eq!(
+        line(&[]),
+        ["decode s axis clock=top.clk aresetn=<rst> prefix=top.s_"]
+    );
+    assert_eq!(
+        line(&["rst", "sys_reset_n"]),
+        ["decode s axis clock=top.clk aresetn=<rst> prefix=top.s_"]
+    );
+}
+
 /// The interfaces built-in protocols decode, by their signals' names, with a decode line each.
 #[test]
 fn detects_interfaces() {
@@ -2829,11 +2914,11 @@ fn detects_interfaces() {
     };
     assert_eq!(
         found("axilite.vcd"),
-        ["decode s_axi axilite clock=top.aclk prefix=top.s_axi_"]
+        ["decode s_axi axilite clock=top.aclk aresetn=top.s_axi_aresetn prefix=top.s_axi_"]
     );
     assert_eq!(
         found("axis.vcd"),
-        ["decode axis axis clock=top.clk prefix=top."]
+        ["decode axis axis clock=top.clk aresetn=top.aresetn prefix=top."]
     );
     // UART has one role: `line` is never an interface
     assert!(found("uart.vcd").is_empty());
@@ -2871,7 +2956,7 @@ fn one_role_is_no_interface() {
 fn axilite_one_side() {
     let mut ws = open("axilite.vcd");
     let write: Vec<(&str, String)> = [
-        "awvalid", "awready", "awaddr", "wvalid", "wready", "wdata", "bvalid", "bready",
+        "awvalid", "awready", "awaddr", "wvalid", "wready", "wdata", "bvalid", "bready", "aresetn",
     ]
     .iter()
     .map(|r| (*r, format!("s_axi_{r}")))
@@ -2891,23 +2976,24 @@ fn axilite_one_side() {
         .unwrap_err();
     assert_eq!(
         err,
-        "x: no signal for bready (the file has: decode x axilite clock=top.aclk prefix=top.s_axi_)"
+        "x: no signal for bready, aresetn (the file has: decode x axilite clock=top.aclk aresetn=top.s_axi_aresetn prefix=top.s_axi_)"
     );
     let dir = Dir::new("axilite-read");
     let vcd = dir.0.join("rd.vcd");
     let mut text =
         String::from("$timescale 1ns $end\n$scope module top $end\n$var wire 1 ! aclk $end\n");
-    for (id, (r, w)) in "\"#$%&'".chars().zip([
+    for (id, (r, w)) in "\"#$%&'(".chars().zip([
         ("arvalid", 1),
         ("arready", 1),
         ("araddr", 8),
         ("rvalid", 1),
         ("rready", 1),
         ("rdata", 8),
+        ("aresetn", 1),
     ]) {
         text += &format!("$var wire {w} {id} m_axi_{r} $end\n");
     }
-    text += "$upscope $end\n$enddefinitions $end\n#0\n0!\n0\"\n1#\nb0 $\n0%\n1&\nb0 '\n#5\n1!\n#10\n0!\n1\"\nb100 $\n#15\n1!\n#20\n0!\n0\"\n1%\nb1010 '\n#25\n1!\n#30\n0!\n0%\n#35\n1!\n#40\n0!\n";
+    text += "$upscope $end\n$enddefinitions $end\n#0\n0!\n1(\n0\"\n1#\nb0 $\n0%\n1&\nb0 '\n#5\n1!\n#10\n0!\n1\"\nb100 $\n#15\n1!\n#20\n0!\n0\"\n1%\nb1010 '\n#25\n1!\n#30\n0!\n0%\n#35\n1!\n#40\n0!\n";
     std::fs::write(&vcd, text).unwrap();
     let t = wtf_core::trace::Trace::open(&vcd).unwrap();
     let found: Vec<String> = wtf_core::protocol::detect(&t)
@@ -2916,7 +3002,7 @@ fn axilite_one_side() {
         .collect();
     assert_eq!(
         found,
-        ["decode m_axi axilite clock=top.aclk prefix=top.m_axi_"]
+        ["decode m_axi axilite clock=top.aclk aresetn=top.m_axi_aresetn prefix=top.m_axi_"]
     );
     let mut ws = Workspace::open(&vcd).unwrap();
     ws.add_decode(decode("m", "axilite", "aclk", &[], &[("prefix", "m_axi_")]))
@@ -2928,8 +3014,8 @@ fn axilite_one_side() {
     assert!(!ws.streams().iter().any(|s| s.name == "m.wr"));
 }
 
-/// The roles of IHI 0022L Table B2.2 are required; the five it lets a slave leave out are
-/// optional with the value the spec gives them, and `aresetn` too, with no value to give.
+/// The roles of IHI 0022L Table B2.2 are required, `aresetn` too; the five it lets a slave leave
+/// out are optional with the value the spec gives them.
 #[test]
 fn axilite_required_roles() {
     let def = wtf_core::protocol::get("axilite").unwrap();
@@ -2938,13 +3024,10 @@ fn axilite_required_roles() {
         required,
         [
             "awvalid", "awready", "awaddr", "wvalid", "wready", "wdata", "bvalid", "bready",
-            "arvalid", "arready", "araddr", "rvalid", "rready", "rdata"
+            "arvalid", "arready", "araddr", "rvalid", "rready", "rdata", "aresetn"
         ]
     );
-    assert_eq!(
-        optional,
-        ["awprot", "wstrb", "bresp", "arprot", "rresp", "aresetn"]
-    );
+    assert_eq!(optional, ["awprot", "wstrb", "bresp", "arprot", "rresp"]);
     assert_eq!(
         def.defaults(),
         [
@@ -2973,7 +3056,7 @@ fn axilite_required_roles() {
         .unwrap_err();
     assert_eq!(
         err,
-        "x: no signal for bready (the file has: decode x axilite clock=top.aclk prefix=top.s_axi_)"
+        "x: no signal for bready, aresetn (the file has: decode x axilite clock=top.aclk aresetn=top.s_axi_aresetn prefix=top.s_axi_)"
     );
 }
 
@@ -3104,10 +3187,11 @@ fn axi4_one_side() {
     };
     let write = roles(&[
         "awvalid", "awready", "awaddr", "awid", "wvalid", "wready", "wdata", "wlast", "bvalid",
-        "bready", "bid",
+        "bready", "bid", "aresetn",
     ]);
     let read = roles(&[
         "arvalid", "arready", "araddr", "arid", "rvalid", "rready", "rdata", "rlast", "rid",
+        "aresetn",
     ]);
     let names = |ws: &Workspace| {
         ws.streams()
@@ -3463,7 +3547,7 @@ fn set_errors_and_briefs() {
 #[test]
 fn undecoded_interface_names() {
     let mut ws = open("axilite.vcd");
-    let line = "decode s_axi axilite clock=top.aclk prefix=top.s_axi_";
+    let line = "decode s_axi axilite clock=top.aclk aresetn=top.s_axi_aresetn prefix=top.s_axi_";
     let part = |ws: &Workspace, name: &str| match ws.stream_set(name).unwrap_err() {
         wtf_core::workspace::unknown::NoStream::NotDecoded {
             name: n,
@@ -3576,6 +3660,7 @@ const PACKETS: &[(&str, &str)] = &[
     ("tstrb", "tstrb"),
     ("tid", "tid"),
     ("tdest", "tdest"),
+    ("aresetn", "aresetn"),
 ];
 
 /// axis_packets.vcd: clk rises at 5, 15 ...; two packets by (tid, tdest), one of them left open,
@@ -3701,7 +3786,7 @@ fn host_defaults_and_describe() {
     let text =
         wtf_core::protocol::describe("axis", wtf_core::protocol::Sources::default()).unwrap();
     assert!(
-        text.starts_with("axis: AXI4-Stream: beats, packets by tlast and (tid, tdest), the handshake's errors\nroles: tvalid (required)"),
+        text.starts_with("axis: AXI4-Stream: beats, packets by tlast and (tid, tdest), the handshake's errors\nroles: tvalid aresetn (required)"),
         "{text}"
     );
     // a signal not given reads a default, not an error: that is what makes a short instance decode
@@ -3843,12 +3928,18 @@ fn loaded_protocols() {
     assert!(!stream(&ws, "b.beat").records.is_empty());
 }
 
-/// Only tvalid and the clock: tready reads 1, tlast reads 1, the rest read 0.
+/// Only tvalid, the clock and the reset: tready reads 1, tlast reads 1, the rest read 0.
 #[test]
 fn axis_tvalid_only_decodes() {
     let mut ws = open("axis.vcd");
-    ws.add_decode(decode("v", "axis", "clk", &[("tvalid", "tvalid")], &[]))
-        .unwrap();
+    ws.add_decode(decode(
+        "v",
+        "axis",
+        "clk",
+        &[("tvalid", "tvalid"), ("aresetn", "aresetn")],
+        &[],
+    ))
+    .unwrap();
     // no payload role given, so the beat carries no fields — but every tvalid cycle is one
     assert_eq!(table(stream(&ws, "v.beat"))[0], row(15, 25, &[]));
     // tlast reads 1: every beat ends its own packet, with no bytes and complete
@@ -3866,10 +3957,10 @@ fn axis_tvalid_only_decodes() {
     );
 }
 
-/// The error rules the packets fixture reaches: tkeep where tstrb is 1, and a tvalid that falls.
-/// (Its x payload reports the `payload_unknown` warning, asserted in `axis_warning_rules`.)
-/// Twakeup's drop needs a stalled cycle with `twakeup` high, which the packets fixture never sets:
-/// that rule, and the handshake-unknown warnings, are pinned by `axis_wakeup.vcd` below.
+/// The error rules the packets fixture reaches: tkeep where tstrb is 1, an x payload while tvalid,
+/// and a tvalid that falls. Twakeup's drop needs a stalled cycle with `twakeup` high, which the
+/// packets fixture never sets: that rule, and the handshake-unknown errors, are pinned by
+/// `axis_wakeup.vcd` below.
 #[test]
 fn axis_error_rules() {
     let mut ws = open("axis_packets.vcd");
@@ -3882,6 +3973,7 @@ fn axis_error_rules() {
         ("tstrb", "tstrb"),
         ("tid", "tid"),
         ("tdest", "tdest"),
+        ("aresetn", "aresetn"),
     ];
     ws.add_decode(decode("rx", "axis", "clk", signals, &[]))
         .unwrap();
@@ -3893,6 +3985,11 @@ fn axis_error_rules() {
         errors,
         [
             row(35, 45, &["keep", "tkeep 0, tstrb 1 on byte 0", "error"]),
+            row(
+                65,
+                75,
+                &["payload_unknown", "tdata is x or z while tvalid", "error"]
+            ),
             row(75, 85, &["dropped", "tvalid fell before tready", "error"])
         ]
     );
@@ -3906,6 +4003,7 @@ fn axis_error_rules() {
             ("tvalid", "tvalid"),
             ("tready", "tready"),
             ("twakeup", "twakeup"),
+            ("aresetn", "aresetn"),
         ],
         &[],
     ))
@@ -3922,40 +4020,25 @@ fn axis_error_rules() {
                 25,
                 &["wakeup", "twakeup fell while the transfer stalled", "error"]
             ),
-            row(25, 35, &["dropped", "tvalid fell before tready", "error"])
+            row(25, 35, &["dropped", "tvalid fell before tready", "error"]),
+            row(
+                35,
+                45,
+                &["unknown", "tvalid is x or z out of reset", "error"]
+            ),
+            row(
+                45,
+                55,
+                &["unknown", "tready is x or z out of reset", "error"]
+            ),
         ]
     );
 }
 
-/// The warning rules: an x payload while tvalid (packets fixture), and twakeup's timing plus x/z
-/// on the handshake itself (`axis_wakeup.vcd`, which stalls without ever transferring).
+/// The warning rule: twakeup in the same cycle as tvalid (`axis_wakeup.vcd`, which stalls without
+/// ever transferring).
 #[test]
 fn axis_warning_rules() {
-    let mut ws = open("axis_packets.vcd");
-    let signals: &[(&str, &str)] = &[
-        ("tvalid", "tvalid"),
-        ("tready", "tready"),
-        ("tdata", "tdata"),
-        ("tlast", "tlast"),
-        ("tkeep", "tkeep"),
-        ("tstrb", "tstrb"),
-        ("tid", "tid"),
-        ("tdest", "tdest"),
-    ];
-    ws.add_decode(decode("rx", "axis", "clk", signals, &[]))
-        .unwrap();
-    let warnings: Vec<_> = table(stream(&ws, "rx.errors"))
-        .into_iter()
-        .filter(|(_, _, f)| f[2] == "warning")
-        .collect();
-    assert_eq!(
-        warnings,
-        [row(
-            65,
-            75,
-            &["payload_unknown", "tdata is x or z while tvalid", "warning"]
-        )]
-    );
     let mut ws = open("axis_wakeup.vcd");
     ws.add_decode(decode(
         "rx",
@@ -3965,6 +4048,7 @@ fn axis_warning_rules() {
             ("tvalid", "tvalid"),
             ("tready", "tready"),
             ("twakeup", "twakeup"),
+            ("aresetn", "aresetn"),
         ],
         &[],
     ))
@@ -3975,27 +4059,15 @@ fn axis_warning_rules() {
         .collect();
     assert_eq!(
         warnings,
-        [
-            row(
-                5,
-                15,
-                &[
-                    "wakeup_early",
-                    "twakeup in the same cycle as tvalid",
-                    "warning"
-                ]
-            ),
-            row(
-                35,
-                45,
-                &["unknown", "tvalid is x or z out of reset", "warning"]
-            ),
-            row(
-                45,
-                55,
-                &["unknown", "tready is x or z out of reset", "warning"]
-            ),
-        ]
+        [row(
+            5,
+            15,
+            &[
+                "wakeup_early",
+                "twakeup in the same cycle as tvalid",
+                "warning"
+            ]
+        ),]
     );
 }
 
@@ -4243,6 +4315,7 @@ fn request_vcd(dir: &Dir, chan: &str, cycles: &[(u64, u64, u64, u64, u64)]) -> P
         ("rready", 1),
         ("rdata", 32),
         ("rlast", 1),
+        ("aresetn", 1),
     ];
     // the VCD identifier of each role: a printable character, `!` for `aclk` first
     let id = |role: &str| {
@@ -4260,7 +4333,10 @@ fn request_vcd(dir: &Dir, chan: &str, cycles: &[(u64, u64, u64, u64, u64)]) -> P
         let id = char::from_u32(34 + i as u32).unwrap();
         text += &format!("$var wire {width} {id} m_axi_{role}{range} $end\n");
     }
-    text += "$upscope $end\n$enddefinitions $end\n#0\n0!\n#10\n1!\n";
+    text += &format!(
+        "$upscope $end\n$enddefinitions $end\n#0\n0!\n1{}\n#10\n1!\n",
+        id("aresetn")
+    );
     for f in ["valid", "ready"] {
         text += &format!("1{}\n", id(&format!("{chan}{f}")));
     }

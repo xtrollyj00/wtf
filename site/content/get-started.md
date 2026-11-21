@@ -159,7 +159,7 @@ the number beside one to open it, or `o` to type a path.
 not match a built-in protocol. `Space` `d` `D`, or a `:decode` line, names the signal for every role:
 
 ```
-:decode bus axilite clock=aclk awvalid=m_awv awready=m_awr awaddr=m_awa wvalid=m_wv wready=m_wr wdata=m_wd bvalid=m_bv bready=m_br arvalid=m_arv arready=m_arr araddr=m_ara rvalid=m_rv rready=m_rr rdata=m_rd
+:decode bus axilite clock=aclk awvalid=m_awv awready=m_awr awaddr=m_awa wvalid=m_wv wready=m_wr wdata=m_wd bvalid=m_bv bready=m_br arvalid=m_arv arready=m_arr araddr=m_ara rvalid=m_rv rready=m_rr rdata=m_rd aresetn=rst_n
 ```
 
 When the names share a prefix, `prefix=m_` plus the role names is enough. Each protocol needs these
@@ -167,9 +167,9 @@ roles (`:help decode` lists the optional ones):
 
 | protocol | roles |
 |---|---|
-| `axis` | `tvalid` `tready` `tdata` |
-| `axilite` | `awvalid` `awready` `awaddr` `wvalid` `wready` `wdata` `bvalid` `bready` `arvalid` `arready` `araddr` `rvalid` `rready` `rdata` |
-| `axi4` | the `axilite` roles, plus `wlast` and `rlast` (optional: AxLEN frames a burst without them) and `aresetn` |
+| `axis` | `tvalid` `aresetn` |
+| `axilite` | `awvalid` `awready` `awaddr` `wvalid` `wready` `wdata` `bvalid` `bready` `arvalid` `arready` `araddr` `rvalid` `rready` `rdata` `aresetn` |
+| `axi4` | the `axilite` roles (`wlast` and `rlast` are optional: AxLEN frames a burst without them) |
 | `spi` | `sclk` `cs` `mosi` |
 | `uart` | `line` |
 

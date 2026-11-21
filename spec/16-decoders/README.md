@@ -133,8 +133,8 @@ checks that return only violations.
   instead, as functions. `axilite` and `axi4` take a `timeout` param (`timeout=1us`): a request
   still unanswered more than that after it completed is `no response` when the next response
   comes, so a lost B or R doesn't pair every later response with the request before its own;
-  `axi4` names that answer `timeout`. `axilite` and `axi4` take `reset_active` too, `low` or
-  `high`, for their optional `aresetn`.
+  `axi4` names that answer `timeout`. `axis`, `axilite` and `axi4` require `aresetn`, as every
+  AXI interface has it, and take `reset_active`, `low` or `high`, for its polarity.
 - **Instances** are kept in the session, so they persist, and agents declare them like the rest
   of the workspace:
   ```toml
