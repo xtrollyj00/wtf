@@ -178,7 +178,10 @@ impl Start {
                 KeyCode::Esc => self.typing = None,
                 KeyCode::Enter => {
                     let t = self.typing.take().unwrap_or_default();
-                    let trace = match t.strip_prefix("~/").or_else(|| t.strip_prefix("~\\")) {
+                    // `~\` too on Windows; on Unix `\` is a character of a file name
+                    let tilde = t.strip_prefix("~/");
+                    let tilde = tilde.or_else(|| t.strip_prefix("~\\").filter(|_| cfg!(windows)));
+                    let trace = match tilde {
                         Some(rest) => home().map_or(PathBuf::from(&t), |h| h.join(rest)),
                         None => PathBuf::from(t.trim()),
                     };
@@ -833,6 +836,19 @@ mod tests {
             press(&mut s, "o~/a.vcd<CR>"),
             Some(Choice::Open {
                 trace: home.join("a.vcd"),
+                session: None
+            })
+        );
+        // `~\` is the home directory on Windows only; on Unix `\` is part of a file name
+        let back = if cfg!(windows) {
+            home.join("a.vcd")
+        } else {
+            PathBuf::from(r"~\a.vcd")
+        };
+        assert_eq!(
+            press(&mut s, r"o~\a.vcd<CR>"),
+            Some(Choice::Open {
+                trace: back,
                 session: None
             })
         );

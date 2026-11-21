@@ -126,7 +126,13 @@ impl Drop for Dir {
 }
 
 fn simple() -> PathBuf {
-    std::fs::canonicalize("tests/data/simple.vcd").unwrap()
+    plain("tests/data/simple.vcd")
+}
+
+/// `p`'s whole path as wtf shows it: links resolved, without Windows' `\\?\` (history::plain).
+fn plain(p: impl AsRef<Path>) -> PathBuf {
+    let full = std::fs::canonicalize(p).unwrap();
+    PathBuf::from(full.display().to_string().trim_start_matches(r"\\?\"))
 }
 
 /// The user's wtf window `id` on `trace`: answers `GET` with `session`, and passes on what the
@@ -134,10 +140,7 @@ fn simple() -> PathBuf {
 fn fake_window(runtime: &Path, id: &str, trace: &Path, session: &str) -> mpsc::Receiver<String> {
     let listener = UnixListener::bind(runtime.join(format!("wtf-{id}.sock"))).unwrap();
     // as a real window announces it: links resolved (live::window)
-    let info = format!(
-        "window\n{}",
-        std::fs::canonicalize(trace).unwrap().display()
-    );
+    let info = format!("window\n{}", plain(trace).display());
     let get = format!("rows (> selected):\n> clk\n---\n{session}");
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
@@ -287,9 +290,8 @@ fn opens_are_recent() {
     s.ok("open", json!({"trace": simple()}));
     let history = std::fs::read_to_string(dir.0.join("wtf/history")).unwrap();
     // the history records the path without Windows' `\\?\`, as a user would type it
-    let path = simple().display().to_string();
     assert!(
-        history.ends_with(&format!("\tagent\t{}\n", path.trim_start_matches(r"\\?\"))),
+        history.ends_with(&format!("\tagent\t{}\n", simple().display())),
         "{history}"
     );
     let out = wtf(&dir.0).args(["--snapshot", "100x32"]).output().unwrap();
@@ -1418,7 +1420,7 @@ fn workspaces_and_joining() {
         "no sessions: the user has no wtf window open; `open` a trace"
     );
     let pid = s.child.id();
-    let fst = std::fs::canonicalize("tests/data/simple.fst").unwrap();
+    let fst = plain("tests/data/simple.fst");
     let joined =
         "(the user's wtf windows on this trace see your steps; :follow there shows the workspace)";
     assert!(

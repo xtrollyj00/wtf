@@ -102,7 +102,8 @@ pub fn listen(
     let path = sock(id)?;
     let _ = std::fs::remove_file(&path);
     let listener = UnixListener::bind(&path)?;
-    let trace = std::fs::canonicalize(trace).unwrap_or_else(|_| trace.to_path_buf());
+    let trace =
+        std::fs::canonicalize(trace).map_or_else(|_| trace.to_path_buf(), crate::history::plain);
     let info: Arc<str> = format!("{kind}\n{}", trace.display()).into();
     let handle = Arc::new(handle);
     std::thread::spawn(move || {
@@ -226,7 +227,7 @@ pub fn window_on(trace: &Path) -> Option<String> {
 /// The sessions of `kind` (`window`, `agent`) on this trace, most recently started first (spec
 /// §15 "Joining").
 pub fn on_trace(kind: &str, trace: &Path) -> Vec<String> {
-    let Ok(trace) = std::fs::canonicalize(trace) else {
+    let Ok(trace) = std::fs::canonicalize(trace).map(crate::history::plain) else {
         return Vec::new();
     };
     sessions()
