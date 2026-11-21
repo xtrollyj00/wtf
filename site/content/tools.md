@@ -19,14 +19,14 @@ Run one of wtf's `:` commands on the workspace: `decode`, `protocol`, rows, curs
 
 ### `find`
 
-When a search expression holds, as a table of times; `show` adds values, `count_only` counts. With `@<clock> ` first, a match is a cycle whose ending edge samples it true (`@clk x`: the cycles x is high), reported at the cycle's start; without, where it becomes true (`rose(x)`: x's edges). A bus: decode it (`help decode`).
+When a search expression holds, as a table of times; `show` adds values, `count_only` counts. With `@<clock> ` first, a match is a cycle whose ending edge samples it true (`@clk x`: the cycles x is high), reported at the cycle's start; without, where it becomes true (`x`: x's rising edges). A bus: decode it (`help decode`).
 
 | Argument | Means |
 |---|---|
 | `backward` | Search toward the start: the latest matches first. |
 | `count` | How many lines to list; default 20. |
 | `count_only` | Only count the matches; no list. |
-| `expr` (required) | A search expression as in SystemVerilog: `==` `!=` `<` `&&` `\|\|` `!`; only `rose(x)` `fell(x)` `stable(x)` `past(x)` (SVA's, no `$`); `@<clock> ` first samples each cycle: `@top.clk valid && ready`, `rose(irq) && !past(busy)` (`help expressions`). |
+| `expr` (required) | A search expression as in SystemVerilog: `==` `!=` `<` `&&` `\|\|` `!`; only `rose(e)` `fell(e)` `stable(e)` `past(e)` `past(e, n)` (SVA's, no `$`, at a clock); `@<clock> ` first samples each cycle: `@top.clk valid && rose(ready)` (`help expressions`). |
 | `from` | Search after (or with `backward`, before) this time; default the start. |
 | `show` | Signals whose values to list on each match: a table of the transfers. |
 | `to` | Stop at this time (with `backward`, down to it); default the end. |

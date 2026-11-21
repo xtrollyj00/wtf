@@ -63,15 +63,32 @@ clk      ▁▁▁▁▔▔▔▔▁▁▁▁▔▔▔▔
   to the cycle's start, the edge where the transfer's signals are set. The match count says what
   can follow, `match 1 of 12; Space d m: records of them` (`hints = false` in the config file
   drops it): the matches as records (section 5, "Protocol form").
-- **Over time**: `past(x)` is x's value one sample earlier: with a clock, at the cycle before (just
-  before the previous rising edge); without, one tick earlier. It nests (`past(past(x))`) and
-  compares like a signal (`past(state) == 2`). `rose(x)` is `x && !past(x)`, `fell(x)` is
-  `x == 0 && past(x) != 0` (on a bus: becomes nonzero / zero), `stable(x)` is x unchanged since
-  the sample before (false at the first, which has none). So a protocol check is a search for its
-  violations: `/@clk fell(valid) && !past(ready)` finds a valid dropped before its ready,
-  `/@clk past(valid) && !past(ready) && !stable(data)` a payload changed while stalled.
+- **Over time**, at a clock, as SVA's sampled value functions (IEEE 1800 §16.9.3) without the
+  `$`: `past(e)` is the expression e at the cycle before (just before the previous rising edge).
+  e is any expression, a value or a condition: `past(state) == 2`, `past(a + b) > 4`,
+  `!past(valid && ready)`. `past(e, n)` is e n cycles earlier, as `$past(e, n)`: `past(x, 2)` is
+  `past(past(x))`. The count is a number of samples, 1 or more: `past(x, 0)`, `past(x, -1)` and
+  `past(x, y)` are errors that say so. `rose(e)` is where e's bit 0 has become 1 from anything
+  else, 0, x or z, `fell(e)` where it has become 0, and `stable(e)` where e's whole value is the
+  one at the cycle before as SV's `===` compares it, x and z bits included, so x staying x is
+  stable. The three are always 1 or 0, never x, so `!stable(x)` is every cycle `stable(x)` isn't.
+  On a bus `rose(count)` is its bit 0, as in SVA: `rose(count != 0)` is where it becomes nonzero,
+  `rose(a == 0 && b == 0)` where both have become 0. A computed value with an unknown bit is x as
+  a whole (below), so `stable(a + b)` holds while a + b stays x. Before the first sample, and the
+  n-th for `past(e, n)`, the earlier value is x, a 4-state signal's default. The clock's first
+  edge is that first sample, the one before the first cycle (a cycle is sampled at its ending
+  edge), so the x shows through `past`: at the first cycle `past(e, 2)` is x and `rose(past(e))`
+  holds where e was 1 at the first edge. A valid going from x (or U) to 0 in reset fell, so a
+  check that must stay quiet in reset says so (`rst_n && fell(valid)`). They need the clock: without one each is
+  an error that writes it, naming a clock (`aclk`, `clk`) in the scope of the first signal read or
+  above it: `rose(valid) needs a clock, as in SVA: @top.clk rose(valid)`. In a `records` `where`
+  (section 15) the record before is the earlier sample, so none is needed there. So a protocol
+  check is a search for its violations: `/@clk fell(valid) && !past(ready)` finds a valid dropped
+  before its ready, `/@clk past(valid) && !past(ready) && !stable(data)` a payload changed while
+  stalled. An unclosed function names itself: `rose(a && b: missing ) after rose's argument`.
 - A signal compares with a value or with another signal, as unsigned numbers or text:
-  `mi_addr != reg_waddr`, `data != past(data)` (which is `!stable(data)`). In a `records` `where`
+  `mi_addr != reg_waddr`, `data != past(data)` (unlike
+  `!stable(data)`, unknown where either is x). In a `records` `where`
   (section 15) a field compares with another field of the same record, so a `pair`'s two sides
   are compared as a scoreboard does. `@` takes the clock signal itself: `@rising(clk)` is an
   error naming `@clk`.
@@ -115,6 +132,30 @@ clk      ▁▁▁▁▔▔▔▔▁▁▁▁▔▔▔▔
   - A comparison is a value, 1 or 0, and `!x` is one too: `(bd == 1) != !(a < b)`. In a
     `records` `where`, a field's slice or bit is written as a signal's: `b[4:0]`, `b[3]`, on
     either side of a comparison: `rd == insn[11:7]`.
+- **Grammar**, in EBNF, loosest first; each rule is a method of the parser (`search.rs`), so
+  the precedence is `?:` < `||` < `&&` < `!` < comparisons < arithmetic < operands:
+
+  ```ebnf
+  query    = [ "@" signal ] expr ;
+  expr     = or [ "?" value ":" value ] ;             (* c ? a : b is a value *)
+  or       = and { "||" and } ;
+  and      = unary { "&&" unary } ;
+  unary    = "!" unary | contains | chain [ cmp ( chain | literal ) ] ;
+  cmp      = "==" | "!=" | "<" | "<=" | ">" | ">=" ;
+  value    = chain ;
+  chain    = atom { arith atom } ;                    (* * / % before + - *)
+  arith    = "*" | "/" | "%" | "+" | "-" | "<<" | ">>" | "&" | "|" | "^" ;
+  atom     = "!" atom | "~" atom | "(" expr ")" [ slice ]
+           | "signed" "(" chain ")" [ slice ] | call | number | signal ;
+  call     = ( "rose" | "fell" | "stable" ) "(" expr ")"
+           | "past" "(" expr [ "," count ] ")" ;
+  count    = digit { digit } ;                        (* 1 or more *)
+  contains = "contains" "(" atom "," '"' text '"' ")" ;
+  slice    = "[" bit [ ":" bit ] "]" ;
+  signal   = name ;                                   (* data, data[3], data[7:4], as above *)
+  number   = decimal | hex | binary | sv ;            (* 64, 0x40, 0b1000000, 8'h40 *)
+  literal  = "x" | "z" | named | time ;               (* a value the file names; 40ns *)
+  ```
 - On a bit line of an expanded bus, the search looks at that bit. String and real signals are
   searched by their text, the whole of it; `contains(x, "text")` is true where x's text holds
   `text`, case and spaces as written: `/contains(msg, "error")`, and in a `records` `where`, a

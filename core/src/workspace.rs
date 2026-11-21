@@ -589,6 +589,7 @@ impl Workspace {
             let target = Some(search::parse(text, width, names.as_ref())?);
             search::Query {
                 clock: None,
+                call: None,
                 expr: search::Expr::Cmp {
                     sig: (var, bit),
                     past: 0,
@@ -629,9 +630,22 @@ impl Workspace {
                 (p, var.width, var.names.clone(), var.signed)
             })
         })?;
-        let mut sigs: Vec<usize> = q.clock.iter().map(|c| c.0).collect();
         let mut probes = Vec::new();
         search::probes(&q.expr, &mut probes);
+        // rose, fell, stable and past need a clock (spec §8): the error names the one in the first
+        // signal's scope, or above it
+        q.needs_clock(text, || {
+            probes
+                .first()
+                .and_then(|p| {
+                    let path = &self.trace.vars[p.0.0].path;
+                    path.match_indices('.')
+                        .rev()
+                        .find_map(|(i, _)| crate::protocol::clock_of(&self.trace, &path[..=i]))
+                })
+                .unwrap_or_else(|| "clk".into())
+        })?;
+        let mut sigs: Vec<usize> = q.clock.iter().map(|c| c.0).collect();
         sigs.extend(probes.iter().map(|p| p.0.0));
         self.trace.load(&sigs);
         if let Some((v, b)) = q.clock {

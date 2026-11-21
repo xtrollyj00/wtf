@@ -111,7 +111,8 @@ An expression searches several signals at once:
 `@aclk` makes the search sample at the clock. A match is then each clock cycle where the
 expression holds at the rising edge, the way a flip-flop samples it, so one handshake is one
 match. Without `@aclk`, a match is the first time the expression becomes true. `past(x)` is the
-value one cycle earlier, and `rose(x)`, `fell(x)` and `stable(x)` compare with it. So a protocol
+value one cycle earlier, and `rose(x)`, `fell(x)` and `stable(x)` compare with it, as SVA's do,
+so they need the clock. So a protocol
 rule is a search for its violations: `@aclk fell(valid) && !past(ready)` finds a valid that
 dropped before its ready. The [keys](@/keys.md) and the [reference](@/reference.md#expressions)
 list the operators.

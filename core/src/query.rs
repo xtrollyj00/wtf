@@ -111,16 +111,11 @@ fn find_clocked(trace: &Trace, q: &Query, clock: Probe, s: &Search) -> Found {
     if lo >= end {
         return found;
     }
-    // each signal read, with the most samples back it is read
+    // each signal read, with each number of samples back it is read at, fewest first
     let mut probes: Vec<(Probe, u32)> = Vec::new();
     search::probes(&q.expr, &mut probes);
     probes.sort_unstable();
-    probes.dedup_by(|b, a| {
-        a.0 == b.0 && {
-            a.1 = a.1.max(b.1);
-            true
-        }
-    });
+    probes.dedup();
     // where a stretch starts: lo, and each cycle whose samples differ from the cycle before's
     let mut starts = vec![lo];
     let mut cut = |k: usize| {
@@ -128,10 +123,12 @@ fn find_clocked(trace: &Trace, q: &Query, clock: Probe, s: &Search) -> Found {
             starts.push(k);
         }
     };
-    for &(p, most) in &probes {
-        for n in 0..=most as usize {
+    for reads in probes.chunk_by(|a, b| a.0 == b.0) {
+        let (p, most) = reads[reads.len() - 1];
+        let ns = reads.iter().map(|r| r.1);
+        for n in ns.clone() {
             // where `past` n first reads a sample: before, it reads none
-            cut(n.wrapping_sub(1));
+            cut((n as usize).wrapping_sub(1));
         }
         // a change at x is first sampled at row r, the first edge after x, so read n rows back
         // by cycle r - 1 + n; the samples that matter are rows lo + 1 - most ..= end
@@ -147,8 +144,8 @@ fn find_clocked(trace: &Trace, q: &Query, clock: Probe, s: &Search) -> Found {
         let mut r = 0;
         for x in changes.take_while(|&x| x < until) {
             r = gallop(&edges, r, x);
-            for n in 0..=most as usize {
-                cut((r + n).wrapping_sub(1));
+            for n in ns.clone() {
+                cut((r + n as usize).wrapping_sub(1));
             }
         }
     }
@@ -464,6 +461,9 @@ mod tests {
         "@clk stable(d)",
         "@clk !stable(d) || late",
         "@clk stable(past(a))",
+        "@clk past(d, 3) == 1 || past(a && b, 2)",
+        "@clk rose(a && !c) || fell(d + 1 == 2)",
+        "@clk stable(d + 1) && !stable(a || b)",
         "@clk late",
         "@clk !late",
         "@clk past(late) && !late",

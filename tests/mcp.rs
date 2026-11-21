@@ -1174,6 +1174,10 @@ fn errors() {
         s.tool("find", json!({"expr": "@clk rising"})).unwrap_err(),
         "rising: `@clk` already samples at the clock's rising edges; an edge of a signal is rose(x), SVA's $rose without the $"
     );
+    assert_eq!(
+        s.tool("find", json!({"expr": "rose(busy)"})).unwrap_err(),
+        "rose(busy) needs a clock, as in SVA: @top.clk rose(busy)"
+    );
     assert!(
         s.tool("render", json!({}))
             .unwrap_err()

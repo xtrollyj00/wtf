@@ -47,9 +47,9 @@ pub struct ValuesArgs {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 pub struct FindArgs {
-    /// A search expression as in SystemVerilog: `==` `!=` `<` `&&` `||` `!`; only `rose(x)` `fell(x)`
-    /// `stable(x)` `past(x)` (SVA's, no `$`); `@<clock> ` first samples each cycle:
-    /// `@top.clk valid && ready`, `rose(irq) && !past(busy)` (`help expressions`).
+    /// A search expression as in SystemVerilog: `==` `!=` `<` `&&` `||` `!`; only `rose(e)` `fell(e)`
+    /// `stable(e)` `past(e)` `past(e, n)` (SVA's, no `$`, at a clock); `@<clock> ` first samples
+    /// each cycle: `@top.clk valid && rose(ready)` (`help expressions`).
     pub expr: String,
     /// Search after (or with `backward`, before) this time; default the start.
     pub from: Option<String>,
