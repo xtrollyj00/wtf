@@ -19,7 +19,7 @@ An AXI4-Lite port answered something with an error, and you want to know which t
 `tour.vcd` has one. Decode the port:
 
 ```
-:decode bus axilite clock=top.aclk prefix=top.s_axi_
+:decode bus axilite clock=top.aclk aresetn=top.aresetn prefix=top.s_axi_
 ```
 
 `Space` `d` `d` does the same from the list of found interfaces, and names the decode `s_axi`,

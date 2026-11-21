@@ -111,7 +111,7 @@ MCP server's tools."
 
 Then ask the agent about a trace. It opens it in a workspace of its own and answers
 from the decoded values. Asked for failed reads in `docs/demo.vcd`, an agent calls the `command`
-tool with `decode bus axilite clock=aclk prefix=s_axi_`, then `records` on `bus.rd` with
+tool with `decode bus axilite clock=aclk aresetn=aresetn prefix=s_axi_`, then `records` on `bus.rd` with
 `where: "resp != 0"`, and gets:
 
 ```

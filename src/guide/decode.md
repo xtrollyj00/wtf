@@ -10,8 +10,8 @@ Form
   record per cycle a rule holds.
 
 Recipes
-- A bus `open` or `info` listed: run its line, `decode bus axilite clock=aclk prefix=s_axi_`,
-  then `records` `bus` (`help records`).
+- A bus `open` or `info` listed: run its line, `decode bus axilite clock=aclk aresetn=aresetn
+  prefix=s_axi_`, then `records` `bus` (`help records`).
 - A handshake of your own: `protocol hs roles=valid,ready,data when=valid && ready d=data`, then
   `decode rx hs clock=clk valid=rx_valid ready=rx_ready data=rx_data`.
 - Packets from beats: `decode f frame input=rx.beat last=tlast`.
