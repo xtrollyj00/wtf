@@ -910,7 +910,8 @@ fn find(trace: &crate::trace::Trace) -> Vec<Found> {
 }
 
 /// The reset an interface likely has: `<prefix>aresetn`, else the one 1-bit signal in its scope
-/// named like a reset (`aresetn`, `rst_n`, `reset`), active low when its name ends in `n`.
+/// named like a reset (`aresetn`, `rst_n`, `reset`), active low when its name says so (`n`, `_b`,
+/// `_l` at the end, `nrst` or `nreset` at the start).
 fn reset_of(trace: &crate::trace::Trace, prefix: &str) -> Option<(String, bool)> {
     let own = format!("{prefix}aresetn");
     if trace.by_path.contains_key(&own) {
@@ -924,8 +925,14 @@ fn reset_of(trace: &crate::trace::Trace, prefix: &str) -> Option<(String, bool)>
         .filter_map(|v| {
             let (s, leaf) = v.path.rsplit_once('.')?;
             let leaf = leaf.to_lowercase();
+            // active low by its name: `rst_n`, `rstn`, `rst_b`, `rst_l`, `nreset`
+            let low = leaf.ends_with('n')
+                || leaf.ends_with("_b")
+                || leaf.ends_with("_l")
+                || leaf.starts_with("nrst")
+                || leaf.starts_with("nreset");
             (s == scope && (leaf.contains("rst") || leaf.contains("reset")))
-                .then(|| (v.path.clone(), !leaf.ends_with('n')))
+                .then(|| (v.path.clone(), !low))
         });
     match (resets.next(), resets.next()) {
         (Some(r), None) => Some(r),

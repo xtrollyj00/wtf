@@ -674,6 +674,20 @@ fn axilite_unknown_out_of_reset() {
             )
         ]
     );
+    // a reset of x, as a testbench's before it drives it, is no cycle to check either: the same
+    // three rows, not the x's
+    let mut text = std::fs::read_to_string(fixture("vcd").with_file_name("axilite.vcd")).unwrap();
+    text = text.replacen("#0\n1~~\n", "#0\nx~~\n", 1);
+    text = text.replacen("#22\n", "#22\n1~~\n", 1);
+    let path = dir.0.join("x-reset.vcd");
+    std::fs::write(&path, text).unwrap();
+    let mut x = Workspace::open(&path).unwrap();
+    x.add_decode(decode("s", "axilite", "aclk", &[], &[("prefix", "s_axi_")]))
+        .unwrap();
+    assert_eq!(
+        table(stream(&x, "s.errors")),
+        table(stream(&ws, "s.errors"))
+    );
 }
 
 /// AXI-Lite in axilite.vcd: two writes (the second's W before its AW), two reads (the second
@@ -2889,6 +2903,14 @@ fn detects_the_reset() {
         line(&["rst"]),
         ["decode s axis clock=top.clk aresetn=top.rst reset_active=high prefix=top.s_"]
     );
+    for low in ["rst_b", "rst_l", "nreset"] {
+        assert_eq!(
+            line(&[low]),
+            [format!(
+                "decode s axis clock=top.clk aresetn=top.{low} prefix=top.s_"
+            )]
+        );
+    }
     assert_eq!(
         line(&[]),
         ["decode s axis clock=top.clk aresetn=<rst> prefix=top.s_"]
@@ -3752,6 +3774,24 @@ fn axis_reset_takes_no_beats() {
         ]
     );
     assert_eq!(table(stream(&ws, "rx.beat")), [row(5, 15, &["160"])]);
+    // a reset of x, as a testbench's before it drives it, says nothing of the tvalid under it and
+    // takes no beat; the cycle it is released in is as ever
+    let dir = Dir::new("axis-x-reset");
+    let path = dir.0.join("x.vcd");
+    let text = std::fs::read_to_string(fixture("vcd").with_file_name("axis_reset.vcd")).unwrap();
+    std::fs::write(&path, text.replacen("0%\n", "x%\n", 1)).unwrap();
+    let mut ws = Workspace::open(&path).unwrap();
+    ws.add_decode(decode("rx", "axis", "clk", &reset, &[]))
+        .unwrap();
+    assert_eq!(
+        table(stream(&ws, "rx.errors")),
+        [row(
+            15,
+            25,
+            &["reset", "tvalid in the cycle reset is released", "error"]
+        )]
+    );
+    assert_eq!(table(stream(&ws, "rx.beat")), [row(25, 35, &["160"])]);
 }
 
 /// What `protocols uart` says: the one role, the params, the two streams, and the three rules its
@@ -3988,7 +4028,7 @@ fn axis_error_rules() {
             row(
                 65,
                 75,
-                &["payload_unknown", "tdata is x or z while tvalid", "error"]
+                &["payload_unknown", "tdata is x while tvalid", "error"]
             ),
             row(75, 85, &["dropped", "tvalid fell before tready", "error"])
         ]
@@ -4021,16 +4061,8 @@ fn axis_error_rules() {
                 &["wakeup", "twakeup fell while the transfer stalled", "error"]
             ),
             row(25, 35, &["dropped", "tvalid fell before tready", "error"]),
-            row(
-                35,
-                45,
-                &["unknown", "tvalid is x or z out of reset", "error"]
-            ),
-            row(
-                45,
-                55,
-                &["unknown", "tready is x or z out of reset", "error"]
-            ),
+            row(35, 45, &["unknown", "tvalid is x out of reset", "error"]),
+            row(45, 55, &["unknown", "tready is x out of reset", "error"]),
         ]
     );
 }

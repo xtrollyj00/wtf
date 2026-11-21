@@ -312,12 +312,12 @@ impl Axis {
         let valid = self.bit(values, "tvalid");
         let ready = self.bit(values, "tready").unwrap_or(true);
         let (wake, has_wake) = (self.bit(values, "twakeup"), self.has("twakeup"));
-        // the spec's reset is active low (2.8.2)
-        let in_reset = self
-            .bit(values, "aresetn")
-            .is_some_and(|high| high != self.reset_low);
+        // the spec's reset is active low (2.8.2); an x on it (a testbench's reset before it is
+        // driven) records nothing and says nothing
+        let level = self.bit(values, "aresetn");
+        let in_reset = level.is_none_or(|high| high != self.reset_low);
         if in_reset {
-            if valid != Some(false) {
+            if level.is_some() && valid != Some(false) {
                 out.push(violation("reset", start, end, "tvalid in reset"));
             }
             self.stall = None;
@@ -348,26 +348,26 @@ impl Axis {
             return out;
         }
         for role in ["tvalid", "tready"] {
-            if self.value(values, role).as_ref().is_some_and(unknown) {
+            if let Some(v) = self.value(values, role).filter(unknown) {
                 out.push(violation(
                     "unknown",
                     start,
                     end,
-                    format!("{role} is x or z out of reset"),
+                    format!("{role} is {} out of reset", shown(&v)),
                 ));
             }
         }
-        if let (Some(true), Some(role)) = (
+        if let (Some(true), Some((role, v))) = (
             valid,
             self.beats
                 .iter()
-                .find(|f| self.value(values, f.as_str()).as_ref().is_some_and(unknown)),
+                .find_map(|f| Some((f, self.value(values, f.as_str()).filter(unknown)?))),
         ) {
             out.push(violation(
                 "payload_unknown",
                 start,
                 end,
-                format!("{role} is x or z while tvalid"),
+                format!("{role} is {} while tvalid", shown(&v)),
             ));
         }
         if has_wake {
@@ -657,6 +657,16 @@ fn violation(rule: &str, start: u64, end: u64, detail: impl Into<String>) -> Out
 /// A bit that is x or z (or uninitialized), which the spec forbids for these.
 fn unknown(v: &Val) -> bool {
     matches!(v, Val::Bits(b) if b.contains(['x', 'z', 'u', 'w', '-']))
+}
+
+/// An unknown value as a detail shows it, as the built-in does: one letter when every bit is the
+/// same (`x`, `z`), its bits when they differ (`10xx`).
+fn shown(v: &Val) -> &str {
+    let (Val::Bits(b) | Val::Text(b)) = v;
+    match b.as_bytes() {
+        [first, rest @ ..] if rest.iter().all(|c| c == first) => &b[..1],
+        _ => b,
+    }
 }
 
 /// Bit `k` of a bit string, from the lowest: None for x or z.

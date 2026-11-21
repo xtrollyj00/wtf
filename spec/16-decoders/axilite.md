@@ -128,7 +128,7 @@ The rest of the conformance, clause by clause:
 
 | clause | what `axilite` does | pinned by |
 | --- | --- | --- |
-| A2.1.2 | a valid while `aresetn` holds the reset, or in the first cycle it is released, is `<chan>_reset`; no handshake, write or read is decoded there | `axilite_reset_takes_no_records` |
+| A2.1.2 | a valid while `aresetn` holds the reset, or in the first cycle it is released, is `<chan>_reset`; no handshake, write or read is decoded there; an x reset (a testbench's before it is driven) records nothing and fires nothing | `axilite_reset_takes_no_records` |
 | A2.3 | a valid is held until its ready, so one that falls first is `<chan>_dropped`, once | `axilite_error_rules`, `axilite_errors_conformance` |
 | A2.3 | a payload signal that moves while its valid is stalled is `<chan>_changed` | `axilite_payload_changed_while_stalled` |
 | A2.3 | a valid or a ready that is x or z out of reset is `<chan>_unknown`, a payload that is x or z while its valid `<chan>_payload_unknown` | `axilite_unknown_out_of_reset` |

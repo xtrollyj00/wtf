@@ -64,7 +64,7 @@ The rest of the conformance, clause by clause:
 | 2.3 | twakeup rising with tvalid is `wakeup_early`, falling while a transfer stalls is `wakeup` | `axis_warning_rules`, `axis_error_rules` |
 | 2.5.1 | `beats` and `len` count the beats and the bytes `tkeep` marks | `axis_beats_and_frames` |
 | 2.6 | a packet per (tid, tdest); tlast closes it, and one still open when the trace ends comes with `complete` 0 | `axis_frames_per_tid_tdest` |
-| 2.8.2 | tvalid in reset, or in the cycle the reset is released, is `reset`; no beat is decoded there | `axis_reset_takes_no_beats` |
+| 2.8.2 | tvalid in reset, or in the cycle the reset is released, is `reset`; no beat is decoded there; an x reset (a testbench's before it is driven) records nothing and fires nothing | `axis_reset_takes_no_beats` |
 | Table B-1 | the defaults above: tready 1, tdata 0, tkeep the bytes of tdata, tstrb as tkeep, tlast 1, tid/tdest/tuser 0 | `host_defaults_and_describe`, `axis_tvalid_only_decodes` |
 
 Not implemented, and so reported by nothing:

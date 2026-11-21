@@ -233,9 +233,11 @@ impl Handshakes {
         let defer = self.defer;
         let mut out = Vec::new();
         // a port with a reset: a valid in it, or in the cycle it is released in, is the error, and
-        // nothing is recorded (A2.1.2); an x on it is out of reset
+        // nothing is recorded (A2.1.2). An x on it (a testbench's reset before it is driven) is no
+        // cycle to check: nothing is recorded, and nothing is said
         if let Some(reset) = &self.reset {
-            let in_reset = roles.bit(reset).is_some_and(|high| high != self.reset_low);
+            let level = roles.bit(reset);
+            let in_reset = level.is_none_or(|high| high != self.reset_low);
             if in_reset || self.in_reset {
                 for p in &mut self.chans {
                     let valid = roles.bit(&p.valid);
@@ -245,7 +247,7 @@ impl Handshakes {
                         .iter()
                         .map(|(_, r)| roles.get(r).cloned())
                         .collect();
-                    if valid == Some(true) {
+                    if valid == Some(true) && level.is_some() {
                         out.push(violation(
                             rules,
                             p,
@@ -689,7 +691,7 @@ pub(crate) fn unknown(v: &Val) -> bool {
 
 /// An unknown value as a detail shows it: one letter when every bit is the same (`x`, `z`, `u`),
 /// its bits when they differ (`10xx`).
-fn shown(v: &Val) -> &str {
+pub(crate) fn shown(v: &Val) -> &str {
     let (Val::Bits(b) | Val::Text(b)) = v;
     match b.as_bytes() {
         [first, rest @ ..] if rest.iter().all(|c| c == first) => &b[..1],

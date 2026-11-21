@@ -213,9 +213,10 @@ reuse wtf's own pieces:
   of the protocol's roles there; a protocol with one role, UART's `line`, is never found; AXI4 over
   AXI-Lite, whose roles it has too; the clock `<prefix>aclk`, or the one clock-like signal in the
   scope; an AXI port's reset `<prefix>aresetn`, or the one reset-like 1-bit signal in the scope,
-  `reset_active=high` unless its name ends in `n`, else `aresetn=<rst>` to fill in), the server's instructions put decoding before `find`, `find`'s
-  description and `help expressions` point to the decoders, and `decode` answers that `pair`
-  matches a stream with another. A `find` with a clock and `show` is a table of events, which is
+  `reset_active=high` unless its name says active low (`n`, `_b` or `_l` at the end, `nrst` or
+  `nreset` at the start), else `aresetn=<rst>` to fill in), the server's instructions put
+  decoding before `find`, `find`'s description and `help expressions` point to the decoders, and
+  `decode` answers that `pair` matches a stream with another. A `find` with a clock and `show` is a table of events, which is
   what a sampled protocol makes: its answer ends with the two lines that make it, the protocol on
   roles and the decode putting it on the signals (`as records (help decode): protocol ev
   roles=valid,ready,addr when=valid && ready addr=addr then decode s ev clock=clk valid=valid

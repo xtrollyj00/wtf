@@ -191,7 +191,7 @@ The rest of the conformance, clause by clause:
 | clause | what it does | pinned by |
 | --- | --- | --- |
 | A1.2 | the five channels; each given `valid` and `ready` makes a record per handshake; a side given in part is an error | `axi4_one_side`, `axi4_required_roles` |
-| A2.1.2 | a valid in reset, or in the cycle reset is released, is an error and records nothing | `axi4_reset_takes_no_records`, `axi4_shared_error_rules` |
+| A2.1.2 | a valid in reset, or in the cycle reset is released, is an error and records nothing; an x reset (a testbench's before it is driven) records nothing and fires nothing | `axi4_reset_takes_no_records`, `axi4_shared_error_rules` |
 | A2.3 | a valid stays until its ready (`dropped`), a payload stays while stalled (`changed`), x or z is `unknown` or `payload_unknown` | `axi4_shared_error_rules`, `axi4_unknown_valid` |
 | A2.3.2 | a B only after its AW and its W burst, an R only after its AR; one before them is `b_early` / `r_early`, once | `axi4_b_early_mid_burst`, `axi4_b_early_same_cycle`, `axi4_b_after_last_beat`, `axi4_multi_beat_read_not_early` |
 | A3.1.1 | AxSIZE within the bus | `axi4_burst_request_strobe_exclusive_rules` |
