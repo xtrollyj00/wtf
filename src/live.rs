@@ -345,7 +345,10 @@ mod tests {
             .expect("listed");
         assert_eq!(
             (s.kind.as_str(), s.trace),
-            ("window", std::fs::canonicalize(trace).unwrap())
+            (
+                "window",
+                crate::history::plain(std::fs::canonicalize(trace).unwrap())
+            )
         );
         assert_eq!(window_on(trace), Some(id.clone()));
         assert_eq!(request(&id, Request::Get), Ok("version = 1\n".into()));
