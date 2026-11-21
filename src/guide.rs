@@ -88,7 +88,7 @@ fn written(text: &str, syntax: Syntax) -> String {
         Syntax::Regex => [
             (
                 "{patterns}",
-                "- A pattern is a regex in slashes, found anywhere in the path in any case, the path\n  \
+                "- A pattern is a regex in slashes, found anywhere in the path in any case (no flags), the path\n  \
                  lowercase with indices in brackets whichever HDL wrote it: `/uart/`, `/_valid$/`,\n  \
                  `/^top\\.cpu\\./` (a scope's signals), `/mem\\[0\\]/`. `signals`, `add`, `rm` and\n  \
                  `records` take them; a bare word is always a name.",

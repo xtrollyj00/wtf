@@ -46,7 +46,7 @@ Patterns: many signals or streams at once, and searching the design.
 
 **Form**
 
-- A pattern is a regex in slashes, found anywhere in the path in any case, the path
+- A pattern is a regex in slashes, found anywhere in the path in any case (no flags), the path
   lowercase with indices in brackets whichever HDL wrote it: `/uart/`, `/_valid$/`,
   `/^top\.cpu\./` (a scope's signals), `/mem\[0\]/`. `signals`, `add`, `rm` and
   `records` take them; a bare word is always a name.

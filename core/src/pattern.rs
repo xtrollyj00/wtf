@@ -34,6 +34,17 @@ impl Syntax {
                 .filter(|_| w.len() >= 2)
             {
                 Some(re) => regex(re).map(|r| Some(Pattern::Regex(r))),
+                // a flag after the slash, as JavaScript writes `/clk/i`
+                None if w.starts_with('/')
+                    && w.rfind('/').is_some_and(|i| {
+                        i > 0 && w[i + 1..].chars().all(|c| c.is_ascii_alphabetic())
+                    }) =>
+                {
+                    let re = &w[..w.rfind('/').unwrap_or(0) + 1];
+                    Err(format!(
+                        "{w}: a pattern takes no flags and matches in any case: {re}"
+                    ))
+                }
                 None if glob => Err(format!(
                     "{w} is a glob; a pattern is a regex in slashes: /{}/",
                     glob_regex(w)
@@ -104,6 +115,10 @@ mod tests {
         assert_eq!(is(Syntax::Regex, "top.cpu"), Ok(false));
         assert_eq!(is(Syntax::Regex, "(a * b)"), Ok(false));
         assert_eq!(is(Syntax::Regex, "/"), Ok(false));
+        assert_eq!(
+            is(Syntax::Regex, "/CLK/i"),
+            Err("/CLK/i: a pattern takes no flags and matches in any case: /CLK/".into())
+        );
         assert_eq!(
             is(Syntax::Regex, "top.cpu.*"),
             Err("top.cpu.* is a glob; a pattern is a regex in slashes: /top\\.cpu\\./".into())

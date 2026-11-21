@@ -13,7 +13,7 @@ pub struct OpenArgs {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 pub struct SignalsArgs {
-    /// A regex in slashes, found anywhere in the path in any case, indices in brackets
+    /// A regex in slashes, found anywhere in the path in any case (no flags), indices in brackets
     /// (`/s_axi_.*valid/`, `/^top\.cpu\./`, `/gen\[0\]/`); none lists all.
     #[serde(default)]
     pub pattern: String,

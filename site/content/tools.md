@@ -103,7 +103,7 @@ Search the waveform's design, scopes (instances) and signals, by a regex in slas
 
 | Argument | Means |
 |---|---|
-| `pattern` | A regex in slashes, found anywhere in the path in any case, indices in brackets (`/s_axi_.*valid/`, `/^top\.cpu\./`, `/gen\[0\]/`); none lists all. |
+| `pattern` | A regex in slashes, found anywhere in the path in any case (no flags), indices in brackets (`/s_axi_.*valid/`, `/^top\.cpu\./`, `/gen\[0\]/`); none lists all. |
 
 ### `user_view`
 
