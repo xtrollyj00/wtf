@@ -371,6 +371,11 @@ fn reading_tools() {
         s.tool("signals", json!({"pattern": "^top\\.cpu"})),
         Err("^top\\.cpu is no pattern: a pattern is a regex in slashes, /^top\\.cpu/".into())
     );
+    // a JavaScript flag: none are taken, and patterns match in any case already
+    assert_eq!(
+        s.tool("signals", json!({"pattern": "/clk/i"})),
+        Err("/clk/i: a pattern takes no flags and matches in any case: /clk/".into())
+    );
     // a slice a query made isn't listed afterwards (spec §16)
     s.ok(
         "find",

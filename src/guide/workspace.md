@@ -27,9 +27,10 @@ Details
   `{"group": "write", "rows": [...], "collapsed": false}`, an open struct `{"signal": "pkts",
   "open": ["pkts", "pkts[1]"], "fields": [{"field": "pkt.pair.hi", "radix": "dec"}]}`. Groups
   hold signals only.
-- `cursors` by number, `{"1": "80ns", "2": "390ns"}`: 1 is the cursor, where values are read;
-  2 - 9 are marks on the events to show. A mark's name stands on the ruler, its note on the
-  user's status line when they jump there.
+- `cursors` by number, `{"1": "80ns", "2": {"time": "390ns", "name": "first bad write"}}`: the
+  cursor, 1, is where values are read, a bare time and never named; marks 2 - 9 are on the
+  events to show, a time or `{"time", "name", "note"}`. A mark's name stands on the ruler, its
+  note on the user's status line when they jump there.
 - `view`: the visible range, `{"time": "60ns", "to": "480ns"}`; default the whole trace.
 - `scope` (`help names`).
 - `unit`: the time unit of the answers, `ns`, or `auto` for the one that fits (`help times`).
