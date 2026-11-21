@@ -147,6 +147,6 @@ Not implemented, and so reported by nothing:
 | B2.2 | the AXI5-Lite signals with no role above | not implemented: listed in the matrix, decoded without them |
 | bind | static widths (`wdata` whole bytes, `wstrb` one bit per byte of it, the addresses as wide as the file has) | not implemented: the fields are as wide as the signal |
 | A2.3.2 | more than one write or read in flight | not implemented: one of each at a time |
-| A3.1, A3.2 | bursts and exclusive access | an AXI5-Lite interface has neither: no `AWLEN`, `AWBURST`, `WLAST`, `RLAST`, `AWLOCK` (`axi4`'s page owns them) |
+| A3.1, A3.2, A6.3 | bursts and exclusive access | an AXI5-Lite interface has neither: no `AWLEN`, `AWBURST`, `WLAST`, `RLAST`, `AWLOCK`; [axi4](axi4.md) has them |
 | A4 | region, cache, QoS, domain and snoop attributes | not implemented |
 | A14.1.1 | the `AWAKEUP` low-power handshake | not implemented |

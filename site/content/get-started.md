@@ -169,7 +169,7 @@ roles (`:help decode` lists the optional ones):
 |---|---|
 | `axis` | `tvalid` `tready` `tdata` |
 | `axilite` | `awvalid` `awready` `awaddr` `wvalid` `wready` `wdata` `bvalid` `bready` `arvalid` `arready` `araddr` `rvalid` `rready` `rdata` |
-| `axi4` | the `axilite` roles, plus `wlast` and `rlast` |
+| `axi4` | the `axilite` roles, plus `wlast` and `rlast` (optional: AxLEN frames a burst without them) and `aresetn` |
 | `spi` | `sclk` `cs` `mosi` |
 | `uart` | `line` |
 

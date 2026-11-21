@@ -9,7 +9,7 @@ checks that return only violations.
 | --- | --- |
 | [axis.md](axis.md) | `axis`: beats, packets by (tid, tdest), the handshake's rules, the matrix against IHI 0051B |
 | [axilite.md](axilite.md) | `axilite`: the five channels and their roles, signals and defaults, `aresetn`, the rules with their clauses, `wr` and `rd`, `timeout` |
-| [axi4.md](axi4.md) | `axi4`: bursts by ID, `wburst`/`rburst`, `wr`/`rd` |
+| [axi4.md](axi4.md) | `axi4`: the five channels, absent-role defaults, reset, AxLEN framing, the rules with their clauses, `wburst`/`rburst`, `wr`/`rd`, `timeout` |
 | [spi.md](spi.md) | `spi`: bits, words and transfers sampled by time |
 | [uart.md](uart.md) | `uart`: bytes and errors sampled by time |
 | [streams.md](streams.md) | `frame`, `pair`, `check`, `join`, and the `Decoder` trait |
@@ -132,8 +132,9 @@ checks that return only violations.
   AXI-Lite's AW and W by B, or by an ID, as AXI4's B by BID) and `check` work on whole streams
   instead, as functions. `axilite` and `axi4` take a `timeout` param (`timeout=1us`): a request
   still unanswered more than that after it completed is `no response` when the next response
-  comes, so a lost B or R doesn't pair every later response with the request before its own.
-  `axilite` takes `reset_active` too, `low` or `high`, for its optional `aresetn`.
+  comes, so a lost B or R doesn't pair every later response with the request before its own;
+  `axi4` names that answer `timeout`. `axilite` and `axi4` take `reset_active` too, `low` or
+  `high`, for their optional `aresetn`.
 - **Instances** are kept in the session, so they persist, and agents declare them like the rest
   of the workspace:
   ```toml
