@@ -14,13 +14,33 @@ pub struct Open {
     pub session: Option<PathBuf>,
 }
 
-/// `$XDG_STATE_HOME/wtf/history`, or `~/.local/state/wtf/history`.
+/// `$XDG_STATE_HOME/wtf/history`, else `~/.local/state/wtf/history`, or
+/// `%LOCALAPPDATA%\wtf\history` on Windows.
 pub fn path() -> Option<PathBuf> {
+    let home = || {
+        if cfg!(windows) {
+            std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
+        } else {
+            Some(PathBuf::from(std::env::var_os("HOME")?).join(".local/state"))
+        }
+    };
     let state = std::env::var_os("XDG_STATE_HOME")
         .filter(|d| !d.is_empty())
         .map(PathBuf::from)
-        .or_else(|| Some(PathBuf::from(std::env::var_os("HOME")?).join(".local/state")))?;
-    Some(state.join("wtf/history"))
+        .or_else(home)?;
+    Some(state.join("wtf").join("history"))
+}
+
+/// `p` without the `\\?\` that `canonicalize` puts before a Windows path, which nobody types:
+/// `\\?\C:\a` is `C:\a`, `\\?\UNC\srv\a` is `\\srv\a`.
+pub fn plain(p: PathBuf) -> PathBuf {
+    let Some(rest) = p.to_str().and_then(|s| s.strip_prefix(r"\\?\")) else {
+        return p;
+    };
+    match rest.strip_prefix(r"UNC\") {
+        Some(unc) => PathBuf::from(format!(r"\\{unc}")),
+        None => PathBuf::from(rest),
+    }
 }
 
 pub fn now() -> u64 {
@@ -66,6 +86,7 @@ pub fn record(
 ) -> Result<(), String> {
     let abs = |p: &Path| {
         std::fs::canonicalize(p)
+            .map(plain)
             .or_else(|_| std::path::absolute(p))
             .map_err(|e| format!("{}: {e}", p.display()))
     };
@@ -107,6 +128,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn plain_paths() {
+        assert_eq!(
+            plain(PathBuf::from(r"\\?\C:\w\a.vcd")),
+            PathBuf::from(r"C:\w\a.vcd")
+        );
+        assert_eq!(
+            plain(PathBuf::from(r"\\?\UNC\srv\w\a.vcd")),
+            PathBuf::from(r"\\srv\w\a.vcd")
+        );
+        assert_eq!(plain(PathBuf::from("/w/a.vcd")), PathBuf::from("/w/a.vcd"));
+    }
+
+    #[test]
     fn round_trip() {
         let d = std::env::temp_dir().join(format!("wtf-history-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
@@ -122,7 +156,7 @@ mod tests {
         )
         .unwrap();
         let h = read(&file);
-        let abs = std::fs::canonicalize(trace).unwrap();
+        let abs = plain(std::fs::canonicalize(trace).unwrap());
         assert_eq!(h.len(), 2);
         assert_eq!(
             (h[0].agent, &h[0].trace, &h[0].session),

@@ -1,6 +1,6 @@
 name: release
 
-# A tag v* builds wtf for Linux and macOS and publishes them as a GitHub release, with the
+# A tag v* builds wtf for Linux, macOS and Windows and publishes them as a GitHub release, with the
 # tag's section of CHANGELOG.md as its notes, and publishes wtf-core and wtf-wave to crates.io.
 # install.sh downloads from the latest release.
 on:
@@ -19,6 +19,8 @@ jobs:
           - { target: aarch64-unknown-linux-gnu, os: ubuntu-22.04-arm }
           - { target: x86_64-apple-darwin, os: macos-latest }
           - { target: aarch64-apple-darwin, os: macos-latest }
+          # Windows 10 1803 or later (AF_UNIX for the link, spec §18)
+          - { target: x86_64-pc-windows-msvc, os: windows-latest }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -27,6 +29,7 @@ jobs:
           targets: ${{ matrix.target }}
       - run: cargo build --release --locked --target ${{ matrix.target }}
       - name: Package
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           name=wtf-${{ matrix.target }}
@@ -34,10 +37,22 @@ jobs:
           cp target/${{ matrix.target }}/release/wtf README.md LICENSE-APACHE LICENSE-MIT "$name"/
           tar czf "$name.tar.gz" "$name"
           shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $name = "wtf-${{ matrix.target }}"
+          New-Item -ItemType Directory $name | Out-Null
+          Copy-Item target/${{ matrix.target }}/release/wtf.exe, README.md, LICENSE-APACHE, LICENSE-MIT $name
+          Compress-Archive $name "$name.zip"
+          $hash = (Get-FileHash -Algorithm SHA256 "$name.zip").Hash.ToLower()
+          [IO.File]::WriteAllText("$name.zip.sha256", "$hash  $name.zip`n")
       - uses: actions/upload-artifact@v7
         with:
           name: wtf-${{ matrix.target }}
-          path: wtf-${{ matrix.target }}.tar.gz*
+          path: |
+            wtf-${{ matrix.target }}.tar.gz*
+            wtf-${{ matrix.target }}.zip*
 
   release:
     needs: build
@@ -57,7 +72,7 @@ jobs:
           # the tag's section of the changelog, from its heading to the next
           version=${GITHUB_REF_NAME#v}
           awk -v v="$version" '/^## /{on = ($2 == v)} on && !/^## /' CHANGELOG.md > notes.md
-          gh release create "$GITHUB_REF_NAME" --title "wtf $version" --notes-file notes.md wtf-*.tar.gz*
+          gh release create "$GITHUB_REF_NAME" --title "wtf $version" --notes-file notes.md wtf-*.tar.gz* wtf-*.zip*
 
   # `cargo install wtf-wave`; the workspace publishes wtf-core first, wtf-bench stays unpublished
   crates:

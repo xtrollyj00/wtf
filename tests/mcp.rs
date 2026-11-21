@@ -4,10 +4,14 @@
 
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Read, Write};
+#[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
+// the link on Windows (src/live.rs): AF_UNIX through uds_windows
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::mpsc;
+#[cfg(windows)]
+use uds_windows::{UnixListener, UnixStream};
 
 struct Server {
     child: Child,
@@ -18,7 +22,11 @@ struct Server {
 
 impl Server {
     fn start(runtime: &Path) -> Self {
-        let mut child = wtf(runtime)
+        Self::spawn(wtf(runtime))
+    }
+
+    fn spawn(mut c: Command) -> Self {
+        let mut child = c
             .arg("--mcp")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -118,7 +126,13 @@ impl Drop for Dir {
 }
 
 fn simple() -> PathBuf {
-    std::fs::canonicalize("tests/data/simple.vcd").unwrap()
+    plain("tests/data/simple.vcd")
+}
+
+/// `p`'s whole path as wtf shows it: links resolved, without Windows' `\\?\` (history::plain).
+fn plain(p: impl AsRef<Path>) -> PathBuf {
+    let full = std::fs::canonicalize(p).unwrap();
+    PathBuf::from(full.display().to_string().trim_start_matches(r"\\?\"))
 }
 
 /// The user's wtf window `id` on `trace`: answers `GET` with `session`, and passes on what the
@@ -126,10 +140,7 @@ fn simple() -> PathBuf {
 fn fake_window(runtime: &Path, id: &str, trace: &Path, session: &str) -> mpsc::Receiver<String> {
     let listener = UnixListener::bind(runtime.join(format!("wtf-{id}.sock"))).unwrap();
     // as a real window announces it: links resolved (live::window)
-    let info = format!(
-        "window\n{}",
-        std::fs::canonicalize(trace).unwrap().display()
-    );
+    let info = format!("window\n{}", plain(trace).display());
     let get = format!("rows (> selected):\n> clk\n---\n{session}");
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
@@ -278,6 +289,7 @@ fn opens_are_recent() {
     let mut s = Server::start(&dir.0);
     s.ok("open", json!({"trace": simple()}));
     let history = std::fs::read_to_string(dir.0.join("wtf/history")).unwrap();
+    // the history records the path without Windows' `\\?\`, as a user would type it
     assert!(
         history.ends_with(&format!("\tagent\t{}\n", simple().display())),
         "{history}"
@@ -1370,6 +1382,35 @@ fn answers_are_capped() {
     );
 }
 
+/// Without `XDG_RUNTIME_DIR` the sockets go in the user's own directory in the temp directory,
+/// or `%LOCALAPPDATA%\wtf\runtime` on Windows (spec §15 "Registry").
+#[test]
+fn sockets_without_xdg_runtime_dir() {
+    let dir = Dir::new("no-xdg");
+    let mut c = wtf(&dir.0);
+    c.env_remove("XDG_RUNTIME_DIR")
+        .env("TMPDIR", &dir.0)
+        .env("LOCALAPPDATA", "");
+    let mut s = Server::spawn(c);
+    let listed = s.ok("sessions", json!({}));
+    if cfg!(windows) {
+        assert_eq!(
+            listed,
+            "can't list sessions: LOCALAPPDATA is not set; set it, or set XDG_RUNTIME_DIR"
+        );
+    } else {
+        assert_eq!(
+            listed,
+            "no sessions: the user has no wtf window open; `open` a trace"
+        );
+        let mine = std::fs::read_dir(&dir.0)
+            .unwrap()
+            .flatten()
+            .any(|e| e.file_name().to_string_lossy().starts_with("wtf-"));
+        assert!(mine, "no wtf-<uid> directory in {}", dir.0.display());
+    }
+}
+
 #[test]
 fn workspaces_and_joining() {
     let dir = Dir::new("ws");
@@ -1379,7 +1420,7 @@ fn workspaces_and_joining() {
         "no sessions: the user has no wtf window open; `open` a trace"
     );
     let pid = s.child.id();
-    let fst = std::fs::canonicalize("tests/data/simple.fst").unwrap();
+    let fst = plain("tests/data/simple.fst");
     let joined =
         "(the user's wtf windows on this trace see your steps; :follow there shows the workspace)";
     assert!(
