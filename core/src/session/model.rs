@@ -28,7 +28,7 @@ pub struct File {
     /// The visible range, `{"time": "60ns", "to": "480ns"}`; default the whole trace.
     #[serde(default, skip_serializing_if = "no_view")]
     pub view: View,
-    /// Cursors by number, `{"1": "80ns", "2": "390ns"}`: 1 the cursor, 2 - 9 marks; a mark may be `{"time": "390ns", "name": "first bad write", "note": "..."}`.
+    /// The cursor and marks by number, `{"1": "80ns", "2": {"time": "390ns", "name": "first bad write", "note": "..."}}`: 1 is the cursor, a bare time, never named; marks 2 - 9 take a time or a name and note.
     #[serde(default, skip_serializing_if = "Table::is_empty")]
     #[cfg_attr(feature = "schema", schemars(schema_with = "any_value"))]
     pub cursors: Table,

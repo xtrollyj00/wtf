@@ -139,7 +139,7 @@ Set up the whole workspace in one call: rows, cursors, view, decodes (`help work
 
 | Argument | Means |
 |---|---|
-| `cursors` | Cursors by number, `{"1": "80ns", "2": "390ns"}`: 1 the cursor, 2 - 9 marks; a mark may be `{"time": "390ns", "name": "first bad write", "note": "..."}`. |
+| `cursors` | The cursor and marks by number, `{"1": "80ns", "2": {"time": "390ns", "name": "first bad write", "note": "..."}}`: 1 is the cursor, a bare time, never named; marks 2 - 9 take a time or a name and note. |
 | `decode` | Decodes, as `decode` makes them (`help decode`). |
 | `names` | Value names, `[{"signal": "state", "values": "0=zero"}]`. |
 | `protocol` | Sampled protocols, as `protocol` makes them (`help decode`). |

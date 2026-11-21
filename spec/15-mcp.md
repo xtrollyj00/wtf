@@ -155,7 +155,7 @@ reuse wtf's own pieces:
   [{"signal": "s_axi_awaddr", "radix": "hex"}, {"signal": "s_axi_awvalid"}]}],
   "cursors": {"1": "80ns", "2": "390ns"}, "view": {"time": "60ns", "to": "480ns"}}`.
   A mark may say what it shows: `"2": {"time": "390ns", "name": "first bad write",
-  "note": "AW came before W"}` (section 9); `view` lists the name and note after its time. A struct, record or array is a row as any signal (`{"signal": "pkt"}`, folded);
+  "note": "AW came before W"}` (section 9); the cursor, 1, is a bare time, never named; `view` lists the name and note after its time. A struct, record or array is a row as any signal (`{"signal": "pkt"}`, folded);
   `{"signal": "grid", "open": ["grid", "grid[1]"]}` opens levels of it, as a session's
   `open`. It is the session (section 11) itself, and the session validator checks it, so a name, radix,
   time, unit or mark it gets wrong is worded as wtf words it for a session file. Its rows,
