@@ -459,9 +459,10 @@ impl Handshakes {
         let reqs: Vec<(&str, &Stream)> = requests.iter().map(|(c, s)| (*c, s)).collect();
         let (done, mut rest) = decode::join(name, &reqs, &response, None, timeout)?;
         // an early response is `b_early` or `r_early` in errors, so its `no request` row would say
-        // it twice; a late one, after `timeout`, is said here alone
+        // it twice; a late one, after `timeout`, is said here alone. `early` is in time order, as
+        // `feed` pushed it
         rest.records.retain(|q| {
-            !(early.contains(&q.start)
+            !(early.binary_search(&q.start).is_ok()
                 && matches!(q.fields.first(), Some(Some(Val::Text(k))) if k == "no request"))
         });
         let mut out = from_stream(name, &done);
@@ -569,7 +570,8 @@ impl Handshakes {
         // how many of a key were said early
         let mut said: HashMap<Option<Val>, usize> = HashMap::new();
         let mut next = 0;
-        let mut early = Vec::new();
+        // which responses were said early, by index
+        let mut early = vec![false; response.records.len()];
         let mut out = Vec::new();
         for (i, r) in response.records.iter().enumerate() {
             while next < n && complete(next) < r.start {
@@ -616,7 +618,7 @@ impl Handshakes {
             } else {
                 format!("response {m} before read {ord}'s AR")
             };
-            early.push(i);
+            early[i] = true;
             out.push(self.finish_violation(early_chan, "early", r.start, r.end, detail));
         }
         // the rest, joined as `decode::join` does: no early response is left to take a request it
@@ -628,7 +630,7 @@ impl Handshakes {
                 .records
                 .iter()
                 .enumerate()
-                .filter(|(i, _)| !early.contains(i))
+                .filter(|(i, _)| !early[*i])
                 .map(|(_, r)| r.clone())
                 .collect(),
             violations: response.violations,

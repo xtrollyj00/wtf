@@ -142,11 +142,11 @@ The rules, each with the clause of IHI 0022 issue L it comes from and the severi
 | `<c>_payload_unknown` | A2.3 | warning | a payload signal is x or z while its valid | `axi4_unknown_valid`, `axi4_shared_error_rules` |
 | `b_resp` `r_resp` | A3.3 | warning | a SLVERR or DECERR response | `axi4_shared_error_rules`, `axi4_bursts_by_id` |
 | `b_early` `r_early` | A2.3.2 | error | a response before its request's handshakes | `axi4_b_early_mid_burst`, `axi4_b_early_same_cycle`, `axi4_b_after_last_beat`, `axi4_multi_beat_read_not_early` |
-| `b_exokay` `r_exokay` | A3.3 | error | an EXOKAY response to a non-exclusive access | `axi4_exokay_non_exclusive_is_an_error`, `axi4_exokay_exclusive_is_silent`, `axi4_shared_error_rules` |
+| `b_exokay` `r_exokay` | A3.3 | error | an EXOKAY response to a non-exclusive access, with or without IDs | `axi4_exokay_non_exclusive_is_an_error`, `axi4_exokay_exclusive_is_silent`, `axi4_exokay_without_ids_is_an_error`, `axi4_shared_error_rules` |
 | `aw_burst` `ar_burst` | A3.1.4 | error | AxBURST is reserved (`0b11`) | `axi4_burst_request_strobe_exclusive_rules` |
 | `aw_wrap` `ar_wrap` | A3.1.4 | error | a WRAP burst of other than 2, 4, 8 or 16 beats, or not aligned to its size | `axi4_burst_request_strobe_exclusive_rules` |
 | `aw_fixed` `ar_fixed` | A3.1.2 | error | a FIXED burst of more than 16 beats | `axi4_burst_request_strobe_exclusive_rules` |
-| `aw_4k` `ar_4k` | A3.1.2 | error | an INCR burst crossing a 4KB boundary | `axi4_burst_request_strobe_exclusive_rules` |
+| `aw_4k` `ar_4k` | A3.1.2 | error | an INCR burst crossing a 4KB boundary, its bytes counted from the address aligned to its size (A3.1.6) | `axi4_burst_request_strobe_exclusive_rules`, `axi4_request_4k_rule` |
 | `aw_size` `ar_size` | A3.1.1 | error | AxSIZE wider than the data bus | `axi4_burst_request_strobe_exclusive_rules` |
 | `aw_exclusive` `ar_exclusive` | A6.3.3 | error | an exclusive access misaligned to its bytes, not a power of two up to 128 bytes, or over 16 beats | `axi4_burst_request_strobe_exclusive_rules` |
 | `w_last` `r_last` | A3.2 | error | LAST on a beat other than AxLEN+1, or missing on it | `axi4_wlast_vs_len`, `axi4_rlast_vs_len`, `axi4_burst_request_strobe_exclusive_rules` |
@@ -195,7 +195,7 @@ The rest of the conformance, clause by clause:
 | A3.1.4 | WRAP of 2, 4, 8 or 16 beats, aligned; `0b11` reserved | `axi4_burst_request_strobe_exclusive_rules` |
 | A3.2.1 | a strobe outside the beat's lanes (A3.1.6's equations) | `axi4_w_strb` |
 | A3.2 | LAST on the burst's last beat, by AxLEN when the role is either given or not | `axi4_wlast_vs_len`, `axi4_rlast_vs_len`, `axi4_last_optional_axlen_framing` |
-| A3.3 | SLVERR and DECERR warn; EXOKAY is an error unless the access is exclusive | `axi4_shared_error_rules`, `axi4_exokay_non_exclusive_is_an_error`, `axi4_exokay_exclusive_is_silent` |
+| A3.3 | SLVERR and DECERR warn; EXOKAY is an error unless the access is exclusive | `axi4_shared_error_rules`, `axi4_exokay_non_exclusive_is_an_error`, `axi4_exokay_exclusive_is_silent`, `axi4_exokay_without_ids_is_an_error` |
 | A5.3, A5.6 | bursts pair by ID in the order they come, a burst's beats stay in order, different IDs interleave | `axi4_bursts_by_id` |
 | A6.3.3 | an exclusive access aligned, a power of two up to 128 bytes, at most 16 beats | `axi4_burst_request_strobe_exclusive_rules` |
 | Table B2.2 | the defaults above, an absent role being what AXI5 means by it | `axi4_required_roles`, `axi4_defaults_for_absent_roles`, `axi4_request_fields_without_rules` |

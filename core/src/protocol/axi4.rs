@@ -375,8 +375,10 @@ impl Live {
         // the join's schema, as `descs` makes it: the fields a rule reads by name
         let fields = self.descs(channels)[1].fields.clone();
         let beats = channel(records, side.channel);
-        // a port without wlast/rlast frames its bursts by AxLEN, the beats gaining their last
-        let framed = (!self.has_last).then(|| by_len(channels, side, records, beats));
+        // each beat's request, by AxLEN and ID: the LAST and strobe rules read it, and a port
+        // without wlast/rlast frames its bursts by it, the beats gaining their last
+        let (places, assigns) = beat_places(side, channels, records, beats);
+        let framed = (!self.has_last).then(|| by_len(beats, &assigns));
         let beats = framed.as_deref().unwrap_or(beats);
         let burst = decode::run_records(side.burst, beats, self.frame);
         let mut out = axi::from_stream(side.burst, &burst);
@@ -422,7 +424,7 @@ impl Live {
         out.extend(exokay);
         // LAST reads the beats against their requests, which the join does not: a stray beat is no
         // request's, so an unmatched burst is told nowhere
-        out.extend(side_rules(side, channels, records));
+        out.extend(side_rules(side, channels, records, &places));
         out
     }
 }
@@ -487,8 +489,8 @@ fn exokays(
             .desc(chan)
             .and_then(|d| d.fields.iter().position(|f| f.name == name))
     };
-    // an exclusive access is the lock at 0: an x or z claims nothing
-    let exclusive =
+    // a normal access is the lock at 0: an x or z claims nothing
+    let normal =
         |f: &[Option<Val>], lock: usize| matches!(&f[lock], Some(Val::Bits(b)) if b == "0");
     let Some(lock) = at("lock") else {
         return Vec::new();
@@ -500,12 +502,10 @@ fn exokays(
                 return rows;
             };
             let answers = channel(records, code);
-            for (_, end, f) in joined(out, side.name) {
-                if !exclusive(f, lock) {
-                    continue;
-                }
-                // a B ends its write, and its `resp` is the write's
-                let Some(b) = answers.iter().find(|b| b.end == end) else {
+            for (_, end, _) in joined(out, side.name).filter(|(_, _, f)| normal(f, lock)) {
+                // a B ends its write, and its `resp` is the write's; the Bs are in time order
+                let i = answers.partition_point(|b| b.end < end);
+                let Some(b) = answers.get(i).filter(|b| b.end == end) else {
                     continue;
                 };
                 if b.fields[resp].as_ref().is_some_and(axi::is_exokay) {
@@ -520,33 +520,35 @@ fn exokays(
             }
         }
         Answers::Burst => {
-            let (Some(resp), Some(id)) = (pos(side.channel, "resp"), pos(side.channel, "id"))
-            else {
+            let Some(resp) = pos(side.channel, "resp") else {
                 return rows;
             };
-            let (Some(key), Some(key_at)) = (
+            // a port without IDs pairs its reads in order (spec §16): no ID to compare
+            let ids = match (
+                pos(side.channel, "id"),
                 burst.schema.iter().position(|f| f.name == "id"),
                 at("resp_id"),
-            ) else {
-                return rows;
+            ) {
+                (Some(id), Some(key), Some(key_at)) => Some((id, key, key_at)),
+                _ => None,
             };
             let beats = channel(records, side.channel);
-            for (_, end, f) in joined(out, side.name) {
-                if !exclusive(f, lock) {
-                    continue;
-                }
-                // the burst the join ended with: its window holds this read's beats
-                let Some(b) = burst
-                    .records
+            for (_, end, f) in joined(out, side.name).filter(|(_, _, f)| normal(f, lock)) {
+                // the burst the join ended with: its window holds this read's beats; the bursts
+                // and the beats are in time order
+                let i = burst.records.partition_point(|r| r.end < end);
+                let Some(b) = burst.records[i..]
                     .iter()
-                    .find(|r| r.end == end && r.fields[key] == f[key_at])
+                    .take_while(|r| r.end == end)
+                    .find(|r| ids.is_none_or(|(_, key, key_at)| r.fields[key] == f[key_at]))
                 else {
                     continue;
                 };
-                let mine = beats
+                let from = beats.partition_point(|beat| beat.start < b.start);
+                let to = beats.partition_point(|beat| beat.start < b.end);
+                let mine = beats[from..to]
                     .iter()
-                    .filter(|beat| beat.start >= b.start && beat.start < b.end)
-                    .filter(|beat| beat.fields[id] == f[key_at]);
+                    .filter(|beat| ids.is_none_or(|(id, _, key_at)| beat.fields[id] == f[key_at]));
                 for beat in mine {
                     if beat.fields[resp].as_ref().is_some_and(axi::is_exokay) {
                         rows.push(channels.finish_violation(
@@ -664,39 +666,37 @@ fn beat_ordinals(assigns: &[BeatAssign]) -> Vec<Place> {
         .collect()
 }
 
-/// The requests behind the side's beats, and the place of each beat: what they were told they would
-/// be, and where they fell. Read off the signals, not the burst's stream, so a beat the join could
-/// not place is still counted.
+/// The requests behind the side's beats: the places the LAST and strobe rules read, and each beat's
+/// assignment, whose `last` frames a port without WLAST/RLAST (`by_len`). Read off the signals, not
+/// the burst's stream, so a beat the join could not place is still counted.
 fn beat_places(
     side: &Side,
     channels: &Handshakes,
     records: &[Vec<Record>],
     beats: &[Record],
-) -> Places {
+) -> (Places, Vec<BeatAssign>) {
     let fields = |name: &str| channels.desc(name).map(|d| d.fields).unwrap_or_default();
     let (address, beat_fields) = (fields(side.address), fields(side.channel));
     let index = |fields: &[Field], name: &str| fields.iter().position(|f| f.name == name);
-    let len = index(&address, "len");
-    let id = index(&address, "id");
-    let value = |r: &Record, i: usize| r.fields.get(i).cloned().flatten();
-    let lens: Vec<Option<u64>> = channel(records, side.address)
+    let (len, id) = (index(&address, "len"), index(&address, "id"));
+    let requests = channel(records, side.address);
+    // AxLEN is the length less one: an absent or unreadable one is `None`, counted as one beat
+    let lens: Vec<Option<u64>> = requests
         .iter()
-        .map(|r| {
-            len.and_then(|i| value(r, i)).and_then(|v| match v {
-                Val::Bits(bits) => u64::from_str_radix(&bits, 2).ok(),
-                Val::Text(_) => None,
-            })
-        })
-        .map(|n| n.map(|n| n + 1))
+        .map(|r| number(len.and_then(|i| r.fields.get(i)).and_then(Option::as_ref)).map(|n| n + 1))
         .collect();
-    let reqs: Vec<(Option<Val>, u64)> = channel(records, side.address)
+    let reqs: Vec<(Option<Val>, u64)> = requests
         .iter()
         .zip(&lens)
-        .map(|(r, of)| (id.and_then(|i| value(r, i)), of.unwrap_or(1)))
+        .map(|(r, of)| {
+            (
+                id.and_then(|i| r.fields.get(i).cloned()).flatten(),
+                of.unwrap_or(1),
+            )
+        })
         .collect();
-    let beat_id = id.and_then(|_| index(&beat_fields, "id"));
-    let assigns = assign_beats(beats, beat_id, &reqs);
-    (lens, beat_ordinals(&assigns))
+    let assigns = assign_beats(beats, id.and_then(|_| index(&beat_fields, "id")), &reqs);
+    ((lens, beat_ordinals(&assigns)), assigns)
 }
 
 /// A beat's LAST against the AxLEN of the request it belongs to, on the beat's own handshake: high
@@ -814,10 +814,14 @@ fn check_strb(
 }
 
 /// The side's LAST and strobe rules: the beats, their requests, and what each said.
-fn side_rules(side: &Side, channels: &Handshakes, records: &[Vec<Record>]) -> Vec<Out> {
+fn side_rules(
+    side: &Side,
+    channels: &Handshakes,
+    records: &[Vec<Record>],
+    places: &Places,
+) -> Vec<Out> {
     let beats = channel(records, side.channel);
-    let places = beat_places(side, channels, records, beats);
-    let (lens, ords) = &places;
+    let (lens, ords) = places;
     let mut out = Vec::new();
     if let Some(last) = channels
         .desc(side.channel)
@@ -832,7 +836,7 @@ fn side_rules(side: &Side, channels: &Handshakes, records: &[Vec<Record>]) -> Ve
         strb_bus(channels, side.channel),
     ) {
         out.extend(check_strb(
-            side, channels, records, beats, strb, bus, &places,
+            side, channels, records, beats, strb, bus, places,
         ));
     }
     out
@@ -842,9 +846,9 @@ fn side_rules(side: &Side, channels: &Handshakes, records: &[Vec<Record>]) -> Ve
 /// it is that request's last beat.
 pub(crate) struct BeatAssign {
     /// Which of the address channel's records it belongs to: the `w_last`/`r_last` and `w_strb`
-    /// rules read it, the AxLEN framing only `last`.
+    /// rules read it.
     pub req: Option<usize>,
-    #[allow(dead_code)]
+    /// It is its request's last beat: `by_len` frames a port without WLAST/RLAST by it.
     pub last: bool,
 }
 
@@ -911,33 +915,9 @@ pub(crate) fn assign_beats(
 
 /// The burst channel's beats with the `last` their request's AxLEN gives them, as `frame` takes
 /// them from `wlast`/`rlast` when the port gives those: a burst is AxLEN+1 beats (A3.2).
-fn by_len(
-    channels: &Handshakes,
-    side: &Side,
-    records: &[Vec<Record>],
-    beats: &[Record],
-) -> Vec<Record> {
-    let fields = |name: &str| channels.desc(name).map(|d| d.fields).unwrap_or_default();
-    let (address, beat_fields) = (fields(side.address), fields(side.channel));
-    let index = |fields: &[Field], name: &str| fields.iter().position(|f| f.name == name);
-    let (len, id) = (index(&address, "len"), index(&address, "id"));
-    let reqs: Vec<(Option<Val>, u64)> = channel(records, side.address)
+fn by_len(beats: &[Record], assigns: &[BeatAssign]) -> Vec<Record> {
+    assigns
         .iter()
-        .map(|r| {
-            // AxLEN is the length less one: an absent or unreadable one is a single beat
-            let beats = len
-                .and_then(|i| r.fields.get(i).cloned())
-                .flatten()
-                .and_then(|v| match v {
-                    Val::Bits(b) => u64::from_str_radix(&b, 2).ok(),
-                    Val::Text(_) => None,
-                })
-                .map_or(1, |n| n + 1);
-            (id.and_then(|i| r.fields.get(i).cloned()).flatten(), beats)
-        })
-        .collect();
-    assign_beats(beats, id.and_then(|_| index(&beat_fields, "id")), &reqs)
-        .into_iter()
         .zip(beats)
         .map(|(assign, beat)| {
             let mut fields = beat.fields.clone();
@@ -1089,7 +1069,10 @@ impl Axi4 {
             );
         }
         let span = beats.saturating_mul(bytes);
-        if burst == 0b01 && addr >> 12 != addr.saturating_add(span.saturating_sub(1)) >> 12 {
+        // an unaligned INCR's transfers count from the address aligned to its size (A3.1.6): the
+        // first covers only the bytes from the address up
+        let last = (addr & !(bytes - 1)).saturating_add(span - 1);
+        if burst == 0b01 && addr >> 12 != last >> 12 {
             fire(
                 "4k",
                 format!(
@@ -1105,16 +1088,15 @@ impl Axi4 {
             );
         }
         if roles.bit(&format!("{chan}lock")) == Some(true) {
-            let total = span;
-            if !total.is_power_of_two() || total > 128 {
+            if !span.is_power_of_two() || span > 128 {
                 fire(
                     "exclusive",
-                    format!("{chan} exclusive: {total} bytes is not a power of two up to 128"),
+                    format!("{chan} exclusive: {span} bytes is not a power of two up to 128"),
                 );
-            } else if addr % total != 0 {
+            } else if addr % span != 0 {
                 fire(
                     "exclusive",
-                    format!("{chan} exclusive: address not aligned to {total} bytes"),
+                    format!("{chan} exclusive: address not aligned to {span} bytes"),
                 );
             } else if beats > 16 {
                 fire(

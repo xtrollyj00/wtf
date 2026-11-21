@@ -905,6 +905,55 @@ fn axi4_exokay_exclusive_is_silent() {
     assert_eq!(table(stream(&ws, "m.rd")).len(), 2);
 }
 
+/// The EXOKAY fixture with `arid` and `rid` renamed off the prefix: a port without IDs pairs its
+/// reads in order (spec §16), and the first read's EXOKAY beat is still `r_exokay`. Its interleaved
+/// beats frame differently without IDs, so `r_last` rows join the errors: only the exokay rows are
+/// this test's.
+#[test]
+fn axi4_exokay_without_ids_is_an_error() {
+    let dir = Dir::new("axi4-exokay-no-ids");
+    let path = dir.0.join("exokay.vcd");
+    let text = std::fs::read_to_string(fixture("vcd").with_file_name("axi4.vcd")).unwrap();
+    let text = text.replacen("b10 /\n", "b01 /\n", 1);
+    let text = text.replacen("b110101000000 7\n", "b110101000000 7\nb01 9\n", 1);
+    let text = text.replacen("b110100110000 7\n", "b110100110000 7\nb0 9\n", 1);
+    let text = text
+        .replace("m_axi_arid", "u_arid")
+        .replace("m_axi_rid", "u_rid");
+    assert!(text.contains("b01 9") && !text.contains("m_axi_arid") && !text.contains("m_axi_rid"));
+    std::fs::write(&path, text).unwrap();
+    let mut ws = Workspace::open(&path).unwrap();
+    ws.add_decode(decode("m", "axi4", "aclk", &[], &[("prefix", "m_axi_")]))
+        .unwrap();
+    let exokay: Vec<_> = table(stream(&ws, "m.errors"))
+        .into_iter()
+        .filter(|r| r.2[0].ends_with("_exokay"))
+        .collect();
+    assert_eq!(
+        exokay,
+        [
+            row(
+                50,
+                60,
+                &[
+                    "b_exokay",
+                    "bresp is EXOKAY to a non-exclusive write",
+                    "error"
+                ]
+            ),
+            row(
+                90,
+                100,
+                &[
+                    "r_exokay",
+                    "rresp is EXOKAY to a non-exclusive read",
+                    "error"
+                ]
+            ),
+        ]
+    );
+}
+
 /// A port with a reset (`aresetn`, active low): a valid in it, and in the cycle it is released
 /// in, is an error, and no handshake is recorded; out of it the handshakes are as ever.
 #[test]
@@ -4329,14 +4378,19 @@ fn axi4_request_fixed_rule() {
 }
 
 /// An INCR burst may not cross a 4KB boundary (A3.1.2): 2 beats of 4 bytes from 0xffc reach into
-/// the next page, from 0xff8 they stop at its edge.
+/// the next page, from 0xff8 they stop at its edge. 4 beats of 4 bytes from the unaligned 0xff2
+/// count from 0xff0 (A3.1.6), so they stop there too.
 #[test]
 fn axi4_request_4k_rule() {
     assert_eq!(
         request_errors(
             "aw",
             "axi4-4k-rule",
-            &[(0xffc, 1, 2, 1, 0), (0xff8, 1, 2, 1, 0)]
+            &[
+                (0xffc, 1, 2, 1, 0),
+                (0xff8, 1, 2, 1, 0),
+                (0xff2, 3, 2, 1, 0)
+            ]
         ),
         [row(
             10,
