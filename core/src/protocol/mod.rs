@@ -51,6 +51,9 @@ pub enum Default {
     Bits(&'static str),
     /// One bit per whole byte of another given role (AXI4-Stream `tkeep`, spec §3.1.2).
     Bytes(&'static str),
+    /// The log2 of another given role's width in bytes, in three bits (AXI4's `awsize`): the
+    /// number of bytes a beat of that width holds.
+    Size(&'static str),
     /// The same value as another role.
     Same(&'static str),
 }
@@ -63,6 +66,7 @@ impl Default {
             Default::Ones => "1".into(),
             Default::Bits(b) => (*b).into(),
             Default::Bytes(src) => format!("bytes of {src}"),
+            Default::Size(src) => format!("log2({src}/8)"),
             Default::Same(src) => format!("same as {src}"),
         }
     }
@@ -816,9 +820,9 @@ impl Found {
 
 /// The interfaces of the file's signals that built-in protocols decode: wherever every role the
 /// instance needs is a signal `<prefix><role>`, and at least two of the protocol's roles are
-/// there. A prefix goes to the protocol needing most roles (AXI4's wlast / rlast over AXI-Lite).
-/// A protocol with one role is never found (UART's `line`). Worked out once per trace: the file's
-/// signals don't change.
+/// there. A prefix goes to the protocol that explains most of its roles (AXI4 over AXI-Lite, whose
+/// roles it has too). A protocol with one role is never found (UART's `line`). Worked out once per
+/// trace: the file's signals don't change.
 pub fn detect(trace: &crate::trace::Trace) -> Vec<Found> {
     trace.found.get_or_init(|| find(trace)).clone()
 }
@@ -833,6 +837,8 @@ fn find(trace: &crate::trace::Trace) -> Vec<Found> {
     protocols.sort_by_key(|(_, p)| std::cmp::Reverse(p.roles().0.len()));
     let file = |v: &usize| !trace.is_computed(*v);
     let mut found: Vec<Found> = Vec::new();
+    // how many of each found protocol's roles the prefix has, for the same prefix's next one
+    let mut scores: Vec<usize> = Vec::new();
     for (name, p) in protocols {
         // a port is found by its first role, or a side's (a read-only one by arvalid)
         let (required, optional) = p.roles();
@@ -857,12 +863,29 @@ fn find(trace: &crate::trace::Trace) -> Vec<Found> {
                 .filter(|&r| there(r))
                 .count();
             let all = p.needed(there).iter().all(|r| there(r));
-            if present >= 2 && all && !found.iter().any(|f| f.prefix == prefix) {
-                found.push(Found {
-                    prefix: prefix.into(),
-                    protocol: name,
-                    clock: clock_of(trace, prefix),
-                });
+            if present < 2 || !all {
+                continue;
+            }
+            // the protocol that explains more of the port wins: AXI4 over AXI-Lite, whose roles it
+            // has too, AXI4's LAST being optional; a tie keeps the one found first
+            match found.iter().position(|f| f.prefix == prefix) {
+                Some(i) if scores[i] >= present => {}
+                Some(i) => {
+                    found[i] = Found {
+                        prefix: prefix.into(),
+                        protocol: name,
+                        clock: clock_of(trace, prefix),
+                    };
+                    scores[i] = present;
+                }
+                None => {
+                    found.push(Found {
+                        prefix: prefix.into(),
+                        protocol: name,
+                        clock: clock_of(trace, prefix),
+                    });
+                    scores.push(present);
+                }
             }
         }
     }

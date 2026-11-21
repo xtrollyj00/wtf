@@ -1,11 +1,13 @@
 //! AXI channel handshakes, shared by AXI4-Lite and AXI4 (spec §16): a record per channel handshake,
 //! the handshake's rules, and each side's joined into a transaction.
 
+use std::collections::{HashMap, VecDeque};
+
 use crate::decode;
 use crate::protocol::{
     Default, Field, Given, Out, Params, RoleDef, Roles, Severity, StreamDesc, bit_of,
 };
-use crate::stream::{self, Stream};
+use crate::stream::{self, Record, Stream};
 use crate::time::Tick;
 use crate::trace::Val;
 
@@ -37,6 +39,8 @@ pub struct Handshakes {
     /// The reset is active low (`reset_active=low`), the spec's default.
     reset_low: bool,
     in_reset: bool,
+    /// AXI4: `early` and `exokay` are decided after the join, so `feed` says nothing of them.
+    defer: bool,
 }
 
 /// One channel the instance gives: its two handshake roles and the payload it has.
@@ -64,8 +68,7 @@ struct Present {
 
 impl Present {
     /// The channel has that rule: it lists it, and `changed` and `payload_unknown` need a
-    /// payload, `resp` and `exokay` a response role. A rule the port does not list never fires
-    /// (AXI4 has no `unknown`).
+    /// payload, `resp` and `exokay` a response role. A rule the port does not list never fires.
     fn has(&self, suffix: &str) -> bool {
         self.rule(suffix).is_some()
             && match suffix {
@@ -106,6 +109,7 @@ impl Handshakes {
             signal(r).or_else(|| match def(r)?.default? {
                 Default::Bits(b) => Some(b.len() as u32),
                 Default::Bytes(src) => Some(signal(src)?.div_ceil(8)),
+                Default::Size(_) => Some(3),
                 Default::Zero | Default::Ones | Default::Same(_) => None,
             })
         };
@@ -151,6 +155,7 @@ impl Handshakes {
             reset: has("aresetn").then(|| "aresetn".to_string()),
             reset_low,
             in_reset: false,
+            defer: false,
         }
     }
 
@@ -227,6 +232,7 @@ impl Handshakes {
         let rules = self.rules;
         // a port whose responses carry EXOKAY splits SLVERR and DECERR from it
         let split = rules.iter().any(|k| k.suffix == "exokay");
+        let defer = self.defer;
         let mut out = Vec::new();
         // a port with a reset: a valid in it, or in the cycle it is released in, is the error, and
         // nothing is recorded (A2.1.2); an x on it is out of reset
@@ -352,7 +358,7 @@ impl Handshakes {
                         end,
                         format!("{resp} is SLVERR or DECERR"),
                     ));
-                } else if split && is_exokay(v) {
+                } else if !defer && split && is_exokay(v) {
                     out.push(violation(
                         rules,
                         p,
@@ -375,7 +381,9 @@ impl Handshakes {
             // a response before its request's handshakes: a B needs an AW and a W, an R an AR,
             // recorded before this cycle (A2.3.2). It is checked when the response begins, so a
             // valid raised too early is one even when its handshake waits for them
-            let early = p.has("early")
+            // AXI4's `early` is decided once its requests are paired: `join_streams` says it
+            let early = !defer
+                && p.has("early")
                 && match p.chan.name {
                     "b" => b >= aw.min(w),
                     "r" => r >= ar,
@@ -460,6 +468,182 @@ impl Handshakes {
         out.extend(from_stream(unmatched, &rest));
         Ok(out)
     }
+
+    /// AXI4: `early` and `exokay` are decided after the join, on the transactions it pairs, so
+    /// `feed` never says them.
+    pub fn defer_to_join(&mut self) {
+        self.defer = true;
+    }
+
+    /// A violation of one of the port's rules, made after the cycle: AXI4's `early` is the join's,
+    /// on the response it pairs with no request.
+    pub fn finish_violation(
+        &self,
+        channel: &str,
+        suffix: &str,
+        start: Tick,
+        end: Tick,
+        detail: String,
+    ) -> Out {
+        let p = self
+            .present(channel)
+            .expect("the channel's rules are its own");
+        violation(self.rules, p, suffix, start, end, detail)
+    }
+
+    /// An AXI4 side's transactions, its early responses told from its late ones: those of
+    /// `requests`, answered by `response`, with a response that comes before its request's parts
+    /// started as `early_chan`'s `early` rule (A2.3.2), and one that comes after its request
+    /// expired under `timeout` as `timeout`, never `no request` (a late response is not an early
+    /// one, and says which it is).
+    /// A request is complete when all its parts started, and with a `burst`, when the burst ended
+    /// too: a response in its last beat's cycle waits for it rather than being early.
+    #[allow(clippy::too_many_arguments)]
+    pub fn join_streams(
+        &self,
+        name: &'static str,
+        unmatched: &'static str,
+        requests: &[(&'static str, &Stream)],
+        response: &Stream,
+        id: Option<(&'static str, &'static str, &'static str)>,
+        burst: Option<&str>,
+        early_chan: &'static str,
+        timeout: Option<Tick>,
+    ) -> Result<Vec<Out>, String> {
+        let n = requests
+            .iter()
+            .map(|r| r.1.records.len())
+            .min()
+            .unwrap_or(0);
+        let parts = |k: usize| requests.iter().map(move |r| &r.1.records[k]);
+        let complete = |k: usize| parts(k).map(|q| q.start).max().unwrap_or(0);
+        // a response answers a request that started before it, and whose burst has ended: a B in
+        // its burst's last beat's cycle is not early
+        let ready = |k: usize, start: Tick| {
+            parts(k).all(|q| q.start < start)
+                && burst.is_none_or(|b| {
+                    requests
+                        .iter()
+                        .find(|r| r.0 == b)
+                        .is_none_or(|r| r.1.records[k].end <= start)
+                })
+        };
+        // a response takes its request by the ID both name
+        let key = match id {
+            Some((label, field, rfield)) => {
+                let i = requests
+                    .iter()
+                    .position(|r| r.0 == label)
+                    .ok_or_else(|| format!("join: no {label} channel given"))?;
+                let q = requests[i]
+                    .1
+                    .schema
+                    .iter()
+                    .position(|f| f.name == field)
+                    .ok_or_else(|| format!("join: {label} has no field {field}"))?;
+                let r = response
+                    .schema
+                    .iter()
+                    .position(|f| f.name == rfield)
+                    .ok_or_else(|| format!("join: {} has no field {rfield}", response.name))?;
+                Some((i, q, r))
+            }
+            None => None,
+        };
+        let req_key =
+            |k: usize| key.and_then(|(i, q, _)| requests[i].1.records[k].fields[q].clone());
+        let resp_key = |r: &Record| key.and_then(|(_, _, i)| r.fields[i].clone());
+        // the requests of a key, in order: the front is the one a response answers first
+        let mut waiting: HashMap<Option<Val>, VecDeque<usize>> = HashMap::new();
+        // how many of a key are done (`expired` or answered): a response with one and no front is
+        // late, not early
+        let mut answered: HashMap<Option<Val>, usize> = HashMap::new();
+        // the ordinal of each request among those of its key: what an early response names
+        let mut ordinals = vec![0usize; n];
+        let mut seen: HashMap<Option<Val>, usize> = HashMap::new();
+        for (k, ordinal) in ordinals.iter_mut().enumerate() {
+            let count = seen.entry(req_key(k)).or_default();
+            *count += 1;
+            *ordinal = *count;
+        }
+        // how many of a key were said early
+        let mut said: HashMap<Option<Val>, usize> = HashMap::new();
+        let mut next = 0;
+        let mut early = Vec::new();
+        let mut out = Vec::new();
+        for (i, r) in response.records.iter().enumerate() {
+            while next < n && complete(next) < r.start {
+                waiting.entry(req_key(next)).or_default().push_back(next);
+                next += 1;
+            }
+            // the join's expiry: a request that waited more than `timeout` is gone, and its
+            // response comes late rather than early
+            if let Some(t) = timeout {
+                for (k, w) in &mut waiting {
+                    while w
+                        .front()
+                        .is_some_and(|&f| r.start.saturating_sub(complete(f)) > t)
+                    {
+                        w.pop_front();
+                        *answered.entry(k.clone()).or_default() += 1;
+                    }
+                }
+            }
+            let k = resp_key(r);
+            let front = waiting.get(&k).and_then(|w| w.front().copied());
+            let before = match front {
+                Some(f) if ready(f, r.start) => {
+                    if let Some(w) = waiting.get_mut(&k) {
+                        w.pop_front();
+                    }
+                    *answered.entry(k.clone()).or_default() += 1;
+                    None
+                }
+                // the front request's burst has not ended: the response is before it
+                Some(f) => Some(ordinals[f]),
+                // nothing waits: the one it would answer expired, or never came
+                None if answered.get(&k).copied().unwrap_or(0) > 0 => None,
+                None => Some(answered.get(&k).copied().unwrap_or(0) + 1),
+            };
+            let Some(ord) = before else { continue };
+            let m = {
+                let count = said.entry(k).or_default();
+                *count += 1;
+                *count
+            };
+            let detail = if name == "wr" {
+                format!("response {m} before write {ord}'s AW and W")
+            } else {
+                format!("response {m} before read {ord}'s AR")
+            };
+            early.push(i);
+            out.push(self.finish_violation(early_chan, "early", r.start, r.end, detail));
+        }
+        // the rest, joined as `decode::join` does: no early response is left to take a request it
+        // does not answer, so a `no request` left is a late one
+        let rest = Stream {
+            name: response.name.clone(),
+            schema: response.schema.clone(),
+            records: response
+                .records
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| !early.contains(i))
+                .map(|(_, r)| r.clone())
+                .collect(),
+            violations: response.violations,
+            inputs: response.inputs.clone(),
+        };
+        let (done, mut left) = decode::join(name, requests, &rest, id, timeout)?;
+        for r in &mut left.records {
+            if matches!(r.fields.first(), Some(Some(Val::Text(k))) if k == "no request") {
+                r.fields[0] = Some(Val::Text("timeout".into()));
+            }
+        }
+        out.extend(from_stream(name, &done));
+        out.extend(from_stream(unmatched, &left));
+        Ok(out)
+    }
 }
 
 /// A violation of one of the port's rules: its name on the channel, its severity from the port's
@@ -516,7 +700,7 @@ fn not_okay(v: &Val) -> bool {
 
 /// Whether a signal's value is x, z or an unset bit: it says nothing, so no rule reads a meaning
 /// into it.
-fn unknown(v: &Val) -> bool {
+pub(crate) fn unknown(v: &Val) -> bool {
     matches!(v, Val::Bits(b) if b.contains(['x', 'z', 'u', 'w', '-']))
 }
 
@@ -526,8 +710,9 @@ fn resp_bits(v: &Val) -> Option<(bool, bool)> {
     Some((bit_of(b, 0)?, bit_of(b, 1)?))
 }
 
-/// A response of EXOKAY (`2'b01`): exclusive access, which AXI4-Lite has none of.
-fn is_exokay(v: &Val) -> bool {
+/// A response of EXOKAY (`2'b01`): exclusive access, which AXI4-Lite has none of and AXI4 allows
+/// only when the lock asked for one.
+pub(crate) fn is_exokay(v: &Val) -> bool {
     resp_bits(v) == Some((true, false))
 }
 

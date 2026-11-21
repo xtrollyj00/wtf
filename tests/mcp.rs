@@ -2247,6 +2247,97 @@ fn axilite_warnings_filter_by_severity() {
     );
 }
 
+/// An AXI4 decode has no `no request` row: an early B or R is the transaction's own rule, and a
+/// response too late for its `timeout=` is a `timeout`, so the join only ever says `no response`,
+/// `timeout` or a burst with no request left over (spec §16).
+#[test]
+fn axi4_unmatched_without_no_request() {
+    let dir = Dir::new("axi4-unmatched");
+    let mut s = Server::start(&dir.0);
+    s.ok(
+        "open",
+        json!({"trace": std::fs::canonicalize("tests/data/axi4_errors.vcd").unwrap()}),
+    );
+    s.ok(
+        "command",
+        json!({"line": "decode mem axi4 clock=aclk prefix=m_axi_"}),
+    );
+    let column = |text: &str, n: usize| -> Vec<String> {
+        text.lines()
+            .skip(2)
+            .map(|l| l.split('\t').nth(n).unwrap().to_string())
+            .collect()
+    };
+    // the early B and the stray R are rules of the port, not rows of the join
+    let errors = s.ok("records", json!({"stream": "mem.errors"}));
+    assert_eq!(
+        column(&errors, 3),
+        [
+            "aw_reset",
+            "aw_reset",
+            "aw_dropped",
+            "w_changed",
+            "b_early",
+            "r_early",
+            "b_exokay",
+            "r_exokay",
+            "b_resp",
+            "r_resp",
+            "ar_unknown",
+            "w_payload_unknown"
+        ]
+    );
+    // the write nobody answered is the join's, and no read is left over
+    assert_eq!(
+        s.ok("records", json!({"stream": "mem.wr.unmatched"})),
+        "1 of 1\nn\tstart\tend\tkind\n0\t440ns\t450ns\tno response"
+    );
+    assert_eq!(
+        s.ok("records", json!({"stream": "mem.rd.unmatched"})),
+        "no records: no violations"
+    );
+    // a response too late for a short `timeout=` is a `timeout`, never a `no request`
+    s.ok(
+        "command",
+        json!({"line": "decode mem axi4 clock=aclk prefix=m_axi_ timeout=50ns"}),
+    );
+    let rd = s.ok("records", json!({"stream": "mem.rd.unmatched"}));
+    assert_eq!(column(&rd, 3), ["no response", "timeout"]);
+    assert!(!rd.contains("no request"), "{rd}");
+    assert!(
+        !s.ok("records", json!({"stream": "mem.wr.unmatched"}))
+            .contains("no request")
+    );
+    // the severity an agent filters by: the four warnings say nothing rather than a bug
+    let w = s.ok(
+        "records",
+        json!({"stream": "mem.errors", "where": "severity == warning"}),
+    );
+    assert!(w.starts_with("4 of 4 matching, of 12\n"), "{w}");
+    assert_eq!(
+        column(&w, 3),
+        ["b_resp", "r_resp", "ar_unknown", "w_payload_unknown"]
+    );
+    let e = s.ok(
+        "records",
+        json!({"stream": "mem.errors", "where": "severity == error"}),
+    );
+    assert!(e.starts_with("8 of 8 matching, of 12\n"), "{e}");
+    assert_eq!(
+        column(&e, 3),
+        [
+            "aw_reset",
+            "aw_reset",
+            "aw_dropped",
+            "w_changed",
+            "b_early",
+            "r_early",
+            "b_exokay",
+            "r_exokay"
+        ]
+    );
+}
+
 /// `protocols axilite` says what a port may leave out and what it is then, and names every rule
 /// with its severity and clause, so an agent can tell `error` from `warning` before it decodes.
 #[test]
@@ -2314,7 +2405,8 @@ fn protocols_describe_themselves() {
     let axi4 = s.ok("protocols", json!({"name": "axi4"}));
     for line in [
         "  <name>.rburst: beats id data complete\n",
-        "  <name>.rd: delay addr ar_id len size burst prot beats resp_id data complete\n",
+        "  <name>.rd: delay addr ar_id len size burst prot lock cache qos region beats resp_id \
+         data complete\n",
         "example: decode mem axi4 clock=aclk prefix=m_axi_",
     ] {
         assert!(axi4.contains(line), "{line}\n{axi4}");
@@ -2344,6 +2436,49 @@ fn protocols_describe_themselves() {
         .tool("command", json!({"line": "decode x hz v=valid"}))
         .unwrap_err();
     assert!(err.contains("unknown protocol: hz (protocols: axis, axilite, axi4, spi, uart, frame, pair, check, hs;"), "{err}");
+}
+
+/// `protocols axi4` says what AXI5 means by a role the port leaves out, that the reset is optional
+/// and a param, and every AXI4-only rule with its clause — the card and the guide an agent reads
+/// (spec §16 "AXI4").
+#[test]
+fn axi4_protocols_describes_defaults_reset_rules() {
+    let dir = Dir::new("axi4-card");
+    let mut s = Server::start(&dir.0);
+    let card = s.ok("protocols", json!({"name": "axi4"}));
+    // aresetn is a role and reset_active a param: a trace without the reset decodes, its rules off
+    assert!(card.contains("  timeout reset_active\n"), "{card}");
+    for want in [
+        "aresetn (optional)\n",
+        "awlen 00000000",
+        "awsize log2(wdata/8)",
+        "arsize log2(rdata/8)",
+        "awburst 01",
+        "awlock 0",
+        "awcache 0000",
+        "wstrb bytes of wdata",
+        "bresp 00",
+    ] {
+        assert!(card.contains(want), "{want}\n{card}");
+    }
+    for line in [
+        "        aw_reset: a valid while the interface is in reset, or in its first cycle out (error, spec A2.1.2)\n",
+        "        b_early: a response before its request's handshakes (error, spec A2.3.2)\n",
+        "        r_early: a response before its request's handshakes (error, spec A2.3.2)\n",
+        "        b_resp: a SLVERR or DECERR response (warning, spec A3.3)\n",
+        "        b_exokay: an EXOKAY response to a non-exclusive access (error, spec A3.3)\n",
+        "        aw_exclusive: an exclusive access misaligned to its bytes, not a power of two up to 128 bytes, or over 16 beats (error, spec A6.3.3)\n",
+        "        w_last: LAST on a beat other than AxLEN+1, or missing on it (error, spec A3.2)\n",
+        "        w_strb: a strobe high outside the beat's byte lanes (error, spec A3.2.1)\n",
+        "      severity: error or warning; records <name>.errors where severity == warning keeps the warnings\n",
+    ] {
+        assert!(card.contains(line), "{line}\n{card}");
+    }
+    // the guide says the same of the reset and of an answer that comes too late
+    let help = s.ok("help", json!({"topic": "decode"}));
+    for want in ["axi4", "aresetn", "timeout", "b_early"] {
+        assert!(help.contains(want), "{want}\n{help}");
+    }
 }
 
 /// A protocol in the config dir's `protocols/` decodes as a built-in does — before a trace is open,
