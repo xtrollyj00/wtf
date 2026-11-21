@@ -22,8 +22,8 @@ expression: "crate::snapshot(&mut a, 100, Some(30))"
      │ rvalid                                                                                 │
      │ rready                                                                                 │
      │ rdata                                                                                  │
+     │ aresetn                                                                                │
      │ awprot                                                                                 │
-     │ wstrb                                                                                  │
      │────────────────────────────────────────────────────────────────────────────────────────│
      │ s: awvalid: unknown signal: m_axi_awvalid (nearest: top.s_axi_awvalid,                 │
      │ top.s_axi_arvalid, top.s_axi_wvalid);                                                  │

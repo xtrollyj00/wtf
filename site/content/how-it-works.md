@@ -59,7 +59,7 @@ lists the interfaces wtf found in the trace and names the decode after the signa
 `s_axi` here. The command form lets you pick the name:
 
 ```
-:decode bus axilite clock=top.aclk prefix=top.s_axi_
+:decode bus axilite clock=top.aclk aresetn=top.aresetn prefix=top.s_axi_
 ```
 
 `axilite` is the protocol. `bus` is the name of this instance, and each of its streams takes the

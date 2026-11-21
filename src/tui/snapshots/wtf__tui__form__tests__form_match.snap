@@ -22,10 +22,10 @@ expression: "crate::snapshot(&mut a, 100, Some(30))"
      │ rvalid     top.s_axi_rvalid                                                            │
      │ rready     top.s_axi_rready                                                            │
      │ rdata      top.s_axi_rdata                                                             │
+     │ aresetn    top.s_axi_aresetn                                                           │
      │ awprot                                                                                 │
      │ wstrb      top.s_axi_wstrb                                                             │
      │ bresp      top.s_axi_bresp                                                             │
-     │ arprot                                                                                 │
      │────────────────────────────────────────────────────────────────────────────────────────│
      │ the names match: Enter decodes                                                         │
      │ :decode s axilite clock=aclk prefix=s_axi_                                             │

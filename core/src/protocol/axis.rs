@@ -2,6 +2,7 @@
 //! handshake's errors, and the three warnings the spec gives (spec §16 "AXI4-Stream").
 
 use crate::decode::data_bytes;
+use crate::protocol::axi::{shown, unknown};
 use crate::protocol::{
     Def, Default, Desc, Field, Given, Out, Params, Protocol, RoleDef, Roles, Rule, Severity,
     StreamDesc, bit_of, reset_low,
@@ -25,13 +26,13 @@ pub const RULES: &[Rule] = &[
     },
     Rule {
         name: "unknown",
-        severity: Severity::Warning,
+        severity: Severity::Error,
         spec: "2.2",
         about: "tvalid or tready is x or z out of reset",
     },
     Rule {
         name: "payload_unknown",
-        severity: Severity::Warning,
+        severity: Severity::Error,
         spec: "2.4",
         about: "a payload signal is x or z while tvalid",
     },
@@ -132,7 +133,7 @@ pub const DEF: Def = Def {
         },
         RoleDef {
             name: "aresetn",
-            required: false,
+            required: true,
             default: None,
             about: "the reset, active low (reset_active=high: active high)",
         },
@@ -305,12 +306,12 @@ impl Protocol for Axis {
         let valid = roles.bit("tvalid");
         let ready = roles.bit("tready").unwrap_or(true);
         let (wake, has_wake) = (roles.bit("twakeup"), roles.get("twakeup").is_some());
-        // the spec's reset is active low (2.8.2)
-        let in_reset = roles
-            .bit("aresetn")
-            .is_some_and(|high| high != self.reset_low);
+        // the spec's reset is active low (2.8.2); an x on it (a testbench's reset before it is
+        // driven) records nothing and says nothing
+        let level = roles.bit("aresetn");
+        let in_reset = level.is_none_or(|high| high != self.reset_low);
         if in_reset {
-            if valid != Some(false) {
+            if level.is_some() && valid != Some(false) {
                 out.push(violation("reset", start, end, "tvalid in reset"));
             }
             self.stall = None;
@@ -341,26 +342,26 @@ impl Protocol for Axis {
             return out;
         }
         for role in ["tvalid", "tready"] {
-            if roles.get(role).is_some_and(unknown) {
+            if let Some(v) = roles.get(role).filter(|v| unknown(v)) {
                 out.push(violation(
                     "unknown",
                     start,
                     end,
-                    format!("{role} is x or z out of reset"),
+                    format!("{role} is {} out of reset", shown(v)),
                 ));
             }
         }
-        if let (Some(true), Some(role)) = (
+        if let (Some(true), Some((role, v))) = (
             valid,
             self.beats
                 .iter()
-                .find(|f| roles.get(&f.name).is_some_and(unknown)),
+                .find_map(|f| Some((f, roles.get(&f.name).filter(|v| unknown(v))?))),
         ) {
             out.push(violation(
                 "payload_unknown",
                 start,
                 end,
-                format!("{} is x or z while tvalid", role.name),
+                format!("{} is {} while tvalid", role.name, shown(v)),
             ));
         }
         if has_wake {
@@ -493,11 +494,6 @@ fn violation(rule: &'static str, start: Tick, end: Tick, detail: impl Into<Strin
         detail: detail.into(),
         severity,
     }
-}
-
-/// A bit that is x or z (or uninitialized), which the spec forbids for these.
-fn unknown(v: &Val) -> bool {
-    matches!(v, Val::Bits(b) if b.contains(['x', 'z', 'u', 'w', '-']))
 }
 
 /// A beat's bytes: those tkeep marks, and those of them tstrb marks as position.

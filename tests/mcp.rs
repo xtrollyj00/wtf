@@ -1897,12 +1897,11 @@ fn axis_frames_and_errors() {
         json!({"trace": std::fs::canonicalize("tests/data/axis.vcd").unwrap()}),
     );
     // the fields are the interface's: info offers them by their signals
-    assert!(
-        s.ok("info", json!({}))
-            .contains("\n  top.* axis: decode axis axis clock=top.clk prefix=top.")
-    );
+    assert!(s.ok("info", json!({})).contains(
+        "\n  top.* axis: decode axis axis clock=top.clk aresetn=top.aresetn prefix=top."
+    ));
     let decl = json!({
-        "decode": [{"name": "rx", "protocol": "axis", "clock": "clk", "signals": [{"tvalid": "tvalid"}, {"tready": "tready"}, {"tdata": "tdata"}, {"tlast": "tlast"}, {"tkeep": "tkeep"}]}],
+        "decode": [{"name": "rx", "protocol": "axis", "clock": "clk", "signals": [{"tvalid": "tvalid"}, {"tready": "tready"}, {"tdata": "tdata"}, {"tlast": "tlast"}, {"tkeep": "tkeep"}, {"aresetn": "aresetn"}]}],
         "rows": [{"signal": "rx.frame"}, {"signal": "rx.frame.len", "radix": "dec"}, {"signal": "rx.errors"}],
     });
     assert!(s.ok("workspace", decl).starts_with("rows (> selected):\n> rx.frame  rx.frame\n  rx.frame.len  rx.frame.len  dec\n  rx.errors  rx.errors\n"));
@@ -1946,7 +1945,7 @@ fn decode_with_command() {
         "open",
         json!({"trace": std::fs::canonicalize("tests/data/axilite.vcd").unwrap()}),
     );
-    let line = "decode s_axi axilite clock=top.aclk prefix=top.s_axi_";
+    let line = "decode s_axi axilite clock=top.aclk aresetn=top.s_axi_aresetn prefix=top.s_axi_";
     assert!(opened.ends_with(&format!("interfaces a built-in protocol decodes (decode them: exact records, handshake checks built in):\n  top.s_axi_* axilite: {line}")), "{opened}");
     // a stream of an interface not decoded yet: the error gives its line
     let undecoded =
@@ -1983,7 +1982,7 @@ fn decode_with_command() {
     // where a stream has none; a filter keeps the streams having its fields
     assert_eq!(
         s.ok("records", json!({"stream": "bus", "count": 3})),
-        "3 of 23\nstream\tn\tstart\tend\tdelay\taddr\tprot\tdata\tstrb\tresp\trule\tdetail\tseverity\tkind\nbus.errors\t0\t10ns\t20ns\t\t\t\t\t\t\taw_unknown\tawvalid is x or z out of reset\twarning\t\nbus.errors\t1\t10ns\t20ns\t\t\t\t\t\t\taw_unknown\tawready is x or z out of reset\twarning\t\nbus.errors\t2\t10ns\t20ns\t\t\t\t\t\t\tw_unknown\twvalid is x or z out of reset\twarning\t"
+        "3 of 23\nstream\tn\tstart\tend\tdelay\taddr\tprot\tdata\tstrb\tresp\trule\tdetail\tseverity\tkind\nbus.errors\t0\t10ns\t20ns\t\t\t\t\t\t\taw_unknown\tawvalid is x out of reset\terror\t\nbus.errors\t1\t10ns\t20ns\t\t\t\t\t\t\taw_unknown\tawready is x out of reset\terror\t\nbus.errors\t2\t10ns\t20ns\t\t\t\t\t\t\tw_unknown\twvalid is x out of reset\terror\t"
     );
     assert_eq!(
         s.ok(
@@ -2017,7 +2016,7 @@ fn decode_with_command() {
     );
     assert_eq!(
         s.ok("records", json!({"stream": "bus.errors"})),
-        "13 of 13\nn\tstart\tend\trule\tdetail\tseverity\n0\t10ns\t20ns\taw_unknown\tawvalid is x or z out of reset\twarning\n1\t10ns\t20ns\taw_unknown\tawready is x or z out of reset\twarning\n2\t10ns\t20ns\tw_unknown\twvalid is x or z out of reset\twarning\n3\t10ns\t20ns\tw_unknown\twready is x or z out of reset\twarning\n4\t10ns\t20ns\tb_unknown\tbvalid is x or z out of reset\twarning\n5\t10ns\t20ns\tb_unknown\tbready is x or z out of reset\twarning\n6\t10ns\t20ns\tar_unknown\tarvalid is x or z out of reset\twarning\n7\t10ns\t20ns\tar_unknown\tarready is x or z out of reset\twarning\n8\t10ns\t20ns\tr_unknown\trvalid is x or z out of reset\twarning\n9\t10ns\t20ns\tr_unknown\trready is x or z out of reset\twarning\n10\t180ns\t190ns\tr_resp\trresp is SLVERR or DECERR\twarning\n11\t210ns\t220ns\taw_dropped\tawvalid fell before awready\terror\n12\t230ns\t240ns\tb_early\tresponse 3 before write 3's AW and W\terror"
+        "13 of 13\nn\tstart\tend\trule\tdetail\tseverity\n0\t10ns\t20ns\taw_unknown\tawvalid is x out of reset\terror\n1\t10ns\t20ns\taw_unknown\tawready is x out of reset\terror\n2\t10ns\t20ns\tw_unknown\twvalid is x out of reset\terror\n3\t10ns\t20ns\tw_unknown\twready is x out of reset\terror\n4\t10ns\t20ns\tb_unknown\tbvalid is x out of reset\terror\n5\t10ns\t20ns\tb_unknown\tbready is x out of reset\terror\n6\t10ns\t20ns\tar_unknown\tarvalid is x out of reset\terror\n7\t10ns\t20ns\tar_unknown\tarready is x out of reset\terror\n8\t10ns\t20ns\tr_unknown\trvalid is x out of reset\terror\n9\t10ns\t20ns\tr_unknown\trready is x out of reset\terror\n10\t180ns\t190ns\tr_resp\trresp is SLVERR\twarning\n11\t210ns\t220ns\taw_dropped\tawvalid fell before awready\terror\n12\t230ns\t240ns\tb_early\tresponse 3 before write 3's AW and W\terror"
     );
     // a radix for every number field (not the delay, a time), or one field's
     let wr = |radix: &str| json!({"stream": "bus.wr", "radix": radix, "count": 1});
@@ -2175,13 +2174,13 @@ fn axilite_errors_conformance() {
          1\t20ns\t30ns\taw_reset\tawvalid in the cycle reset is released\terror\n\
          2\t50ns\t60ns\taw_dropped\tawvalid fell before awready\terror\n\
          3\t90ns\t100ns\tw_changed\twdata changed while wvalid stalled\terror\n\
-         4\t110ns\t120ns\tb_resp\tbresp is SLVERR or DECERR\twarning\n\
-         5\t130ns\t140ns\tr_resp\trresp is SLVERR or DECERR\twarning\n\
+         4\t110ns\t120ns\tb_resp\tbresp is SLVERR\twarning\n\
+         5\t130ns\t140ns\tr_resp\trresp is DECERR\twarning\n\
          6\t150ns\t160ns\tr_exokay\trresp is EXOKAY\terror\n\
          7\t160ns\t170ns\tb_early\tresponse 2 before write 2's AW and W\terror\n\
          8\t190ns\t200ns\tr_early\tresponse 4 before read 4's AR\terror\n\
-         9\t200ns\t210ns\tar_unknown\tarvalid is x or z out of reset\twarning\n\
-         10\t220ns\t230ns\tw_payload_unknown\twdata is x or z while wvalid\twarning"
+         9\t200ns\t210ns\tar_unknown\tarvalid is x out of reset\terror\n\
+         10\t220ns\t230ns\tw_payload_unknown\twdata is x while wvalid\terror"
     );
     // no `no request`: what has no request is `b_early` or `r_early` in errors (phase 5)
     assert_eq!(
@@ -2223,16 +2222,13 @@ fn axilite_warnings_filter_by_severity() {
         "records",
         json!({"stream": "bus.errors", "where": "severity == warning"}),
     );
-    assert!(w.starts_with("4 of 4 matching, of 11\n"), "{w}");
-    assert_eq!(
-        rules(&w),
-        ["b_resp", "r_resp", "ar_unknown", "w_payload_unknown"]
-    );
+    assert!(w.starts_with("2 of 2 matching, of 11\n"), "{w}");
+    assert_eq!(rules(&w), ["b_resp", "r_resp"]);
     let e = s.ok(
         "records",
         json!({"stream": "bus.errors", "where": "severity == error"}),
     );
-    assert!(e.starts_with("7 of 7 matching, of 11\n"), "{e}");
+    assert!(e.starts_with("9 of 9 matching, of 11\n"), "{e}");
     assert_eq!(
         rules(&e),
         [
@@ -2242,7 +2238,99 @@ fn axilite_warnings_filter_by_severity() {
             "w_changed",
             "r_exokay",
             "b_early",
-            "r_early"
+            "r_early",
+            "ar_unknown",
+            "w_payload_unknown"
+        ]
+    );
+}
+
+/// An AXI4 decode has no `no request` row: an early B or R is the transaction's own rule, and a
+/// response too late for its `timeout=` is a `timeout`, so the join only ever says `no response`,
+/// `timeout` or a burst with no request left over (spec §16).
+#[test]
+fn axi4_unmatched_without_no_request() {
+    let dir = Dir::new("axi4-unmatched");
+    let mut s = Server::start(&dir.0);
+    s.ok(
+        "open",
+        json!({"trace": std::fs::canonicalize("tests/data/axi4_errors.vcd").unwrap()}),
+    );
+    s.ok(
+        "command",
+        json!({"line": "decode mem axi4 clock=aclk prefix=m_axi_"}),
+    );
+    let column = |text: &str, n: usize| -> Vec<String> {
+        text.lines()
+            .skip(2)
+            .map(|l| l.split('\t').nth(n).unwrap().to_string())
+            .collect()
+    };
+    // the early B and the stray R are rules of the port, not rows of the join
+    let errors = s.ok("records", json!({"stream": "mem.errors"}));
+    assert_eq!(
+        column(&errors, 3),
+        [
+            "aw_reset",
+            "aw_reset",
+            "aw_dropped",
+            "w_changed",
+            "b_early",
+            "r_early",
+            "b_exokay",
+            "r_exokay",
+            "b_resp",
+            "r_resp",
+            "ar_unknown",
+            "w_payload_unknown"
+        ]
+    );
+    // the write nobody answered is the join's, and no read is left over
+    assert_eq!(
+        s.ok("records", json!({"stream": "mem.wr.unmatched"})),
+        "1 of 1\nn\tstart\tend\tkind\n0\t440ns\t450ns\tno response"
+    );
+    assert_eq!(
+        s.ok("records", json!({"stream": "mem.rd.unmatched"})),
+        "no records: no violations"
+    );
+    // a response too late for a short `timeout=` is a `timeout`, never a `no request`
+    s.ok(
+        "command",
+        json!({"line": "decode mem axi4 clock=aclk prefix=m_axi_ timeout=50ns"}),
+    );
+    let rd = s.ok("records", json!({"stream": "mem.rd.unmatched"}));
+    assert_eq!(column(&rd, 3), ["no response", "timeout"]);
+    assert!(!rd.contains("no request"), "{rd}");
+    assert!(
+        !s.ok("records", json!({"stream": "mem.wr.unmatched"}))
+            .contains("no request")
+    );
+    // the severity an agent filters by: the two warnings are the slave's answers, not a bug
+    let w = s.ok(
+        "records",
+        json!({"stream": "mem.errors", "where": "severity == warning"}),
+    );
+    assert!(w.starts_with("2 of 2 matching, of 12\n"), "{w}");
+    assert_eq!(column(&w, 3), ["b_resp", "r_resp"]);
+    let e = s.ok(
+        "records",
+        json!({"stream": "mem.errors", "where": "severity == error"}),
+    );
+    assert!(e.starts_with("10 of 10 matching, of 12\n"), "{e}");
+    assert_eq!(
+        column(&e, 3),
+        [
+            "aw_reset",
+            "aw_reset",
+            "aw_dropped",
+            "w_changed",
+            "b_early",
+            "r_early",
+            "b_exokay",
+            "r_exokay",
+            "ar_unknown",
+            "w_payload_unknown"
         ]
     );
 }
@@ -2255,13 +2343,13 @@ fn axilite_protocols_describes_defaults_reset_rules() {
     let mut s = Server::start(&dir.0);
     let card = s.ok("protocols", json!({"name": "axilite"}));
     for line in [
-        "  awprot wstrb bresp arprot rresp aresetn (optional)\n",
+        "  awprot wstrb bresp arprot rresp (optional)\n",
         "  when not given: awprot 000, wstrb bytes of wdata, bresp 00, arprot 000, rresp 00\n",
         "  timeout reset_active\n",
         "        aw_reset: a valid while the interface is in reset, or in its first cycle out (error, spec A2.1.2)\n",
         "        b_exokay: an EXOKAY response: Lite has no exclusive access (error, spec A3.3)\n",
-        "        aw_unknown: a valid or ready is x or z out of reset (warning, spec A2.3)\n",
-        "        w_payload_unknown: a payload signal is x or z while its valid (warning, spec A2.3)\n",
+        "        aw_unknown: a valid or ready is x or z out of reset (error, spec A2.3)\n",
+        "        w_payload_unknown: a payload signal is x or z while its valid (error, spec A2.3)\n",
         "        b_early: a response before its request's handshakes (error, spec A2.3.2)\n",
         "        r_early: a response before its request's handshakes (error, spec A2.3.2)\n",
     ] {
@@ -2284,7 +2372,7 @@ fn protocols_describe_themselves() {
     }
     let axil = s.ok("protocols", json!({"name": "axilite"}));
     for line in [
-        "  awprot wstrb bresp arprot rresp aresetn (optional)",
+        "  awprot wstrb bresp arprot rresp (optional)",
         "  when not given: awprot 000, wstrb bytes of wdata, bresp 00, arprot 000, rresp 00\n",
         "  <name>.wr: delay addr prot data strb resp\n",
         "  <name>.wr.unmatched: kind (violations)",
@@ -2293,8 +2381,8 @@ fn protocols_describe_themselves() {
         // for the rest
         "  <name>.aw: addr prot\n      a record per cycle where awvalid && awready; addr = awaddr, prot = awprot\n",
         "        aw_dropped: a valid fell before its ready: it stays until the handshake (error, spec A2.3)\n",
-        "        aw_unknown: a valid or ready is x or z out of reset (warning, spec A2.3)\n",
-        "        w_payload_unknown: a payload signal is x or z while its valid (warning, spec A2.3)\n",
+        "        aw_unknown: a valid or ready is x or z out of reset (error, spec A2.3)\n",
+        "        w_payload_unknown: a payload signal is x or z while its valid (error, spec A2.3)\n",
         "        r_resp: a SLVERR or DECERR response (warning, spec A3.3)\n",
         "        r_exokay: an EXOKAY response: Lite has no exclusive access (error, spec A3.3)\n",
         "      writes: AW and W in either order, then B; delay from the later of AW and W to B\n",
@@ -2314,7 +2402,8 @@ fn protocols_describe_themselves() {
     let axi4 = s.ok("protocols", json!({"name": "axi4"}));
     for line in [
         "  <name>.rburst: beats id data complete\n",
-        "  <name>.rd: delay addr ar_id len size burst prot beats resp_id data complete\n",
+        "  <name>.rd: delay addr ar_id len size burst prot lock cache qos region beats resp_id \
+         data complete\n",
         "example: decode mem axi4 clock=aclk prefix=m_axi_",
     ] {
         assert!(axi4.contains(line), "{line}\n{axi4}");
@@ -2344,6 +2433,49 @@ fn protocols_describe_themselves() {
         .tool("command", json!({"line": "decode x hz v=valid"}))
         .unwrap_err();
     assert!(err.contains("unknown protocol: hz (protocols: axis, axilite, axi4, spi, uart, frame, pair, check, hs;"), "{err}");
+}
+
+/// `protocols axi4` says what AXI5 means by a role the port leaves out, that the reset is required
+/// with its polarity a param, and every AXI4-only rule with its clause — the card and the guide an agent reads
+/// (spec §16 "AXI4").
+#[test]
+fn axi4_protocols_describes_defaults_reset_rules() {
+    let dir = Dir::new("axi4-card");
+    let mut s = Server::start(&dir.0);
+    let card = s.ok("protocols", json!({"name": "axi4"}));
+    // aresetn is a required role and reset_active a param
+    assert!(card.contains("  timeout reset_active\n"), "{card}");
+    for want in [
+        "rdata aresetn (required)\n",
+        "awlen 00000000",
+        "awsize log2(wdata/8)",
+        "arsize log2(rdata/8)",
+        "awburst 01",
+        "awlock 0",
+        "awcache 0000",
+        "wstrb bytes of wdata",
+        "bresp 00",
+    ] {
+        assert!(card.contains(want), "{want}\n{card}");
+    }
+    for line in [
+        "        aw_reset: a valid while the interface is in reset, or in its first cycle out (error, spec A2.1.2)\n",
+        "        b_early: a response before its request's handshakes (error, spec A2.3.2)\n",
+        "        r_early: a response before its request's handshakes (error, spec A2.3.2)\n",
+        "        b_resp: a SLVERR or DECERR response (warning, spec A3.3)\n",
+        "        b_exokay: an EXOKAY response to a non-exclusive access (error, spec A3.3)\n",
+        "        aw_exclusive: an exclusive access misaligned to its bytes, not a power of two up to 128 bytes, or over 16 beats (error, spec A6.3.3)\n",
+        "        w_last: LAST on a beat other than AxLEN+1, or missing on it (error, spec A3.2)\n",
+        "        w_strb: a strobe high outside the beat's byte lanes (error, spec A3.2.1)\n",
+        "      severity: error or warning; records <name>.errors where severity == warning keeps the warnings\n",
+    ] {
+        assert!(card.contains(line), "{line}\n{card}");
+    }
+    // the guide says the same of the reset and of an answer that comes too late
+    let help = s.ok("help", json!({"topic": "decode"}));
+    for want in ["axi4", "aresetn", "timeout", "b_early"] {
+        assert!(help.contains(want), "{want}\n{help}");
+    }
 }
 
 /// A protocol in the config dir's `protocols/` decodes as a built-in does — before a trace is open,
@@ -2546,7 +2678,7 @@ fn command_lists_twenty_rows_changed() {
     );
     let added = s.ok("command", json!({"line": "add /./"}));
     assert!(
-        added.starts_with("added 26: ") && added.ends_with(", and 6 more"),
+        added.starts_with("added 27: ") && added.ends_with(", and 7 more"),
         "{added}"
     );
 }
@@ -3165,7 +3297,7 @@ fn axis_errors_filter_by_severity() {
         "open",
         json!({"trace": std::fs::canonicalize("tests/data/axis.vcd").unwrap()}),
     );
-    s.ok("command", json!({"line": "decode rx axis clock=clk tvalid=tvalid tready=tready tdata=tdata tlast=tlast tkeep=tkeep"}));
+    s.ok("command", json!({"line": "decode rx axis clock=clk tvalid=tvalid tready=tready tdata=tdata tlast=tlast tkeep=tkeep aresetn=aresetn"}));
     assert!(
         s.ok("records", json!({"stream": "rx.errors"}))
             .starts_with("2 of 2\nn\tstart\tend\trule\tdetail\tseverity\n")
@@ -3183,16 +3315,14 @@ fn axis_errors_filter_by_severity() {
     );
     s.ok(
         "command",
-        json!({"line": "decode rx axis clock=clk tvalid=tvalid tready=tready twakeup=twakeup"}),
+        json!({"line": "decode rx axis clock=clk tvalid=tvalid tready=tready twakeup=twakeup aresetn=aresetn"}),
     );
     let w = s.ok(
         "records",
         json!({"stream": "rx.errors", "where": "severity == warning", "unit": "ns"}),
     );
     assert!(
-        w.starts_with("3 of 3 matching, of 5")
-            && w.contains("wakeup_early")
-            && w.matches("\tunknown\t").count() == 2,
+        w.starts_with("1 of 1 matching, of 5") && w.contains("wakeup_early"),
         "{w}"
     );
     let e = s.ok(
@@ -3200,9 +3330,10 @@ fn axis_errors_filter_by_severity() {
         json!({"stream": "rx.errors", "where": "severity == error", "unit": "ns"}),
     );
     assert!(
-        e.starts_with("2 of 2 matching, of 5")
+        e.starts_with("4 of 4 matching, of 5")
             && e.contains("\twakeup\t")
-            && e.contains("\tdropped\t"),
+            && e.contains("\tdropped\t")
+            && e.matches("\tunknown\t").count() == 2,
         "{e}"
     );
     let g = s.ok(
@@ -3210,7 +3341,7 @@ fn axis_errors_filter_by_severity() {
         json!({"stream": "rx.errors", "group_by": ["severity"]}),
     );
     assert!(
-        g.contains("3 × severity=warning") && g.contains("2 × severity=error"),
+        g.contains("1 × severity=warning") && g.contains("4 × severity=error"),
         "{g}"
     );
 }

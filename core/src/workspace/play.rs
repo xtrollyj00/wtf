@@ -20,6 +20,13 @@ fn default_value(role: &protocol::RoleDef, given: &protocol::Given) -> Option<Va
         Default::Ones => Some(Val::Bits("1".repeat(w))),
         Default::Bits(b) => Some(Val::Bits(b.to_string())),
         Default::Bytes(src) => Some(Val::Bits("1".repeat(width(src)?.div_ceil(8) as usize))),
+        // One beat is a whole number of bytes of that role: the count as a log2, or no value when
+        // the width is not one, two, four, eight… bytes.
+        Default::Size(src) => {
+            let w = width(src)?;
+            (w % 8 == 0 && (w / 8).is_power_of_two())
+                .then(|| Val::Bits(format!("{:03b}", (w / 8).trailing_zeros())))
+        }
         Default::Same(_) => None,
     }
 }

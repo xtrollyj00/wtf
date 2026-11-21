@@ -104,7 +104,7 @@ name = "how-stream"
 trace = "docs/demo.vcd"
 copy = "demo.vcd"
 size = "100x18"
-keys = "<Esc>:add top.aclk<CR>:decode bus axilite clock=top.aclk prefix=top.s_axi_<CR>:add bus.wr<CR><CR>:60ns<CR>z<Esc>"
+keys = "<Esc>:add top.aclk<CR>:decode bus axilite clock=top.aclk aresetn=top.aresetn prefix=top.s_axi_<CR>:add bus.wr<CR><CR>:60ns<CR>z<Esc>"
 label = "The decoded write stream unfolded into a row per field, each with its value at the cursor"
 
 # The recipes (content/recipes.md)
@@ -156,6 +156,6 @@ label = "A packed struct opened one level: valid, state and pair under pkt, with
 trace = "docs/demo.vcd"
 calls = [
   { tool = "open", args = { trace = "sim/axi_tb.vcd" } },
-  { tool = "command", args = { line = "decode bus axilite clock=top.aclk prefix=top.s_axi_" } },
+  { tool = "command", args = { line = "decode bus axilite clock=top.aclk aresetn=top.aresetn prefix=top.s_axi_" } },
   { tool = "records", args = { stream = "bus" } },
 ]

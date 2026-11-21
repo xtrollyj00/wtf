@@ -1006,7 +1006,7 @@ mod tests {
         // spec §5 "Records": a warning's row in the theme's warning, an error's red
         let t = Trace::open("tests/data/axis_wakeup.vcd".as_ref()).unwrap();
         let mut app = App::new(Workspace::new(t, "x".into()));
-        app.keys(":decode rx axis clock=clk tvalid=tvalid tready=tready twakeup=twakeup\n:records rx.errors\n").unwrap();
+        app.keys(":decode rx axis clock=clk tvalid=tvalid tready=tready twakeup=twakeup aresetn=aresetn\n:records rx.errors\n").unwrap();
         let area = ratatui::layout::Rect::new(0, 0, 120, 30);
         let mut buf = ratatui::buffer::Buffer::empty(area);
         crate::tui::render::draw(&mut app, area, &mut buf);

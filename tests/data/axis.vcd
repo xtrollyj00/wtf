@@ -6,9 +6,11 @@ $var wire 1 # tready $end
 $var wire 32 $ tdata [31:0] $end
 $var wire 1 % tlast $end
 $var wire 4 & tkeep [3:0] $end
+$var wire 1 ~~ aresetn $end
 $upscope $end
 $enddefinitions $end
 #0
+1~~
 0!
 0"
 1#

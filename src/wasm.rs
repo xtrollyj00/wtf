@@ -477,7 +477,8 @@ mod tests {
                 )))
                 .unwrap(),
             );
-            let roles = "clock=clk tvalid=tvalid tready=tready tdata=tdata tlast=tlast";
+            let roles =
+                "clock=clk tvalid=tvalid tready=tready tdata=tdata tlast=tlast aresetn=aresetn";
             command::run(&mut ws, &format!("decode r axis {roles}")).unwrap();
             command::run(&mut ws, &format!("decode w axis-wasm {roles}")).unwrap();
             let records = |prefix: &str| {

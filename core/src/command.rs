@@ -74,7 +74,7 @@ pub const COMMANDS: &[Command] = &[
     Command {
         name: "decode",
         usage: "usage: :decode <name> <protocol> <role>=<signal>...",
-        desc: "Decode a protocol into streams, e.g. :decode rx axis clock=clk tvalid=rx_tvalid tready=rx_tready tdata=rx_tdata tlast=rx_tlast; alone, a form that fills it in",
+        desc: "Decode a protocol into streams, e.g. :decode rx axis clock=clk tvalid=rx_tvalid tready=rx_tready tdata=rx_tdata tlast=rx_tlast aresetn=rst_n; alone, a form that fills it in",
         args: &[ArgKind::Text, ArgKind::Protocol, ArgKind::Role],
         trailing: true,
         icon: '\u{eb2d}',

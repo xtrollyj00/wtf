@@ -51,6 +51,9 @@ pub enum Default {
     Bits(&'static str),
     /// One bit per whole byte of another given role (AXI4-Stream `tkeep`, spec §3.1.2).
     Bytes(&'static str),
+    /// The log2 of another given role's width in bytes, in three bits (AXI4's `awsize`): the
+    /// number of bytes a beat of that width holds.
+    Size(&'static str),
     /// The same value as another role.
     Same(&'static str),
 }
@@ -63,6 +66,7 @@ impl Default {
             Default::Ones => "1".into(),
             Default::Bits(b) => (*b).into(),
             Default::Bytes(src) => format!("bytes of {src}"),
+            Default::Size(src) => format!("log2({src}/8)"),
             Default::Same(src) => format!("same as {src}"),
         }
     }
@@ -785,6 +789,8 @@ pub struct Found {
     pub prefix: String,
     pub protocol: &'static str,
     pub clock: Option<String>,
+    /// The reset, for a protocol with an `aresetn` role: its path, and whether it is active high.
+    pub reset: Option<(String, bool)>,
 }
 
 impl Found {
@@ -807,18 +813,29 @@ impl Found {
             (Some(c), true) => format!(" clock={c}"),
             (None, true) => " clock=<clk>".into(),
         };
+        let reset = match (&self.reset, self.needs_reset()) {
+            (_, false) => String::new(),
+            (Some((r, false)), true) => format!(" aresetn={r}"),
+            (Some((r, true)), true) => format!(" aresetn={r} reset_active=high"),
+            (None, true) => " aresetn=<rst>".into(),
+        };
         format!(
-            "decode {name} {}{clock} prefix={}",
+            "decode {name} {}{clock}{reset} prefix={}",
             self.protocol, self.prefix
         )
+    }
+
+    /// The protocol takes a reset (`aresetn`), which detection finds as it finds the clock.
+    pub fn needs_reset(&self) -> bool {
+        get(self.protocol).is_some_and(|p| p.roles.iter().any(|r| r.name == "aresetn"))
     }
 }
 
 /// The interfaces of the file's signals that built-in protocols decode: wherever every role the
 /// instance needs is a signal `<prefix><role>`, and at least two of the protocol's roles are
-/// there. A prefix goes to the protocol needing most roles (AXI4's wlast / rlast over AXI-Lite).
-/// A protocol with one role is never found (UART's `line`). Worked out once per trace: the file's
-/// signals don't change.
+/// there. A prefix goes to the protocol that explains most of its roles (AXI4 over AXI-Lite, whose
+/// roles it has too). A protocol with one role is never found (UART's `line`). Worked out once per
+/// trace: the file's signals don't change.
 pub fn detect(trace: &crate::trace::Trace) -> Vec<Found> {
     trace.found.get_or_init(|| find(trace)).clone()
 }
@@ -833,6 +850,8 @@ fn find(trace: &crate::trace::Trace) -> Vec<Found> {
     protocols.sort_by_key(|(_, p)| std::cmp::Reverse(p.roles().0.len()));
     let file = |v: &usize| !trace.is_computed(*v);
     let mut found: Vec<Found> = Vec::new();
+    // how many of each found protocol's roles the prefix has, for the same prefix's next one
+    let mut scores: Vec<usize> = Vec::new();
     for (name, p) in protocols {
         // a port is found by its first role, or a side's (a read-only one by arvalid)
         let (required, optional) = p.roles();
@@ -856,18 +875,69 @@ fn find(trace: &crate::trace::Trace) -> Vec<Found> {
                 .chain(optional.iter().copied())
                 .filter(|&r| there(r))
                 .count();
-            let all = p.needed(there).iter().all(|r| there(r));
-            if present >= 2 && all && !found.iter().any(|f| f.prefix == prefix) {
-                found.push(Found {
-                    prefix: prefix.into(),
-                    protocol: name,
-                    clock: clock_of(trace, prefix),
-                });
+            // the reset is found as the clock is, in the scope rather than under the prefix
+            let all = p.needed(there).iter().all(|&r| r == "aresetn" || there(r));
+            if present < 2 || !all {
+                continue;
+            }
+            // the protocol that explains more of the port wins: AXI4 over AXI-Lite, whose roles it
+            // has too, AXI4's LAST being optional; a tie keeps the one found first
+            match found.iter().position(|f| f.prefix == prefix) {
+                Some(i) if scores[i] >= present => {}
+                Some(i) => {
+                    found[i] = Found {
+                        prefix: prefix.into(),
+                        protocol: name,
+                        clock: clock_of(trace, prefix),
+                        reset: reset_of(trace, prefix),
+                    };
+                    scores[i] = present;
+                }
+                None => {
+                    found.push(Found {
+                        prefix: prefix.into(),
+                        protocol: name,
+                        clock: clock_of(trace, prefix),
+                        reset: reset_of(trace, prefix),
+                    });
+                    scores.push(present);
+                }
             }
         }
     }
     found.sort_by(|a, b| a.prefix.cmp(&b.prefix));
     found
+}
+
+/// The reset an interface likely has: `<prefix>aresetn`, else the one 1-bit signal in its scope
+/// named like a reset (`aresetn`, `rst_n`, `reset`), active low when its name says so (`n`, `_b`,
+/// `_l` at the end, `nrst` or `nreset` at the start).
+fn reset_of(trace: &crate::trace::Trace, prefix: &str) -> Option<(String, bool)> {
+    let own = format!("{prefix}aresetn");
+    if trace.by_path.contains_key(&own) {
+        return Some((own, false));
+    }
+    let scope = prefix.rsplit_once('.').map_or("", |s| s.0);
+    let mut resets = trace
+        .vars
+        .iter()
+        .filter(|v| v.width == Some(1))
+        .filter_map(|v| {
+            let (s, leaf) = v.path.rsplit_once('.')?;
+            let leaf = leaf.to_lowercase();
+            // active low by its name: `rst_n`, `rstn`, `rst_b`, `rst_l`, `nreset`
+            let low = leaf.ends_with('n')
+                || leaf.ends_with("_b")
+                || leaf.ends_with("_l")
+                || leaf.starts_with("nrst")
+                || leaf.starts_with("nreset");
+            (s == scope && (leaf.contains("rst") || leaf.contains("reset")))
+                .then(|| (v.path.clone(), !low))
+        });
+    match (resets.next(), resets.next()) {
+        (Some(r), None) => Some(r),
+        _ => None,
+    }
 }
 
 /// The clock an interface likely runs on: `<prefix>aclk` or `<prefix>clk`, else the one 1-bit

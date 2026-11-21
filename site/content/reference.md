@@ -187,8 +187,8 @@ Decode first: records are exact and their handshake checks built in.
 
 **Recipes**
 
-- A bus `open` or `info` listed: run its line, `decode bus axilite clock=aclk prefix=s_axi_`,
-  then `records` `bus` (`help records`).
+- A bus `open` or `info` listed: run its line, `decode bus axilite clock=aclk aresetn=aresetn
+  prefix=s_axi_`, then `records` `bus` (`help records`).
 - A handshake of your own: `protocol hs roles=valid,ready,data when=valid && ready d=data`, then
   `decode rx hs clock=clk valid=rx_valid ready=rx_ready data=rx_data`.
 - Packets from beats: `decode f frame input=rx.beat last=tlast`.
@@ -202,11 +202,10 @@ Decode first: records are exact and their handshake checks built in.
 
 - The answer lists the streams made (`bus.wr`, `bus.rd`, ...) with their counts, and the
   violations (`bus.errors`, `bus.wr.unmatched`).
-- A lost response shifts every later AXI pairing by one: `axilite` reports the response left
-  without a request as `b_early` / `r_early` in `errors`, `axi4` as `no request`; `timeout=1us`
-  makes a request unanswered that long `no response`.
-- A value runs to the next `key=`, so it can have spaces; in quotes it runs to the closing one
-  (`when="x=1"`).
+- A B or R with nothing before it never shifts the pairing: `axilite` and `axi4` report it as
+  `b_early` / `r_early` in `errors`; `timeout=1us` makes a request unanswered that long
+  `no response`, and `axi4` calls the answer that comes after it `timeout`.
+- A value runs to the next `key=` (spaces are fine); in quotes, to the closing one (`when="x=1"`).
 - A `protocol` makes a record per clock cycle where `when` holds (`help expressions`), its
   fields sampled with it. A field is any expression of roles without past: `next=pc + 4`,
   `imm=signed(insn[31:20])` (a field that can be negative is signed, shown in decimal); later
@@ -215,17 +214,18 @@ Decode first: records are exact and their handshake checks built in.
   `rule` field.
 - `axis` and `axilite` read a role they aren't given as a default (`axis`: `tready` 1, `tkeep`
   the bytes of `tdata`; `axilite`: `wstrb` all ones, `*prot` 0, `*resp` OKAY), so
-  `decode rx axis clock=clk tvalid=v tready=r tdata=d` makes `rx.beat`, `rx.frame` and
+  `decode rx axis clock=clk tvalid=v tready=r tdata=d aresetn=rst_n` makes `rx.beat`, `rx.frame` and
   `rx.errors`; a violation carries the `rule`, what it saw (`detail`) and its `severity` (error or
   warning), and `records rx.errors where severity == warning` keeps the warnings.
-- `axilite` takes `aresetn`, optional, and `reset_active=high` for an active-high reset: a valid
-  in reset, or in its first cycle out, is `<chan>_reset`. A SLVERR or DECERR response is a
-  warning, an EXOKAY one an error (Lite has no exclusives).
+- `axi4` and `axilite` read an absent role as AXI5's default (`protocols axi4` lists them);
+  `wlast`/`rlast` are optional, AxLEN framing a burst without them. All three AXI need `aresetn`
+  (`reset_active=high` if active high): a valid in reset or its first cycle out is `<chan>_reset`,
+  an x out of reset an error, so are a bad burst type, size, length or alignment, a LAST off its
+  end and a strobe outside the beat's lanes; a SLVERR or DECERR is a warning, an EXOKAY an error.
 - `decode <name> off` removes a decode, its streams and the rows showing them; one another decode
-  reads stays, naming it. `decode` again under a name replaces it.
+  reads stays, naming it. `decode` again replaces it; decoding doesn't touch the rows.
 - A protocol in the config dir's `protocols/` decodes as a built-in does (`protocols` lists them);
   `help wasm` writes one.
-- Decoding doesn't touch the rows.
 
 ## wasm
 

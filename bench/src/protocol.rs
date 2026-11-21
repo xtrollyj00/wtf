@@ -42,17 +42,17 @@ pub fn main(args: &[String]) -> Result<(), String> {
     for (name, line, config) in [
         (
             "axilite",
-            "decode bus axilite clock=top.clk prefix=top.u0.s_axi_",
+            "decode bus axilite clock=top.clk aresetn=top.rst_n prefix=top.u0.s_axi_",
             false,
         ),
         (
             "axis",
-            "decode rx axis clock=top.clk prefix=top.u0.s_axis_",
+            "decode rx axis clock=top.clk aresetn=top.rst_n prefix=top.u0.s_axis_",
             false,
         ),
         (
             "axis-wasm",
-            "decode rx axis-wasm clock=top.clk prefix=top.u0.s_axis_",
+            "decode rx axis-wasm clock=top.clk aresetn=top.rst_n prefix=top.u0.s_axis_",
             true,
         ),
     ] {

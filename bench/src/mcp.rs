@@ -51,7 +51,7 @@ pub fn main(args: &[String]) -> Result<(), String> {
         (
             "command decode bus axilite (top.u0)".into(),
             "command",
-            json!({"line": "decode bus axilite clock=top.clk prefix=top.u0.s_axi_"}),
+            json!({"line": "decode bus axilite clock=top.clk aresetn=top.rst_n prefix=top.u0.s_axi_"}),
         ),
         (
             "records bus.rd where resp != 0".into(),

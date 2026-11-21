@@ -75,9 +75,9 @@ axi_tb.vcd
 1 tick = 1ns
 19 signals
 interfaces a built-in protocol decodes (decode them: exact records, handshake checks built in):
-  top.s_axi_* axilite: decode s_axi axilite clock=top.aclk prefix=top.s_axi_
+  top.s_axi_* axilite: decode s_axi axilite clock=top.aclk aresetn=top.aresetn prefix=top.s_axi_
 
-command {"line": "decode s_axi axilite clock=top.aclk prefix=top.s_axi_"}
+command {"line": "decode s_axi axilite clock=top.aclk aresetn=top.aresetn prefix=top.s_axi_"}
 s_axi: records s_axi.wr 1, s_axi.rd 2; violations s_axi.errors 1, s_axi.wr.unmatched 0, s_axi.rd.unmatched 0; made from s_axi.aw 1, s_axi.w 1, s_axi.b 1, s_axi.ar 2, s_axi.r 2
 `records <stream>` lists one, `records <name>` its records and violations in order; `protocols` says what each stream and field is; `pair` matches a stream with another (`help decode`)
 

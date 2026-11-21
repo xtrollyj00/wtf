@@ -288,7 +288,7 @@ New signals go below the selected row, at the accent line.
 | `:<time>` | Move the cursor to a time, e.g. :2000ns |
 | `:add <path\|pattern>...` | Add signals below the selected row (after a selected group); a scope becomes a group, e.g. :add top.cpu.* |
 | `:e` | Reload the trace, keeping signals, groups, cursor and zoom |
-| `:decode <name> <protocol> <role>=<signal>...` | Decode a protocol into streams, e.g. :decode rx axis clock=clk tvalid=rx_tvalid tready=rx_tready tdata=rx_tdata tlast=rx_tlast; alone, a form that fills it in |
+| `:decode <name> <protocol> <role>=<signal>...` | Decode a protocol into streams, e.g. :decode rx axis clock=clk tvalid=rx_tvalid tready=rx_tready tdata=rx_tdata tlast=rx_tlast aresetn=rst_n; alone, a form that fills it in |
 | `:signal <name> = <signal> \| off` | Name a computed signal, e.g. :signal op = cmd[7:0] or :signal hdr = {a, b}; :signal op off removes it |
 | `:zoom <time>` | Set the time per column, e.g. :zoom 1ns |
 | `:fit [<from> <to>]` | Zoom to the whole simulation, or between cursors or times, e.g. :fit '2 '3 or :fit 10ns 20ns |

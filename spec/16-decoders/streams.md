@@ -51,4 +51,6 @@ Several request streams answered by one response stream, in order (AXI-Lite's AW
 by B) or by an ID field (AXI4's B by its BID). A request is `no request` when the response comes
 with nothing to pair it with, and `no response` when the next response leaves it unanswered past
 `timeout`. It is a function, not a protocol of its own: `axilite` and `axi4` make `wr` and `rd`
-with it.
+with it. `axi4` (16.3) keeps `no response` for a request never answered, names the answer that comes
+after its request expired `timeout`, and reports a response before its request's handshakes as
+`b_early` / `r_early` in `errors`, not here.

@@ -4,7 +4,8 @@ Arm's AXI5-Lite (IHI 0022 issue L, Table B2.2), which an AXI4-Lite port wires th
 decoded as transactions, a record per channel handshake, writes and reads paired with their
 response and the delay between them, and the interface's rules as violations. A signal the port
 doesn't give is what the table means by it, so a port that leaves out `wstrb`, the protections or
-the responses still decodes, and a reset that is given is checked.
+the responses still decodes. The reset is required, as the table has every interface give it: it
+is what tells a valid of x at start-up, in reset, from one out of it, which is an error.
 
 ```
 decode bus axilite clock=aclk prefix=s_axi_
@@ -45,7 +46,7 @@ they mean, given or not:
 | `arprot` | no | `0b000` | the read's protection, as `awprot` |
 | `bresp` | no | OKAY (`0b000`) | how the write went |
 | `rresp` | no | OKAY (`0b000`) | how the read went |
-| `aresetn` | no | — | the reset, active low; `reset_active=high` for active high |
+| `aresetn` | yes | — | the reset, active low; `reset_active=high` for active high |
 
 Params: `timeout=<time>`, the wait after a request completes before it is `no response`
 (`timeout=1us`, section 16's decoder bullet); `reset_active`, `low` (the default) or `high`.
@@ -57,7 +58,7 @@ without: it is no role, and nothing checks it. Rows group signals that mean the 
 | signal | presence | default | role |
 | --- | --- | --- | --- |
 | `ACLK` | `Y` | — | the `clock=` argument: a handshake is one edge of it |
-| `ARESETn` | `Y` | — | `aresetn`, optional here: a trace without it decodes, reset rules off |
+| `ARESETn` | `Y` | — | `aresetn`: without it nothing tells reset from an x out of it |
 | `AWVALID` | `Y` | — | `awvalid` |
 | `AWREADY` | `Y` | — | `awready` |
 | `AWADDR` | `Y` | — | `awaddr` |
@@ -112,20 +113,22 @@ rule; the others are Arm's:
 | `b_resp` `r_resp` | A3.3 | warning | a SLVERR or DECERR response | `axilite_warnings_filter_by_severity`, `axilite_transactions_and_errors` |
 | `b_exokay` `r_exokay` | A3.3 | error | an EXOKAY response: Lite has no exclusive access | `axilite_exokay_is_an_error` |
 | `aw_reset` `w_reset` `b_reset` `ar_reset` `r_reset` | A2.1.2 | error | a valid while the interface is in reset, or in its first cycle out | `axilite_reset_takes_no_records` |
-| `aw_unknown` `w_unknown` `b_unknown` `ar_unknown` `r_unknown` | A2.3 | warning | a valid or ready is x or z out of reset | `axilite_unknown_out_of_reset` |
-| `aw_payload_unknown` `w_payload_unknown` `b_payload_unknown` `ar_payload_unknown` `r_payload_unknown` | A2.3 | warning | a payload signal is x or z while its valid | `axilite_unknown_out_of_reset` |
+| `aw_unknown` `w_unknown` `b_unknown` `ar_unknown` `r_unknown` | A2.3 | error | a valid or ready is x or z out of reset | `axilite_unknown_out_of_reset` |
+| `aw_payload_unknown` `w_payload_unknown` `b_payload_unknown` `ar_payload_unknown` `r_payload_unknown` | A2.3 | error | a payload signal is x or z while its valid | `axilite_unknown_out_of_reset` |
 | `b_early` `r_early` | A2.3.2 | error | a response before its request's handshakes | `axilite_b_early`, `axilite_r_early`, `axilite_b_early_same_cycle`, `axilite_bvalid_before_request`, `axilite_stray_response_once` |
 
-The `reset` rules fire only when `aresetn` is bound. A `detail` is the handshake's own values:
-`awvalid fell before awready`, `wdata changed while wvalid stalled`, `rresp is SLVERR or DECERR`,
-`rresp is EXOKAY`, `awvalid in reset`, `awvalid in the cycle reset is released`, `awvalid is x or
-z out of reset`, `awaddr is x or z while awvalid`, `response 1 before write 1's AW and W`.
+A `detail` is the handshake's own values:
+`awvalid fell before awready`, `wdata changed while wvalid stalled`, `rresp is SLVERR`,
+`rresp is DECERR`, `rresp is EXOKAY`, `awvalid in reset`, `awvalid in the cycle reset is
+released`, `awvalid is x out of reset`, `awaddr is z while awvalid`, `awaddr is 0001xxxx while
+awvalid` (an unknown value is one letter when its bits agree, its bits when not), `response 1
+before write 1's AW and W`.
 
 The rest of the conformance, clause by clause:
 
 | clause | what `axilite` does | pinned by |
 | --- | --- | --- |
-| A2.1.2 | a valid while `aresetn` holds the reset, or in the first cycle it is released, is `<chan>_reset`; no handshake, write or read is decoded there | `axilite_reset_takes_no_records` |
+| A2.1.2 | a valid while `aresetn` holds the reset, or in the first cycle it is released, is `<chan>_reset`; no handshake, write or read is decoded there; an x reset (a testbench's before it is driven) records nothing and fires nothing | `axilite_reset_takes_no_records` |
 | A2.3 | a valid is held until its ready, so one that falls first is `<chan>_dropped`, once | `axilite_error_rules`, `axilite_errors_conformance` |
 | A2.3 | a payload signal that moves while its valid is stalled is `<chan>_changed` | `axilite_payload_changed_while_stalled` |
 | A2.3 | a valid or a ready that is x or z out of reset is `<chan>_unknown`, a payload that is x or z while its valid `<chan>_payload_unknown` | `axilite_unknown_out_of_reset` |
@@ -147,6 +150,6 @@ Not implemented, and so reported by nothing:
 | B2.2 | the AXI5-Lite signals with no role above | not implemented: listed in the matrix, decoded without them |
 | bind | static widths (`wdata` whole bytes, `wstrb` one bit per byte of it, the addresses as wide as the file has) | not implemented: the fields are as wide as the signal |
 | A2.3.2 | more than one write or read in flight | not implemented: one of each at a time |
-| A3.1, A3.2 | bursts and exclusive access | an AXI5-Lite interface has neither: no `AWLEN`, `AWBURST`, `WLAST`, `RLAST`, `AWLOCK` (`axi4`'s page owns them) |
+| A3.1, A3.2, A6.3 | bursts and exclusive access | an AXI5-Lite interface has neither: no `AWLEN`, `AWBURST`, `WLAST`, `RLAST`, `AWLOCK`; [axi4](axi4.md) has them |
 | A4 | region, cache, QoS, domain and snoop attributes | not implemented |
 | A14.1.1 | the `AWAKEUP` low-power handshake | not implemented |

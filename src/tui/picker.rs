@@ -552,7 +552,8 @@ impl App {
                     1,
                 );
                 let p = wtf_core::protocol::get(f.protocol).expect("detect finds built-ins");
-                let ready = f.clock.is_some() || !p.clocked();
+                let ready =
+                    (f.clock.is_some() || !p.clocked()) && (f.reset.is_some() || !f.needs_reset());
                 let mut preview = vec![
                     format!("{} at {}", f.protocol, f.prefix),
                     line.clone(),
@@ -573,6 +574,17 @@ impl App {
                         f.clock.clone().unwrap_or_else(|| {
                             "none found: Enter puts the line on the command line to name it".into()
                         })
+                    ));
+                }
+                if f.needs_reset() && !roles.contains(&&"aresetn") {
+                    preview.push(format!(
+                        "{:<rw$}  {}",
+                        "reset",
+                        f.reset.as_ref().map_or_else(
+                            || "none found: Enter puts the line on the command line to name it"
+                                .into(),
+                            |(r, high)| format!("{r}{}", if *high { " (active high)" } else { "" })
+                        )
                     ));
                 }
                 preview.push(String::new());
