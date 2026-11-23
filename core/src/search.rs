@@ -215,8 +215,7 @@ impl<V: std::borrow::Borrow<Val>> Four<V> {
                 (Val::Bits(a), Val::Bits(b)) => {
                     a.len() == b.len() && a.chars().map(four).eq(b.chars().map(four))
                 }
-                (Val::Text(a), Val::Text(b)) => a == b,
-                _ => false,
+                (a, b) => a == b,
             },
             (Four::Num(a), Four::Num(b)) => a == b,
             _ => false,
@@ -2155,14 +2154,20 @@ mod tests {
     /// `text` over one bits signal `v`, as wide as `now`, read now and a sample earlier (`was`
     /// None: no sample before).
     fn sampled(text: &str, was: Option<&str>, now: &str) -> bool {
-        let q = parse_query(text, None, &mut |n| match n {
-            "v" => Ok(((0, None), Some(now.len() as u32), None, false)),
-            _ => Err(format!("unknown signal: {n}")),
-        })
-        .unwrap();
+        let bits = |s: &str| Val::Bits(s.into());
+        sampled_val(text, was.map(bits), bits(now))
+    }
+
+    /// `sampled` over any values, text too.
+    fn sampled_val(text: &str, was: Option<Val>, now: Val) -> bool {
+        let width = match &now {
+            Val::Bits(b) => Some(b.len() as u32),
+            Val::Text(_) => None,
+        };
+        let q = parse_query(text, None, &mut |_| Ok(((0, None), width, None, false))).unwrap();
         holds(&q.expr, &|_, back| match back {
-            0 => Some(Some(Val::Bits(now.into()))),
-            1 => was.map(|w| Some(Val::Bits(w.into()))),
+            0 => Some(Some(now.clone())),
+            1 => was.clone().map(Some),
             _ => None,
         })
     }
@@ -2200,14 +2205,28 @@ mod tests {
         // before the first sample, x
         assert!(sampled("past(v) == x", None, "0000"));
         assert!(!sampled("past(v) == x", Some("0000"), "0000"));
+        // past of an expression shifts every read in it
+        assert!(sampled("past(v == v)", Some("0001"), "0000"));
+        assert!(!sampled("past(v == v)", None, "0000"));
+        assert!(sampled("past(v ? 1 : 0)", Some("0001"), "0000"));
+        assert!(!sampled("past(v ? 1 : 0)", Some("0000"), "0001"));
+        assert!(sampled("past(v + 1 && v)", Some("0001"), "0000"));
+        assert!(!sampled("past(v + 1 && v)", Some("0000"), "0001"));
+        assert!(!sampled("past(v, 2) == 1", Some("0001"), "0001"));
+        // text has no bit 0 to rise; stable compares it whole
+        let text = |s: &str| Val::Text(s.into());
+        assert_eq!(Four::Sig(text("run")).lsb(), None);
+        assert!(sampled_val("stable(v)", Some(text("run")), text("run")));
+        assert!(!sampled_val("stable(v)", Some(text("idle")), text("run")));
+        assert!(!sampled_val(
+            "stable(v)",
+            Some(Val::Bits("1".into())),
+            text("run")
+        ));
+        assert!(!Four::<Val>::Sig(Val::Bits("1".into())).same(&Four::Num(IBig::ONE)));
         // a search with one needs a clock: the first call, outermost, and the text with one
-        let q = |s: &str| {
-            parse_query(s, None, &mut |n| match n {
-                "v" | "clk" => Ok(((0, None), Some(1), None, false)),
-                _ => Err(format!("unknown signal: {n}")),
-            })
-            .unwrap()
-        };
+        let q =
+            |s: &str| parse_query(s, None, &mut |_| Ok(((0, None), Some(1), None, false))).unwrap();
         let clock = || "top.clk".to_string();
         assert_eq!(
             q("v && rose(past(v, 2))").needs_clock("v && rose(past(v, 2))", clock),

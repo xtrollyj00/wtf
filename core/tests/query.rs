@@ -236,6 +236,11 @@ fn across_time() {
         ws.query("!past(valid, 2) && stable(data)").err().unwrap(),
         "past(valid, 2) needs a clock, as in SVA: @top.clk !past(valid, 2) && stable(data)"
     );
+    // with no signal to find a scope by, a clock named clk
+    assert_eq!(
+        ws.query("stable(1)").err().unwrap(),
+        "stable(1) needs a clock, as in SVA: @clk stable(1)"
+    );
     // unfinished calls
     assert!(ws.query("rose(").is_err());
     assert_eq!(
