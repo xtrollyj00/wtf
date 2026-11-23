@@ -1382,7 +1382,13 @@ mod tests {
         );
         assert_eq!(app.ws.view.cursor, 75);
         keys(&mut app, "/rose(valid\n");
-        assert_eq!(msg(&app), "missing )");
+        assert_eq!(msg(&app), "rose(valid: missing ) after rose's argument");
+        // without a clock: the error writes one
+        keys(&mut app, "/rose(valid)\n");
+        assert_eq!(
+            msg(&app),
+            "rose(valid) needs a clock, as in SVA: @top.clk rose(valid)"
+        );
     }
 
     #[test]

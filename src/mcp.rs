@@ -1027,7 +1027,7 @@ impl Wtf {
     }
 
     #[tool(
-        description = "When a search expression holds, as a table of times; `show` adds values, `count_only` counts. With `@<clock> ` first, a match is a cycle whose ending edge samples it true (`@clk x`: the cycles x is high), reported at the cycle's start; without, where it becomes true (`rose(x)`: x's edges). A bus: decode it (`help decode`).",
+        description = "When a search expression holds, as a table of times; `show` adds values, `count_only` counts. With `@<clock> ` first, a match is a cycle whose ending edge samples it true (`@clk x`: the cycles x is high), reported at the cycle's start; without, where it becomes true (`x`: x's rising edges). A bus: decode it (`help decode`).",
         annotations(read_only_hint = true, open_world_hint = false)
     )]
     fn find(&self, Parameters(a): Parameters<FindArgs>) -> Result<Answer, Answer> {

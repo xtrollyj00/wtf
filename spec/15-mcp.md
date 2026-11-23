@@ -87,7 +87,7 @@ reuse wtf's own pieces:
 - A search expression with a word of another language says the form meant, when the word is no
   signal: an edge is `rose(x)` / `fell(x)` (for `rising`, `posedge`, `$rose(x)`; after `@clk`,
   that the clock already samples at its rising edges), the value a cycle earlier `past(x)` (for
-  `prev(x)`, `previous(x)`, `$past(x)`), a change `x != past(x)` (for `changed(x)`: one form, no
+  `prev(x)`, `previous(x)`, `$past(x)`), a change `!stable(x)` (for `changed(x)`: one form, no
   function of its own), a comparison `==` (for `a=1`), and an expression reads no later value
   (`next(x)`). On waveform questions agents wrote all of these, in 1 run of 5; once the guide
   named SVA's functions, `changed(x)` too.

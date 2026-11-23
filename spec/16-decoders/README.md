@@ -34,9 +34,10 @@ checks that return only violations.
     instance's roles do: `f3=insn[14:12] ok=f3 == 0`. Its var is named by the expression with full paths and no spaces
     (`top.pc+4`), and a row shows that whole;
   - in search expressions too, `rose(x)`, `fell(x)`, `stable(x)` and `past(x)` (the value one
-    clock cycle earlier, with `@clk`), so a protocol check is a search for its violations:
-    `@clk fell(valid) && !past(ready)`. Unlike SVA's `$rose` / `$fell`, `rose` and `fell` need a
-    known value before (U -> 0 in reset isn't a fall), so checks don't fire on reset.
+    clock cycle earlier; they need `@clk`), so a protocol check is a search for its violations:
+    `@clk fell(valid) && !past(ready)`. As SVA's `$rose` / `$fell` (section 8), an edge from x
+    counts (U -> 0 in reset is a fall), so a check that must stay quiet in reset says so:
+    `rst_n && fell(valid) && !past(ready)`.
 - **Records and streams.** Decoding produces streams of records: a record has a start, an end
   and fields (`Record { start, end, fields }`), a stream has a name and a schema of field names
   and widths. A beat, a frame, a transaction and a violation are records.

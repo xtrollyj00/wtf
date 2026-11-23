@@ -223,16 +223,98 @@ fn across_time() {
     );
     assert_eq!(at("@clk past(data) == 0x22", true), [75]);
     assert_eq!(at("@clk past(past(data)) == 0x22", true), [85]);
-    // without a clock: one tick earlier, so rose / fell are the edges
-    assert_eq!(at("rose(valid)", true), [15, 65, 105]);
-    assert_eq!(at("fell(valid)", true), [45, 85, 115]);
-    assert_eq!(at("fell(valid)", false), [115, 85, 45]);
-    assert_eq!(at("!stable(data)", true), [15, 65, 75, 105]);
-    // past(x) changes a tick after x: !past(valid) becomes true a tick after valid falls
-    assert_eq!(at("!past(valid) && !valid", true), [46, 86, 116]);
+    // before the first sample the earlier value is x, a 4-state signal's default: the first
+    // cycle's past(data, 2) reads none, and past(valid) there (0) fell from it
+    assert_eq!(at("@clk past(data, 2) == x", true), [5]);
+    assert_eq!(at("@clk fell(past(valid))", true), [5, 55, 95, 125]);
+    // without a clock each is an error that writes one, the clock in the signals' scope
+    assert_eq!(
+        ws.query("rose(valid)").err().unwrap(),
+        "rose(valid) needs a clock, as in SVA: @top.clk rose(valid)"
+    );
+    assert_eq!(
+        ws.query("!past(valid, 2) && stable(data)").err().unwrap(),
+        "past(valid, 2) needs a clock, as in SVA: @top.clk !past(valid, 2) && stable(data)"
+    );
+    // with no signal to find a scope by, a clock named clk
+    assert_eq!(
+        ws.query("stable(1)").err().unwrap(),
+        "stable(1) needs a clock, as in SVA: @clk stable(1)"
+    );
     // unfinished calls
     assert!(ws.query("rose(").is_err());
-    assert_eq!(ws.query("@clk fell(valid").err().unwrap(), "missing )");
+    assert_eq!(
+        ws.query("@clk fell(valid").err().unwrap(),
+        "fell(valid: missing ) after fell's argument"
+    );
+}
+
+/// `rose`, `fell`, `stable` and `past` take any expression, as SVA's: each agrees with the SV it
+/// stands for, `x` and `z` included (unknowns.vcd).
+#[test]
+fn functions_of_expressions() {
+    // handshake.vcd: the AXI rule as above, and the same written out
+    let mut ws =
+        wtf_core::workspace::Workspace::open(&fixture("vcd").with_file_name("handshake.vcd"))
+            .unwrap();
+    let at = |ws: &mut wtf_core::workspace::Workspace, from, expr: &str| {
+        let q = ws.query(expr).unwrap();
+        let f = query::find(
+            &ws.trace,
+            &q,
+            &Search {
+                merge: false,
+                ..search(from, true)
+            },
+        );
+        f.runs.iter().map(|r| r.first).collect::<Vec<_>>()
+    };
+    assert_eq!(at(&mut ws, 0, "@clk rose(valid)"), [15, 65, 105]);
+    assert_eq!(at(&mut ws, 0, "@clk fell(valid) && !past(ready)"), [85]);
+    // unknowns.vcd: cycle k (from 5 + 10k) reads row k + 1, its past row k; rows (a, b, x):
+    // 0 1 0 / 0 1 0 / 1 1 3 / 1 0 x / x 1 x / 1 1 5 / 1 1 5 / 0 x 5 / 1 x x / z 1 2 / 1 1 2 / 1 0 0 / 0 0 0
+    let mut ws =
+        wtf_core::workspace::Workspace::open(&fixture("vcd").with_file_name("unknowns.vcd"))
+            .unwrap();
+    for (a, b) in [
+        (
+            "rose(a)",
+            "a == 1 && (past(a) == 0 || past(a) == x || past(a) == z)",
+        ),
+        (
+            "fell(b)",
+            "b == 0 && (past(b) == 1 || past(b) == x || past(b) == z)",
+        ),
+        (
+            "rose(x)",
+            "x[0] == 1 && (past(x[0]) == 0 || past(x[0]) == x || past(x[0]) == z)",
+        ),
+        (
+            "stable(a + b)",
+            "a + b == past(a + b) || (a + b == x && past(a + b) == x)",
+        ),
+        ("past(x, 2)", "past(past(x))"),
+        ("past(a && b)", "past(a) && past(b)"),
+        ("past(x, 2) == 5", "past(past(x)) == 5"),
+        ("past(a + b, 2) == 2", "past(past(a)) + past(past(b)) == 2"),
+        ("past(past(x) + 1) == 4", "past(x, 2) + 1 == 4"),
+        ("past(~x) == 12", "~past(x) == 12"),
+        ("past(a ? x : 0) == 5", "(past(a) ? past(x) : 0) == 5"),
+        ("past(stable(x))", "stable(past(x))"),
+        ("past(fell(x + 0))", "fell(past(x + 0))"),
+    ] {
+        let found = at(&mut ws, 0, &format!("@clk {a}"));
+        assert_eq!(found, at(&mut ws, 0, &format!("@clk {b}")), "@clk {a}");
+        assert!(!found.is_empty(), "@clk {a} finds nothing");
+    }
+    // as SVA has them: an edge from x or z counts, x staying x is stable, and every cycle is
+    // stable or not, never x (a && b is 0 1 0 x 1 1 0 x x 1 0 0 over rows 1 - 12)
+    assert_eq!(at(&mut ws, 0, "@clk rose(a && b)"), [15, 45, 95]);
+    assert_eq!(at(&mut ws, 0, "@clk fell(a && b)"), [25, 65, 105]);
+    assert_eq!(at(&mut ws, 0, "@clk rose(x)"), [15, 45]);
+    assert_eq!(at(&mut ws, 0, "@clk fell(x)"), [85]);
+    assert_eq!(at(&mut ws, 0, "@clk stable(x)"), [5, 35, 55, 65, 95, 115]);
+    assert_eq!(at(&mut ws, 0, "@clk !stable(x)"), [15, 25, 45, 75, 85, 105]);
 }
 
 /// The clocked search works over a table of samples; it finds what searching edge by edge

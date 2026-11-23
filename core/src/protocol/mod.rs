@@ -942,7 +942,7 @@ fn reset_of(trace: &crate::trace::Trace, prefix: &str) -> Option<(String, bool)>
 
 /// The clock an interface likely runs on: `<prefix>aclk` or `<prefix>clk`, else the one 1-bit
 /// signal in its scope named like a clock.
-fn clock_of(trace: &crate::trace::Trace, prefix: &str) -> Option<String> {
+pub(crate) fn clock_of(trace: &crate::trace::Trace, prefix: &str) -> Option<String> {
     for own in ["aclk", "clk"] {
         let p = format!("{prefix}{own}");
         if trace.by_path.contains_key(&p) {

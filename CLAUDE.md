@@ -99,7 +99,8 @@ Ideas that span files:
 ## Tests
 
 - Fixtures in `tests/data/` (`simple.vcd` / `.fst` are the same trace; `axis`, `axilite`, `axi4`,
-  `spi`, `uart`, `handshake`, `reqresp`, `skew` for decoders and timing; `enum.fst` with an FST
+  `spi`, `uart`, `handshake`, `reqresp`, `skew` for decoders and timing; `unknowns` (x and z
+  stretches) for expressions over time; `enum.fst` with an FST
   enum table, written by `enum.c`; `hdl.vcd` and `vhdl.fst`, dumped by nvc from `vhdl.vhd`, for
   names in either HDL's form). The fixture's contents are documented
   where tests use them; changing one means updating every test that reads it.
